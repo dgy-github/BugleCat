@@ -92,6 +92,70 @@ def _save_scheduler_enabled(enabled: bool) -> None:
     _save_state({"scheduler_enabled": bool(enabled)})
 
 
+# Theme palettes. Both are Codex-style (one accent, low-noise); "light" is the
+# default (white canvas, soft-gray panels), "dark" preserves the original look.
+# Every widget reads self._palette, so swapping the dict + rebuilding re-colors
+# the whole UI. Keys are identical across themes so no call site needs to know
+# which theme is active.
+_PALETTES: dict[str, dict[str, str]] = {
+    "light": {
+        "bg":      "#ffffff",   # window / transcript background
+        "panel":   "#f5f6f8",   # bars and inputs (soft gray)
+        "border":  "#e2e5e9",   # hairline separators
+        "fg":      "#1f2328",   # primary text (near-black)
+        "muted":   "#6e7781",   # secondary text
+        "accent":  "#2f6fed",   # single accent (links, send)
+        "accent_fg": "#ffffff",
+        "ok":      "#1a7f37",
+        "err":     "#cf222e",
+        "tool":    "#8250df",
+        "reason":  "#8c959f",
+        "diff_add_bg":    "#e6ffec",   # added-line row background
+        "diff_del_bg":    "#ffebe9",   # removed-line row background
+        "cat_messages":   "#2f6fed",   # context bar: Messages segment
+        "cat_system":     "#8c959f",   # context bar: System prompt segment
+        "cat_free":       "#d8dde3",   # context bar: Free space segment
+    },
+    "dark": {
+        "bg":      "#0d1117",
+        "panel":   "#161b22",
+        "border":  "#30363d",
+        "fg":      "#e6edf3",
+        "muted":   "#7d8590",
+        "accent":  "#2f81f7",
+        "accent_fg": "#ffffff",
+        "ok":      "#3fb950",
+        "err":     "#f85149",
+        "tool":    "#bc8cff",
+        "reason":  "#6e7681",
+        "diff_add_bg":    "#13351f",
+        "diff_del_bg":    "#3a1620",
+        "cat_messages":   "#4f8cff",
+        "cat_system":     "#9aa0a6",
+        "cat_free":       "#3a3f44",
+    },
+}
+
+VALID_THEMES = tuple(_PALETTES)
+
+
+def _palette_for(theme: str) -> dict[str, str]:
+    """Return the palette dict for *theme*, falling back to light if unknown."""
+    return dict(_PALETTES.get(theme, _PALETTES["light"]))
+
+
+def _load_theme() -> str:
+    """The persisted UI theme (default 'light'); only a known value is honored."""
+    val = _load_state().get("theme", "light")
+    return val if val in _PALETTES else "light"
+
+
+def _save_theme(theme: str) -> None:
+    """Persist the UI theme choice (best-effort; never raises)."""
+    if theme in _PALETTES:
+        _save_state({"theme": theme})
+
+
 class _UiEvent:
     """A message from the worker thread to the Tk main thread."""
 
@@ -217,6 +281,11 @@ class NanocodexGUI:
         self._session_cost_usd: float = 0.0
         self._last_turn_cost_usd: Optional[float] = None
 
+        # UI theme: 'light' (Codex-style, default) or 'dark' (original). Read
+        # here so _build_widgets can pick the palette; switched live in
+        # Settings → General (persists to gui_state.json).
+        self._theme: str = _load_theme()
+
         self._build_widgets()
         # Build the AgentLoop up front (cheap, no network) to surface config
         # errors before the user types anything.
@@ -235,20 +304,11 @@ class NanocodexGUI:
         self.root.geometry("960x680")
         self.root.minsize(640, 480)
 
-        # --- palette (Codex-ish: calm dark, one accent, low-noise) -------
-        P = self._palette = {
-            "bg":      "#0d1117",   # window / transcript background
-            "panel":   "#161b22",   # bars and inputs
-            "border":  "#30363d",   # hairline separators
-            "fg":      "#e6edf3",   # primary text
-            "muted":   "#7d8590",   # secondary text
-            "accent":  "#2f81f7",   # single accent (links, send)
-            "accent_fg": "#ffffff",
-            "ok":      "#3fb950",
-            "err":     "#f85149",
-            "tool":    "#bc8cff",
-            "reason":  "#6e7681",
-        }
+        # --- palette (Codex-style; light by default, dark optional) ------
+        # Both palettes live in _palette_for(); the saved choice (Settings →
+        # General) selects one. Every widget reads self._palette, so switching
+        # the theme + rebuilding re-colors the whole UI.
+        P = self._palette = _palette_for(self._theme)
         self.root.configure(bg=P["bg"])
 
         def flat_btn(parent, text, command, *, accent=False):
@@ -262,6 +322,47 @@ class NanocodexGUI:
                 font=("Segoe UI", 9), cursor="hand2",
                 highlightthickness=0,
             )
+
+        def add_tooltip(widget, text):
+            """Lightweight hover tooltip so each action button is self-explaining.
+
+            A borderless Toplevel shown on <Enter> near the cursor and destroyed
+            on <Leave>; best-effort (any Tk error is swallowed so a tooltip can
+            never break a click).
+            """
+            tip = {"win": None}
+
+            def show(event=None):
+                if tip["win"] is not None:
+                    return
+                try:
+                    tw = tk.Toplevel(widget)
+                    tw.wm_overrideredirect(True)
+                    x = widget.winfo_rootx() + 12
+                    y = widget.winfo_rooty() - 30
+                    tw.wm_geometry(f"+{x}+{y}")
+                    tk.Label(
+                        tw, text=text, justify="left",
+                        bg=P["fg"], fg=P["bg"], relief="flat", bd=0,
+                        font=("Segoe UI", 9), padx=8, pady=4,
+                    ).pack()
+                    tip["win"] = tw
+                except Exception:
+                    tip["win"] = None
+
+            def hide(event=None):
+                tw = tip["win"]
+                tip["win"] = None
+                if tw is not None:
+                    try:
+                        tw.destroy()
+                    except Exception:
+                        pass
+
+            widget.bind("<Enter>", show)
+            widget.bind("<Leave>", hide)
+            widget.bind("<ButtonPress>", hide)
+            return widget
 
         # --- top bar -----------------------------------------------------
         top = tk.Frame(self.root, bg=P["bg"])
@@ -359,15 +460,20 @@ class NanocodexGUI:
         self.entry.bind("<Shift-Return>", lambda e: None)  # fall through -> newline
         self.send_btn = flat_btn(bottom, "Send  ⏎", self._on_send, accent=True)
         self.send_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        add_tooltip(self.send_btn, "发送 (Enter)。Shift+Enter 换行")
         # ✨ Enhance: rewrite the raw input into a clearer prompt, then PREVIEW
         # it before sending (never silently replaces the user's words).
-        self.enhance_btn = flat_btn(bottom, "✨", self._on_enhance)
+        self.enhance_btn = flat_btn(bottom, "✨ 润色", self._on_enhance)
         self.enhance_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        add_tooltip(self.enhance_btn,
+                    "润色输入：把草稿改写成更清晰的 prompt，\n发送前先预览，不会替换你的原话")
         # 📎 Attach: pick local files for the NEXT send. Images become OpenAI
         # multimodal blocks; text-like files (.txt/.md/.json…) are read and
         # inlined into the prompt. The button label shows the pending count.
-        self.attach_btn = flat_btn(bottom, "📎", self._on_attach)
+        self.attach_btn = flat_btn(bottom, "📎 附件", self._on_attach)
         self.attach_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        add_tooltip(self.attach_btn,
+                    "附件：给下一条消息带上本地文件\n图片作图像块，文本类文件读进 prompt")
         # Dedicated, always-visible Stop button (disabled until a turn runs).
         self.stop_btn = tk.Button(
             bottom, text="■ Stop", command=self._request_stop,
@@ -377,6 +483,8 @@ class NanocodexGUI:
             state=tk.DISABLED,
         )
         self.stop_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        add_tooltip(self.stop_btn,
+                    "停止：取消正在跑的这一轮\n排队中的下一个任务照常继续")
         # Continue button: enabled only when a turn stopped with work left
         # (hit the step limit, or paused with unfinished plan steps). One click
         # resumes instead of making the user type "continue".
@@ -388,6 +496,8 @@ class NanocodexGUI:
             state=tk.DISABLED,
         )
         self.continue_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+        add_tooltip(self.continue_btn,
+                    "继续：上一轮没干完时点它接着干\n（撞步数上限或还有未完成步骤时才亮）")
 
         # --- body: session sidebar (left) + transcript (right) -----------
         # A horizontal container so the directory list sits beside the
@@ -493,8 +603,8 @@ class NanocodexGUI:
         fp_hsb.pack(side=tk.BOTTOM, fill=tk.X)
         self.file_view.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.file_view.tag_config("lineno", foreground=P["muted"])
-        self.file_view.tag_config("added", background="#13351f", foreground=P["fg"])
-        self.file_view.tag_config("removed", background="#3a1620", foreground=P["fg"])
+        self.file_view.tag_config("added", background=P["diff_add_bg"], foreground=P["fg"])
+        self.file_view.tag_config("removed", background=P["diff_del_bg"], foreground=P["fg"])
         self.file_view.tag_config("context", foreground=P["fg"])
         self.file_view.tag_config("meta", foreground=P["accent"], font=("Cascadia Code", 10, "bold"))
         self.file_view.tag_config("hunk", foreground=P["muted"], font=("Cascadia Code", 10, "italic"))
@@ -672,11 +782,12 @@ class NanocodexGUI:
         dlg.resizable(True, True)
         dlg.geometry("440x340")
 
-        # Colors for the categories (swatch + bar segments), Claude-Code-ish.
+        # Colors for the categories (swatch + bar segments), theme-aware so the
+        # bar reads cleanly on both the light and dark palettes.
         cat_colors = {
-            "Messages": "#4f8cff",
-            "System prompt": "#9aa0a6",
-            "Free space": "#3a3f44",
+            "Messages": P["cat_messages"],
+            "System prompt": P["cat_system"],
+            "Free space": P["cat_free"],
         }
 
         txt = tk.Text(dlg, wrap="word", bg=P["panel"], fg=P["fg"],
@@ -1427,6 +1538,90 @@ class NanocodexGUI:
             tk.Label(grid, text=str(v), anchor="w", bg=P["bg"], fg=P["fg"],
                      font=("Cascadia Code", 10)).grid(row=r, column=1, sticky="w",
                                                       pady=3)
+
+        # --- Appearance: theme switcher -----------------------------------
+        # The whole UI reads self._palette, so switching the theme + rebuilding
+        # the widgets re-colors everything live. 'light' is the Codex-style
+        # default (white canvas); 'dark' is the original GitHub-dark look.
+        tk.Label(parent, text="Appearance", anchor="w", bg=P["bg"], fg=P["fg"],
+                 font=("Segoe UI", 12, "bold"), padx=18).pack(
+                     side=tk.TOP, fill=tk.X, pady=(20, 2))
+        tk.Label(parent, text="Theme applies immediately (the transcript is kept).",
+                 anchor="w", bg=P["bg"], fg=P["muted"], font=("Segoe UI", 9),
+                 padx=18).pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
+        trow = tk.Frame(parent, bg=P["bg"])
+        trow.pack(side=tk.TOP, fill=tk.X, padx=18)
+        tk.Label(trow, text="theme", anchor="w", bg=P["bg"], fg=P["muted"],
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 12))
+        theme_var = tk.StringVar(value=self._theme)
+        om = tk.OptionMenu(trow, theme_var, *VALID_THEMES,
+                           command=lambda t: self._on_pick_theme(t))
+        om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
+                  activeforeground=P["fg"], relief="flat", bd=0,
+                  highlightthickness=0, font=("Segoe UI", 9), anchor="w")
+        om["menu"].config(bg=P["panel"], fg=P["fg"],
+                          activebackground=P["accent"],
+                          activeforeground=P["accent_fg"])
+        om.pack(side=tk.LEFT)
+
+    def _on_pick_theme(self, theme: str) -> None:
+        """Switch the UI theme: persist it, rebuild every widget, restore the
+        transcript text, and reopen Settings on this section.
+
+        Rebuilding is how the ~300 ``P[...]`` lookups re-color at once — we tear
+        down the root's children and re-run _build_widgets() with the new
+        palette, then replay the saved transcript so the conversation isn't lost.
+        """
+        theme = theme if theme in VALID_THEMES else "light"
+        if theme == self._theme:
+            return
+        tk = self._tk
+        # Snapshot the transcript so the rebuild doesn't wipe the conversation.
+        try:
+            saved = self.output.get("1.0", "end-1c")
+        except Exception:
+            saved = ""
+        self._theme = theme
+        _save_theme(theme)
+
+        # Close the Settings window (its widgets belong to the old palette).
+        prev = getattr(self, "_settings_dlg", None)
+        if prev is not None:
+            try:
+                prev.destroy()
+            except Exception:
+                pass
+            self._settings_dlg = None
+
+        # Tear down and rebuild the main UI with the new palette.
+        for child in list(self.root.winfo_children()):
+            try:
+                child.destroy()
+            except Exception:
+                pass
+        self._build_widgets()
+
+        # Replay the saved transcript text (plain; tag coloring resumes for new
+        # output). Best-effort — a failure here must not break the session.
+        if saved:
+            try:
+                self.output.config(state=tk.NORMAL)
+                self.output.insert("end", saved)
+                self.output.config(state=tk.DISABLED)
+                self.output.see("end")
+            except Exception:
+                pass
+
+        # Repaint dynamic bits that _build_widgets leaves blank (model label,
+        # context usage, session list, scheduled panel).
+        for fn in ("_refresh_session_list", "_update_context_usage",
+                   "_refresh_model_label", "_refresh_schedule_panel"):
+            m = getattr(self, fn, None)
+            if callable(m):
+                try:
+                    m()
+                except Exception:
+                    pass
 
     def _settings_section_config(self, parent) -> None:
         """Editable config: API key / base URL / model / sandbox / approval /
