@@ -122,11 +122,11 @@ class StoryboardTool(Tool):
                 "analysis; shots will have no per-image scene tags."
             )
 
-        # Seedance: only needed when rendering. Key from env ARK_API_KEY.
+        # Seedance: only needed when rendering. Key from config (GUI Settings /
+        # ~/.nanocodex/config.toml) or env ARK_API_KEY.
         seedance = None
         if render_video:
-            import os
-            ark_key = os.environ.get("ARK_API_KEY", "")
+            ark_key = cfg.ark_api_key
             try:
                 seedance = SeedanceClient(ark_key)
             except SeedanceError as exc:

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from nanocodex.agent.images import encode_image_block
-from nanocodex.storyboard.models import AssetAnalysis, Shot
+from nanocodex.storyboard.models import AssetAnalysis, Chapter, Shot
 
 # --- prompt templates (loaded from files next to this module) ---------------
 
@@ -115,6 +115,73 @@ class VisionAnalyzer:
         )
 
 
+def _chapters_for_prompt(chapters: "list[Chapter] | None") -> str:
+    """Render chapters as a compact numbered outline for the shot-planner prompt.
+
+    Returns "(none)" when there are no chapters, so the prompt's fallback branch
+    (plan straight from the full story) kicks in. Otherwise one block per
+    chapter with its title/summary/setting/cast/key beats — enough structure for
+    the planner to slice shots chapter by chapter without re-reading raw text.
+    """
+    if not chapters:
+        return "(none)"
+    blocks: list[str] = []
+    for i, ch in enumerate(chapters, 1):
+        lines = [f"{i}. {ch.title}"]
+        if ch.summary:
+            lines.append(f"   概要: {ch.summary}")
+        if ch.setting:
+            lines.append(f"   场景: {ch.setting}")
+        if ch.characters:
+            lines.append(f"   角色: {', '.join(ch.characters)}")
+        for km in ch.key_moments:
+            lines.append(f"   - {km}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+class ChapterPlanner:
+    """Split a story into chapters (the story-detail layer above shots)."""
+
+    def __init__(self, provider: ChatProvider) -> None:
+        self._provider = provider
+        self._prompt = _load_prompt("plan_chapters.txt")
+
+    async def plan(self, story_text: str, *, language: str = "zh") -> list[Chapter]:
+        # str.replace (not str.format) — the prompt embeds literal JSON braces.
+        filled = (
+            self._prompt
+            .replace("{story_text}", story_text)
+            .replace("{language}", language or "zh")
+        )
+        resp = await self._provider.chat([{"role": "user", "content": filled}])
+        data = _extract_json(getattr(resp, "content", "") or "")
+        if isinstance(data, dict):
+            chapters_raw = data.get("chapters", data)
+        else:
+            chapters_raw = data
+        if not isinstance(chapters_raw, list):
+            raise ValueError("chapter planner did not return a list of chapters")
+        chapters: list[Chapter] = []
+        for i, c in enumerate(chapters_raw, 1):
+            if not isinstance(c, dict):
+                continue
+            chapters.append(
+                Chapter(
+                    chapter_id=str(c.get("chapter_id") or f"ch_{i:02d}"),
+                    title=str(c.get("title", f"Chapter {i}")),
+                    summary=str(c.get("summary", "")),
+                    setting=str(c.get("setting", "")),
+                    characters=[str(x) for x in c.get("characters", [])],
+                    key_moments=[str(x) for x in c.get("key_moments", [])],
+                    source_excerpt=str(c.get("source_excerpt", "")),
+                )
+            )
+        if not chapters:
+            raise ValueError("chapter planner returned no usable chapters")
+        return chapters
+
+
 class TextPlanner:
     """Turn story text into a list of Shot objects via the main provider."""
 
@@ -123,16 +190,21 @@ class TextPlanner:
         self._prompt = _load_prompt("plan_storyboard.txt")
 
     async def plan(self, story_text: str, *, aspect_ratio: str = "16:9",
-                   global_style: str = "") -> list[Shot]:
+                   global_style: str = "",
+                   chapters: "list[Chapter] | None" = None) -> list[Shot]:
         # NB: substitute named placeholders with str.replace, NOT str.format —
         # the prompt embeds a literal JSON example with many { } braces, which
         # str.format would try to parse as fields (KeyError). replace touches
-        # only our three real placeholders and leaves the JSON braces intact.
+        # only our real placeholders and leaves the JSON braces intact.
+        # `chapters` is optional: when given, the shots are sliced chapter by
+        # chapter; when None the prompt's "(none)" branch plans from the full
+        # story (backward-compatible with callers that never pass chapters).
         filled = (
             self._prompt
             .replace("{story_text}", story_text)
             .replace("{aspect_ratio}", aspect_ratio)
             .replace("{global_style}", global_style or "(none)")
+            .replace("{chapters}", _chapters_for_prompt(chapters))
         )
         resp = await self._provider.chat([{"role": "user", "content": filled}])
         data = _extract_json(getattr(resp, "content", "") or "")
@@ -155,10 +227,12 @@ class TextPlanner:
                     title=str(s.get("title", f"Shot {i}")),
                     duration_sec=float(s.get("duration_sec", 5) or 5),
                     prompt=str(s.get("prompt", "")),
+                    prompt_zh=str(s.get("prompt_zh", "")),
                     characters=[str(c) for c in s.get("characters", [])],
                     camera=str(s.get("camera", "")),
                     action=str(s.get("action", "")),
                     negative_prompt=str(s.get("negative_prompt", "")),
+                    chapter_id=str(s.get("chapter_id", "")),
                 )
             )
         if not shots:

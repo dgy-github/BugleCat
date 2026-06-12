@@ -30,6 +30,7 @@ from typing import Any, Callable
 from nanocodex.agent.pricing import SEEDANCE_PRICING_AS_OF, seedance_cost_cny
 from nanocodex.storyboard.models import (
     AssetAnalysis,
+    Chapter,
     ImageInput,
     Project,
     SeedancePayload,
@@ -49,6 +50,7 @@ class PipelineDeps:
     """
 
     vision: Any = None       # VisionAnalyzer-like: .analyze(image_id, path) -> AssetAnalysis
+    chapters: Any = None     # ChapterPlanner-like: .plan(story_text, ...) -> list[Chapter]
     planner: Any = None      # TextPlanner-like: .plan(story_text, ...) -> list[Shot]
     seedance: Any = None     # SeedanceClient-like: .generate(payload, ...) -> SeedanceResult
 
@@ -60,6 +62,7 @@ class PipelineState:
     project: Project
     images: list[ImageInput]
     story_text: str
+    chapters: list[Chapter] = field(default_factory=list)
     asset_analysis: list[AssetAnalysis] = field(default_factory=list)
     shots: list[Shot] = field(default_factory=list)
     payloads: list[SeedancePayload] = field(default_factory=list)
@@ -114,17 +117,43 @@ async def analyze_assets(state: PipelineState, deps: PipelineDeps) -> PipelineSt
     return state
 
 
-# --- stage 3: plan storyboard -----------------------------------------------
+# --- stage 3a: plan chapters (story-detail layer above shots) ---------------
+
+
+async def plan_chapters(state: PipelineState, deps: PipelineDeps) -> PipelineState:
+    """Split the story into chapters (3-8) BEFORE it is broken into shots.
+
+    Skipped when no chapter planner is injected (offline tests / callers that
+    don't want the chapter layer), in which case shot planning falls back to
+    planning straight from the full story text.
+    """
+    if deps.chapters is None:
+        return state
+    state.chapters = await deps.chapters.plan(
+        state.story_text,
+        language=state.project.language,
+    )
+    return state
+
+
+# --- stage 3b: plan storyboard ----------------------------------------------
 
 
 async def plan_storyboard(state: PipelineState, deps: PipelineDeps) -> PipelineState:
-    """Turn the story text into shots via the text planner."""
+    """Turn the story text into shots via the text planner.
+
+    When chapters were planned, they are passed through so shots are sliced
+    chapter by chapter (continuity preserved); otherwise the planner reads the
+    full story directly. Each shot is tagged with the chapter it falls under
+    (best-effort, by order) so the GUI can group shots under their chapter.
+    """
     if deps.planner is None:
         return state
     state.shots = await deps.planner.plan(
         state.story_text,
         aspect_ratio=state.project.aspect_ratio,
         global_style=state.project.global_style,
+        chapters=state.chapters or None,
     )
     return state
 
@@ -185,9 +214,28 @@ def build_payloads(state: PipelineState) -> PipelineState:
     ratio/duration from the project/shot. Negative prompt is appended to the
     text since Seedance takes a single text directive.
     """
+    from nanocodex.agent.images import ImageError, encode_image_block
+
     payloads: list[SeedancePayload] = []
     model_name = "doubao-seedance-2-0-fast-260128"
     img_path = {im.image_id: im.path for im in state.images}
+
+    def _ref_url(p: str) -> str | None:
+        """Turn a reference-image source into something ARK accepts.
+
+        ARK's ``image_url`` takes a fetchable URL or a base64 data URI — NOT a
+        local disk path (that returns HTTP 400 InvalidParameter). So: pass an
+        http(s)/data URL straight through; encode a local file to a base64 data
+        URI. Returns None when a local file can't be read so the shot still
+        renders from its text prompt instead of failing the whole submit.
+        """
+        low = p.lower()
+        if low.startswith(("http://", "https://", "data:")):
+            return p
+        try:
+            return encode_image_block(p)["image_url"]["url"]
+        except ImageError:
+            return None
 
     for shot in state.shots:
         text = shot.prompt
@@ -202,10 +250,13 @@ def build_payloads(state: PipelineState) -> PipelineState:
             ref_ids.append(shot.background_image_ids[0])
         for rid in ref_ids:
             p = img_path.get(rid)
-            if p:
+            if not p:
+                continue
+            url = _ref_url(p)
+            if url:
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": p},
+                    "image_url": {"url": url},
                     "role": "reference_image",
                 })
         payload = {
@@ -269,6 +320,7 @@ def export(state: PipelineState, out_dir: Path) -> dict[str, Path]:
     written: dict[str, Path] = {}
 
     files = {
+        "chapters.json": [as_jsonable(c) for c in state.chapters],
         "asset_analysis.json": [as_jsonable(a) for a in state.asset_analysis],
         "storyboard.json": [as_jsonable(s) for s in state.shots],
         "seedance_payloads.json": [as_jsonable(p) for p in state.payloads],
@@ -311,6 +363,43 @@ def export(state: PipelineState, out_dir: Path) -> dict[str, Path]:
 # --- orchestration ----------------------------------------------------------
 
 
+async def run_planning(obj: dict[str, Any], deps: PipelineDeps, *,
+                       out_dir: "Path | None" = None) -> PipelineState:
+    """Run the PLANNING half only: ingest → analyze → chapters → shots → map →
+    payloads. NEVER renders (never spends money). This is the "preview" path.
+
+    Returns the planned state (chapters + shots + payloads filled, video_urls
+    empty). ``out_dir`` None skips the export write; when given, writes the
+    chapters/storyboard/payloads JSON (but no video files, since none rendered).
+    """
+    state = ingest(obj)
+    state = await analyze_assets(state, deps)
+    state = await plan_chapters(state, deps)
+    state = await plan_storyboard(state, deps)
+    state = map_assets(state)
+    state = build_payloads(state)
+    if out_dir is not None:
+        export(state, out_dir)
+    return state
+
+
+def render_state(state: PipelineState, deps: PipelineDeps, *,
+                 out_dir: "Path | None" = None,
+                 on_progress: Callable[[str, int, str], None] | None = None
+                 ) -> tuple[PipelineState, dict[str, Path]]:
+    """Render an ALREADY-PLANNED state (the "make video" path).
+
+    Call this on a state returned by :func:`run_planning` once the user has
+    reviewed the preview and chosen to spend. Runs the render stage then exports
+    (so video_urls/video_costs land in the JSON). Returns (state, written).
+    """
+    state = render(state, deps, on_progress=on_progress)
+    written: dict[str, Path] = {}
+    if out_dir is not None:
+        written = export(state, out_dir)
+    return state, written
+
+
 async def run_pipeline(obj: dict[str, Any], deps: PipelineDeps, *,
                        out_dir: "Path | None" = None, render_video: bool = False,
                        on_progress: Callable[[str, int, str], None] | None = None
@@ -319,12 +408,12 @@ async def run_pipeline(obj: dict[str, Any], deps: PipelineDeps, *,
 
     ``render_video`` defaults False — Seedance billing is opt-in. ``out_dir``
     None skips the export write (used by tests that assert on state only).
+
+    Thin wrapper over :func:`run_planning` (+ optional :func:`render`) so the
+    one-shot CLI/agent entry points keep the same signature while the GUI can
+    drive plan and render as two separate, user-gated steps.
     """
-    state = ingest(obj)
-    state = await analyze_assets(state, deps)
-    state = await plan_storyboard(state, deps)
-    state = map_assets(state)
-    state = build_payloads(state)
+    state = await run_planning(obj, deps)
     if render_video:
         state = render(state, deps, on_progress=on_progress)
     written: dict[str, Path] = {}

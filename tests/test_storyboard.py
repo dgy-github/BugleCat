@@ -23,6 +23,7 @@ from nanocodex.storyboard.clients import (
 )
 from nanocodex.storyboard.models import (
     AssetAnalysis,
+    Chapter,
     Shot,
     StoryboardError,
     validate_project,
@@ -32,7 +33,9 @@ from nanocodex.storyboard.pipeline import (
     build_payloads,
     ingest,
     map_assets,
+    render_state,
     run_pipeline,
+    run_planning,
 )
 
 # A tiny valid PNG (magic bytes + padding) so encode_image_block accepts it.
@@ -142,7 +145,8 @@ def test_build_payloads_shape():
 
     obj = _valid_obj()
     state = ingest(obj)
-    state.images = [ImageInput(image_id="c1", path="/abs/c.png", kind="character")]
+    # An http(s) URL must pass straight through to ARK's image_url.url.
+    state.images = [ImageInput(image_id="c1", path="https://x/c.png", kind="character")]
     state.shots = [
         Shot(
             shot_id="s1", title="S1", duration_sec=8, prompt="a knight stands",
@@ -155,12 +159,51 @@ def test_build_payloads_shape():
     assert payload["ratio"] == "16:9"
     assert payload["duration"] == 8
     assert payload["watermark"] is False
-    # text block carries prompt + negative; reference_image points at the path.
+    # text block carries prompt + negative; reference_image carries the URL.
     text_block = payload["content"][0]
     assert text_block["type"] == "text"
     assert "no modern objects" in text_block["text"]
     ref = [c for c in payload["content"] if c.get("role") == "reference_image"]
-    assert ref and ref[0]["image_url"]["url"] == "/abs/c.png"
+    assert ref and ref[0]["image_url"]["url"] == "https://x/c.png"
+
+
+def test_build_payloads_encodes_local_file_to_data_uri(tmp_path):
+    # A local image path must be base64-encoded into a data URI (ARK rejects a
+    # raw disk path with HTTP 400), NOT passed through verbatim.
+    from nanocodex.storyboard.models import ImageInput
+
+    img = tmp_path / "c.png"
+    img.write_bytes(_PNG)
+    obj = _valid_obj()
+    state = ingest(obj)
+    state.images = [ImageInput(image_id="c1", path=str(img), kind="character")]
+    state.shots = [
+        Shot(shot_id="s1", title="S1", duration_sec=5, prompt="x",
+             character_image_ids=["c1"])
+    ]
+    build_payloads(state)
+    ref = [c for c in state.payloads[0].payload["content"]
+           if c.get("role") == "reference_image"]
+    assert ref and ref[0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_build_payloads_drops_unreadable_local_file(tmp_path):
+    # A local path that can't be read is DROPPED (shot still renders from text),
+    # never sent as a raw path that would 400 the whole submit.
+    from nanocodex.storyboard.models import ImageInput
+
+    obj = _valid_obj()
+    state = ingest(obj)
+    state.images = [ImageInput(image_id="c1", path=str(tmp_path / "missing.png"),
+                               kind="character")]
+    state.shots = [
+        Shot(shot_id="s1", title="S1", duration_sec=5, prompt="x",
+             character_image_ids=["c1"])
+    ]
+    build_payloads(state)
+    content = state.payloads[0].payload["content"]
+    assert not [c for c in content if c.get("role") == "reference_image"]
+    assert content[0]["type"] == "text"  # text block still present
 
 
 # --- full pipeline with fakes (offline) -------------------------------------
@@ -173,10 +216,26 @@ class _FakeVision:
 
 
 class _FakePlanner:
-    async def plan(self, story_text, *, aspect_ratio="16:9", global_style=""):
+    # Accepts the optional `chapters` kwarg the pipeline now passes; records
+    # whether it was given so a test can assert the chapter layer flowed through.
+    def __init__(self):
+        self.saw_chapters = None
+
+    async def plan(self, story_text, *, aspect_ratio="16:9", global_style="",
+                   chapters=None):
+        self.saw_chapters = chapters
         return [
             Shot(shot_id="shot_01", title="Open", duration_sec=5, prompt="scene one"),
             Shot(shot_id="shot_02", title="Close", duration_sec=6, prompt="scene two"),
+        ]
+
+
+class _FakeChapters:
+    async def plan(self, story_text, *, language="zh"):
+        return [
+            Chapter(chapter_id="ch_01", title="起", summary="开场",
+                    setting="雪夜", characters=["猫"], key_moments=["客栈亮灯"]),
+            Chapter(chapter_id="ch_02", title="承", summary="转折"),
         ]
 
 
@@ -221,6 +280,69 @@ async def test_pipeline_offline_with_render(tmp_path):
     assert all(u.startswith("https://") for u in state.video_urls.values())
     urls_doc = json.loads((tmp_path / "out" / "video_urls.json").read_text(encoding="utf-8"))
     assert "expire" in urls_doc["_note"]
+
+
+# --- chapter layer + two-phase plan/render ----------------------------------
+
+
+async def test_plan_chapters_flow_into_shot_planner(tmp_path):
+    # When a chapter planner is injected, its chapters land in state AND are
+    # passed through to the shot planner (so shots are sliced chapter by chapter).
+    obj = _valid_obj()
+    planner = _FakePlanner()
+    deps = PipelineDeps(chapters=_FakeChapters(), planner=planner)
+    state = await run_planning(obj, deps)
+    assert [c.chapter_id for c in state.chapters] == ["ch_01", "ch_02"]
+    # The planner received the chapters list (not None) — chapter layer flowed.
+    assert planner.saw_chapters is not None
+    assert len(planner.saw_chapters) == 2
+
+
+async def test_shot_planner_backward_compatible_without_chapters():
+    # No chapter planner injected -> planner is called with chapters=None, so
+    # callers predating the chapter layer behave exactly as before.
+    obj = _valid_obj()
+    planner = _FakePlanner()
+    deps = PipelineDeps(planner=planner)  # no `chapters` client
+    state = await run_planning(obj, deps)
+    assert state.chapters == []
+    assert planner.saw_chapters is None
+
+
+async def test_run_planning_never_renders(tmp_path):
+    # The "preview" path: chapters + shots + payloads filled, but NO video and
+    # NO Seedance call even when a seedance client is present.
+    obj = _valid_obj()
+
+    class _BoomSeedance:
+        def generate(self, *a, **k):
+            raise AssertionError("run_planning must never call Seedance")
+
+    deps = PipelineDeps(chapters=_FakeChapters(), planner=_FakePlanner(),
+                        seedance=_BoomSeedance())
+    state = await run_planning(obj, deps, out_dir=tmp_path / "out")
+    assert len(state.shots) == 2
+    assert len(state.payloads) == 2
+    assert state.video_urls == {}
+    assert state.video_costs == {}
+    # chapters.json is written by the planning export; no video files.
+    chapters_doc = json.loads((tmp_path / "out" / "chapters.json").read_text(encoding="utf-8"))
+    assert [c["chapter_id"] for c in chapters_doc] == ["ch_01", "ch_02"]
+    assert not (tmp_path / "out" / "video_urls.json").exists()
+
+
+async def test_render_state_renders_already_planned(tmp_path):
+    # The "make video" path: plan first (no spend), then render the SAME state.
+    obj = _valid_obj()
+    deps_plan = PipelineDeps(chapters=_FakeChapters(), planner=_FakePlanner())
+    state = await run_planning(obj, deps_plan)
+    assert state.video_urls == {}  # nothing rendered yet
+
+    deps_render = PipelineDeps(seedance=_FakeSeedance())
+    state2, written = render_state(state, deps_render, out_dir=tmp_path / "out")
+    assert set(state2.video_urls) == {"shot_01", "shot_02"}
+    assert set(state2.video_costs) == {"shot_01", "shot_02"}
+    assert "video_urls.json" in written
 
 
 def _fake_ark_transport(total_tokens=108900):

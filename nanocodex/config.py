@@ -60,6 +60,9 @@ class Config:
     vl_base_url: str = ""
     vl_api_key: str = ""
     vl_model: str = ""
+    # Volcengine ARK key for Seedance video rendering (storyboard 出片). Only
+    # needed when actually rendering; planning/preview never touches it.
+    ark_api_key: str = ""
     workspace: Path = field(default_factory=Path.cwd)
     writable_roots: list[Path] = field(default_factory=list)
     network_access: bool = False
@@ -111,6 +114,10 @@ class Config:
         if self.vl_api_key:
             vtail = self.vl_api_key[-4:] if len(self.vl_api_key) >= 4 else ""
             vl_masked = f"****{vtail}"
+        ark_masked = "(unset)"
+        if self.ark_api_key:
+            atail = self.ark_api_key[-4:] if len(self.ark_api_key) >= 4 else ""
+            ark_masked = f"****{atail}"
         return {
             "api_key": masked,
             "base_url": self.base_url,
@@ -121,6 +128,7 @@ class Config:
             "vl_base_url": self.vl_base_url,
             "vl_api_key": vl_masked,
             "vl_model": self.vl_model,
+            "ark_api_key": ark_masked,
             "workspace": str(self.workspace),
             "writable_roots": [str(p) for p in self.writable_roots],
             "network_access": self.network_access,
@@ -180,7 +188,7 @@ def _nanocodex_values(raw: dict[str, Any]) -> dict[str, Any]:
         return out
     for key in ("api_key", "base_url", "model", "sandbox_mode",
                 "approval_policy", "reasoning_effort",
-                "vl_base_url", "vl_api_key", "vl_model"):
+                "vl_base_url", "vl_api_key", "vl_model", "ark_api_key"):
         val = raw.get(key)
         if val:
             out[key] = val
@@ -234,6 +242,8 @@ def load_config(
         "vl_base_url": ("NANOCODEX_VL_BASE_URL",),
         "vl_api_key": ("DASHSCOPE_API_KEY", "NANOCODEX_VL_API_KEY"),
         "vl_model": ("NANOCODEX_VL_MODEL",),
+        # Volcengine ARK key for Seedance video rendering (storyboard 出片).
+        "ark_api_key": ("ARK_API_KEY", "NANOCODEX_ARK_API_KEY"),
         "sandbox_mode": ("NANOCODEX_SANDBOX",),
         "approval_policy": ("NANOCODEX_APPROVAL",),
         "context_token_budget": ("NANOCODEX_CONTEXT_BUDGET",),
@@ -265,6 +275,7 @@ def load_config(
         vl_base_url=merged.get("vl_base_url", ""),
         vl_api_key=merged.get("vl_api_key", ""),
         vl_model=merged.get("vl_model", ""),
+        ark_api_key=merged.get("ark_api_key", ""),
         workspace=(workspace or Path.cwd()).resolve(),
         context_token_budget=_as_int(merged.get("context_token_budget"), 512_000),
         context_window=_as_int(merged.get("context_window"), 1_048_576),
@@ -327,6 +338,7 @@ _WRITABLE_KEYS = (
     "api_key", "base_url", "model",
     "sandbox_mode", "approval_policy", "reasoning_effort",
     "vl_base_url", "vl_api_key", "vl_model",
+    "ark_api_key",
 )
 
 

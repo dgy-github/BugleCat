@@ -379,6 +379,12 @@ class NanocodexGUI:
         # adopt the better side's changes. Requires a clean git workspace.
         self.ab_btn = flat_btn(top, "A/B", self._on_ab_compare)
         self.ab_btn.pack(side=tk.LEFT, padx=(8, 0))
+        # 分镜: story -> chapters + shots preview -> (on command) render video.
+        # A dedicated panel so the user reviews the breakdown BEFORE spending.
+        self.storyboard_btn = flat_btn(top, "分镜", self._open_storyboard_panel)
+        self.storyboard_btn.pack(side=tk.LEFT, padx=(8, 0))
+        add_tooltip(self.storyboard_btn,
+                    "分镜：把故事拆成章节+镜头先预览，\n满意后再出片（出片真实计费）")
         self.ws_label = tk.Label(top, text="", anchor="w", bg=P["bg"],
                                  fg=P["muted"], font=("Segoe UI", 9))
         self.ws_label.pack(side=tk.LEFT, padx=(12, 0), fill=tk.X, expand=True)
@@ -450,7 +456,12 @@ class NanocodexGUI:
         entry_wrap = tk.Frame(bottom, bg=P["panel"], highlightbackground=P["border"],
                               highlightthickness=1, bd=0)
         entry_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.entry = tk.Text(entry_wrap, height=3, wrap=tk.WORD,
+        # Starts at 2 rows and auto-grows with content up to 12 rows (then the
+        # box scrolls internally) — pasting a whole story no longer hides most
+        # of it behind a fixed 3-line window. See _autogrow_entry.
+        self._entry_min_rows = 2
+        self._entry_max_rows = 12
+        self.entry = tk.Text(entry_wrap, height=self._entry_min_rows, wrap=tk.WORD,
                              font=("Cascadia Code", 11), bg=P["panel"], fg=P["fg"],
                              insertbackground=P["fg"], relief="flat", bd=0,
                              padx=12, pady=8, highlightthickness=0)
@@ -458,6 +469,9 @@ class NanocodexGUI:
         # Enter sends; Shift+Enter inserts a newline (chat-box convention).
         self.entry.bind("<Return>", self._on_send)
         self.entry.bind("<Shift-Return>", lambda e: None)  # fall through -> newline
+        # Auto-grow on any content change (typing, paste, programmatic prefill).
+        self.entry.bind("<KeyRelease>", self._autogrow_entry)
+        self.entry.bind("<<Modified>>", self._autogrow_entry)
         self.send_btn = flat_btn(bottom, "Send  ⏎", self._on_send, accent=True)
         self.send_btn.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         add_tooltip(self.send_btn, "发送 (Enter)。Shift+Enter 换行")
@@ -1646,6 +1660,7 @@ class NanocodexGUI:
         cur_vl_base = info.get("vl_base_url", "")
         cur_vl_masked = info.get("vl_api_key", "(unset)")
         cur_vl_model = info.get("vl_model", "")
+        cur_ark_masked = info.get("ark_api_key", "(unset)")
 
         form = tk.Frame(parent, bg=P["bg"])
         form.pack(side=tk.TOP, fill=tk.X, padx=18)
@@ -1714,6 +1729,20 @@ class NanocodexGUI:
         _label("VL base URL"); vl_base_e = _entry(prefill=cur_vl_base); row[0] += 1
         _label("VL model"); vl_model_e = _entry(prefill=cur_vl_model); row[0] += 1
 
+        # Volcengine ARK key for Seedance video rendering (storyboard 出片).
+        # Only used when actually rendering; planning/preview never touches it.
+        tk.Label(form, text="— Seedance (ARK) key for storyboard 出片 —",
+                 anchor="w", bg=P["bg"], fg=P["muted"],
+                 font=("Segoe UI", 9, "italic")).grid(
+                     row=row[0], column=0, columnspan=2, sticky="w", pady=(12, 2))
+        row[0] += 1
+        _label("ARK current key")
+        tk.Label(form, text=cur_ark_masked, anchor="w", bg=P["bg"], fg=P["fg"],
+                 font=("Cascadia Code", 10)).grid(row=row[0], column=1,
+                                                  sticky="w", pady=3)
+        row[0] += 1
+        _label("ARK new key"); ark_key_e = _entry(show="*"); row[0] += 1
+
         status = tk.Label(form, text="", anchor="w", bg=P["bg"], fg=P["err"],
                           font=("Segoe UI", 9), wraplength=480, justify="left")
         status.grid(row=row[0] + 1, column=0, columnspan=2, sticky="we",
@@ -1737,6 +1766,7 @@ class NanocodexGUI:
                 vl_base_url=vl_base_e.get().strip(),
                 vl_api_key=vl_key_e.get().strip(),
                 vl_model=vl_model_e.get().strip(),
+                ark_api_key=ark_key_e.get().strip(),
             )
             if not updates:
                 status.config(text="Nothing to save.", fg=P["muted"])
@@ -2494,6 +2524,15 @@ class NanocodexGUI:
         if text.startswith("#") and text[1:].strip():
             self._quick_capture_memory(text[1:].strip())
             return "break"
+        # `/storyboard` (alias `/sb`): drive the dedicated storyboard panel from
+        # the composer. `/storyboard render` renders the panel's already-previewed
+        # state; `/storyboard <story>` opens the panel, prefills the story and
+        # auto-runs the preview; bare `/storyboard` just opens the panel.
+        low = text.lower()
+        if low in ("/storyboard", "/sb") or low.startswith(("/storyboard ", "/sb ")):
+            rest = text.split(None, 1)[1].strip() if " " in text else ""
+            self._handle_storyboard_command(rest)
+            return "break"
         if self._busy:
             # Queue it: the running turn keeps going, this waits its turn.
             self._pending_inputs.append(text)
@@ -2505,6 +2544,29 @@ class NanocodexGUI:
         else:
             self._start_turn(text)
         return "break"  # stop the <Return> binding from also inserting a newline
+
+    def _autogrow_entry(self, _event=None) -> None:
+        """Grow/shrink the composer to fit its content, within [min, max] rows.
+
+        Counts the displayed lines and clamps the Text height to that range; past
+        the max the box scrolls internally. Bound to <KeyRelease> and
+        <<Modified>> so typing, pasting, and programmatic prefills all resize it.
+        The <<Modified>> virtual event latches a flag we must clear, or it stops
+        firing. Best-effort: any Tk error is swallowed so it never breaks input.
+        """
+        entry = getattr(self, "entry", None)
+        if entry is None:
+            return
+        try:
+            # <<Modified>> only re-fires after the modified flag is reset.
+            entry.edit_modified(False)
+            # Number of display lines = row index of the last char.
+            rows = int(entry.index("end-1c").split(".")[0])
+            rows = max(self._entry_min_rows, min(self._entry_max_rows, rows))
+            if rows != int(entry.cget("height")):
+                entry.config(height=rows)
+        except Exception:  # noqa: BLE001 - cosmetic, never break the composer
+            pass
 
     def _quick_capture_memory(self, note: str) -> None:
         """Append `note` to user memory (the `# ...` composer shortcut).
@@ -2741,6 +2803,383 @@ class NanocodexGUI:
         dlg.bind("<Escape>", lambda e: _use(None))
 
     # --- A/B configuration comparison ------------------------------------
+
+    # --- 分镜 storyboard panel (chapters + shots preview, gated render) -----
+
+    def _flat_btn(self, parent, text, command, *, accent=False):
+        """Class-level twin of the _build_widgets-local flat_btn closure, so
+        dialogs built outside _build_widgets (storyboard panel) get the same
+        flat, palette-colored button without re-defining it each time."""
+        tk = self._tk
+        P = self._palette
+        return tk.Button(
+            parent, text=text, command=command,
+            bg=P["accent"] if accent else P["panel"],
+            fg=P["accent_fg"] if accent else P["fg"],
+            activebackground=P["accent"] if accent else P["border"],
+            activeforeground=P["accent_fg"] if accent else P["fg"],
+            relief="flat", bd=0, padx=14, pady=6,
+            font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
+        )
+
+    def _handle_storyboard_command(self, rest: str) -> None:
+        """`/storyboard` composer command. `render` -> render the previewed
+        state; anything else -> open the panel (prefilling+auto-previewing the
+        story text when given)."""
+        if rest.lower() == "render":
+            self._open_storyboard_panel()
+            self._sb_run_render()
+            return
+        self._open_storyboard_panel(prefill_story=rest, auto_preview=bool(rest))
+
+    def _open_storyboard_panel(self, *, prefill_story: str = "",
+                               auto_preview: bool = False) -> None:
+        """Open (or focus) the dedicated storyboard panel.
+
+        Single-instance, like Settings: a story box + image picker + aspect
+        ratio on top, a read-only two-level (chapters / shots) preview in the
+        middle, an estimated Seedance cost + [出片] button at the bottom. Plan
+        and render are two separate user-gated steps — preview never spends.
+        """
+        tk = self._tk
+        P = self._palette
+
+        prev = getattr(self, "_sb_dlg", None)
+        if prev is not None:
+            try:
+                if prev.winfo_exists():
+                    prev.deiconify()
+                    prev.lift()
+                    if prefill_story:
+                        self._sb_story.delete("1.0", "end")
+                        self._sb_story.insert("1.0", prefill_story)
+                    if auto_preview:
+                        self._sb_run_preview()
+                    return
+            except Exception:  # noqa: BLE001 - stale handle; rebuild below
+                pass
+
+        self._sb_image_paths: list[str] = []
+        self._sb_state = None
+        self._sb_busy = False
+
+        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        self._sb_dlg = dlg
+        dlg.title("分镜 — 故事 → 章节 → 镜头 → 出片")
+        dlg.resizable(True, True)
+        dlg.geometry("760x620")
+        dlg.minsize(560, 460)
+
+        # --- top: story text + controls ---
+        top = tk.Frame(dlg, bg=P["bg"])
+        top.pack(side=tk.TOP, fill=tk.X, padx=14, pady=(12, 6))
+        tk.Label(top, text="故事文本", anchor="w", bg=P["bg"], fg=P["fg"],
+                 font=("Segoe UI", 10, "bold")).pack(side=tk.TOP, fill=tk.X)
+        story_wrap = tk.Frame(top, bg=P["panel"], highlightbackground=P["border"],
+                              highlightthickness=1, bd=0)
+        story_wrap.pack(side=tk.TOP, fill=tk.X, pady=(4, 8))
+        self._sb_story = tk.Text(story_wrap, height=6, wrap=tk.WORD,
+                                 font=("Cascadia Code", 10), bg=P["panel"], fg=P["fg"],
+                                 insertbackground=P["fg"], relief="flat", bd=0,
+                                 padx=10, pady=6, highlightthickness=0)
+        self._sb_story.pack(fill=tk.X)
+        if prefill_story:
+            self._sb_story.insert("1.0", prefill_story)
+
+        ctrl = tk.Frame(top, bg=P["bg"])
+        ctrl.pack(side=tk.TOP, fill=tk.X)
+        img_btn = self._flat_btn(ctrl, "选图片（可选）", self._sb_pick_images)
+        img_btn.pack(side=tk.LEFT)
+        self._sb_images_label = tk.Label(ctrl, text="未选图片", anchor="w",
+                                         bg=P["bg"], fg=P["muted"], font=("Segoe UI", 9))
+        self._sb_images_label.pack(side=tk.LEFT, padx=(8, 16))
+        tk.Label(ctrl, text="比例", anchor="w", bg=P["bg"], fg=P["muted"],
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self._sb_ratio = tk.StringVar(value="16:9")
+        om = tk.OptionMenu(ctrl, self._sb_ratio, "16:9", "9:16", "1:1", "4:3")
+        om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
+                  activeforeground=P["fg"], relief="flat", bd=0,
+                  highlightthickness=0, font=("Segoe UI", 9), anchor="w")
+        om["menu"].config(bg=P["panel"], fg=P["fg"], activebackground=P["accent"],
+                          activeforeground=P["accent_fg"])
+        om.pack(side=tk.LEFT, padx=(6, 16))
+        self._sb_preview_btn = self._flat_btn(ctrl, "生成预览", self._sb_run_preview,
+                                              accent=True)
+        self._sb_preview_btn.pack(side=tk.RIGHT)
+
+        # --- middle: two-level preview (chapters then shots) ---
+        mid = tk.Frame(dlg, bg=P["bg"])
+        mid.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(2, 6))
+        pv_vsb = tk.Scrollbar(mid, orient=tk.VERTICAL)
+        self._sb_preview = tk.Text(
+            mid, wrap="word", state=tk.DISABLED, font=("Cascadia Code", 10),
+            bg=P["panel"], fg=P["fg"], relief="flat", bd=0, padx=10, pady=8,
+            highlightthickness=0, yscrollcommand=pv_vsb.set, cursor="arrow",
+        )
+        pv_vsb.config(command=self._sb_preview.yview)
+        pv_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._sb_preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._sb_preview.tag_config("chapter", foreground=P["accent"],
+                                    font=("Cascadia Code", 11, "bold"), spacing1=6)
+        self._sb_preview.tag_config("shot", foreground=P["tool"],
+                                    font=("Cascadia Code", 10, "bold"), spacing1=4)
+        self._sb_preview.tag_config("field", foreground=P["muted"])
+        self._sb_preview.tag_config("body", foreground=P["fg"])
+
+        # --- bottom: cost estimate + render + progress ---
+        bot = tk.Frame(dlg, bg=P["bg"])
+        bot.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(0, 12))
+        self._sb_cost_label = tk.Label(bot, text="", anchor="w", bg=P["bg"],
+                                       fg=P["fg"], font=("Segoe UI", 9))
+        self._sb_cost_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._sb_render_btn = tk.Button(
+            bot, text="▶ 出片", command=self._sb_run_render,
+            bg=P["panel"], fg=P["err"], activebackground=P["border"],
+            activeforeground=P["err"], relief="flat", bd=0, padx=14, pady=6,
+            font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
+            state=tk.DISABLED,
+        )
+        self._sb_render_btn.pack(side=tk.RIGHT)
+        self._sb_status = tk.Label(dlg, text="", anchor="w", bg=P["bg"],
+                                   fg=P["muted"], font=("Segoe UI", 9),
+                                   wraplength=720, justify="left")
+        self._sb_status.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(0, 4))
+
+        if auto_preview and prefill_story:
+            self._sb_run_preview()
+
+    def _sb_pick_images(self) -> None:
+        """Pick reference images for the storyboard (optional)."""
+        from tkinter import filedialog
+        paths = filedialog.askopenfilenames(
+            title="选择参考图片（角色/背景）", parent=self._sb_dlg,
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.gif *.webp *.bmp"),
+                       ("All files", "*.*")],
+        )
+        if not paths:
+            return
+        self._sb_image_paths = list(paths)
+        n = len(self._sb_image_paths)
+        self._sb_images_label.config(text=f"{n} 张图片")
+
+    def _sb_set_status(self, text: str, *, error: bool = False) -> None:
+        lbl = getattr(self, "_sb_status", None)
+        if lbl is None:
+            self._append(f"\n[storyboard] {text}\n",
+                         "result_err" if error else "system")
+            return
+        try:
+            lbl.config(text=text,
+                       fg=self._palette["err"] if error else self._palette["muted"])
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sb_build_obj(self, story: str) -> dict:
+        """Build the schema project dict from the panel's story + images."""
+        import uuid
+        return {
+            "project": {
+                "id": f"sb_{uuid.uuid4().hex[:8]}",
+                "title": story[:40] or "Untitled storyboard",
+                "target_model": "seedance",
+                "aspect_ratio": self._sb_ratio.get(),
+                "language": "zh",
+            },
+            "inputs": {
+                "story_text": story,
+                "images": [
+                    {"image_id": f"img_{i:02d}", "path": p, "kind": "unknown"}
+                    for i, p in enumerate(self._sb_image_paths, 1)
+                ],
+            },
+        }
+
+    def _sb_build_deps(self, *, want_render: bool):
+        """Wire pipeline deps from layered config (planner/chapters always;
+        vision only with a VL backend + images; seedance only when rendering).
+        Raises with a clear message when a needed key is missing."""
+        import os
+
+        from nanocodex.config import load_config
+        from nanocodex.provider.deepseek import DeepSeekProvider
+        from nanocodex.storyboard.clients import (
+            ChapterPlanner, SeedanceClient, TextPlanner, VisionAnalyzer,
+        )
+        from nanocodex.storyboard.pipeline import PipelineDeps
+
+        cfg = load_config(workspace=self._workspace)
+        if not cfg.api_key:
+            raise RuntimeError("未配置文本模型 API key（设置 DEEPSEEK_API_KEY）。")
+        prov = DeepSeekProvider(api_key=cfg.api_key, base_url=cfg.base_url,
+                                model=cfg.model, timeout_s=cfg.timeout_s)
+        chapters = ChapterPlanner(prov)
+        planner = TextPlanner(prov)
+        vision = None
+        if self._sb_image_paths and cfg.vl_model:
+            vision = VisionAnalyzer(DeepSeekProvider(
+                api_key=cfg.vl_api_key or cfg.api_key,
+                base_url=cfg.vl_base_url or cfg.base_url,
+                model=cfg.vl_model, timeout_s=cfg.timeout_s,
+            ))
+        seedance = None
+        if want_render:
+            # cfg.ark_api_key already folds in the ARK_API_KEY env var (config
+            # merges it), so reading config alone covers both file + env.
+            seedance = SeedanceClient(cfg.ark_api_key)
+        return PipelineDeps(vision=vision, chapters=chapters, planner=planner,
+                            seedance=seedance)
+
+    def _sb_run_preview(self) -> None:
+        """[生成预览]: plan chapters + shots on a worker thread (never renders)."""
+        if getattr(self, "_sb_busy", False):
+            return
+        story = self._sb_story.get("1.0", "end").strip()
+        if not story:
+            self._sb_set_status("先填入故事文本。", error=True)
+            return
+        self._sb_busy = True
+        try:
+            self._sb_preview_btn.config(text="预览中…", state=self._tk.DISABLED)
+        except Exception:  # noqa: BLE001
+            pass
+        self._sb_set_status("正在拆分章节、生成镜头…（不出片，不计费）")
+        obj = self._sb_build_obj(story)
+        threading.Thread(target=self._sb_preview_thread, args=(obj,),
+                         daemon=True).start()
+
+    def _sb_preview_thread(self, obj: dict) -> None:
+        """Daemon thread: run_planning over its own asyncio loop; result to queue."""
+        try:
+            deps = self._sb_build_deps(want_render=False)
+            from nanocodex.storyboard.pipeline import run_planning
+            state = asyncio.run(run_planning(obj, deps))
+            self._ui_queue.put(_UiEvent("sb_preview", state))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the panel
+            self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_run_render(self) -> None:
+        """[出片]: render the previewed state after an explicit confirm (COSTS $$)."""
+        if getattr(self, "_sb_busy", False):
+            return
+        state = getattr(self, "_sb_state", None)
+        if state is None or not getattr(state, "payloads", None):
+            self._sb_set_status("先生成预览再出片。", error=True)
+            return
+        from tkinter import messagebox
+        from nanocodex.agent.pricing import estimate_seedance_cost_cny
+        total_s = sum(float(s.duration_sec) for s in state.shots)
+        est = estimate_seedance_cost_cny(total_s)
+        ok = messagebox.askyesno(
+            "出片确认（真实计费）",
+            f"将调用 Seedance 出片 {len(state.payloads)} 个镜头，"
+            f"预计花费 ≈ ¥{est:.2f} CNY（约 {total_s:.0f}s，720p 估算）。\n\n"
+            "这会真实计费，确定继续？",
+            parent=self._sb_dlg,
+        )
+        if not ok:
+            return
+        self._sb_busy = True
+        try:
+            self._sb_render_btn.config(state=self._tk.DISABLED)
+        except Exception:  # noqa: BLE001
+            pass
+        self._sb_set_status("出片中…（每镜需轮询，耐心等）")
+        threading.Thread(target=self._sb_render_thread, args=(state,),
+                         daemon=True).start()
+
+    def _sb_render_thread(self, state) -> None:
+        """Daemon thread: render the planned state via Seedance; results to queue."""
+        try:
+            deps = self._sb_build_deps(want_render=True)
+            from nanocodex.storyboard.pipeline import render_state
+            out_dir = (self._workspace / "storyboard_out").resolve()
+
+            def _prog(sid: str, i: int, st: str) -> None:
+                self._ui_queue.put(_UiEvent("sb_render_progress", (sid, i, st)))
+
+            state2, _written = render_state(state, deps, out_dir=out_dir,
+                                            on_progress=_prog)
+            self._ui_queue.put(_UiEvent("sb_render_done", state2))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the panel
+            self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_show_preview(self, state) -> None:
+        """Render the chapters + shots into the read-only preview, set cost."""
+        from nanocodex.agent.pricing import estimate_seedance_cost_cny
+        tk = self._tk
+        view = getattr(self, "_sb_preview", None)
+        if view is None:
+            return
+        view.config(state=tk.NORMAL)
+        view.delete("1.0", "end")
+
+        if state.chapters:
+            view.insert("end", "章节（故事细节）\n", "chapter")
+            for i, ch in enumerate(state.chapters, 1):
+                view.insert("end", f"  {i}. {ch.title}\n", "shot")
+                if ch.summary:
+                    view.insert("end", "     概要: ", "field")
+                    view.insert("end", ch.summary + "\n", "body")
+                if ch.setting:
+                    view.insert("end", "     场景: ", "field")
+                    view.insert("end", ch.setting + "\n", "body")
+                if ch.characters:
+                    view.insert("end", "     角色: ", "field")
+                    view.insert("end", ", ".join(ch.characters) + "\n", "body")
+                for km in ch.key_moments:
+                    view.insert("end", f"      · {km}\n", "body")
+            view.insert("end", "\n")
+
+        view.insert("end", f"镜头（{len(state.shots)}）\n", "chapter")
+        for s in state.shots:
+            view.insert("end", f"  {s.shot_id}  {s.title}  ({s.duration_sec:g}s)\n",
+                        "shot")
+            if s.camera:
+                view.insert("end", "     镜头: ", "field")
+                view.insert("end", s.camera + "\n", "body")
+            # 中文画面描述给人看（prompt_zh）；英文 prompt 是给视频模型出片用的，
+            # 次要显示。老数据没有 prompt_zh 时退回显示英文 prompt。
+            if getattr(s, "prompt_zh", ""):
+                view.insert("end", "     画面: ", "field")
+                view.insert("end", s.prompt_zh + "\n", "body")
+                if s.prompt:
+                    view.insert("end", "     出片(英): ", "field")
+                    view.insert("end", s.prompt + "\n", "body")
+            elif s.prompt:
+                view.insert("end", "     prompt: ", "field")
+                view.insert("end", s.prompt + "\n", "body")
+            if s.negative_prompt:
+                view.insert("end", "     负向: ", "field")
+                view.insert("end", s.negative_prompt + "\n", "body")
+        view.config(state=tk.DISABLED)
+        view.see("1.0")
+
+        total_s = sum(float(s.duration_sec) for s in state.shots)
+        est = estimate_seedance_cost_cny(total_s)
+        self._sb_cost_label.config(
+            text=f"预计花费 ≈ ¥{est:.2f} CNY（{len(state.shots)} 镜，"
+                 f"约 {total_s:.0f}s，720p 估算）")
+        try:
+            self._sb_render_btn.config(state=tk.NORMAL)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sb_show_render_done(self, state) -> None:
+        """Show video URLs + actual cost after a render; fold cost into session."""
+        run_cny = round(sum(float(c.get("cost_cny", 0.0))
+                            for c in state.video_costs.values()), 4)
+        ok_n = sum(1 for u in state.video_urls.values()
+                   if not str(u).startswith("[failed"))
+        # Fold this render's spend into the session-wide running total so the
+        # status bar reflects it (same as the agent storyboard tool does).
+        try:
+            self._loop.tools.ctx.seedance_cost_cny += run_cny
+        except Exception:  # noqa: BLE001
+            pass
+        self._update_context_usage()
+        self._sb_set_status(
+            f"出片完成：{ok_n}/{len(state.video_urls)} 成功，本次 ¥{run_cny:.4f} CNY。"
+            f"视频 URL 已写入 storyboard_out/video_urls.json（签名，约 24h 失效）。")
 
     def _on_ab_compare(self) -> None:
         """Open the A/B setup dialog: two configs + one prompt, run isolated.
@@ -3249,6 +3688,33 @@ class NanocodexGUI:
             # the ab_result event that preceded this one.
             self._ab_running = False
             self._set_busy(False)
+        elif ev.kind == "sb_preview":
+            self._sb_busy = False
+            self._sb_state = ev.payload
+            try:
+                self._sb_preview_btn.config(text="生成预览", state=self._tk.NORMAL)
+            except Exception:  # noqa: BLE001
+                pass
+            self._sb_set_status("预览完成。检查无误后点「出片」（真实计费）。")
+            self._sb_show_preview(ev.payload)
+        elif ev.kind == "sb_render_progress":
+            sid, i, st = ev.payload
+            self._sb_set_status(f"出片中… {sid}: 轮询 {i} — {st}")
+        elif ev.kind == "sb_render_done":
+            self._sb_busy = False
+            try:
+                self._sb_render_btn.config(state=self._tk.NORMAL)
+            except Exception:  # noqa: BLE001
+                pass
+            self._sb_show_render_done(ev.payload)
+        elif ev.kind == "sb_error":
+            self._sb_busy = False
+            try:
+                self._sb_preview_btn.config(text="生成预览", state=self._tk.NORMAL)
+                self._sb_render_btn.config(state=self._tk.NORMAL)
+            except Exception:  # noqa: BLE001
+                pass
+            self._sb_set_status(str(ev.payload), error=True)
         elif ev.kind == "turn_end":
             self._announce_turn_end(ev.payload)
         elif ev.kind == "done":
@@ -4156,6 +4622,7 @@ def _collect_settings_updates(
     *, api_key: str, base_url: str, model: str,
     sandbox_mode: str, approval_policy: str, reasoning_effort: str,
     vl_base_url: str = "", vl_api_key: str = "", vl_model: str = "",
+    ark_api_key: str = "",
 ) -> dict[str, str]:
     """Build the updates dict for write_nanocodex_config from raw field values.
 
@@ -4186,6 +4653,10 @@ def _collect_settings_updates(
         updates["vl_api_key"] = vl_api_key
     if vl_model:
         updates["vl_model"] = vl_model
+    # Volcengine ARK key for Seedance video rendering (storyboard 出片). Same
+    # blank-key rule: a blank submit keeps the existing key.
+    if ark_api_key:
+        updates["ark_api_key"] = ark_api_key
     return updates
 
 

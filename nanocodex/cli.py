@@ -719,8 +719,8 @@ def storyboard_run(
 
     seedance = None
     if render:
-        import os
-        ark_key = os.environ.get("ARK_API_KEY", "")
+        # ARK key: config (GUI Settings / ~/.nanocodex/config.toml) or env.
+        ark_key = cfg.ark_api_key
         try:
             seedance = SeedanceClient(ark_key)
         except SeedanceError as exc:

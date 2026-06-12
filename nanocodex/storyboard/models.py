@@ -83,6 +83,25 @@ class Character:
 
 
 @dataclass
+class Chapter:
+    """A story chapter — the "story-detail" layer that sits ABOVE shots.
+
+    A long story is first split into a handful of chapters (3-8), each carrying
+    its plot summary, setting, cast and key beats, so the user can review the
+    narrative structure BEFORE it is broken down into camera shots. The shot
+    planner then slices each chapter into shots, keeping continuity.
+    """
+
+    chapter_id: str
+    title: str
+    summary: str = ""               # 剧情概要
+    setting: str = ""               # 场景 / 环境
+    characters: list[str] = field(default_factory=list)
+    key_moments: list[str] = field(default_factory=list)  # 关键细节 / 节拍
+    source_excerpt: str = ""        # 对应原文片段（可空）
+
+
+@dataclass
 class AssetAnalysis:
     image_id: str
     summary: str
@@ -96,13 +115,15 @@ class Shot:
     shot_id: str
     title: str
     duration_sec: float
-    prompt: str
+    prompt: str              # English画面描述，给视频模型读（出片用）
+    prompt_zh: str = ""      # 中文画面描述，给人看的预览（不进 Seedance payload）
     characters: list[str] = field(default_factory=list)
     background_image_ids: list[str] = field(default_factory=list)
     character_image_ids: list[str] = field(default_factory=list)
     camera: str = ""
     action: str = ""
     negative_prompt: str = ""
+    chapter_id: str = ""  # which Chapter this shot belongs to (for grouped preview)
 
 
 @dataclass

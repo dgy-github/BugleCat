@@ -3,6 +3,10 @@
 
 {story_text}
 
+章节结构参考（按章节顺序切镜头，保持章节内与跨章节的连贯；若为 (none) 则忽略，直接按整段故事切镜头）：
+
+{chapters}
+
 只输出一个 JSON 对象，不要任何额外文字、不要 markdown 代码块。结构如下：
 
 {
@@ -12,7 +16,8 @@
       "duration_sec": 每镜时长秒数（4 到 10 之间的数字）,
       "camera": "镜头语言，如 medium side shot, slow push-in",
       "action": "这一镜发生什么（英文，给视频模型读）",
-      "prompt": "给视频生成模型的正向 prompt（英文，画面描述详细）",
+      "prompt_zh": "这一镜的中文画面描述（给人预览看，写清光线/构图/动作/环境）",
+      "prompt": "给视频生成模型的正向 prompt（英文，画面描述详细，与 prompt_zh 对应）",
       "negative_prompt": "负向约束（英文，如 no extra characters, no modern objects）",
       "characters": ["出现的角色名称列表（中文）"]
     }
