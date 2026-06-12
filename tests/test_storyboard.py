@@ -345,6 +345,76 @@ async def test_render_state_renders_already_planned(tmp_path):
     assert "video_urls.json" in written
 
 
+async def test_render_one_reruns_single_failed_shot(tmp_path):
+    # A failed shot can be re-rendered on its own: render_one updates only that
+    # shot in place. First fail it, then retry with a good client -> success,
+    # and the OTHER shot's state is untouched (no re-spend on the good one).
+    from nanocodex.storyboard.pipeline import render_one
+    from nanocodex.storyboard.clients import SeedanceError
+
+    obj = _valid_obj()
+    state = await run_planning(obj, PipelineDeps(planner=_FakePlanner()))
+
+    class _BoomOnce:
+        def generate(self, *a, **k):
+            raise SeedanceError("RemoteDisconnected: connection closed")
+
+    # shot_01 fails -> records a [failed: ...] marker, no cost, returns False.
+    ok = render_one(state, PipelineDeps(seedance=_BoomOnce()), "shot_01")
+    assert ok is False
+    assert state.video_urls["shot_01"].startswith("[failed:")
+    assert "shot_01" not in state.video_costs
+
+    # Retry shot_01 with a working client -> success replaces the marker, the
+    # stale failure is cleared, and a cost entry appears. shot_02 stays absent.
+    ok2 = render_one(state, PipelineDeps(seedance=_FakeSeedance()), "shot_01")
+    assert ok2 is True
+    assert state.video_urls["shot_01"].startswith("https://")
+    assert "shot_01" in state.video_costs
+    assert "shot_02" not in state.video_urls  # untouched -> no re-spend
+
+
+async def test_render_concurrent_renders_all_shots(tmp_path):
+    # Concurrent render: with a slow client, N shots running in parallel finish
+    # in roughly one shot's time, not N times it. Asserts BOTH that every shot
+    # rendered (no lost/clobbered writes) and that wall-clock ~= one shot, not
+    # the serial sum.
+    import time as _time
+    from nanocodex.storyboard.pipeline import render
+
+    obj = _valid_obj()
+    state = await run_planning(obj, PipelineDeps(planner=_FakePlanner()))
+
+    class _SlowSeedance:
+        def generate(self, payload, *, on_progress=None, **kw):
+            _time.sleep(0.3)  # simulate the submit+poll latency of one clip
+            return SeedanceResult(
+                video_url="https://example.com/v.mp4?sig=x",
+                usage={"completion_tokens": 108900, "total_tokens": 108900},
+            )
+
+    t0 = _time.monotonic()
+    render(state, PipelineDeps(seedance=_SlowSeedance()), max_workers=4)
+    elapsed = _time.monotonic() - t0
+
+    # Both shots rendered (concurrent writes to distinct keys didn't clobber).
+    assert set(state.video_urls) == {"shot_01", "shot_02"}
+    assert all(u.startswith("https://") for u in state.video_urls.values())
+    assert set(state.video_costs) == {"shot_01", "shot_02"}
+    # 2 shots x 0.3s serial would be ~0.6s; concurrent should be well under that.
+    assert elapsed < 0.5
+
+
+async def test_render_serial_when_max_workers_one(tmp_path):
+    # max_workers <= 1 falls back to the serial path (still renders everything).
+    from nanocodex.storyboard.pipeline import render
+
+    obj = _valid_obj()
+    state = await run_planning(obj, PipelineDeps(planner=_FakePlanner()))
+    render(state, PipelineDeps(seedance=_FakeSeedance()), max_workers=1)
+    assert set(state.video_urls) == {"shot_01", "shot_02"}
+
+
 def _fake_ark_transport(total_tokens=108900):
     """A SeedanceClient transport that scripts ARK submit/poll with NO network.
 

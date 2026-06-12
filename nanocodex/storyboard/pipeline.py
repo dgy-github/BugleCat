@@ -274,35 +274,86 @@ def build_payloads(state: PipelineState) -> PipelineState:
 # --- stage 6: render (opt-in, costs money) ----------------------------------
 
 
+def render_one(state: PipelineState, deps: PipelineDeps, shot_id: str,
+               on_progress: Callable[[str, int, str], None] | None = None) -> bool:
+    """Render (or RE-render) a single shot by id, updating *state* in place.
+
+    Returns True on success (``video_urls[shot_id]`` is a real URL), False on
+    failure (``video_urls[shot_id]`` holds a ``[failed: ...]`` marker). A retry
+    of a previously-failed shot clears any stale cost entry first, so a shot is
+    billed at most once per successful render. Each clip is real spend, so a
+    failure is recorded but never raises — the caller keeps going.
+    """
+    if deps.seedance is None:
+        return False
+    payload_obj = next((p for p in state.payloads if p.shot_id == shot_id), None)
+    if payload_obj is None:
+        return False
+
+    def _cb(i: int, st: str) -> None:
+        if on_progress:
+            on_progress(shot_id, i, st)
+
+    try:
+        result = deps.seedance.generate(payload_obj.payload, on_progress=_cb)
+        state.video_urls[shot_id] = result.video_url
+        # Register cost from the task's own usage. Only successful tasks reach
+        # here (failures raise), and only those are billed.
+        usage = result.usage or {}
+        has_video = _payload_has_video_input(payload_obj.payload)
+        cost = seedance_cost_cny(usage, has_video_input=has_video)
+        if cost is not None:
+            state.video_costs[shot_id] = {
+                "total_tokens": int(usage.get("total_tokens", 0)),
+                "has_video_input": has_video,
+                "cost_cny": round(cost, 4),
+            }
+        return True
+    except Exception as exc:  # noqa: BLE001 - record, keep going
+        state.video_urls[shot_id] = f"[failed: {type(exc).__name__}: {exc}]"
+        # A re-render that fails again must not leave a stale cost from a prior
+        # (impossible-but-defensive) state — only successful renders are billed.
+        state.video_costs.pop(shot_id, None)
+        return False
+
+
 def render(state: PipelineState, deps: PipelineDeps,
-           on_progress: Callable[[str, int, str], None] | None = None) -> PipelineState:
+           on_progress: Callable[[str, int, str], None] | None = None,
+           *, max_workers: int = 4) -> PipelineState:
     """Render each shot's payload to a video via Seedance (OPT-IN).
 
     Only called when the caller explicitly enables rendering. Each clip is real
     spend, so failures on one shot are recorded but don't abort the rest.
+
+    Shots render CONCURRENTLY (up to ``max_workers`` at once): each Seedance
+    task is submit-then-poll, so the wall-clock for N shots drops from the sum
+    of their times to roughly the slowest single shot. ``render_one`` updates
+    ``state`` in place writing distinct keys per shot (the GIL makes each dict
+    assignment atomic), so concurrent writes don't clobber each other. Cost is
+    unchanged — each shot is still billed once on its own success. ``max_workers
+    <= 1`` falls back to serial. ``on_progress`` may fire from worker threads;
+    GUI callers already marshal it onto the UI thread via a queue.
     """
     if deps.seedance is None:
         return state
-    for p in state.payloads:
-        def _cb(i: int, st: str, _sid=p.shot_id) -> None:
-            if on_progress:
-                on_progress(_sid, i, st)
-        try:
-            result = deps.seedance.generate(p.payload, on_progress=_cb)
-            state.video_urls[p.shot_id] = result.video_url
-            # Register cost from the task's own usage. Only successful tasks
-            # reach here (failures raise), and only those are billed.
-            usage = result.usage or {}
-            has_video = _payload_has_video_input(p.payload)
-            cost = seedance_cost_cny(usage, has_video_input=has_video)
-            if cost is not None:
-                state.video_costs[p.shot_id] = {
-                    "total_tokens": int(usage.get("total_tokens", 0)),
-                    "has_video_input": has_video,
-                    "cost_cny": round(cost, 4),
-                }
-        except Exception as exc:  # noqa: BLE001 - record, keep going
-            state.video_urls[p.shot_id] = f"[failed: {type(exc).__name__}: {exc}]"
+    n = len(state.payloads)
+    if n == 0:
+        return state
+    if max_workers <= 1 or n == 1:
+        for p in state.payloads:
+            render_one(state, deps, p.shot_id, on_progress=on_progress)
+        return state
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = min(max_workers, n)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(render_one, state, deps, p.shot_id, on_progress)
+            for p in state.payloads
+        ]
+        for f in futures:
+            f.result()  # render_one never raises (records failures in state)
     return state
 
 
@@ -385,15 +436,17 @@ async def run_planning(obj: dict[str, Any], deps: PipelineDeps, *,
 
 def render_state(state: PipelineState, deps: PipelineDeps, *,
                  out_dir: "Path | None" = None,
-                 on_progress: Callable[[str, int, str], None] | None = None
+                 on_progress: Callable[[str, int, str], None] | None = None,
+                 max_workers: int = 4
                  ) -> tuple[PipelineState, dict[str, Path]]:
     """Render an ALREADY-PLANNED state (the "make video" path).
 
     Call this on a state returned by :func:`run_planning` once the user has
     reviewed the preview and chosen to spend. Runs the render stage then exports
     (so video_urls/video_costs land in the JSON). Returns (state, written).
+    Shots render concurrently up to ``max_workers`` (see :func:`render`).
     """
-    state = render(state, deps, on_progress=on_progress)
+    state = render(state, deps, on_progress=on_progress, max_workers=max_workers)
     written: dict[str, Path] = {}
     if out_dir is not None:
         written = export(state, out_dir)
