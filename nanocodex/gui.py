@@ -2907,6 +2907,13 @@ class NanocodexGUI:
                                               accent=True)
         self._sb_preview_btn.pack(side=tk.RIGHT)
 
+        # --- thumbnail strip for picked reference images (filled on pick) ---
+        # Always packed here (empty -> 0 height) so thumbs sit right under the
+        # picker row; _sb_render_thumbs fills/clears its children.
+        self._sb_thumb_strip = tk.Frame(top, bg=P["bg"])
+        self._sb_thumb_strip.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+        self._sb_thumb_imgs = []  # keep PhotoImage refs alive (else GC blanks them)
+
         # --- middle: two-level preview (chapters then shots) ---
         mid = tk.Frame(dlg, bg=P["bg"])
         mid.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(2, 6))
@@ -2925,6 +2932,36 @@ class NanocodexGUI:
                                     font=("Cascadia Code", 10, "bold"), spacing1=4)
         self._sb_preview.tag_config("field", foreground=P["muted"])
         self._sb_preview.tag_config("body", foreground=P["fg"])
+        # Result-view status colors: success (teal) vs failure (red).
+        self._sb_preview.tag_config("ok", foreground=P["tool"],
+                                    font=("Cascadia Code", 10, "bold"), spacing1=6)
+        self._sb_preview.tag_config("fail", foreground=P["err"],
+                                    font=("Cascadia Code", 10, "bold"), spacing1=6)
+
+        # --- results: per-shot status + ▶播放 / ↻重试 (filled after a render) ---
+        # A scrollable list packed between the preview and the bottom bar. Each
+        # shot gets a row: ✓ + ▶播放 when a clip rendered, ✗/— + ↻重试 otherwise
+        # (so a failed shot can be re-generated on its own without re-spending on
+        # the ones that already succeeded).
+        res_outer = tk.Frame(dlg, bg=P["bg"])
+        self._sb_results_outer = res_outer
+        res_canvas = tk.Canvas(res_outer, bg=P["bg"], highlightthickness=0,
+                               height=0)
+        res_vsb = tk.Scrollbar(res_outer, orient=tk.VERTICAL,
+                               command=res_canvas.yview)
+        res_inner = tk.Frame(res_canvas, bg=P["bg"])
+        res_inner.bind(
+            "<Configure>",
+            lambda e: res_canvas.configure(scrollregion=res_canvas.bbox("all")))
+        res_win = res_canvas.create_window((0, 0), window=res_inner, anchor="nw")
+        res_canvas.bind(
+            "<Configure>", lambda e: res_canvas.itemconfig(res_win, width=e.width))
+        res_canvas.configure(yscrollcommand=res_vsb.set)
+        res_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        res_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._sb_results_canvas = res_canvas
+        self._sb_results_inner = res_inner
+        # res_outer is packed lazily by _sb_render_results once rows exist.
 
         # --- bottom: cost estimate + render + progress ---
         bot = tk.Frame(dlg, bg=P["bg"])
@@ -2945,8 +2982,132 @@ class NanocodexGUI:
                                    wraplength=720, justify="left")
         self._sb_status.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(0, 4))
 
+        # Restore last session's inputs (story + images + ratio) unless the
+        # caller prefilled a story (e.g. via the /storyboard command). This is
+        # the panel "memory" — reopening or restarting brings back what you had.
+        if not prefill_story:
+            mem = self._sb_load_memory()
+            if mem.get("story"):
+                self._sb_story.delete("1.0", "end")
+                self._sb_story.insert("1.0", mem["story"])
+            imgs = [p for p in (mem.get("images") or []) if isinstance(p, str)]
+            if imgs:
+                self._sb_image_paths = imgs
+                self._sb_images_label.config(text=f"{len(imgs)} 张图片")
+                self._sb_render_thumbs()
+            if mem.get("ratio"):
+                try:
+                    self._sb_ratio.set(mem["ratio"])
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Save inputs on close so they survive across panel reopen / restart.
+        def _on_close() -> None:
+            self._sb_save_memory()
+            try:
+                dlg.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        dlg.protocol("WM_DELETE_WINDOW", _on_close)
+
         if auto_preview and prefill_story:
             self._sb_run_preview()
+
+    def _sb_memory_path(self):
+        """Where the panel persists its inputs (story + images + ratio)."""
+        from pathlib import Path as _Path
+        return (_Path(self._workspace) / "storyboard_out" / "_panel.json").resolve()
+
+    def _sb_save_memory(self) -> None:
+        """Persist the panel's story + picked images + ratio (best-effort).
+
+        Lets reopening the panel (or relaunching the app) restore what you had
+        instead of starting blank. Any failure is swallowed so saving memory
+        never disturbs the UI.
+        """
+        import json as _json
+        try:
+            story = self._sb_story.get("1.0", "end").strip()
+        except Exception:  # noqa: BLE001
+            story = ""
+        ratio = "16:9"
+        try:
+            ratio = self._sb_ratio.get()
+        except Exception:  # noqa: BLE001
+            pass
+        data = {
+            "story": story,
+            "images": list(getattr(self, "_sb_image_paths", []) or []),
+            "ratio": ratio,
+        }
+        try:
+            path = self._sb_memory_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_json.dumps(data, ensure_ascii=False, indent=2),
+                            encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sb_load_memory(self) -> dict:
+        """Load the panel's last-saved inputs; {} when none/unreadable."""
+        import json as _json
+        try:
+            path = self._sb_memory_path()
+            if path.is_file():
+                data = _json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+        except Exception:  # noqa: BLE001
+            pass
+        return {}
+
+    def _sb_render_thumbs(self) -> None:
+        """Show small thumbnails of the picked reference images under the picker.
+
+        Uses Pillow to decode any format (PNG/JPEG/webp/…) and downscale to a
+        ~64px-tall thumbnail. PhotoImage refs are kept in ``_sb_thumb_imgs`` so
+        Tk doesn't GC them (which would blank the images). Best-effort per
+        image: an unreadable file gets a small "?" placeholder; if Pillow is
+        missing, the strip shows a one-line hint instead of crashing.
+        """
+        tk = self._tk
+        P = self._palette
+        strip = getattr(self, "_sb_thumb_strip", None)
+        if strip is None:
+            return
+        for child in strip.winfo_children():
+            child.destroy()
+        self._sb_thumb_imgs = []
+        paths = getattr(self, "_sb_image_paths", []) or []
+        if not paths:
+            return
+        try:
+            from PIL import Image, ImageTk
+        except Exception:  # noqa: BLE001 - Pillow missing: count-only fallback
+            tk.Label(strip, text="(装 pillow 可显示缩略图)", bg=P["bg"],
+                     fg=P["muted"], font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            return
+        from pathlib import Path as _Path
+        for p in paths[:8]:  # cap the strip so many images don't overflow it
+            cell = tk.Frame(strip, bg=P["bg"])
+            cell.pack(side=tk.LEFT, padx=(0, 6))
+            try:
+                im = Image.open(p)
+                im.thumbnail((96, 64))
+                photo = ImageTk.PhotoImage(im)
+                self._sb_thumb_imgs.append(photo)
+                tk.Label(cell, image=photo, bg=P["bg"]).pack(side=tk.TOP)
+            except Exception:  # noqa: BLE001 - unreadable -> placeholder
+                tk.Label(cell, text="?", width=6, height=3, bg=P["panel"],
+                         fg=P["err"], font=("Segoe UI", 9)).pack(side=tk.TOP)
+            name = _Path(p).name
+            if len(name) > 14:
+                name = name[:12] + "…"
+            tk.Label(cell, text=name, bg=P["bg"], fg=P["muted"],
+                     font=("Segoe UI", 8)).pack(side=tk.TOP)
+        if len(paths) > 8:
+            tk.Label(strip, text=f"+{len(paths) - 8}", bg=P["bg"],
+                     fg=P["muted"], font=("Segoe UI", 8)).pack(side=tk.LEFT)
 
     def _sb_pick_images(self) -> None:
         """Pick reference images for the storyboard (optional)."""
@@ -2961,6 +3122,8 @@ class NanocodexGUI:
         self._sb_image_paths = list(paths)
         n = len(self._sb_image_paths)
         self._sb_images_label.config(text=f"{n} 张图片")
+        self._sb_render_thumbs()
+        self._sb_save_memory()
 
     def _sb_set_status(self, text: str, *, error: bool = False) -> None:
         lbl = getattr(self, "_sb_status", None)
@@ -3078,6 +3241,9 @@ class NanocodexGUI:
         )
         if not ok:
             return
+        # Fresh render: reset how much of this state's cost has been folded into
+        # the session total (so re-renders only add the delta, never double-count).
+        self._sb_folded_cny = 0.0
         self._sb_busy = True
         try:
             self._sb_render_btn.config(state=self._tk.DISABLED)
@@ -3088,18 +3254,85 @@ class NanocodexGUI:
                          daemon=True).start()
 
     def _sb_render_thread(self, state) -> None:
-        """Daemon thread: render the planned state via Seedance; results to queue."""
+        """Daemon thread: render the planned state via Seedance, download the
+        finished clips locally, then export. Results to the UI queue."""
         try:
             deps = self._sb_build_deps(want_render=True)
-            from nanocodex.storyboard.pipeline import render_state
+            from nanocodex.storyboard.pipeline import render, export
             out_dir = (self._workspace / "storyboard_out").resolve()
 
             def _prog(sid: str, i: int, st: str) -> None:
                 self._ui_queue.put(_UiEvent("sb_render_progress", (sid, i, st)))
 
-            state2, _written = render_state(state, deps, out_dir=out_dir,
-                                            on_progress=_prog)
-            self._ui_queue.put(_UiEvent("sb_render_done", state2))
+            render(state, deps, on_progress=_prog)
+            self._sb_download_clips(state, out_dir)
+            export(state, out_dir)
+            self._ui_queue.put(_UiEvent("sb_render_done", state))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the panel
+            self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_download_clips(self, state, out_dir) -> None:
+        """Download each successful shot's signed URL to ``out_dir/<shot_id>.mp4``.
+
+        Signed Seedance URLs expire (~24h), so a local copy makes 播放 reliable.
+        Best-effort: a download failure leaves the shot playable via its URL and
+        never aborts the render. Already-downloaded clips are skipped.
+        """
+        import urllib.request
+        from pathlib import Path as _Path
+        out_dir = _Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for sid, url in state.video_urls.items():
+            if not url or str(url).startswith("[failed"):
+                continue
+            dest = out_dir / f"{sid}.mp4"
+            if dest.exists() and dest.stat().st_size > 0:
+                continue
+            try:
+                urllib.request.urlretrieve(url, dest)
+            except Exception:  # noqa: BLE001 - URL still works as a fallback
+                pass
+
+    def _sb_rerender_one(self, shot_id: str) -> None:
+        """Re-render a single (usually failed) shot after a per-shot confirm."""
+        if getattr(self, "_sb_busy", False):
+            return
+        state = getattr(self, "_sb_render_state", None)
+        if state is None:
+            self._sb_set_status("没有可重出的镜头。", error=True)
+            return
+        from tkinter import messagebox
+        from nanocodex.agent.pricing import estimate_seedance_cost_cny
+        shot = next((s for s in state.shots if s.shot_id == shot_id), None)
+        dur = float(shot.duration_sec) if shot else 5.0
+        est = estimate_seedance_cost_cny(dur)
+        ok = messagebox.askyesno(
+            "重新生成（真实计费）",
+            f"重新生成镜头 {shot_id}，预计 ≈ ¥{est:.2f} CNY"
+            f"（约 {dur:.0f}s，720p 估算）。\n\n这会真实计费，确定继续？",
+            parent=self._sb_dlg,
+        )
+        if not ok:
+            return
+        self._sb_busy = True
+        self._sb_set_status(f"重新生成 {shot_id}…（真实计费）")
+        threading.Thread(target=self._sb_rerender_thread,
+                         args=(state, shot_id), daemon=True).start()
+
+    def _sb_rerender_thread(self, state, shot_id: str) -> None:
+        """Daemon thread: re-render ONE shot in place, download, export, refresh."""
+        try:
+            deps = self._sb_build_deps(want_render=True)
+            from nanocodex.storyboard.pipeline import render_one, export
+            out_dir = (self._workspace / "storyboard_out").resolve()
+
+            def _prog(sid: str, i: int, st: str) -> None:
+                self._ui_queue.put(_UiEvent("sb_render_progress", (sid, i, st)))
+
+            render_one(state, deps, shot_id, on_progress=_prog)
+            self._sb_download_clips(state, out_dir)
+            export(state, out_dir)
+            self._ui_queue.put(_UiEvent("sb_render_done", state))
         except Exception as exc:  # noqa: BLE001 - surfaced to the panel
             self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
 
@@ -3165,7 +3398,13 @@ class NanocodexGUI:
             pass
 
     def _sb_show_render_done(self, state) -> None:
-        """Show video URLs + actual cost after a render; fold cost into session."""
+        """Show per-shot results + actual cost after a render; fold cost in.
+
+        Keeps the rendered state so a failed shot can be re-generated on its
+        own, then (re)builds the per-shot result list (✓ + ▶播放 / ✗ + ↻重试).
+        """
+        self._sb_render_state = state
+        self._sb_busy = False
         run_cny = round(sum(float(c.get("cost_cny", 0.0))
                             for c in state.video_costs.values()), 4)
         ok_n = sum(1 for u in state.video_urls.values()
@@ -3177,9 +3416,97 @@ class NanocodexGUI:
         except Exception:  # noqa: BLE001
             pass
         self._update_context_usage()
+        try:
+            self._sb_render_btn.config(state=self._tk.NORMAL)
+        except Exception:  # noqa: BLE001
+            pass
+        self._sb_render_results(state)
         self._sb_set_status(
             f"出片完成：{ok_n}/{len(state.video_urls)} 成功，本次 ¥{run_cny:.4f} CNY。"
-            f"视频 URL 已写入 storyboard_out/video_urls.json（签名，约 24h 失效）。")
+            f"成功的已下载到 storyboard_out/，失败的可单独点「↻重试」重出。")
+
+    def _sb_render_results(self, state) -> None:
+        """(Re)build the per-shot result rows: status + ▶播放 / ↻重试.
+
+        A succeeded shot shows ✓ + its title + ▶播放 (opens the local mp4, or
+        the signed URL as fallback). A failed shot shows ✗ + the short error +
+        ↻重试, which re-renders just that shot (no re-spend on the good ones).
+        """
+        tk = self._tk
+        P = self._palette
+        inner = getattr(self, "_sb_results_inner", None)
+        if inner is None:
+            return
+        for child in inner.winfo_children():
+            child.destroy()
+
+        out_dir = (self._workspace / "storyboard_out").resolve()
+        urls = state.video_urls or {}
+        for s in state.shots:
+            url = str(urls.get(s.shot_id, ""))
+            ok = bool(url) and not url.startswith("[failed")
+            row = tk.Frame(inner, bg=P["bg"])
+            row.pack(side=tk.TOP, fill=tk.X, pady=1)
+            mark = "✓" if ok else ("✗" if url else "—")
+            tk.Label(row, text=mark, width=2, anchor="w", bg=P["bg"],
+                     fg=(P["tool"] if ok else P["err"]),
+                     font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+            tk.Label(row, text=f"{s.shot_id}  {s.title}", anchor="w",
+                     bg=P["bg"], fg=P["fg"], font=("Segoe UI", 9)).pack(
+                         side=tk.LEFT, padx=(4, 8))
+            if ok:
+                local = out_dir / f"{s.shot_id}.mp4"
+                self._flat_btn(
+                    row, "▶ 播放",
+                    lambda p=local, u=url: self._sb_play_clip(p, u),
+                ).pack(side=tk.RIGHT)
+            else:
+                self._flat_btn(
+                    row, "↻ 重试",
+                    lambda sid=s.shot_id: self._sb_rerender_one(sid),
+                ).pack(side=tk.RIGHT)
+                if url:
+                    short = url[8:60].replace("\n", " ")  # strip "[failed: "
+                    tk.Label(row, text=short, anchor="e", bg=P["bg"],
+                             fg=P["muted"], font=("Segoe UI", 8)).pack(
+                                 side=tk.RIGHT, padx=(0, 8))
+
+        # Reveal the results area (packed lazily so it stays hidden pre-render)
+        # and cap its height so it scrolls instead of pushing the panel.
+        try:
+            self._sb_results_canvas.config(height=min(150, 26 * len(state.shots)))
+            self._sb_results_outer.pack(side=tk.TOP, fill=tk.X,
+                                        padx=14, pady=(0, 4))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sb_play_clip(self, local_path, url: str) -> None:
+        """Open a rendered clip: prefer the local mp4, fall back to the URL.
+
+        Uses the OS default handler (os.startfile on Windows) so the system
+        video player opens it. A signed URL is the fallback when the local
+        download is missing/failed (it still works until it expires ~24h).
+        """
+        import os
+        from pathlib import Path as _Path
+        target = None
+        try:
+            p = _Path(local_path)
+            if p.exists() and p.stat().st_size > 0:
+                target = str(p)
+        except Exception:  # noqa: BLE001
+            target = None
+        if target is None:
+            target = url
+        try:
+            startfile = getattr(os, "startfile", None)
+            if startfile is not None:
+                startfile(target)
+            else:  # non-Windows fallback
+                import webbrowser
+                webbrowser.open(target)
+        except Exception as exc:  # noqa: BLE001
+            self._sb_set_status(f"打开失败：{exc}", error=True)
 
     def _on_ab_compare(self) -> None:
         """Open the A/B setup dialog: two configs + one prompt, run isolated.
