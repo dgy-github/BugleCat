@@ -1,0 +1,4 @@
+/target
+**/*.rs.bk
+# Cargo.lock IS committed: this workspace produces an application binary, so we
+# pin exact dependency versions for reproducible builds.

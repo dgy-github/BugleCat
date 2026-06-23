@@ -1,0 +1,8 @@
+[package]
+name = "ncx-sandbox"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

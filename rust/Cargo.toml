@@ -1,0 +1,16 @@
+# nanocodex — Rust rewrite (workspace).
+#
+# Lives alongside the Python implementation during the staged migration; the
+# Python tree is untouched. Crates map 1:1 to the Python packages (see the
+# migration plan): ncx-sandbox <- nanocodex/sandbox, ncx-config <- config.py,
+# ncx-provider <- nanocodex/provider, ncx-tools <- nanocodex/tools,
+# ncx-core <- nanocodex/agent, ncx-cli <- cli.py.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.96"
