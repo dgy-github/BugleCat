@@ -331,6 +331,63 @@ pub fn list_profiles() -> Vec<String> {
     list_profiles_at(&ConfigPaths::default().nanocodex)
 }
 
+// ── MCP server config ─────────────────────────────────────────────────────────
+
+/// Load MCP server definitions from a `mcp.toml` file.
+///
+/// Format:
+/// ```toml
+/// [[servers]]
+/// name    = "everything"
+/// command = "npx"
+/// args    = ["-y", "@modelcontextprotocol/server-everything"]
+/// env     = { MY_VAR = "value" }   # optional
+/// ```
+pub fn load_mcp_servers_at(path: &Path) -> Vec<crate::config::McpServerConfig> {
+    use crate::config::McpServerConfig;
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let parsed: Value = match text.parse() {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match parsed.get("servers").and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for s in arr {
+        let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let command = s.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if name.is_empty() || command.is_empty() {
+            continue;
+        }
+        let args: Vec<String> = s
+            .get("args")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let env: HashMap<String, String> = s
+            .get("env")
+            .and_then(|v| v.as_table())
+            .map(|t| {
+                t.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|val| (k.clone(), val.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(McpServerConfig { name, command, args, env });
+    }
+    out
+}
+
+/// Load MCP server definitions from `~/.nanocodex/mcp.toml`.
+pub fn load_mcp_servers() -> Vec<crate::config::McpServerConfig> {
+    load_mcp_servers_at(&home_dir().join(".nanocodex/mcp.toml"))
+}
+
 /// Resolve a [`Config`] using real env vars and default config-file paths.
 pub fn load_config(overrides: Overrides) -> Result<Config, ConfigError> {
     let env: HashMap<String, String> = std::env::vars().collect();
@@ -557,6 +614,7 @@ pub(crate) fn load_config_impl(
             &active_model,
         ),
         hooks: parse_hooks(&nano_raw),
+        mcp_servers: vec![],
     };
     Ok(cfg)
 }

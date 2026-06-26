@@ -12,6 +12,15 @@ pub const VALID_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "dang
 pub const VALID_APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
 pub const VALID_HOOK_EVENTS: &[&str] = &["pre_tool", "post_tool", "user_prompt", "stop"];
 
+/// An MCP server to connect on startup, loaded from `~/.nanocodex/mcp.toml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: HashMap<String, String>,
+}
+
 /// Project-level deterministic hook. Hooks are configured from `[[hooks]]` in
 /// `~/.nanocodex/config.toml` and executed around tool calls.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +73,8 @@ pub struct Config {
     pub context_edit_max_tool_result_chars: i64,
     pub available_models: Vec<String>,
     pub hooks: Vec<HookConfig>,
+    /// MCP servers loaded from `~/.nanocodex/mcp.toml`.
+    pub mcp_servers: Vec<McpServerConfig>,
 }
 
 impl Default for Config {
@@ -97,6 +108,7 @@ impl Default for Config {
             context_edit_max_tool_result_chars: 4_000,
             available_models: DEFAULT_MODELS.iter().map(|s| s.to_string()).collect(),
             hooks: vec![],
+            mcp_servers: vec![],
         }
     }
 }

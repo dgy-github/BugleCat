@@ -18,10 +18,11 @@ pub mod loader;
 pub mod writer;
 
 pub use config::{
-    Config, ConfigError, HookConfig, VALID_APPROVAL_POLICIES, VALID_HOOK_EVENTS,
+    Config, ConfigError, HookConfig, McpServerConfig, VALID_APPROVAL_POLICIES, VALID_HOOK_EVENTS,
     VALID_SANDBOX_MODES,
 };
 pub use loader::{
-    list_profiles, list_profiles_at, load_config, load_config_with_paths, ConfigPaths, Overrides,
+    list_profiles, list_profiles_at, load_config, load_config_with_paths, load_mcp_servers,
+    load_mcp_servers_at, ConfigPaths, Overrides,
 };
 pub use writer::{dump_nanocodex_toml, write_nanocodex_config, WRITABLE_KEYS};

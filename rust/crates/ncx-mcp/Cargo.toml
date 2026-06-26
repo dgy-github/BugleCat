@@ -1,0 +1,13 @@
+[package]
+name = "ncx-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "time", "rt", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["process", "io-util", "time", "rt", "rt-multi-thread", "macros"] }

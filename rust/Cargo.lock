@@ -511,10 +511,19 @@ dependencies = [
  "async-trait",
  "futures-util",
  "ncx-config",
+ "ncx-mcp",
  "ncx-provider",
  "ncx-sandbox",
  "ncx-tools",
  "regex",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "ncx-mcp"
+version = "0.1.0"
+dependencies = [
  "serde_json",
  "tokio",
 ]
