@@ -11,7 +11,7 @@
 - 工具链：无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 
 ## 当前状态（已完成，约 225 测试全绿）
-- 6 核心 crate + CLI(`ncx`) + Tauri GUI + **`ncx-mcp`**（MCP stdio 客户端，已 live 验证，未接进 agent）
+- 6 核心 crate + CLI(`ncx`) + Tauri GUI + **`ncx-mcp`**（MCP stdio 客户端，已接进 agent：McpTool + mcp.toml loader + 启动注册）
 - 工具：read_file·apply_patch·shell·update_plan·grep·glob·web_search·web_fetch·tool_search·remember·skill
 - **Skills（已并入 rust-capability）**：SKILL.md 发现 + 渐进披露注入 + `skill` 工具 + builtin（`commit-message`，include_str! 编入二进制，FS 同名可覆盖）+ `/skills` 命令。stream C vision 基础（`7de2235`）也随 FF 一起进了 rust-capability。
 - 分层 flash/pro 编排器（`-o`，verifier 选 BEST worker + promote）；memory 自进化 + 启发式/LLM consolidate（`--memory-merge`）；keyed 搜索(Tavily/DDG)
@@ -23,10 +23,10 @@
 
 | 流 | 任务 | 拥有/新建文件（低冲突） | 依赖 |
 |---|---|---|---|
-| **A 分支 feat/mcp** | McpTool（包 `Rc<tokio::Mutex<McpClient>>`+ToolDef→实现 `Tool::execute`→call_tool，非只读走审批）+ `~/.nanocodex/mcp.toml` 配置 + 启动连服务/list_tools/注册 + 真实 server 验（`npx -y @modelcontextprotocol/server-everything`） | 新 `ncx-core/src/mcp_tool.rs`；`ncx-config` 加 servers 字段 | ncx-mcp(done) |
+| **A 分支 feat/mcp** ✅完成(`dc56233`，已并入) | ncx-mcp crate(stdio JSON-RPC client) + McpTool(`Rc<Mutex<McpClient>>`，非只读走审批) + `~/.nanocodex/mcp.toml` loader + main.rs 启动注册。mock server live 测过。⚠️ 之前这些文件未入库导致 HEAD 干净 checkout 编不过，已修复 | `ncx-core/src/mcp_tool.rs`、`crates/ncx-mcp/`、`ncx-config` servers 字段 | 无 |
 | **B 分支 feat/skills** ✅完成(`b70907b`) | SKILL.md 发现 + 渐进披露注入 + `skill` 工具(已 live 验) | `ncx-core/src/skills.rs`(新)；tools/lib/cli/runner/gui 各加几行 | 无 |
-| **C 分支 feat/vision** | VL 视觉后端分流（image turn 路由到 vision provider） | `ncx-provider` vision 路径；`ncx-config` vl 字段（agent_loop 已有 image_url 检测） | 无 |
-| **D 分支 feat/orch** | 编排器加深：动态 worker 数 / 更好 plan 拆分 / 递归子任务 | **独占 `ncx-core/src/orchestrator.rs`** | 无 |
+| **C 分支 feat/vision** ✅完成(已并入) | VL 视觉分流：`with_vision_provider` + `has_image_block` 路由；CLI `--image`(可重复)/REPL 内联 `--image`；base64 多模态 content；`vl_base_url/vl_api_key/vl_model` 配置；含测试 | `agent_loop`、`cli/main.rs`、`ncx-config` vl 字段 | 无 |
+| **D 分支 feat/orch** ✅完成(`3207b43`，已并入) | high 任务递归分解：plan→decompose→每子任务 recurse(顺序、各自 promote)→main verify；atomic/depth 耗尽回退 best-of-N(`high_workers`=3)。新旋钮 `high_workers`/`max_depth`(0=关)。`LocalBoxFuture` 保 ?Send。5 个新测试 | **独占 `ncx-core/src/orchestrator.rs`** | 无 |
 | **E 分支 feat/bench** ✅完成(`b175a74`，已并入 rust-capability) | bench 入库：+4 难任务(t5_roman/t6_lru/t7_balanced/t8_wordfreq) + 每任务 `--repeats`(默认3)出通过率 + md/json 报告(`bench/reports/`已 gitignore) + `--tasks` 过滤；Claude 臂沿用已有接线。smoke 验：nanocodex×2 跑 t6/t7 全过 | **整个 `bench/`（纯 Python，零 Rust 冲突）** | 无 |
 
 **冲突热点（只有这几处，纪律）**：`tools.rs`(register 行)、`lib.rs`(mod/export)、`Cargo.toml`(deps)、`cli/main.rs`(接线)。
