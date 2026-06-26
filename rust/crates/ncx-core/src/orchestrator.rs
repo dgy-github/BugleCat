@@ -8,18 +8,27 @@
 //! classify (fast)
 //!   ├─ Simple → single run (fast)
 //!   ├─ Medium → plan (main) → workers×N (fast, parallel) → verify (fast)  ┐
-//!   └─ High   → plan (main) → workers×N (fast, parallel) → verify (main)  ┘
+//!   └─ High   → plan (main) → decompose (main)                            │
+//!                  ├─ atomic        → workers×M (fast, parallel) → verify (main) ┘
+//!                  └─ ≥2 subtasks   → for each: recurse(handle_at, depth+1)        (sequential,
+//!                                     → verify (main)                               each promotes)
 //!                                         ▲                         │
 //!                                         └──── FAIL: retry ────────┘  (closed loop, ≤ max_verify_retries)
 //! ```
 //!
 //! It cannot exceed the *main* model's reasoning ceiling (plan + verify run
-//! there); the gains are completion-rate / reliability on simple+medium tasks.
-//! Model calls are abstracted behind [`AgentRunner`] so this module is
-//! provider-agnostic and unit-testable with a mock.
+//! there); the gains are completion-rate / reliability on simple+medium tasks
+//! and divide-and-conquer reach on high ones. Model calls are abstracted behind
+//! [`AgentRunner`] so this module is provider-agnostic and unit-testable.
+//!
+//! Recursion is live-safe because workers run in isolated workspace copies and
+//! the verifier-chosen winner is promoted to the real workspace before the next
+//! subtask starts — so sequential subtasks see each other's committed work
+//! without parallel-write collisions (see `cli/runner.rs`).
 
 use async_trait::async_trait;
-use futures_util::future::join_all;
+use futures_util::future::{join_all, LocalBoxFuture};
+use futures_util::FutureExt;
 
 /// Which model tier a node runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +74,10 @@ const CLASSIFY_SYS: &str = "You are a task-complexity classifier. Reply with exa
     low-risk change; medium = multi-step but routine; high = risky, broad, or easy to get wrong.";
 const PLAN_SYS: &str = "You are a senior engineer. Produce a short, concrete step-by-step plan to \
     accomplish the task. Do not write code — just the plan.";
+const DECOMPOSE_SYS: &str = "You are a planning lead. Break the task into the smallest set of \
+    INDEPENDENT subtasks that can be carried out one after another. Output each subtask on its \
+    own line, prefixed with 'SUBTASK: '. If the task is atomic (cannot be usefully split), output \
+    a single 'SUBTASK: ' line restating it. No prose, no extra numbering.";
 const WORKER_SYS: &str =
     "You are an implementation worker. Carry out the task following the plan, \
     using your tools. Describe what you did and the outcome.";
@@ -76,17 +89,25 @@ const VERIFY_SYS: &str = "You are a strict reviewer. Given the task, plan, and t
 /// Tunables for the node graph.
 #[derive(Debug, Clone)]
 pub struct OrchestratorConfig {
-    /// Parallel fast workers for medium/high tasks.
+    /// Parallel fast workers for medium tasks (best-of-N attempts).
     pub workers: usize,
+    /// Parallel fast workers for high tasks that run as a single best-of-N
+    /// attempt (atomic / depth-exhausted). High gets more attempts than medium.
+    pub high_workers: usize,
     /// Extra verify→retry rounds after the first attempt (closed loop).
     pub max_verify_retries: usize,
+    /// Max recursive decomposition depth for high tasks (0 = never decompose;
+    /// high tasks then always run as a single best-of-N attempt).
+    pub max_depth: usize,
 }
 
 impl Default for OrchestratorConfig {
     fn default() -> Self {
         OrchestratorConfig {
             workers: 2,
+            high_workers: 3,
             max_verify_retries: 1,
+            max_depth: 1,
         }
     }
 }
@@ -101,7 +122,8 @@ pub struct OrchestratorOutcome {
     pub verify_passed: bool,
     /// How many plan→workers→verify rounds ran (1 = no retry; 0 = simple path).
     pub verify_rounds: usize,
-    /// 0-based index of the worker the verifier picked as best (0 for simple).
+    /// 0-based index of the worker the verifier picked as best (0 for simple /
+    /// decomposed paths, where there is no single best-of-N attempt).
     pub best_worker: usize,
 }
 
@@ -116,25 +138,47 @@ impl<'a> Orchestrator<'a> {
         Orchestrator { runner, cfg }
     }
 
-    /// Classify the task, then run the matching node graph.
+    /// Classify the task, then run the matching node graph (depth 0).
     pub async fn handle(&self, task: &str) -> OrchestratorOutcome {
-        let complexity = self.classify(task).await;
-        match complexity {
-            Complexity::Simple => {
-                let final_text = self.runner.run(Tier::Fast, WORKER_SYS, task).await;
-                OrchestratorOutcome {
-                    complexity,
-                    final_text,
-                    plan: None,
-                    worker_results: vec![],
-                    verify_passed: true,
-                    verify_rounds: 0,
-                    best_worker: 0,
+        self.handle_at(task.to_string(), 0).await
+    }
+
+    /// The recursive core. `depth` bounds high-task decomposition. Boxed because
+    /// it recurses into itself (an `async fn` calling itself is infinitely sized
+    /// otherwise). `LocalBoxFuture` keeps the `?Send` (current-thread) contract.
+    fn handle_at(&self, task: String, depth: usize) -> LocalBoxFuture<'_, OrchestratorOutcome> {
+        async move {
+            let complexity = self.classify(&task).await;
+            orch_trace(&format!("classified as {complexity:?} at depth {depth}"));
+            match complexity {
+                Complexity::Simple => {
+                    let final_text = self.runner.run(Tier::Fast, WORKER_SYS, &task).await;
+                    OrchestratorOutcome {
+                        complexity,
+                        final_text,
+                        plan: None,
+                        worker_results: vec![],
+                        verify_passed: true,
+                        verify_rounds: 0,
+                        best_worker: 0,
+                    }
+                }
+                Complexity::Medium => {
+                    self.pipeline(&task, complexity, Tier::Fast, self.cfg.workers)
+                        .await
+                }
+                Complexity::High => {
+                    if depth < self.cfg.max_depth {
+                        self.decompose_and_recurse(&task, depth).await
+                    } else {
+                        // Depth budget spent → run as a single best-of-N attempt.
+                        self.pipeline(&task, complexity, Tier::Main, self.cfg.high_workers)
+                            .await
+                    }
                 }
             }
-            Complexity::Medium => self.pipeline(task, complexity, Tier::Fast).await,
-            Complexity::High => self.pipeline(task, complexity, Tier::Main).await,
         }
+        .boxed_local()
     }
 
     async fn classify(&self, task: &str) -> Complexity {
@@ -142,17 +186,31 @@ impl<'a> Orchestrator<'a> {
         parse_complexity(&out)
     }
 
-    /// plan(main) → workers(fast, parallel) → verify(`verify_tier`); on FAIL,
-    /// feed the verdict back and retry up to `max_verify_retries` times.
+    /// plan(main) → run_attempts(workers, verify). The plan is computed once here
+    /// so callers that already have a plan can drive [`Self::run_attempts`].
     async fn pipeline(
         &self,
         task: &str,
         complexity: Complexity,
         verify_tier: Tier,
+        n_workers: usize,
     ) -> OrchestratorOutcome {
-        let n = self.cfg.workers.max(1);
         let plan = self.runner.run(Tier::Main, PLAN_SYS, task).await;
+        self.run_attempts(task, &plan, complexity, verify_tier, n_workers)
+            .await
+    }
 
+    /// workers(fast, parallel best-of-N) → verify(`verify_tier`); on FAIL, feed
+    /// the verdict back and retry up to `max_verify_retries` times.
+    async fn run_attempts(
+        &self,
+        task: &str,
+        plan: &str,
+        complexity: Complexity,
+        verify_tier: Tier,
+        n_workers: usize,
+    ) -> OrchestratorOutcome {
+        let n = n_workers.max(1);
         let mut feedback = String::new();
         let mut worker_results: Vec<String>;
         let mut verify_passed;
@@ -164,7 +222,7 @@ impl<'a> Orchestrator<'a> {
             // execution can't corrupt shared state. Each gets the plan (+ any
             // verifier feedback from the prior round).
             let worker_futs = (0..n).map(|i| {
-                let wtask = build_worker_task(task, &plan, &feedback, i, n);
+                let wtask = build_worker_task(task, plan, &feedback, i, n);
                 async move { self.runner.run_worker(i, n, WORKER_SYS, &wtask).await }
             });
             worker_results = join_all(worker_futs).await;
@@ -174,7 +232,7 @@ impl<'a> Orchestrator<'a> {
                 .run(
                     verify_tier,
                     VERIFY_SYS,
-                    &build_verify_task(task, &plan, &worker_results),
+                    &build_verify_task(task, plan, &worker_results),
                 )
                 .await;
             verify_passed = verdict_passed(&verdict);
@@ -188,7 +246,7 @@ impl<'a> Orchestrator<'a> {
                 return OrchestratorOutcome {
                     complexity,
                     final_text,
-                    plan: Some(plan),
+                    plan: Some(plan.to_string()),
                     worker_results,
                     verify_passed,
                     verify_rounds: rounds,
@@ -198,6 +256,81 @@ impl<'a> Orchestrator<'a> {
             // Closed loop: carry the verifier's complaint into the next attempt.
             feedback = verdict;
         }
+    }
+
+    /// High-task path: plan, then split into subtasks. With ≥2 subtasks (and
+    /// depth budget remaining) run each through a recursive [`Self::handle_at`]
+    /// sequentially — each subtask promotes its own winner before the next, so
+    /// they build on each other — then a single main-tier verify over the whole.
+    /// An atomic decomposition (<2 subtasks) falls back to one best-of-N attempt.
+    async fn decompose_and_recurse(&self, task: &str, depth: usize) -> OrchestratorOutcome {
+        let plan = self.runner.run(Tier::Main, PLAN_SYS, task).await;
+        let raw = self
+            .runner
+            .run(Tier::Main, DECOMPOSE_SYS, &build_decompose_task(task, &plan))
+            .await;
+        let subtasks = parse_subtasks(&raw);
+        orch_trace(&format!(
+            "high task at depth {depth}: decomposed into {} subtask(s)",
+            subtasks.len()
+        ));
+
+        if subtasks.len() < 2 {
+            orch_trace("atomic (<2 subtasks) -> best-of-N fallback on main");
+            // Atomic → reuse the plan we already have for a single best-of-N run.
+            return self
+                .run_attempts(
+                    task,
+                    &plan,
+                    Complexity::High,
+                    Tier::Main,
+                    self.cfg.high_workers,
+                )
+                .await;
+        }
+
+        let mut sub_results = Vec::with_capacity(subtasks.len());
+        let mut all_passed = true;
+        for (i, st) in subtasks.iter().enumerate() {
+            orch_trace(&format!(
+                "recursing into subtask {}/{}: {st}",
+                i + 1,
+                subtasks.len()
+            ));
+            let outcome = self.handle_at(st.clone(), depth + 1).await;
+            all_passed &= outcome.verify_passed;
+            sub_results.push(format!("[subtask] {st}\n{}", outcome.final_text));
+        }
+
+        let verdict = self
+            .runner
+            .run(
+                Tier::Main,
+                VERIFY_SYS,
+                &build_verify_task(task, &plan, &sub_results),
+            )
+            .await;
+        let verify_passed = all_passed && verdict_passed(&verdict);
+        let final_text = synthesize_subtasks(&sub_results, &verdict, verify_passed);
+
+        OrchestratorOutcome {
+            complexity: Complexity::High,
+            final_text,
+            plan: Some(plan),
+            worker_results: sub_results,
+            verify_passed,
+            verify_rounds: 1,
+            best_worker: 0,
+        }
+    }
+}
+
+/// Emit an orchestration progress line when `NCX_TRACE` is set (mirrors the
+/// agent loop's trace gating). No-op otherwise, so the node graph stays quiet
+/// in normal runs.
+fn orch_trace(msg: &str) {
+    if std::env::var_os("NCX_TRACE").is_some_and(|v| !v.is_empty()) {
+        eprintln!("[ncx-trace][orch] {msg}");
     }
 }
 
@@ -220,6 +353,23 @@ fn verdict_passed(verdict: &str) -> bool {
     !verdict.to_uppercase().contains("FAIL")
 }
 
+/// Pull `SUBTASK:`-prefixed lines out of a decomposition reply (case-insensitive,
+/// prefix may sit after leading bullets/whitespace). Empty remainders are skipped.
+fn parse_subtasks(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in s.lines() {
+        let t = line.trim();
+        let up = t.to_uppercase();
+        if let Some(pos) = up.find("SUBTASK:") {
+            let rest = t[pos + "SUBTASK:".len()..].trim();
+            if !rest.is_empty() {
+                out.push(rest.to_string());
+            }
+        }
+    }
+    out
+}
+
 fn build_worker_task(task: &str, plan: &str, feedback: &str, i: usize, n: usize) -> String {
     let mut s = format!(
         "Task:\n{task}\n\nPlan:\n{plan}\n\n(You are worker {} of {}.)",
@@ -232,6 +382,10 @@ fn build_worker_task(task: &str, plan: &str, feedback: &str, i: usize, n: usize)
         ));
     }
     s
+}
+
+fn build_decompose_task(task: &str, plan: &str) -> String {
+    format!("Task:\n{task}\n\nPlan:\n{plan}")
 }
 
 fn build_verify_task(task: &str, plan: &str, results: &[String]) -> String {
@@ -254,6 +408,16 @@ fn synthesize(results: &[String], best_idx: usize, verdict: &str, passed: bool) 
         best
     } else {
         format!("{best}\n\n[unverified after retries — reviewer said: {verdict}]")
+    }
+}
+
+/// Join the per-subtask outcomes into the decomposed task's answer.
+fn synthesize_subtasks(results: &[String], verdict: &str, passed: bool) -> String {
+    let body = results.join("\n\n");
+    if passed {
+        body
+    } else {
+        format!("{body}\n\n[unverified after decomposition — reviewer said: {verdict}]")
     }
 }
 
@@ -286,7 +450,12 @@ mod tests {
 
     /// Records every (tier, stage) call and returns scripted outputs.
     struct MockRunner {
-        complexity: &'static str,
+        /// Returned by classify when `complexity_queue` is empty.
+        default_complexity: &'static str,
+        /// Per-call classify results, popped from the back; empty → default.
+        complexity_queue: RefCell<Vec<&'static str>>,
+        /// What the DECOMPOSE node returns (default: one subtask → atomic).
+        decomposition: &'static str,
         // Verify verdicts, popped from the back in call order; empty → "PASS".
         verdicts: RefCell<Vec<&'static str>>,
         calls: RefCell<Vec<(Tier, &'static str)>>,
@@ -296,17 +465,31 @@ mod tests {
     impl MockRunner {
         fn new(complexity: &'static str, verdicts: Vec<&'static str>) -> Self {
             MockRunner {
-                complexity,
+                default_complexity: complexity,
+                complexity_queue: RefCell::new(vec![]),
+                decomposition: "SUBTASK: do the whole thing",
                 verdicts: RefCell::new(verdicts),
                 calls: RefCell::new(vec![]),
                 promoted: RefCell::new(vec![]),
             }
+        }
+        /// Script per-call classify results (popped from the back).
+        fn with_complexities(self, q: Vec<&'static str>) -> Self {
+            *self.complexity_queue.borrow_mut() = q;
+            self
+        }
+        /// Script the DECOMPOSE node's output.
+        fn with_decomposition(mut self, d: &'static str) -> Self {
+            self.decomposition = d;
+            self
         }
         fn stage(system: &str) -> &'static str {
             if system == CLASSIFY_SYS {
                 "classify"
             } else if system == PLAN_SYS {
                 "plan"
+            } else if system == DECOMPOSE_SYS {
+                "decompose"
             } else if system == WORKER_SYS {
                 "worker"
             } else if system == VERIFY_SYS {
@@ -323,7 +506,13 @@ mod tests {
             let stage = MockRunner::stage(system);
             self.calls.borrow_mut().push((tier, stage));
             match stage {
-                "classify" => self.complexity.to_string(),
+                "classify" => self
+                    .complexity_queue
+                    .borrow_mut()
+                    .pop()
+                    .unwrap_or(self.default_complexity)
+                    .to_string(),
+                "decompose" => self.decomposition.to_string(),
                 "verify" => self
                     .verdicts
                     .borrow_mut()
@@ -376,16 +565,83 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn high_verifies_on_main() {
+    async fn high_atomic_falls_back_to_best_of_n_on_main() {
+        // Default decomposition yields a single subtask → atomic → best-of-N
+        // with high_workers (3), verified on main.
         let m = MockRunner::new("high", vec!["PASS"]);
         let o = Orchestrator::new(&m, OrchestratorConfig::default());
         let out = o.handle("refactor the auth layer").await;
         assert_eq!(out.complexity, Complexity::High);
+        assert!(out.verify_passed);
         let calls = m.calls.borrow();
         assert_eq!(count(&calls, Tier::Main, "plan"), 1);
-        assert_eq!(count(&calls, Tier::Fast, "worker"), 2);
+        assert_eq!(count(&calls, Tier::Main, "decompose"), 1);
+        assert_eq!(count(&calls, Tier::Fast, "worker"), 3, "high_workers");
         assert_eq!(count(&calls, Tier::Main, "verify"), 1);
         assert_eq!(count(&calls, Tier::Fast, "verify"), 0);
+    }
+
+    #[tokio::test]
+    async fn high_decomposes_into_recursive_subtasks() {
+        // Top task = high → decompose into 2 subtasks; each subtask classifies
+        // as simple (single fast run, no plan/verify). Then a main verify joins.
+        let m = MockRunner::new("high", vec!["PASS whole"])
+            .with_complexities(vec!["simple", "simple", "high"]) // popped: high(top), simple, simple
+            .with_decomposition("SUBTASK: build module A\nSUBTASK: wire it into B");
+        let o = Orchestrator::new(&m, OrchestratorConfig::default());
+        let out = o.handle("ship a big feature").await;
+
+        assert_eq!(out.complexity, Complexity::High);
+        assert!(out.verify_passed);
+        assert_eq!(out.worker_results.len(), 2, "one entry per subtask");
+        let calls = m.calls.borrow();
+        assert_eq!(count(&calls, Tier::Main, "plan"), 1, "top plan only");
+        assert_eq!(count(&calls, Tier::Main, "decompose"), 1);
+        // Two simple subtasks → two fast worker runs, no per-subtask plan/verify.
+        assert_eq!(count(&calls, Tier::Fast, "worker"), 2);
+        assert_eq!(count(&calls, Tier::Main, "verify"), 1, "final join verify");
+        assert_eq!(count(&calls, Tier::Fast, "classify"), 3, "top + 2 subtasks");
+    }
+
+    #[tokio::test]
+    async fn recursion_is_depth_capped() {
+        // max_depth = 1: the top high task decomposes into 2 subtasks, but those
+        // subtasks are ALSO classified high — at depth==max_depth they must NOT
+        // decompose again; they run as best-of-N instead. So decompose is called
+        // exactly once (top level).
+        let m = MockRunner::new("high", vec![]) // all verdicts default PASS
+            .with_complexities(vec!["high", "high", "high"]) // top + 2 subtasks all high
+            .with_decomposition("SUBTASK: a\nSUBTASK: b");
+        let o = Orchestrator::new(&m, OrchestratorConfig::default());
+        let _ = o.handle("deep task").await;
+        let calls = m.calls.borrow();
+        assert_eq!(
+            count(&calls, Tier::Main, "decompose"),
+            1,
+            "only the top level decomposes; subtasks are depth-capped"
+        );
+    }
+
+    #[tokio::test]
+    async fn decomposition_off_when_max_depth_zero() {
+        // max_depth = 0 → high tasks never decompose; single best-of-N on main.
+        let m = MockRunner::new("high", vec!["PASS"]);
+        let o = Orchestrator::new(
+            &m,
+            OrchestratorConfig {
+                workers: 2,
+                high_workers: 3,
+                max_verify_retries: 1,
+                max_depth: 0,
+            },
+        );
+        let out = o.handle("big risky change").await;
+        assert_eq!(out.complexity, Complexity::High);
+        let calls = m.calls.borrow();
+        assert_eq!(count(&calls, Tier::Main, "decompose"), 0, "no decompose");
+        assert_eq!(count(&calls, Tier::Main, "plan"), 1);
+        assert_eq!(count(&calls, Tier::Fast, "worker"), 3);
+        assert_eq!(count(&calls, Tier::Main, "verify"), 1);
     }
 
     #[tokio::test]
@@ -396,7 +652,9 @@ mod tests {
             &m,
             OrchestratorConfig {
                 workers: 2,
+                high_workers: 3,
                 max_verify_retries: 1,
+                max_depth: 1,
             },
         );
         let out = o.handle("tricky change").await;
@@ -415,7 +673,9 @@ mod tests {
             &m,
             OrchestratorConfig {
                 workers: 3,
+                high_workers: 3,
                 max_verify_retries: 1,
+                max_depth: 1,
             },
         );
         let out = o.handle("pick best").await;
@@ -444,12 +704,21 @@ mod tests {
             &m,
             OrchestratorConfig {
                 workers: 2,
+                high_workers: 3,
                 max_verify_retries: 1,
+                max_depth: 1,
             },
         );
         let out = o.handle("impossible").await;
         assert!(!out.verify_passed);
         assert_eq!(out.verify_rounds, 2); // initial + 1 retry, then give up
         assert!(out.final_text.contains("unverified after retries"));
+    }
+
+    #[tokio::test]
+    async fn parse_subtasks_extracts_prefixed_lines() {
+        let raw = "SUBTASK: first thing\nnoise line\n  subtask: second\nSUBTASK:   \nSUBTASK: third";
+        let got = parse_subtasks(raw);
+        assert_eq!(got, vec!["first thing", "second", "third"]);
     }
 }
