@@ -27,7 +27,7 @@
 | **B 分支 feat/skills** ✅完成(`b70907b`) | SKILL.md 发现 + 渐进披露注入 + `skill` 工具(已 live 验) | `ncx-core/src/skills.rs`(新)；tools/lib/cli/runner/gui 各加几行 | 无 |
 | **C 分支 feat/vision** | VL 视觉后端分流（image turn 路由到 vision provider） | `ncx-provider` vision 路径；`ncx-config` vl 字段（agent_loop 已有 image_url 检测） | 无 |
 | **D 分支 feat/orch** | 编排器加深：动态 worker 数 / 更好 plan 拆分 / 递归子任务 | **独占 `ncx-core/src/orchestrator.rs`** | 无 |
-| **E 分支 feat/bench** | 更多更难任务 + 每任务重复 3 次取通过率 + 报告；补 Claude 臂 | **整个 `bench/`（纯 Python，零 Rust 冲突）** | 无 |
+| **E 分支 feat/bench** ✅完成(`b175a74`，已并入 rust-capability) | bench 入库：+4 难任务(t5_roman/t6_lru/t7_balanced/t8_wordfreq) + 每任务 `--repeats`(默认3)出通过率 + md/json 报告(`bench/reports/`已 gitignore) + `--tasks` 过滤；Claude 臂沿用已有接线。smoke 验：nanocodex×2 跑 t6/t7 全过 | **整个 `bench/`（纯 Python，零 Rust 冲突）** | 无 |
 
 **冲突热点（只有这几处，纪律）**：`tools.rs`(register 行)、`lib.rs`(mod/export)、`Cargo.toml`(deps)、`cli/main.rs`(接线)。
 **约定**：每条流对这些共享文件只加 **1–2 行**、加在末尾/固定锚点 → 合并是 trivial。
