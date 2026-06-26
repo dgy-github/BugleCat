@@ -19,4 +19,4 @@ pub use provider::{stream_open_timeout_s, DeepSeekProvider};
 pub use request::{build_body, is_deepseek_model};
 pub use response::{extract_reasoning, parse_completion};
 pub use types::{ModelResponse, ProviderError, ToolCall};
-pub use web::{ddg_instant_answer, tavily_search};
+pub use web::{ddg_instant_answer, fetch_url, html_to_text, tavily_search};

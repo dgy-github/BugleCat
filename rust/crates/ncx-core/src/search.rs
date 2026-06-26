@@ -318,6 +318,43 @@ impl Tool for WebSearchTool {
     }
 }
 
+
+/// `web_fetch` — fetch a URL and return its readable text (HTML stripped).
+pub struct WebFetchTool;
+
+#[async_trait(?Send)]
+impl Tool for WebFetchTool {
+    fn name(&self) -> &str {
+        "web_fetch"
+    }
+    fn description(&self) -> &str {
+        "Fetch a web page (or text resource) by URL and return its readable text \
+         with HTML/scripts stripped. Use after web_search to actually READ a page. \
+         Requires network access; output is size-capped."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Absolute http(s) URL to fetch."},
+            },
+            "required": ["url"],
+        })
+    }
+    fn read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, _ctx: &ToolContext, args: &Value) -> String {
+        let Some(url) = args.get("url").and_then(|v| v.as_str()) else {
+            return "Error: 'url' is required and must be a string.".into();
+        };
+        match ncx_provider::fetch_url(url).await {
+            Ok(s) => s,
+            Err(e) => format!("Error: web_fetch failed: {e}"),
+        }
+    }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

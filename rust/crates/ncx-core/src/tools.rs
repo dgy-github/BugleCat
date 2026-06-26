@@ -181,6 +181,7 @@ impl ToolRegistry {
         reg.register(Box::new(crate::search::GrepTool));
         reg.register(Box::new(crate::search::GlobTool));
         reg.register(Box::new(crate::search::WebSearchTool));
+        reg.register(Box::new(crate::search::WebFetchTool));
         reg.register(Box::new(ToolSearchTool));
         // Only expose `remember` when a memory store is wired (CLI/GUI supply it).
         if reg.ctx.memory.is_some() {

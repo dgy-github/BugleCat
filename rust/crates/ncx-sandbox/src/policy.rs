@@ -200,7 +200,8 @@ mod tests {
     fn danger_full_access_allows_everything() {
         let p = SandboxPolicy::new(DANGER_FULL_ACCESS, base());
         assert!(p.can_write("/etc/passwd"));
-        assert!(p.network_access || true); // network is forced on by callers, not here
+        // The policy itself does NOT force network on — callers (load_config) do.
+        assert!(!p.network_access);
     }
 
     #[test]

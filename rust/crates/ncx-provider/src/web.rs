@@ -173,10 +173,141 @@ fn format_answer(v: &Value, query: &str) -> String {
     }
 }
 
+
+const MAX_FETCH_BYTES: usize = 2_000_000;
+const MAX_TEXT_CHARS: usize = 12_000;
+
+/// Fetch a URL and return readable text (HTML stripped). Complements the keyless
+/// `web_search` with "read this page". Caps size; errors on non-2xx / empty text.
+pub async fn fetch_url(url: &str) -> Result<String, String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("url must start with http:// or https://".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(25))
+        .build()
+        .map_err(|e| format!("client error: {e}"))?;
+    let resp = client
+        .get(url)
+        .header("User-Agent", "nanocodex/0.1 (+https://localhost)")
+        .send()
+        .await
+        .map_err(|e| format!("request error: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status().as_u16()));
+    }
+    let ctype = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+    let bytes = resp.bytes().await.map_err(|e| format!("read error: {e}"))?;
+    let slice = if bytes.len() > MAX_FETCH_BYTES { &bytes[..MAX_FETCH_BYTES] } else { &bytes[..] };
+    let body = String::from_utf8_lossy(slice);
+    let mut text = if ctype.contains("html") || body.trim_start().starts_with('<') {
+        html_to_text(&body)
+    } else {
+        body.to_string()
+    };
+    if text.chars().count() > MAX_TEXT_CHARS {
+        text = text.chars().take(MAX_TEXT_CHARS).collect::<String>();
+        text.push_str("\n\u{2026} (truncated)");
+    }
+    if text.trim().is_empty() {
+        Err("fetched page had no extractable text".to_string())
+    } else {
+        Ok(text)
+    }
+}
+
+/// Minimal HTML→text: drop <script>/<style> blocks, strip tags, decode a few
+/// entities, collapse whitespace. Dependency-light (no scraper crate).
+pub fn html_to_text(html: &str) -> String {
+    let chars: Vec<char> = html.chars().collect();
+    let mut out = String::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '<' {
+            // tag name (skip a leading '/')
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] == '/' {
+                j += 1;
+            }
+            let name: String = chars[j..]
+                .iter()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .map(|c| c.to_ascii_lowercase())
+                .collect();
+            let tag_end = chars[i..].iter().position(|&c| c == '>').map(|p| i + p).unwrap_or(chars.len() - 1);
+            if name == "script" || name == "style" {
+                let close = format!("</{name}>");
+                match find_ci(&chars, tag_end, &close) {
+                    Some(end) => i = end + close.chars().count(),
+                    None => i = chars.len(),
+                }
+                continue;
+            }
+            out.push(' '); // tag boundary becomes whitespace
+            i = tag_end + 1;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    let decoded = out
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'");
+    // collapse runs of whitespace to single spaces
+    let mut result = String::with_capacity(decoded.len());
+    let mut last_ws = false;
+    for c in decoded.chars() {
+        if c.is_whitespace() {
+            if !last_ws {
+                result.push(' ');
+                last_ws = true;
+            }
+        } else {
+            result.push(c);
+            last_ws = false;
+        }
+    }
+    result.trim().to_string()
+}
+
+/// Case-insensitive search for `needle` in `chars` starting at `from`.
+fn find_ci(chars: &[char], from: usize, needle: &str) -> Option<usize> {
+    let nl: Vec<char> = needle.to_ascii_lowercase().chars().collect();
+    let n = nl.len();
+    if n == 0 || chars.len() < n {
+        return None;
+    }
+    for start in from..=chars.len() - n {
+        if (0..n).all(|k| chars[start + k].to_ascii_lowercase() == nl[k]) {
+            return Some(start);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn html_to_text_strips_tags_and_scripts() {
+        let html = "<html><head><style>.x{color:red}</style></head><body><h1>Title</h1>                    <script>var a=1;</script><p>Hello&nbsp;&amp; welcome</p></body></html>";
+        let t = html_to_text(html);
+        assert!(t.contains("Title"));
+        assert!(t.contains("Hello & welcome"));
+        assert!(!t.contains("color:red"), "style content leaked: {t}");
+        assert!(!t.contains("var a"), "script content leaked: {t}");
+    }
 
     #[test]
     fn formats_abstract_and_related() {
