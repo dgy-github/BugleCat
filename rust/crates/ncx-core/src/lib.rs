@@ -13,6 +13,7 @@ pub mod agent_loop;
 pub mod checkpoint;
 pub mod hooks;
 pub mod isolate;
+pub mod mcp_tool;
 pub mod memory;
 pub mod mentions;
 pub mod orchestrator;
@@ -20,6 +21,7 @@ pub mod project_instructions;
 pub mod search;
 pub mod session;
 pub mod session_index;
+pub mod skills;
 pub mod slash;
 pub mod tools;
 
@@ -34,5 +36,7 @@ pub use orchestrator::{
 pub use project_instructions::load_project_instructions;
 pub use session::{ContextEditPolicy, ContextEditStats, Session};
 pub use session_index::{new_session_id, SessionIndex, SessionSummary};
+pub use skills::{discover_skills, skills_index_block, Skill};
 pub use slash::{parse_slash, split_loop_arg, SLASH_HELP};
+pub use mcp_tool::register_mcp_server;
 pub use tools::{ApprovalHandler, ApprovalRequest, Tool, ToolContext, ToolRegistry};

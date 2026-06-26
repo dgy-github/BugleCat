@@ -23,7 +23,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
-    expand_file_mentions, load_project_instructions, new_session_id, AgentLoop, ApprovalHandler,
+    discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
+    skills_index_block, AgentLoop, ApprovalHandler,
     ApprovalRequest, CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Session,
     SessionIndex, TaskBudget, ToolContext, ToolRegistry,
 };
@@ -174,13 +175,16 @@ fn build_agent(
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     let recall = memory.recall("", 8, 4000); // recency at session start (no task yet)
     let instructions = load_project_instructions(&cfg.workspace, 16_000);
-    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall]);
+    let skills = discover_skills(&cfg.workspace);
+    let skills_index = skills_index_block(&skills);
+    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
         .with_approval_policy(cfg.approval_policy.clone())
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
         .with_hooks(cfg.hooks.clone())
+        .with_skills(skills)
         .with_approver(approver);
     let tools = ToolRegistry::new(ctx);
     let log_path = cfg.workspace.join(".nanocodex").join("session.jsonl");

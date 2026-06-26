@@ -17,8 +17,9 @@ use async_trait::async_trait;
 use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
 use ncx_core::{
-    load_project_instructions, AgentLoop, AgentRunner, ContextEditPolicy, MemoryStore, Session,
-    Summarizer, TaskBudget, Tier, ToolContext, ToolRegistry,
+    discover_skills, load_project_instructions, skills_index_block, AgentLoop, AgentRunner,
+    ContextEditPolicy, MemoryStore, Session, Summarizer, TaskBudget, Tier, ToolContext,
+    ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -77,11 +78,13 @@ impl LiveRunner {
                 self.cfg.search_api_key.clone(),
             )
             .with_memory(self.memory.clone()) // memory is project-level, not per-copy
-            .with_hooks(self.cfg.hooks.clone());
+            .with_hooks(self.cfg.hooks.clone())
+            .with_skills(discover_skills(workspace));
+        let skills_index = skills_index_block(&discover_skills(workspace));
         let tools = ToolRegistry::new(ctx);
         let recall = self.memory.recall(task, 6, 3000);
         let instructions = load_project_instructions(workspace, 16_000);
-        let system = compose_system_prompt(system, &[instructions, recall]);
+        let system = compose_system_prompt(system, &[instructions, recall, skills_index]);
         let session = Session::new(system);
         let mut agent = AgentLoop::new(Box::new(provider), tools, session)
             .with_task_budget(task_budget_from_config(&self.cfg))

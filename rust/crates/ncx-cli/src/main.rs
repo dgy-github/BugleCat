@@ -16,14 +16,16 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use ncx_config::{
-    load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, WRITABLE_KEYS,
+    load_config, load_mcp_servers, write_nanocodex_config, Config, ConfigPaths, Overrides,
+    WRITABLE_KEYS,
 };
 use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    expand_file_mentions, load_project_instructions, new_session_id, AgentLoop, CheckpointMeta,
-    CheckpointStore, ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Session,
+    discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
+    register_mcp_server, skills_index_block, AgentLoop, CheckpointMeta, CheckpointStore,
+    ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Provider, Session,
     SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry, TurnResult,
 };
 use ncx_provider::DeepSeekProvider;
@@ -141,14 +143,25 @@ async fn run(args: Args) -> i32 {
     let recall_query = args.prompt.as_deref().unwrap_or("");
     let recall = memory.recall(recall_query, 8, 4000);
     let instructions = load_project_instructions(&cfg.workspace, 16_000);
-    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall]);
+    // Agent Skills: inject only the name+description index (progressive
+    // disclosure); the `skill` tool loads a full SKILL.md body on demand.
+    let skills = discover_skills(&cfg.workspace);
+    let skills_index = skills_index_block(&skills);
+    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
         .with_approval_policy(cfg.approval_policy.clone())
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
-        .with_hooks(cfg.hooks.clone());
-    let tools = ToolRegistry::new(ctx);
+        .with_hooks(cfg.hooks.clone())
+        .with_skills(skills);
+    let mut tools = ToolRegistry::new(ctx);
+    for srv in load_mcp_servers() {
+        match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await {
+            Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
+            Err(e) => eprintln!("mcp({}): connect failed: {e}", srv.name),
+        }
+    }
     let log_path = session_log_path(&cfg.workspace);
     let session_id = new_session_id();
     let session = if args.resume {
@@ -159,7 +172,8 @@ async fn run(args: Args) -> i32 {
     let restored_count = session.restored_count;
     let mut agent = AgentLoop::new(Box::new(provider), tools, session)
         .with_task_budget(task_budget_from_config(&cfg))
-        .with_context_edit(context_edit_from_config(&cfg));
+        .with_context_edit(context_edit_from_config(&cfg))
+        .with_vision_provider(build_vision_provider(&cfg));
     let mut recorder = SessionRecorder::new(session_id, cfg.workspace.clone(), log_path);
 
     if args.resume {
@@ -947,6 +961,35 @@ fn task_budget_from_config(cfg: &ncx_config::Config) -> TaskBudget {
     }
 }
 
+/// Build a dedicated vision provider from the `vl_*` config, or `None` when no
+/// vision model is configured (image turns then stay on the main provider).
+///
+/// Only `vl_model` is required; `vl_base_url` / `vl_api_key` fall back to the
+/// main `base_url` / `api_key`, so a user can either point at a separate VL
+/// endpoint (e.g. DashScope) or just name a vision model on the same endpoint.
+fn build_vision_provider(cfg: &ncx_config::Config) -> Option<Box<dyn Provider>> {
+    if cfg.vl_model.trim().is_empty() {
+        return None;
+    }
+    let base_url = if cfg.vl_base_url.trim().is_empty() {
+        &cfg.base_url
+    } else {
+        &cfg.vl_base_url
+    };
+    let api_key = if cfg.vl_api_key.trim().is_empty() {
+        cfg.api_key.clone()
+    } else {
+        cfg.vl_api_key.clone()
+    };
+    Some(Box::new(DeepSeekProvider::with_opts(
+        api_key,
+        base_url,
+        cfg.vl_model.clone(),
+        cfg.timeout_s as u64,
+        cfg.max_retries as u32,
+    )))
+}
+
 fn context_edit_from_config(cfg: &ncx_config::Config) -> ContextEditPolicy {
     ContextEditPolicy {
         enabled: cfg.context_edit_enabled,
@@ -966,6 +1009,16 @@ mod tests {
         for (cmd, _) in SLASH_HELP {
             assert!(help.contains(cmd), "{cmd}");
         }
+    }
+
+    #[test]
+    fn vision_provider_only_built_when_vl_model_set() {
+        let mut cfg = ncx_config::Config::default();
+        // No vl_model -> image turns stay on the main provider.
+        assert!(build_vision_provider(&cfg).is_none());
+        // vl_model set -> a dedicated vision provider is constructed.
+        cfg.vl_model = "qwen-vl-max".into();
+        assert!(build_vision_provider(&cfg).is_some());
     }
 
     #[test]

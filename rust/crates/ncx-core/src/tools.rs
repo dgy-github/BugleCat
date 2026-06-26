@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 
 use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::memory::MemoryStore;
+use crate::skills::Skill;
 
 const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 9;
 const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
@@ -27,6 +28,7 @@ const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
     "update_plan",
     "shell",
     "tool_search",
+    "skill",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +75,9 @@ pub struct ToolContext {
     pub tool_hints: Rc<RefCell<Vec<String>>>,
     /// Deterministic project hooks configured from `[[hooks]]`.
     pub hooks: Rc<Vec<HookConfig>>,
+    /// Discovered Agent Skills. When non-empty, the `skill` tool is exposed and
+    /// the index is injected into the system prompt by the CLI/GUI.
+    pub skills: Rc<Vec<Skill>>,
 }
 
 impl ToolContext {
@@ -90,6 +95,7 @@ impl ToolContext {
             tool_catalog: Rc::new(RefCell::new(Vec::new())),
             tool_hints: Rc::new(RefCell::new(Vec::new())),
             hooks: Rc::new(Vec::new()),
+            skills: Rc::new(Vec::new()),
         }
     }
 
@@ -127,6 +133,12 @@ impl ToolContext {
     /// Attach deterministic project hooks.
     pub fn with_hooks(mut self, hooks: Vec<HookConfig>) -> Self {
         self.hooks = Rc::new(hooks);
+        self
+    }
+
+    /// Attach discovered Agent Skills (enables the `skill` tool).
+    pub fn with_skills(mut self, skills: Vec<Skill>) -> Self {
+        self.skills = Rc::new(skills);
         self
     }
 }
@@ -186,6 +198,10 @@ impl ToolRegistry {
         // Only expose `remember` when a memory store is wired (CLI/GUI supply it).
         if reg.ctx.memory.is_some() {
             reg.register(Box::new(RememberTool));
+        }
+        // Only expose `skill` when at least one SKILL.md was discovered.
+        if !reg.ctx.skills.is_empty() {
+            reg.register(Box::new(SkillTool));
         }
         reg
     }
@@ -744,6 +760,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn skill_tool_loads_body_and_reports_unknown() {
+        use crate::skills::Skill;
+        let ws = tmp_ws("skill_tool");
+        let dir = ws.join("skills").join("greeter");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            "---\nname: greeter\ndescription: say hi\n---\n\nStep 1: greet warmly.",
+        )
+        .unwrap();
+        let skill = Skill {
+            name: "greeter".into(),
+            description: "say hi".into(),
+            path: dir.join("SKILL.md"),
+            dir: dir.clone(),
+        };
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_skills(vec![skill]);
+
+        let out = SkillTool.execute(&ctx, &json!({"name": "greeter"})).await;
+        assert!(out.contains("Step 1: greet warmly."), "{out}");
+        assert!(out.contains("greeter"), "{out}");
+
+        let miss = SkillTool.execute(&ctx, &json!({"name": "nope"})).await;
+        assert!(miss.contains("no skill named 'nope'"), "{miss}");
+        assert!(miss.contains("greeter"), "{miss}");
+    }
+
+    #[tokio::test]
+    async fn skill_tool_registered_only_when_skills_present() {
+        use crate::skills::Skill;
+        let ws = tmp_ws("skill_reg");
+        let bare = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        assert!(ToolRegistry::new(bare).get("skill").is_none());
+
+        let withskill = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_skills(vec![Skill {
+                name: "x".into(),
+                description: String::new(),
+                path: ws.join("SKILL.md"),
+                dir: ws.clone(),
+            }]);
+        assert!(ToolRegistry::new(withskill).get("skill").is_some());
+    }
+
+    #[tokio::test]
     async fn pre_tool_hook_can_block_execution() {
         let ws = tmp_ws("hook_pre_block");
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
@@ -1017,6 +1079,66 @@ impl Tool for RememberTool {
             Ok(true) => "Saved to project memory.".into(),
             Ok(false) => "Already in project memory (or empty) — not duplicated.".into(),
             Err(e) => format!("Error saving to memory: {e}"),
+        }
+    }
+}
+
+/// `skill` — load the full instructions for a discovered Agent Skill
+/// (progressive disclosure level 2). The system prompt advertises only each
+/// skill's name + description; this returns the complete `SKILL.md` body plus
+/// the skill's directory so the model can `read_file` any bundled resources.
+/// Read-only.
+pub struct SkillTool;
+
+#[async_trait(?Send)]
+impl Tool for SkillTool {
+    fn name(&self) -> &str {
+        "skill"
+    }
+    fn description(&self) -> &str {
+        "Load the full instructions for an available skill by name (see the \
+         skills list in the system prompt). Call this BEFORE acting when a task \
+         matches a skill's description; it returns the skill's detailed playbook \
+         and its directory, where bundled helper files can be read with read_file."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The skill name to load (exact match)."},
+            },
+            "required": ["name"],
+        })
+    }
+    fn read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(name) = args.get("name").and_then(|v| v.as_str()) else {
+            return "Error: 'name' is required and must be a string.".into();
+        };
+        let name = name.trim();
+        let Some(skill) = ctx.skills.iter().find(|s| s.name.eq_ignore_ascii_case(name)) else {
+            let available = ctx
+                .skills
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return if available.is_empty() {
+                "Error: no skills are available.".into()
+            } else {
+                format!("Error: no skill named '{name}'. Available skills: {available}.")
+            };
+        };
+        match skill.load_body() {
+            Ok(body) => format!(
+                "Skill '{}' (files in {}):\n\n{}",
+                skill.name,
+                skill.dir.display(),
+                body
+            ),
+            Err(e) => format!("Error loading skill '{}': {e}", skill.name),
         }
     }
 }
