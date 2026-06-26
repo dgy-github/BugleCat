@@ -286,7 +286,7 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
 
 # [[hooks]]
-# event = "pre_tool"          # pre_tool | post_tool
+# event = "pre_tool"          # pre_tool | post_tool | user_prompt | stop
 # matcher = "shell|apply_patch"
 # command = "echo checking %NCX_HOOK_TOOL%"
 # timeout_s = 10
@@ -296,8 +296,10 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 
 Hooks 会在环境变量中收到 `NCX_HOOK_EVENT`、`NCX_HOOK_TOOL`、
 `NCX_HOOK_ARGS`、`NCX_HOOK_RESULT` 和 `NCX_HOOK_WORKSPACE`。`pre_tool`
-适合做确定性的风险拦截，例如阻止危险 shell 命令；`post_tool` 适合做审计、
-格式化或通知。Hooks 会作为本地子进程运行，只配置你信任的命令。
+适合做确定性的风险拦截，例如阻止危险 shell 命令；`post_tool` 适合做审计和格式化；
+`user_prompt` 可以在模型看到 prompt 前阻断或追加系统说明；`stop` 适合做轮次结束质量门
+或通知。`UserPromptSubmit`、`Stop`、`PreToolUse`、`PostToolUse` 这类 Claude 风格
+事件名会自动归一化。Hooks 会作为本地子进程运行，只配置你信任的命令。
 
 ## 本地模型 / OpenAI 兼容接口
 

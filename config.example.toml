@@ -26,10 +26,12 @@ reasoning_effort = "auto"
 # context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
 
-# Deterministic hooks around tool execution. A non-zero pre_tool hook blocks
-# the tool; post_tool hook output is appended to the tool result for audit.
+# Deterministic hooks around tool execution and turn lifecycle. A non-zero
+# pre_tool or user_prompt hook blocks the action; post_tool/stop output is
+# appended for audit. Claude-style event aliases such as UserPromptSubmit and
+# Stop are accepted and normalized.
 # [[hooks]]
-# event = "pre_tool"          # pre_tool | post_tool
+# event = "pre_tool"          # pre_tool | post_tool | user_prompt | stop
 # matcher = "shell|apply_patch"
 # command = "echo checking %NCX_HOOK_TOOL%"
 # timeout_s = 10

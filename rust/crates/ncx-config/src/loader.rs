@@ -255,8 +255,11 @@ fn parse_hooks(raw: &Table) -> Vec<HookConfig> {
                 .filter_map(|item| item.as_table())
                 .map(|table| {
                     let command = str_val(table, "command").unwrap_or_default();
+                    let event = str_val(table, "event")
+                        .map(|e| normalize_hook_event(&e))
+                        .unwrap_or_else(|| "pre_tool".into());
                     HookConfig {
-                        event: str_val(table, "event").unwrap_or_else(|| "pre_tool".into()),
+                        event,
                         matcher: str_val(table, "matcher").unwrap_or_else(|| "*".into()),
                         command,
                         timeout_s: table
@@ -268,6 +271,16 @@ fn parse_hooks(raw: &Table) -> Vec<HookConfig> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn normalize_hook_event(event: &str) -> String {
+    match event.trim() {
+        "PreToolUse" | "pre_tool_use" | "pre_tool" => "pre_tool".into(),
+        "PostToolUse" | "post_tool_use" | "post_tool" => "post_tool".into(),
+        "UserPromptSubmit" | "user_prompt_submit" | "user_prompt" => "user_prompt".into(),
+        "Stop" | "stop" => "stop".into(),
+        other => other.to_string(),
+    }
 }
 
 /// Build the model-switcher list: active model first, then extras, deduped.
@@ -834,6 +847,45 @@ command = "echo post"
         assert_eq!(cfg.hooks[0].matcher, "shell|apply_patch");
         assert_eq!(cfg.hooks[0].timeout_s, 3);
         assert_eq!(cfg.hooks[1].matcher, "*");
+    }
+
+    #[test]
+    fn hook_event_aliases_are_normalized() {
+        let tmp = std::env::temp_dir().join("ncx_config_test_hook_aliases");
+        fs::create_dir_all(&tmp).unwrap();
+        let nano = tmp.join("nano.toml");
+        write(
+            &nano,
+            r#"
+api_key = "sk-base"
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "echo prompt"
+
+[[hooks]]
+event = "Stop"
+command = "echo stop"
+"#,
+        );
+        let paths = ConfigPaths {
+            deepseek: tmp.join("nope-ds.toml"),
+            codex: tmp.join("nope-cx.toml"),
+            nanocodex: nano,
+        };
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp),
+                ..Default::default()
+            },
+            &paths,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(cfg.hooks[0].event, "user_prompt");
+        assert_eq!(cfg.hooks[1].event, "stop");
+        cfg.validate().unwrap();
     }
 
     #[test]

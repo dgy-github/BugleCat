@@ -1,8 +1,8 @@
-//! Deterministic project hooks around tool execution.
+//! Deterministic project hooks around the agent lifecycle.
 //!
 //! Hooks are intentionally outside the model's discretion: if configured, they
-//! run before/after matching tools and can block a pre-tool action by returning
-//! a non-zero exit code.
+//! run before/after matching lifecycle events and can block a pre-tool or
+//! user-prompt action by returning a non-zero exit code.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,6 +15,8 @@ use serde_json::Value;
 pub enum HookEvent {
     PreTool,
     PostTool,
+    UserPrompt,
+    Stop,
 }
 
 impl HookEvent {
@@ -22,6 +24,8 @@ impl HookEvent {
         match self {
             HookEvent::PreTool => "pre_tool",
             HookEvent::PostTool => "post_tool",
+            HookEvent::UserPrompt => "user_prompt",
+            HookEvent::Stop => "stop",
         }
     }
 }
@@ -100,11 +104,13 @@ async fn run_one_hook(
 
 fn render_hook_result(hook: &HookConfig, event: HookEvent, result: &ExecResult) -> HookOutcome {
     let rendered = result.render();
-    if event == HookEvent::PreTool && !result.ok() {
+    if matches!(event, HookEvent::PreTool | HookEvent::UserPrompt) && !result.ok() {
         return HookOutcome {
             notes: format!(
-                "pre_tool hook blocked execution: command={:?}\n{}",
-                hook.command, rendered
+                "{} hook blocked execution: command={:?}\n{}",
+                event.as_str(),
+                hook.command,
+                rendered
             ),
             blocked: true,
         };

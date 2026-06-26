@@ -13,6 +13,7 @@ use futures_util::future::join_all;
 use ncx_provider::{DeepSeekProvider, ModelResponse, ToolCall};
 use serde_json::{json, Value};
 
+use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::session::{ContextEditPolicy, ContextEditStats, Session};
 use crate::tools::ToolRegistry;
 
@@ -222,6 +223,7 @@ impl AgentLoop {
         let result = self
             .run_turn_inner(user_input, cancel_check, &mut sink)
             .await;
+        let result = self.apply_stop_hook(result, &mut sink).await;
         self.event_sink = sink;
         result
     }
@@ -234,6 +236,34 @@ impl AgentLoop {
     ) -> TurnResult {
         self.use_vision_this_turn = self.vision_provider.is_some() && has_image_block(&user_input);
         let tool_query = user_query_text(&user_input);
+        let prompt_hook = run_matching_hooks(
+            &self.tools.ctx.hooks,
+            HookEvent::UserPrompt,
+            "user_prompt",
+            &json!({"prompt": tool_query, "content": user_input.clone()}),
+            None,
+            &self.tools.ctx.workspace,
+        )
+        .await;
+        if prompt_hook.blocked {
+            let text = format!(
+                "User prompt blocked by user_prompt hook.\n{}",
+                prompt_hook.notes
+            );
+            self.session.add_assistant(&text, None, "");
+            return TurnResult {
+                final_text: text,
+                iterations: 0,
+                stop_reason: "blocked".into(),
+                tools_used: Vec::new(),
+                usage: Default::default(),
+            };
+        }
+        let prompt_hook_notes = if prompt_hook.notes.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("[user_prompt hook output]\n{}", prompt_hook.notes)]
+        };
         self.session.add_user(user_input);
 
         let mut tools_used: Vec<String> = Vec::new();
@@ -258,7 +288,8 @@ impl AgentLoop {
             }
 
             let schemas = self.tools.schemas_for_query(&tool_query);
-            let notes = vec![self.budget_note(iteration + 1, tools_used.len())];
+            let mut notes = vec![self.budget_note(iteration + 1, tools_used.len())];
+            notes.extend(prompt_hook_notes.clone());
             let (response, edit_stats) = self.call_model(&schemas, &notes).await;
             add_usage(&mut turn_usage, &response.usage);
             if trace_on() {
@@ -447,6 +478,36 @@ impl AgentLoop {
         )
     }
 
+    async fn apply_stop_hook(
+        &mut self,
+        mut result: TurnResult,
+        sink: &mut Option<EventSink>,
+    ) -> TurnResult {
+        let args = json!({
+            "stop_reason": result.stop_reason.clone(),
+            "iterations": result.iterations,
+            "tools_used": result.tools_used.clone(),
+        });
+        let hook = run_matching_hooks(
+            &self.tools.ctx.hooks,
+            HookEvent::Stop,
+            "stop",
+            &args,
+            Some(&result.final_text),
+            &self.tools.ctx.workspace,
+        )
+        .await;
+        if hook.notes.trim().is_empty() {
+            return result;
+        }
+        let note = format!("[stop hook output]\n{}", hook.notes);
+        self.session.add_assistant(&note, None, "");
+        emit(sink, LoopEvent::AssistantText(note.clone()));
+        result.final_text.push_str("\n\n");
+        result.final_text.push_str(&note);
+        result
+    }
+
     fn cancel_result(
         &mut self,
         before: bool,
@@ -565,6 +626,7 @@ fn add_usage(
 mod tests {
     use super::*;
     use crate::tools::{Tool, ToolContext};
+    use ncx_config::HookConfig;
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
     use std::cell::Cell;
     use std::path::PathBuf;
@@ -613,6 +675,18 @@ mod tests {
     fn build(ws: &PathBuf, provider: Box<dyn Provider>) -> AgentLoop {
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, ws);
         let ctx = ToolContext::new(ws.clone(), policy);
+        let tools = ToolRegistry::new(ctx);
+        let session = Session::new("system prompt");
+        AgentLoop::new(provider, tools, session).with_max_iterations(10)
+    }
+
+    fn build_with_hooks(
+        ws: &PathBuf,
+        provider: Box<dyn Provider>,
+        hooks: Vec<HookConfig>,
+    ) -> AgentLoop {
+        let policy = SandboxPolicy::new(WORKSPACE_WRITE, ws);
+        let ctx = ToolContext::new(ws.clone(), policy).with_hooks(hooks);
         let tools = ToolRegistry::new(ctx);
         let session = Session::new("system prompt");
         AgentLoop::new(provider, tools, session).with_max_iterations(10)
@@ -792,6 +866,23 @@ mod tests {
         }
     }
 
+    struct CountingProvider {
+        calls: Rc<Cell<usize>>,
+    }
+    #[async_trait(?Send)]
+    impl Provider for CountingProvider {
+        fn model(&self) -> &str {
+            "counting"
+        }
+        async fn chat(&self, _m: &[Value], _t: &[Value], _r: Option<&str>) -> ModelResponse {
+            self.calls.set(self.calls.get() + 1);
+            ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            }
+        }
+    }
+
     #[tokio::test]
     async fn task_budget_is_visible_to_model() {
         let ws = tmpdir("budget_note");
@@ -815,6 +906,83 @@ mod tests {
                     .unwrap_or("")
                     .contains("tool_calls 0/4")
         }));
+    }
+
+    #[tokio::test]
+    async fn user_prompt_hook_can_block_model_call() {
+        let ws = tmpdir("user_prompt_block");
+        let calls = Rc::new(Cell::new(0usize));
+        let mut loop_ = build_with_hooks(
+            &ws,
+            Box::new(CountingProvider {
+                calls: calls.clone(),
+            }),
+            vec![HookConfig {
+                event: "user_prompt".into(),
+                matcher: "*".into(),
+                command: "exit 1".into(),
+                timeout_s: 3,
+            }],
+        );
+
+        let r = loop_.run_turn(json!("blocked"), None).await;
+
+        assert_eq!(r.stop_reason, "blocked");
+        assert_eq!(calls.get(), 0);
+        assert!(r.final_text.contains("blocked by user_prompt hook"));
+    }
+
+    #[tokio::test]
+    async fn user_prompt_hook_output_is_sent_as_system_note() {
+        let ws = tmpdir("user_prompt_note");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut loop_ = build_with_hooks(
+            &ws,
+            Box::new(CapturingProvider { seen: seen.clone() }),
+            vec![HookConfig {
+                event: "user_prompt".into(),
+                matcher: "*".into(),
+                command: "echo prompt-note".into(),
+                timeout_s: 3,
+            }],
+        );
+
+        let r = loop_.run_turn(json!("continue"), None).await;
+
+        assert_eq!(r.stop_reason, "completed");
+        let messages = seen.borrow();
+        assert!(messages.iter().any(|m| {
+            m["role"] == "system" && m["content"].as_str().unwrap_or("").contains("prompt-note")
+        }));
+    }
+
+    #[tokio::test]
+    async fn stop_hook_output_is_appended_to_final_text() {
+        let ws = tmpdir("stop_hook_note");
+        let mut loop_ = build_with_hooks(
+            &ws,
+            Box::new(ScriptedProvider::new(vec![ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            }])),
+            vec![HookConfig {
+                event: "stop".into(),
+                matcher: "*".into(),
+                command: "echo stop-ok".into(),
+                timeout_s: 3,
+            }],
+        );
+
+        let r = loop_.run_turn(json!("finish"), None).await;
+
+        assert_eq!(r.stop_reason, "completed");
+        assert!(r.final_text.contains("stop-ok"));
+        assert!(loop_
+            .session
+            .messages
+            .iter()
+            .any(|m| m["role"] == "assistant"
+                && m["content"].as_str().unwrap_or("").contains("stop-ok")));
     }
 
     #[tokio::test]

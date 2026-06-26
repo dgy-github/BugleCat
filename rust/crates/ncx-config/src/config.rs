@@ -10,7 +10,7 @@ pub const DEFAULT_MODELS: &[&str] = &["deepseek-v4-pro", "deepseek-chat", "deeps
 
 pub const VALID_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
 pub const VALID_APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
-pub const VALID_HOOK_EVENTS: &[&str] = &["pre_tool", "post_tool"];
+pub const VALID_HOOK_EVENTS: &[&str] = &["pre_tool", "post_tool", "user_prompt", "stop"];
 
 /// Project-level deterministic hook. Hooks are configured from `[[hooks]]` in
 /// `~/.nanocodex/config.toml` and executed around tool calls.
