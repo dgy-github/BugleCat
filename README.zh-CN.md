@@ -16,12 +16,33 @@
 MCP 集成、skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Windows
 GUI、定时器，以及 git worktree 的 A/B 对比。
 
-核心循环刻意保持小而易读；其余一切都围绕它做成纯粹、可独立测试的模块。整个测试
-套件（420 个测试）完全离线——mock 过的 provider，不需要真实 API key，不发网络
-请求。
+项目当前已经进入分阶段的 **Rust 重写**。`nanocodex/` 下的 Python 实现仍作为原始
+完整功能线保留在仓库里；当前 release 工作集中在 `rust/`，agent 被拆成多个小 crate，
+并配套一个 Tauri 桌面壳。Python 线有 420 个离线测试，Rust 工作区当前有 174 个
+离线测试。
+
+## 当前 Rust 发布线
+
+- **工作区：** `rust/`，包含 sandbox、config、provider、tools、core 编排和 `ncx`
+  CLI 等 crate。
+- **CLI：** `ncx` 支持一次性 prompt、交互 REPL、斜杠命令、项目记忆召回，以及
+  分层 flash/pro 编排。
+- **GUI：** `rust/gui/` 是 Tauri v2 + Svelte 5 桌面应用，覆盖聊天、审批、设置和
+  release 打包。
+- **工具：** `read_file`、`apply_patch`、`shell`、`update_plan`、`grep`、`glob`、
+  `web_search`、`remember`。
+- **能力层：** 任务分类、main/fast 模型路由、隔离并行 worker、verifier 选择，以及
+  把胜出 worker 同步回真实工作区。
+- **记忆：** 项目笔记保存在 `.ncx/memory/LEARNINGS.md`；启动时只做便宜的启发式
+  consolidate，显式运行 `ncx --memory-merge` 才会调用 LLM 合并近似重复记忆，并在
+  模型失败时退回保留最新条目。
+- **搜索：** 有 Tavily key 时走 Tavily，否则回退 DuckDuckGo。
+- **Windows release target：** `x86_64-pc-windows-gnu`；已验证命令是
+  `cargo test --workspace --target x86_64-pc-windows-gnu`。
 
 ## 目录
 
+- [当前 Rust 发布线](#当前-rust-发布线)
 - [亮点](#亮点)
 - [架构](#架构)
 - [工具](#工具)
@@ -128,6 +149,17 @@ python -m pip install -e ".[dev]"
 需要 Python ≥ 3.11。
 
 ## 快速开始
+
+Rust CLI，当前 release 线：
+
+```powershell
+cd rust
+cargo run -p ncx-cli -- "summarize this repository"
+cargo run -p ncx-cli
+cargo run -p ncx-cli -- --memory-merge
+```
+
+Python CLI，原始功能线：
 
 ```powershell
 # 一次性任务
@@ -366,12 +398,42 @@ nanocodex schedule run        # 让它一直跑，任务才会触发
 
 ## 测试
 
+Rust release 线：
+
+```powershell
+cd rust
+cargo test --workspace --target x86_64-pc-windows-gnu
+```
+
+Python 线：
+
 ```powershell
 python -m pytest -q
 ```
 
-420 个测试，完全离线：mock 过的 provider、可注入的 I/O，不需要真实 API key 或
-网络请求。
+两套测试都完全离线：mock 过的 provider、可注入的 I/O，不需要真实 API key 或网络
+请求。
+
+## Release 打包
+
+Windows GNU CLI release：
+
+```powershell
+cd rust
+cargo build --release --workspace --target x86_64-pc-windows-gnu
+```
+
+Tauri 桌面 release：
+
+```powershell
+cd rust\gui
+npm.cmd install
+npm.cmd run build
+npx.cmd @tauri-apps/cli@latest build --target x86_64-pc-windows-gnu
+```
+
+Tauri crate 特意保留 `crate-type = ["lib"]`；改成 `cdylib` 或 `staticlib` 会让
+Windows GNU 链接器的 export ordinal 表溢出。
 
 ## 安全说明
 

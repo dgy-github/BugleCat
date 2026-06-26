@@ -18,12 +18,36 @@ ships with MCP integration, a skills system, a sandbox/approval state machine,
 context compaction, token-cost accounting, a Windows GUI, a scheduler, and
 git-worktree A/B comparison.
 
-The core loop is kept deliberately small and readable; everything else is built
-as pure, independently testable modules around it. The whole test suite (420
-tests) is offline — mocked providers, no real API key, no network.
+The project is now in a staged **Rust rewrite**. The Python implementation
+under `nanocodex/` remains in the tree as the original feature-complete line;
+the current release work happens under `rust/`, where the agent has been split
+into small crates plus a Tauri desktop shell. The Python suite has 420 offline
+tests, and the Rust workspace currently has 174 offline tests.
+
+## Current Rust Release Line
+
+- **Workspace:** `rust/`, with crates for sandboxing, config, provider,
+  tools, core orchestration, and the `ncx` CLI.
+- **CLI:** `ncx` supports one-shot prompts, an interactive REPL, slash
+  commands, project memory recall, and tiered flash/pro orchestration.
+- **GUI:** `rust/gui/` is a Tauri v2 + Svelte 5 desktop app for chat,
+  approval, settings, and release bundling.
+- **Tools:** `read_file`, `apply_patch`, `shell`, `update_plan`, `grep`,
+  `glob`, `web_search`, and `remember`.
+- **Capability layer:** task classification, main/fast model routing,
+  isolated parallel workers, verifier selection, and promotion of the winning
+  worker back into the real workspace.
+- **Memory:** project notes live in `.ncx/memory/LEARNINGS.md`; startup uses a
+  cheap heuristic consolidate, while `ncx --memory-merge` performs an explicit
+  LLM-backed near-duplicate fold with fallback to the newest note.
+- **Search:** Tavily is used when a key is configured, otherwise DuckDuckGo is
+  used as the fallback.
+- **Windows release target:** `x86_64-pc-windows-gnu`; the verified command is
+  `cargo test --workspace --target x86_64-pc-windows-gnu`.
 
 ## Table of Contents
 
+- [Current Rust Release Line](#current-rust-release-line)
 - [Highlights](#highlights)
 - [Architecture](#architecture)
 - [Tools](#tools)
@@ -135,6 +159,17 @@ python -m pip install -e ".[dev]"
 Requires Python ≥ 3.11.
 
 ## Quick Start
+
+Rust CLI, current release line:
+
+```powershell
+cd rust
+cargo run -p ncx-cli -- "summarize this repository"
+cargo run -p ncx-cli
+cargo run -p ncx-cli -- --memory-merge
+```
+
+Python CLI, original line:
 
 ```powershell
 # one-shot task
@@ -391,12 +426,42 @@ Note: the GUI does not hot-reload — code changes require closing and reopening
 
 ## Tests
 
+Rust release line:
+
+```powershell
+cd rust
+cargo test --workspace --target x86_64-pc-windows-gnu
+```
+
+Python line:
+
 ```powershell
 python -m pytest -q
 ```
 
-420 tests, fully offline: mocked providers, injectable I/O, no real API key or
-network call required.
+Both suites are fully offline: mocked providers, injectable I/O, no real API
+key or network call required.
+
+## Release Packaging
+
+Windows GNU CLI release:
+
+```powershell
+cd rust
+cargo build --release --workspace --target x86_64-pc-windows-gnu
+```
+
+Tauri desktop release:
+
+```powershell
+cd rust\gui
+npm.cmd install
+npm.cmd run build
+npx.cmd @tauri-apps/cli@latest build --target x86_64-pc-windows-gnu
+```
+
+The Tauri crate deliberately keeps `crate-type = ["lib"]`; changing it to
+`cdylib` or `staticlib` overflows the Windows GNU linker's export table.
 
 ## Security Notes
 
