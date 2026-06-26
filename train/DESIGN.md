@@ -297,15 +297,23 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
 
 ## 11. 路线图（里程碑）
 
-- **M0a｜前置（必须先做，对抗评审定为硬 gate）**：
-  ① §2.1 P1 genome 注入（Rust + 字节等价单测 + forge 自毁-genome 自检）；
-  ② §2.2 P2 失败轨迹采集（run.py 写 session log、屏蔽 grader 输出）。
-  这两件不过，**整个 M0 是静默空跑**，所以先于教师工作。
-- **M0b｜最小闭环**：`genome.py`（extract-current + round-trip 测试，size cap 从基线取）
-  + `evaluator.py`（包 run.py、注入 `NCX_GENOME`、回收轨迹）+ `teacher.py`（codex 后端先行，
-  模型从 config 解析；claude 探测可用才上；api 地板）+ `forge.py` 单 champion 爬山 + 全局
-  token/时钟 governor。验收：自检 gate 通过 + 跑 ≥5 代 + champion 在 **held-out** 不低于
-  gen0 baseline + 全程报告/lineage（记真实模型 id）。
+- **M0a｜前置 ✅完成**：① P1 genome 注入（`f1af9ce`，sentinel 自检 PASS）；
+  ② P2 失败轨迹采集（`evaluator.py`，对真实 session log 验证 + 5 单测）。
+- **M0b｜最小闭环 ✅完成**：
+  - `ncx --dump-genome`（`90d0a20`）：二进制吐默认 genome（真实工具列表+描述）→ extract-current。
+  - `genome.py`：extract-current + TOML 读写（纯 stdlib）+ round-trip 自检 + size cap 从基线取
+    + 校验（拒空/超限/未知工具）+ diff。
+  - `teacher.py`：可插拔 panel —— codex(GPT，模型从 `~/.codex/config.toml` 解析)/claude(Opus，
+    按 `is_error` 判可用)/api(DeepSeek 地板)。npm shim 用 `shutil.which` 解析 .CMD。prompt 把
+    失败轨迹当**不可信数据**定界；候选解析取最后 fence、合并到基线、校验。
+  - `forge.py --train`：自检 gate → 建 panel → gen0 → 每代各教师提议→评测→**接受门(train 升 +
+    holdout 不退)** → lineage(JSON，记真实模型)；wall-clock governor。
+  - **live 验证**：codex(gpt-5.4) 真实产出合法候选 genome（diff 显示扩了 system_prompt/澄清
+    shell/update_plan，未动 load-bearing 的 apply_patch）；forge.train 端到端跑通（gate→panel→
+    gen0→干净停+lineage）。接受门 glue 用 monkeypatch 单测确定性验证（接受/holdout 退化拒绝/
+    非法候选跳过，3/3）。
+  - 注：强基线把 t1–t8 全过 → 真实跑常在 gen0 "fully solved" 停；要看教师真改进，需 M1 的更难
+    任务集（或从退化 genome 起训）。
 - **M1｜抗过拟合**：train/val/test 切分 + TaskGen（自校验）+ 保守接受准则。
 - **M2｜搜索增强**：小种群 / Pareto（通过率×token）/ lineage 可视化。
 - **M3｜数据导出**：Trajectory Store 成型 + `export.py`，对接未来 GPU 训练。

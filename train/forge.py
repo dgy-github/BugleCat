@@ -17,12 +17,19 @@ train/DESIGN.md. This file currently exposes the gate + a thin baseline report.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
+import genome as G  # noqa: E402
+import teacher as T  # noqa: E402
+
+GENOMES_DIR = Path(__file__).resolve().parent / "genomes"
+RUNS_DIR = Path(__file__).resolve().parent / "runs"
 
 # A genome that should make ANY task fail: the agent is told to refuse and not
 # act. If pass-rate does not collapse under this, injection is not working.
@@ -95,15 +102,135 @@ def baseline_report(tasks: list[str] | None, repeats: int, timeout: int) -> None
         print(f"  {t.task:14} {t.passes}/{t.runs}  {t.mean_s:6.1f}s")
 
 
+def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
+          repeats: int, timeout: int, budget_s: float, teachers: str,
+          stamp: str) -> dict:
+    """Single-champion hill-climb. Each round: every available teacher proposes a
+    mutation of the current champion; candidates are evaluated on TRAIN; the best
+    is promoted iff it beats the champion on TRAIN by a margin AND does not regress
+    on the held-out split. A wall-clock governor bounds total spend.
+
+    Returns a lineage dict (also written to runs/lineage_<stamp>.json).
+    """
+    GENOMES_DIR.mkdir(exist_ok=True)
+    RUNS_DIR.mkdir(exist_ok=True)
+    t0 = time.perf_counter()
+
+    def elapsed() -> float:
+        return time.perf_counter() - t0
+
+    panel = [b for b in T.build_panel() if teachers == "panel" or b.name == teachers]
+    if not panel:
+        print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
+        return {"error": "no teacher"}
+
+    baseline = G.extract_current()
+    champion = baseline.copy()
+    champ_path = GENOMES_DIR / f"{stamp}_gen0_baseline.toml"
+    champion.save(champ_path)
+    champ_train = ev.evaluate(str(champ_path), train_tasks, repeats, timeout)
+    champ_hold = ev.evaluate(str(champ_path), holdout_tasks, repeats, timeout)
+    print(f"[forge] gen0 baseline: train {champ_train.total_passes}/{champ_train.total_runs}, "
+          f"holdout {champ_hold.total_passes}/{champ_hold.total_runs}")
+
+    lineage = {"stamp": stamp, "train_tasks": train_tasks, "holdout_tasks": holdout_tasks,
+               "repeats": repeats, "rounds": [],
+               "gen0": {"train": champ_train.total_passes, "holdout": champ_hold.total_passes}}
+
+    for rnd in range(1, rounds + 1):
+        if elapsed() > budget_s:
+            print(f"[forge] budget ({budget_s}s) exhausted — stopping at round {rnd}.")
+            break
+        failures = champ_train.failing_trajectories(top_k=3)
+        if not failures:
+            print("[forge] champion fully solves the train set — nothing to improve "
+                  "(grow the task set, M1). Stopping.")
+            break
+        prompt = T.build_teacher_prompt(champion, failures)
+        round_log = {"round": rnd, "candidates": []}
+        candidates = []  # (teacher_name, genome, eval)
+        for backend in panel:
+            if elapsed() > budget_s:
+                break
+            resp = backend.propose(prompt)
+            cand, why = T.parse_candidate(resp or "", champion)
+            if not cand:
+                print(f"[forge]   round {rnd} {backend.name}: rejected ({why})")
+                round_log["candidates"].append({"teacher": backend.name, "status": why})
+                continue
+            errs = G.validate(cand, baseline)
+            if errs:
+                print(f"[forge]   round {rnd} {backend.name}: invalid ({errs[0]})")
+                round_log["candidates"].append({"teacher": backend.name, "status": f"invalid: {errs[0]}"})
+                continue
+            cpath = GENOMES_DIR / f"{stamp}_gen{rnd}_{backend.name}.toml"
+            cand.save(cpath)
+            cev = ev.evaluate(str(cpath), train_tasks, repeats, timeout)
+            print(f"[forge]   round {rnd} {backend.name}: train "
+                  f"{cev.total_passes}/{cev.total_runs}  changed[{G.diff(champion, cand)!r}]")
+            candidates.append((backend.name, cand, cev, cpath))
+            round_log["candidates"].append({
+                "teacher": backend.name, "status": "evaluated",
+                "train_passes": cev.total_passes, "path": str(cpath),
+            })
+
+        # Pick the best candidate; accept only if it beats champion on TRAIN and
+        # does not regress on HELD-OUT (the real anti-overfit gate).
+        accepted = None
+        if candidates:
+            best = max(candidates, key=lambda c: c[2].total_passes)
+            tname, cand, cev, cpath = best
+            if cev.total_passes > champ_train.total_passes:
+                chold = ev.evaluate(str(cpath), holdout_tasks, repeats, timeout)
+                if chold.total_passes >= champ_hold.total_passes:
+                    champion, champ_train, champ_hold = cand, cev, chold
+                    accepted = tname
+                    print(f"[forge]   round {rnd}: ACCEPT {tname} "
+                          f"(train {cev.total_passes}/{cev.total_runs}, "
+                          f"holdout {chold.total_passes}/{chold.total_runs})")
+                    round_log["accept"] = {"teacher": tname,
+                                           "train": cev.total_passes, "holdout": chold.total_passes}
+                else:
+                    print(f"[forge]   round {rnd}: REJECT {tname} (holdout regressed "
+                          f"{chold.total_passes} < {champ_hold.total_passes})")
+                    round_log["accept"] = {"teacher": tname, "status": "holdout-regressed"}
+        if accepted is None and "accept" not in round_log:
+            print(f"[forge]   round {rnd}: no candidate beat the champion on train.")
+        lineage["rounds"].append(round_log)
+
+    champ_final = GENOMES_DIR / f"{stamp}_champion.toml"
+    champion.save(champ_final)
+    lineage["champion"] = {"path": str(champ_final),
+                           "train": champ_train.total_passes, "holdout": champ_hold.total_passes,
+                           "diff_vs_baseline": G.diff(baseline, champion)}
+    (RUNS_DIR / f"lineage_{stamp}.json").write_text(json.dumps(lineage, indent=2), encoding="utf-8")
+    print(f"[forge] done in {elapsed():.0f}s. champion -> {champ_final}")
+    print(f"[forge] champion vs baseline:\n{G.diff(baseline, champion)}")
+    return lineage
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="ncx-forge harness trainer (M0a).")
+    ap = argparse.ArgumentParser(description="ncx-forge harness trainer (M0b).")
     ap.add_argument("--self-check", action="store_true",
                     help="prove NCX_GENOME injection works, then exit")
     ap.add_argument("--baseline", action="store_true",
                     help="report the gen0 baseline pass-rate")
-    ap.add_argument("--tasks", default="", help="comma-separated task names")
+    ap.add_argument("--train", action="store_true",
+                    help="run the optimizer loop (self-check gates it)")
+    ap.add_argument("--tasks", default="", help="comma-separated task names (for --baseline)")
+    ap.add_argument("--train-tasks", default="t1_mathutils,t3_fizzbuzz,t7_balanced",
+                    help="comma-separated train task names")
+    ap.add_argument("--holdout-tasks", default="t4_stack,t8_wordfreq",
+                    help="comma-separated held-out task names (accept gate)")
+    ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--budget-s", type=float, default=1800.0,
+                    help="wall-clock governor (seconds); stops cleanly when exceeded")
+    ap.add_argument("--teacher", default="panel",
+                    help="panel | codex | claude | api")
+    ap.add_argument("--no-gate", action="store_true",
+                    help="skip the self-check gate before --train (NOT recommended)")
     a = ap.parse_args()
     names = [t.strip() for t in a.tasks.split(",") if t.strip()] or None
 
@@ -112,8 +239,17 @@ def main() -> int:
     if a.baseline:
         baseline_report(names, a.repeats, a.timeout)
         return 0
-    print("nothing to do — pass --self-check or --baseline. "
-          "(optimizer loop is M0b; see train/DESIGN.md)")
+    if a.train:
+        if not a.no_gate and not self_check(a.timeout):
+            print("[forge] self-check failed — refusing to train (use --no-gate to override).")
+            return 1
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        train_tasks = [t.strip() for t in a.train_tasks.split(",") if t.strip()]
+        holdout_tasks = [t.strip() for t in a.holdout_tasks.split(",") if t.strip()]
+        train(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
+              a.budget_s, a.teacher, stamp)
+        return 0
+    print("nothing to do — pass --self-check | --baseline | --train. See train/DESIGN.md")
     return 0
 
 

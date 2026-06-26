@@ -43,3 +43,7 @@ Thumbs.db
 
 # bench-generated reports
 bench/reports/
+
+# ncx-forge generated artifacts
+train/genomes/
+train/runs/
