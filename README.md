@@ -18,18 +18,39 @@ ships with MCP integration, a skills system, a sandbox/approval state machine,
 context compaction, token-cost accounting, a Windows GUI, a scheduler, and
 git-worktree A/B comparison.
 
-The project is now in a staged **Rust rewrite**. The Python implementation
-under `nanocodex/` remains in the tree as the original feature-complete line;
-the current release work happens under `rust/`, where the agent has been split
-into small crates plus a Tauri desktop shell. The Python suite has 420 offline
-tests, and the Rust workspace currently has 174 offline tests.
+The project has two clear stages:
 
-## Current Rust Release Line
+## Project Phases
 
-- **Workspace:** `rust/`, with crates for sandboxing, config, provider,
-  tools, core orchestration, and the `ncx` CLI.
-- **CLI:** `ncx` supports one-shot prompts, an interactive REPL, slash
-  commands, project memory recall, and tiered flash/pro orchestration.
+### Stage 1: Python Baseline
+
+The Python implementation under `nanocodex/` is the original feature-complete
+agent line. It established the product surface and proved the workflows before
+the rewrite:
+
+- **Agent loop:** streaming chat-completions, multi-round tool calls,
+  cancellation, session logs, resume, and fork.
+- **Tool system:** shell, apply_patch, update_plan, read_file, web_search,
+  scheduler, skills, memory, MCP tools, and marketplace management.
+- **Safety layer:** sandbox modes, approval policies, writable-root checks,
+  and Windows policy-level enforcement at the tool boundary.
+- **Context features:** AGENTS.md layering, persistent user memory, skills,
+  deterministic/model compaction, token usage, and cost accounting.
+- **Desktop workflows:** Tkinter GUI with settings, history, file panel, image
+  input, prompt enhancement, scheduler controls, and A/B worktree comparison.
+- **Quality bar:** 420 offline tests with mocked providers, no real key, and
+  no network dependency.
+
+### Stage 2: Rust Rewrite
+
+The Rust implementation under `rust/` is the current release line. It keeps the
+Python tree intact while rebuilding the core as small crates plus a Tauri
+desktop shell:
+
+- **Workspace:** crates for sandboxing, config, provider, tools, core
+  orchestration, and the `ncx` CLI.
+- **CLI:** one-shot prompts, interactive REPL, slash commands, project memory
+  recall, and tiered flash/pro orchestration.
 - **GUI:** `rust/gui/` is a Tauri v2 + Svelte 5 desktop app for chat,
   approval, settings, and release bundling.
 - **Tools:** `read_file`, `apply_patch`, `shell`, `update_plan`, `grep`,
@@ -42,12 +63,29 @@ tests, and the Rust workspace currently has 174 offline tests.
   LLM-backed near-duplicate fold with fallback to the newest note.
 - **Search:** Tavily is used when a key is configured, otherwise DuckDuckGo is
   used as the fallback.
-- **Windows release target:** `x86_64-pc-windows-gnu`; the verified command is
-  `cargo test --workspace --target x86_64-pc-windows-gnu`.
+- **Quality bar:** 174 offline Rust tests, verified on
+  `x86_64-pc-windows-gnu`.
+
+### Why Rust For Stage 2
+
+Rust was chosen for the rewrite because the project had moved from a prototype
+to a distributable desktop tool:
+
+- **Single-binary distribution:** ship `ncx.exe` without requiring users to set
+  up Python, virtual environments, or editable installs.
+- **Startup and footprint:** the Rust CLI starts in milliseconds and produces a
+  compact Windows release package.
+- **Stronger boundaries:** ownership and typed module contracts make the
+  sandbox, tool execution, provider responses, and session state harder to
+  accidentally blur.
+- **Safer parallelism:** isolated worker copies, verifier selection, and
+  promotion are easier to reason about with explicit data ownership.
+- **Desktop packaging:** Tauri gives a smaller native desktop path than the
+  earlier Python/Tkinter line while preserving a web-style UI stack.
 
 ## Table of Contents
 
-- [Current Rust Release Line](#current-rust-release-line)
+- [Project Phases](#project-phases)
 - [Highlights](#highlights)
 - [Architecture](#architecture)
 - [Tools](#tools)

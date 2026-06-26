@@ -16,17 +16,34 @@
 MCP 集成、skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Windows
 GUI、定时器，以及 git worktree 的 A/B 对比。
 
-项目当前已经进入分阶段的 **Rust 重写**。`nanocodex/` 下的 Python 实现仍作为原始
-完整功能线保留在仓库里；当前 release 工作集中在 `rust/`，agent 被拆成多个小 crate，
-并配套一个 Tauri 桌面壳。Python 线有 420 个离线测试，Rust 工作区当前有 174 个
-离线测试。
+项目分为两个清晰阶段：
 
-## 当前 Rust 发布线
+## 项目阶段
 
-- **工作区：** `rust/`，包含 sandbox、config、provider、tools、core 编排和 `ncx`
-  CLI 等 crate。
-- **CLI：** `ncx` 支持一次性 prompt、交互 REPL、斜杠命令、项目记忆召回，以及
-  分层 flash/pro 编排。
+### 第一阶段：Python 基础版
+
+`nanocodex/` 下的 Python 实现是最早的完整功能线，用来验证产品形态和核心工作流：
+
+- **Agent 循环：** 流式 chat-completions、多轮工具调用、取消、会话日志、resume 和
+  fork。
+- **工具系统：** shell、apply_patch、update_plan、read_file、web_search、定时器、
+  skills、记忆、MCP 工具和 marketplace 管理。
+- **安全层：** 沙箱模式、审批策略、可写根检查，以及 Windows 上工具边界的策略级
+  强制。
+- **上下文能力：** AGENTS.md 分层、持久用户记忆、skills、确定性/模型压缩、token
+  用量和成本统计。
+- **桌面流程：** Tkinter GUI，包含设置、历史、文件面板、图片输入、prompt 增强、
+  定时器控制和 A/B worktree 对比。
+- **质量基线：** 420 个离线测试，mock provider，不需要真实 key，也不依赖网络。
+
+### 第二阶段：Rust 重构版
+
+`rust/` 下的 Rust 实现是当前 release 线。它保留 Python 树不动，同时把核心能力重建
+成多个小 crate，并配套 Tauri 桌面壳：
+
+- **工作区：** sandbox、config、provider、tools、core 编排和 `ncx` CLI 等 crate。
+- **CLI：** 一次性 prompt、交互 REPL、斜杠命令、项目记忆召回，以及分层 flash/pro
+  编排。
 - **GUI：** `rust/gui/` 是 Tauri v2 + Svelte 5 桌面应用，覆盖聊天、审批、设置和
   release 打包。
 - **工具：** `read_file`、`apply_patch`、`shell`、`update_plan`、`grep`、`glob`、
@@ -37,12 +54,25 @@ GUI、定时器，以及 git worktree 的 A/B 对比。
   consolidate，显式运行 `ncx --memory-merge` 才会调用 LLM 合并近似重复记忆，并在
   模型失败时退回保留最新条目。
 - **搜索：** 有 Tavily key 时走 Tavily，否则回退 DuckDuckGo。
-- **Windows release target：** `x86_64-pc-windows-gnu`；已验证命令是
-  `cargo test --workspace --target x86_64-pc-windows-gnu`。
+- **质量基线：** 174 个 Rust 离线测试，已在 `x86_64-pc-windows-gnu` 目标验证。
+
+### 第二阶段为什么改用 Rust
+
+切到 Rust 是因为项目从原型验证进入了可分发桌面工具阶段：
+
+- **单文件分发：** 可以发布 `ncx.exe`，用户不需要先配置 Python、虚拟环境或 editable
+  install。
+- **启动与体积：** Rust CLI 毫秒级启动，Windows release 包更小。
+- **边界更硬：** 所有权和类型约束让沙箱、工具执行、provider 响应、session 状态更
+  不容易混在一起。
+- **并行更稳：** 隔离 worker 副本、verifier 选择、胜出结果 promote 回真实工作区，
+  用显式数据所有权更容易推理。
+- **桌面打包路径：** Tauri 比早期 Python/Tkinter 线更适合做小体积原生桌面发布，同时
+  能保留 web 风格 UI。
 
 ## 目录
 
-- [当前 Rust 发布线](#当前-rust-发布线)
+- [项目阶段](#项目阶段)
 - [亮点](#亮点)
 - [架构](#架构)
 - [工具](#工具)
