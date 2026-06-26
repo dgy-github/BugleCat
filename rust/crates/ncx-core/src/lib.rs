@@ -11,6 +11,7 @@
 
 pub mod agent_loop;
 pub mod checkpoint;
+pub mod genome;
 pub mod hooks;
 pub mod isolate;
 pub mod mcp_tool;
@@ -27,6 +28,7 @@ pub mod tools;
 
 pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult};
 pub use checkpoint::{CheckpointMeta, CheckpointStore, RestoreReport};
+pub use genome::Genome;
 pub use hooks::{HookEvent, HookOutcome};
 pub use memory::{MemoryEntry, MemoryStore, Summarizer};
 pub use mentions::{expand_file_mentions, find_mentions};

@@ -17,6 +17,7 @@ use ncx_sandbox::{Approver, Decision, SandboxPolicy, DANGER_FULL_ACCESS, ON_FAIL
 use ncx_tools::{apply_patch, looks_read_only, parse_patch, read_file as rf, PolicyExecutor};
 use serde_json::{json, Value};
 
+use crate::genome::Genome;
 use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::memory::MemoryStore;
 use crate::skills::Skill;
@@ -78,6 +79,9 @@ pub struct ToolContext {
     /// Discovered Agent Skills. When non-empty, the `skill` tool is exposed and
     /// the index is injected into the system prompt by the CLI/GUI.
     pub skills: Rc<Vec<Skill>>,
+    /// Training-time harness overrides (NCX_GENOME). Empty by default — a no-op.
+    /// Currently overrides per-tool descriptions seen by the model.
+    pub genome: Rc<Genome>,
 }
 
 impl ToolContext {
@@ -96,6 +100,7 @@ impl ToolContext {
             tool_hints: Rc::new(RefCell::new(Vec::new())),
             hooks: Rc::new(Vec::new()),
             skills: Rc::new(Vec::new()),
+            genome: Rc::new(Genome::default()),
         }
     }
 
@@ -139,6 +144,12 @@ impl ToolContext {
     /// Attach discovered Agent Skills (enables the `skill` tool).
     pub fn with_skills(mut self, skills: Vec<Skill>) -> Self {
         self.skills = Rc::new(skills);
+        self
+    }
+
+    /// Attach training-time harness overrides (NCX_GENOME). Empty = no-op.
+    pub fn with_genome(mut self, genome: Genome) -> Self {
+        self.genome = Rc::new(genome);
         self
     }
 }
@@ -218,13 +229,35 @@ impl ToolRegistry {
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         let name = tool.name().to_string();
         let idx = self.tools.len();
+        // Apply any NCX_GENOME description override so tool_search (which scores
+        // catalog descriptions) sees the same text the model does.
+        let description = self
+            .ctx
+            .genome
+            .describe(&name, tool.description())
+            .to_string();
         self.ctx.tool_catalog.borrow_mut().push(ToolCatalogEntry {
             name: name.clone(),
-            description: tool.description().to_string(),
+            description,
             read_only: tool.read_only(),
         });
         self.tools.push(tool);
         self.by_name.insert(name, idx);
+    }
+
+    /// Build a tool's function schema with the effective (possibly genome-
+    /// overridden) description. This is the model-facing surface; the `Tool`
+    /// trait's own `to_schema()` keeps returning the unmodified default.
+    fn schema_for(&self, tool: &dyn Tool) -> Value {
+        let description = self.ctx.genome.describe(tool.name(), tool.description());
+        json!({
+            "type": "function",
+            "function": {
+                "name": tool.name(),
+                "description": description,
+                "parameters": tool.parameters(),
+            },
+        })
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
@@ -249,7 +282,7 @@ impl ToolRegistry {
 
     pub fn schemas_limited_for_query(&self, query: &str, limit: usize) -> Vec<Value> {
         if self.tools.len() <= limit {
-            return self.tools.iter().map(|t| t.to_schema()).collect();
+            return self.tools.iter().map(|t| self.schema_for(t.as_ref())).collect();
         }
 
         let mut selected: HashSet<String> = HashSet::new();
@@ -286,7 +319,7 @@ impl ToolRegistry {
         self.tools
             .iter()
             .filter(|t| selected.contains(t.name()))
-            .map(|t| t.to_schema())
+            .map(|t| self.schema_for(t.as_ref()))
             .collect()
     }
 
@@ -757,6 +790,64 @@ mod tests {
             .collect();
         assert!(names.contains(&"tool_search".to_string()));
         assert!(names.contains(&"deploy".to_string()));
+    }
+
+    fn schema_desc(schemas: &[Value], name: &str) -> Option<String> {
+        schemas.iter().find_map(|s| {
+            let f = &s["function"];
+            if f["name"] == name {
+                f["description"].as_str().map(String::from)
+            } else {
+                None
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn empty_genome_leaves_schema_and_catalog_byte_identical() {
+        let ws = tmp_ws("genome_noop");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let mut reg = ToolRegistry::empty(ctx);
+        reg.register(Box::new(ReadFileTool));
+        // schema description == the tool's own default
+        let schemas = reg.schemas_limited_for_query("", 9);
+        assert_eq!(
+            schema_desc(&schemas, "read_file").as_deref(),
+            Some(ReadFileTool.description())
+        );
+        // catalog description == default too
+        let cat = reg.ctx.tool_catalog.borrow();
+        assert_eq!(cat[0].description, ReadFileTool.description());
+    }
+
+    #[tokio::test]
+    async fn genome_override_reaches_schema_and_catalog() {
+        use crate::genome::Genome;
+        let ws = tmp_ws("genome_override");
+        let mut g = Genome::default();
+        g.tool_desc
+            .insert("read_file".into(), "OVERRIDDEN read desc".into());
+        let ctx =
+            ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws)).with_genome(g);
+        let mut reg = ToolRegistry::empty(ctx);
+        reg.register(Box::new(ReadFileTool));
+        reg.register(Box::new(ShellTool));
+
+        // The model-facing schema shows the override for read_file...
+        let schemas = reg.schemas_limited_for_query("", 9);
+        assert_eq!(
+            schema_desc(&schemas, "read_file").as_deref(),
+            Some("OVERRIDDEN read desc")
+        );
+        // ...and shell (no override) keeps its default.
+        assert_eq!(
+            schema_desc(&schemas, "shell").as_deref(),
+            Some(ShellTool.description())
+        );
+        // tool_search's catalog sees the override too.
+        let cat = reg.ctx.tool_catalog.borrow();
+        let rf = cat.iter().find(|e| e.name == "read_file").unwrap();
+        assert_eq!(rf.description, "OVERRIDDEN read desc");
     }
 
     #[tokio::test]

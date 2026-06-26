@@ -518,6 +518,7 @@ dependencies = [
  "regex",
  "serde_json",
  "tokio",
+ "toml",
 ]
 
 [[package]]

@@ -25,7 +25,7 @@ use std::rc::Rc;
 use ncx_core::{
     discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
     register_mcp_server, skills_index_block, AgentLoop, CheckpointMeta, CheckpointStore,
-    ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Provider, Session,
+    ContextEditPolicy, Genome, MemoryStore, Orchestrator, OrchestratorConfig, Provider, Session,
     SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry, TurnResult,
 };
 use ncx_provider::DeepSeekProvider;
@@ -147,14 +147,26 @@ async fn run(args: Args) -> i32 {
     // disclosure); the `skill` tool loads a full SKILL.md body on demand.
     let skills = discover_skills(&cfg.workspace);
     let skills_index = skills_index_block(&skills);
-    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index]);
+    // Training-time harness overrides (NCX_GENOME). Empty/unset => no-op: the
+    // base prompt stays SYSTEM_PROMPT and tool descriptions are untouched.
+    let genome = Genome::from_env();
+    if !genome.is_empty() {
+        eprintln!(
+            "[ncx] NCX_GENOME active: system_prompt={}, tool_desc overrides={}",
+            genome.system_prompt.is_some(),
+            genome.tool_desc.len()
+        );
+    }
+    let base_prompt = genome.base_system_prompt(SYSTEM_PROMPT).to_string();
+    let system_prompt = compose_system_prompt(&base_prompt, &[instructions, recall, skills_index]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
         .with_approval_policy(cfg.approval_policy.clone())
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
         .with_hooks(cfg.hooks.clone())
-        .with_skills(skills);
+        .with_skills(skills)
+        .with_genome(genome);
     let mut tools = ToolRegistry::new(ctx);
     for srv in load_mcp_servers() {
         match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await {
