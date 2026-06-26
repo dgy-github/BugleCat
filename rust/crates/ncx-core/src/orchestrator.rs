@@ -78,15 +78,18 @@ pub trait AgentRunner {
 }
 
 // System prompts for each node. Kept terse; the model's own tools do the work.
-const CLASSIFY_SYS: &str = "You are a task-complexity classifier. Reply with exactly one word — \
-    simple, medium, or high — rating how hard/risky the coding task is. simple = a one-step, \
-    low-risk change; medium = multi-step but routine; high = risky, broad, or easy to get wrong.";
-const PLAN_SYS: &str = "You are a senior engineer. Produce a short, concrete step-by-step plan to \
-    accomplish the task. Do not write code — just the plan.";
-const DECOMPOSE_SYS: &str = "You are a planning lead. Break the task into the smallest set of \
-    INDEPENDENT subtasks that can be carried out one after another. Output each subtask on its \
-    own line, prefixed with 'SUBTASK: '. If the task is atomic (cannot be usefully split), output \
-    a single 'SUBTASK: ' line restating it. No prose, no extra numbering.";
+const CLASSIFY_SYS: &str = "You are a task-complexity classifier. You have NO tools — do not \
+    attempt to read files or run commands. Reply with exactly one word — simple, medium, or high \
+    — rating how hard/risky the coding task is. simple = a one-step, low-risk change; medium = \
+    multi-step but routine; high = risky, broad, or easy to get wrong.";
+const PLAN_SYS: &str = "You are a senior engineer. You have NO tools and cannot read files — work \
+    only from the task text. Produce a short, concrete step-by-step plan to accomplish the task. \
+    Output the plan as plain text only — do not write code, do not call tools.";
+const DECOMPOSE_SYS: &str = "You are a planning lead. You have NO tools and cannot read files — \
+    work only from the task and plan text given. Break the task into the smallest set of \
+    INDEPENDENT subtasks that can be carried out one after another. Output ONLY subtask lines, \
+    each on its own line prefixed with 'SUBTASK: ' — no preamble, no prose, no tool calls. If the \
+    task is atomic (cannot be usefully split), output a single 'SUBTASK: ' line restating it.";
 const WORKER_SYS: &str =
     "You are an implementation worker. Carry out the task following the plan, \
     using your tools. Describe what you did and the outcome.";
@@ -108,6 +111,9 @@ pub struct OrchestratorConfig {
     /// Max recursive decomposition depth for high tasks (0 = never decompose;
     /// high tasks then always run as a single best-of-N attempt).
     pub max_depth: usize,
+    /// Cap on subtasks per decomposition — guards against a model that
+    /// over-splits a task into many tiny pieces (each its own full pipeline).
+    pub max_subtasks: usize,
 }
 
 impl Default for OrchestratorConfig {
@@ -117,6 +123,7 @@ impl Default for OrchestratorConfig {
             high_workers: 3,
             max_verify_retries: 1,
             max_depth: 1,
+            max_subtasks: 6,
         }
     }
 }
@@ -278,7 +285,7 @@ impl<'a> Orchestrator<'a> {
             .runner
             .reason(Tier::Main, DECOMPOSE_SYS, &build_decompose_task(task, &plan))
             .await;
-        let subtasks = parse_subtasks(&raw);
+        let mut subtasks = parse_subtasks(&raw);
         orch_trace(&format!(
             "high task at depth {depth}: decomposed into {} subtask(s)",
             subtasks.len()
@@ -296,6 +303,17 @@ impl<'a> Orchestrator<'a> {
                     self.cfg.high_workers,
                 )
                 .await;
+        }
+
+        // Cap over-decomposition — keep the first N, log what was dropped.
+        if subtasks.len() > self.cfg.max_subtasks {
+            orch_trace(&format!(
+                "capping {} subtasks to max_subtasks={} (dropping {} tail)",
+                subtasks.len(),
+                self.cfg.max_subtasks,
+                subtasks.len() - self.cfg.max_subtasks
+            ));
+            subtasks.truncate(self.cfg.max_subtasks);
         }
 
         let mut sub_results = Vec::with_capacity(subtasks.len());
@@ -362,8 +380,10 @@ fn verdict_passed(verdict: &str) -> bool {
     !verdict.to_uppercase().contains("FAIL")
 }
 
-/// Pull `SUBTASK:`-prefixed lines out of a decomposition reply (case-insensitive,
-/// prefix may sit after leading bullets/whitespace). Empty remainders are skipped.
+/// Parse subtasks from a decomposition reply. Prefers explicit `SUBTASK:`
+/// prefixes (case-insensitive, may follow leading bullets/whitespace); if the
+/// model ignored the format and emitted a plain numbered or bulleted list, fall
+/// back to that so a usable decomposition isn't lost. Empty items are skipped.
 fn parse_subtasks(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in s.lines() {
@@ -376,7 +396,38 @@ fn parse_subtasks(s: &str) -> Vec<String> {
             }
         }
     }
+    if out.is_empty() {
+        // Fallback: numbered (`1.`/`1)`) or bulleted (`-`/`*`/`•`) list lines.
+        for line in s.lines() {
+            if let Some(item) = strip_list_marker(line.trim()) {
+                if !item.is_empty() {
+                    out.push(item.to_string());
+                }
+            }
+        }
+    }
     out
+}
+
+/// Strip a leading list marker (`1.`, `1)`, `-`, `*`, `•`) from a line, returning
+/// the item text. `None` if the line isn't a list item.
+fn strip_list_marker(line: &str) -> Option<&str> {
+    if let Some(rest) = line
+        .strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))
+        .or_else(|| line.strip_prefix("• "))
+    {
+        return Some(rest.trim());
+    }
+    // Numbered: leading digits then '.' or ')'.
+    let digits: String = line.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if !digits.is_empty() {
+        let after = &line[digits.len()..];
+        if let Some(rest) = after.strip_prefix('.').or_else(|| after.strip_prefix(')')) {
+            return Some(rest.trim());
+        }
+    }
+    None
 }
 
 fn build_worker_task(task: &str, plan: &str, feedback: &str, i: usize, n: usize) -> String {
@@ -613,6 +664,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subtask_count_is_capped() {
+        // Model over-splits into 4 subtasks but max_subtasks=2 → only 2 recurse.
+        let m = MockRunner::new("high", vec![])
+            .with_complexities(vec!["simple", "simple", "simple", "simple", "high"])
+            .with_decomposition("SUBTASK: a\nSUBTASK: b\nSUBTASK: c\nSUBTASK: d");
+        let o = Orchestrator::new(
+            &m,
+            OrchestratorConfig {
+                workers: 2,
+                high_workers: 3,
+                max_verify_retries: 1,
+                max_depth: 1,
+                max_subtasks: 2,
+            },
+        );
+        let out = o.handle("over-split me").await;
+        assert_eq!(out.worker_results.len(), 2, "capped to max_subtasks");
+        let calls = m.calls.borrow();
+        // 2 capped simple subtasks → 2 fast worker runs (not 4).
+        assert_eq!(count(&calls, Tier::Fast, "worker"), 2);
+    }
+
+    #[tokio::test]
     async fn recursion_is_depth_capped() {
         // max_depth = 1: the top high task decomposes into 2 subtasks, but those
         // subtasks are ALSO classified high — at depth==max_depth they must NOT
@@ -642,6 +716,7 @@ mod tests {
                 high_workers: 3,
                 max_verify_retries: 1,
                 max_depth: 0,
+                max_subtasks: 6,
             },
         );
         let out = o.handle("big risky change").await;
@@ -664,6 +739,7 @@ mod tests {
                 high_workers: 3,
                 max_verify_retries: 1,
                 max_depth: 1,
+                max_subtasks: 6,
             },
         );
         let out = o.handle("tricky change").await;
@@ -685,6 +761,7 @@ mod tests {
                 high_workers: 3,
                 max_verify_retries: 1,
                 max_depth: 1,
+                max_subtasks: 6,
             },
         );
         let out = o.handle("pick best").await;
@@ -716,6 +793,7 @@ mod tests {
                 high_workers: 3,
                 max_verify_retries: 1,
                 max_depth: 1,
+                max_subtasks: 6,
             },
         );
         let out = o.handle("impossible").await;
@@ -729,5 +807,16 @@ mod tests {
         let raw = "SUBTASK: first thing\nnoise line\n  subtask: second\nSUBTASK:   \nSUBTASK: third";
         let got = parse_subtasks(raw);
         assert_eq!(got, vec!["first thing", "second", "third"]);
+    }
+
+    #[tokio::test]
+    async fn parse_subtasks_falls_back_to_lists() {
+        // No SUBTASK: prefix → numbered/bulleted lines are used instead.
+        assert_eq!(
+            parse_subtasks("1. alpha\n2) beta\n- gamma\n* delta"),
+            vec!["alpha", "beta", "gamma", "delta"]
+        );
+        // Explicit SUBTASK: prefixes take priority (no list fallback then).
+        assert_eq!(parse_subtasks("SUBTASK: x\n1. y"), vec!["x"]);
     }
 }
