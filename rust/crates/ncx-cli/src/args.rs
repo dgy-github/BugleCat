@@ -31,6 +31,8 @@ OPTIONS:
                             Max chars for compressed old tool results.
         --disable-context-edit
                             Send full history without runtime context editing.
+        --image <PATH>      Attach an image to the prompt (repeatable). Routes the
+                            turn to the configured vision model. One-shot only.
     -r, --resume            Resume the workspace session log before starting.
         --history           List recent saved sessions, then exit.
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
@@ -53,6 +55,8 @@ pub struct Args {
     pub context_edit_keep_recent_messages: Option<i64>,
     pub context_edit_max_tool_result_chars: Option<i64>,
     pub disable_context_edit: bool,
+    /// Image files to attach to the one-shot prompt (multimodal / vision turn).
+    pub images: Vec<PathBuf>,
     pub resume: bool,
     pub history: bool,
     pub orchestrate: bool,
@@ -88,6 +92,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-w" | "--workspace" => {
                 args.workspace = Some(PathBuf::from(take_value(argv, &mut i, a)?));
             }
+            "--image" => args.images.push(PathBuf::from(take_value(argv, &mut i, a)?)),
             "-m" | "--model" => args.model = Some(take_value(argv, &mut i, a)?),
             "-p" | "--profile" => args.profile = Some(take_value(argv, &mut i, a)?),
             "-s" | "--sandbox" => args.sandbox = Some(take_value(argv, &mut i, a)?),

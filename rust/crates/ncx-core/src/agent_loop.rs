@@ -157,6 +157,13 @@ impl AgentLoop {
         self
     }
 
+    /// Route turns that carry an image block to a dedicated vision provider.
+    /// When `None`, image turns stay on the main provider (no special routing).
+    pub fn with_vision_provider(mut self, provider: Option<Box<dyn Provider>>) -> Self {
+        self.vision_provider = provider;
+        self
+    }
+
     /// Install a sink that receives [`LoopEvent`]s during every turn (the GUI
     /// bridge forwards them to the frontend). Replaces any previous sink.
     pub fn set_event_sink(&mut self, sink: EventSink) {
@@ -166,6 +173,9 @@ impl AgentLoop {
     fn active_provider(&self) -> &dyn Provider {
         if self.use_vision_this_turn {
             if let Some(v) = &self.vision_provider {
+                if trace_on() {
+                    eprintln!("[ncx-trace] routing image turn -> vision provider");
+                }
                 return v.as_ref();
             }
         }
