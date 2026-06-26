@@ -31,6 +31,8 @@ OPTIONS:
                             Max chars for compressed old tool results.
         --disable-context-edit
                             Send full history without runtime context editing.
+    -r, --resume            Resume the workspace session log before starting.
+        --history           List recent saved sessions, then exit.
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
                             (classify → plan → parallel workers → verify). One-shot only.
         --memory-merge      Maintenance: LLM-fold near-duplicate project memory notes, then exit.
@@ -51,6 +53,8 @@ pub struct Args {
     pub context_edit_keep_recent_messages: Option<i64>,
     pub context_edit_max_tool_result_chars: Option<i64>,
     pub disable_context_edit: bool,
+    pub resume: bool,
+    pub history: bool,
     pub orchestrate: bool,
     pub memory_merge: bool,
     pub help: bool,
@@ -77,6 +81,8 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-h" | "--help" => args.help = true,
             "-V" | "--version" => args.version = true,
             "-o" | "--orchestrate" => args.orchestrate = true,
+            "-r" | "--resume" => args.resume = true,
+            "--history" => args.history = true,
             "--memory-merge" => args.memory_merge = true,
             "--disable-context-edit" => args.disable_context_edit = true,
             "-w" | "--workspace" => {
@@ -197,6 +203,13 @@ mod tests {
         assert!(args(&["--max-tool-calls", "abc"]).is_err());
         let a = args(&["--disable-context-edit"]).unwrap();
         assert!(a.disable_context_edit);
+    }
+
+    #[test]
+    fn resume_and_history_flags() {
+        let a = args(&["--resume", "--history"]).unwrap();
+        assert!(a.resume);
+        assert!(a.history);
     }
 
     #[test]

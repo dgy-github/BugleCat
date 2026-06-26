@@ -221,6 +221,8 @@ Rust CLI，当前 release 线：
 cd rust
 cargo run -p ncx-cli -- "summarize this repository"
 cargo run -p ncx-cli
+cargo run -p ncx-cli -- --resume
+cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
 ```
 
@@ -415,7 +417,10 @@ Look for behavior regressions first, then missing tests, then maintainability.
   供 GUI 的历史列表使用。
 - 一个**单会话快照**（`~/.nanocodex/snapshots/<id>.json`）冻结完整对话，所以详情
   视图回放的是真实对话，而非摘要。
-- `--resume` 续接之前的会话；GUI 可以**分叉（fork）**一个会话来分支历史。
+- Rust CLI 支持 `--resume`，启动前读回工作区 `.nanocodex/session.jsonl`；
+  也支持 `--history` 列出最近的全局会话摘要。Tauri 后端每轮 GUI 对话结束后会记录
+  同一套 snapshot。
+- 原 Python GUI 可以从保存的 snapshot **分叉（fork）**一条历史会话，且不会修改源会话。
 
 ## 上下文压缩
 

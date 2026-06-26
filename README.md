@@ -262,6 +262,8 @@ Rust CLI, current release line:
 cd rust
 cargo run -p ncx-cli -- "summarize this repository"
 cargo run -p ncx-cli
+cargo run -p ncx-cli -- --resume
+cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
 ```
 
@@ -475,8 +477,12 @@ is project-scoped guidance.
   conversation, newest-first, for the GUI's history list.
 - A **per-session snapshot** (`~/.nanocodex/snapshots/<id>.json`) freezes the
   full transcript so the detail view replays the real conversation, not a digest.
-- `--resume` continues a prior session; the GUI can **fork** a session to branch
-  the history.
+- The Rust CLI supports `--resume` to reload the workspace
+  `.nanocodex/session.jsonl` before starting and `--history` to list recent
+  global session summaries. The Tauri backend records the same snapshots after
+  each GUI turn.
+- The original Python GUI can **fork** a saved snapshot to branch a past
+  conversation without mutating the source session.
 
 ## Context Compaction
 

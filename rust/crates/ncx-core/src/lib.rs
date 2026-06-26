@@ -17,6 +17,7 @@ pub mod mentions;
 pub mod orchestrator;
 pub mod search;
 pub mod session;
+pub mod session_index;
 pub mod slash;
 pub mod tools;
 
@@ -28,5 +29,6 @@ pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
 pub use session::{ContextEditPolicy, ContextEditStats, Session};
+pub use session_index::{new_session_id, SessionIndex, SessionSummary};
 pub use slash::{parse_slash, split_loop_arg, SLASH_HELP};
 pub use tools::{ApprovalHandler, ApprovalRequest, Tool, ToolContext, ToolRegistry};

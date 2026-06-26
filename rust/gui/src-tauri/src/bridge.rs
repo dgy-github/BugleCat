@@ -23,8 +23,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
-    expand_file_mentions, AgentLoop, ApprovalHandler, ApprovalRequest, ContextEditPolicy,
-    LoopEvent, MemoryStore, Session, TaskBudget, ToolContext, ToolRegistry,
+    expand_file_mentions, new_session_id, AgentLoop, ApprovalHandler, ApprovalRequest,
+    ContextEditPolicy, LoopEvent, MemoryStore, Session, SessionIndex, TaskBudget, ToolContext,
+    ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -150,7 +151,9 @@ impl ApprovalHandler for GuiApprover {
 }
 
 /// Build the agent loop and its workspace from the resolved config.
-fn build_agent(approver: Rc<dyn ApprovalHandler>) -> Result<(AgentLoop, PathBuf), String> {
+fn build_agent(
+    approver: Rc<dyn ApprovalHandler>,
+) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
     let workspace = std::env::current_dir().ok();
     let overrides = Overrides {
         workspace,
@@ -183,11 +186,19 @@ fn build_agent(approver: Rc<dyn ApprovalHandler>) -> Result<(AgentLoop, PathBuf)
         .with_hooks(cfg.hooks.clone())
         .with_approver(approver);
     let tools = ToolRegistry::new(ctx);
-    let session = Session::new(system_prompt);
+    let log_path = cfg.workspace.join(".nanocodex").join("session.jsonl");
+    let session_id = new_session_id();
+    let session = Session::with_log(system_prompt, Some(log_path.clone()));
     let agent = AgentLoop::new(Box::new(provider), tools, session)
         .with_task_budget(task_budget_from_config(&cfg))
         .with_context_edit(context_edit_from_config(&cfg));
-    Ok((agent, cfg.workspace.clone()))
+    Ok((
+        agent,
+        cfg.workspace.clone(),
+        session_id,
+        log_path,
+        SessionIndex::default(),
+    ))
 }
 
 fn positive_usize(value: i64, fallback: usize) -> usize {
@@ -234,13 +245,14 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     pending: pending.clone(),
                     counter: AtomicU64::new(1),
                 });
-                let (mut agent, mut workspace) = match build_agent(approver.clone()) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        emit(&app, UiEvent::Error { message: e });
-                        return;
-                    }
-                };
+                let (mut agent, mut workspace, mut session_id, mut log_path, mut session_index) =
+                    match build_agent(approver.clone()) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            emit(&app, UiEvent::Error { message: e });
+                            return;
+                        }
+                    };
                 agent.set_event_sink(make_sink(app.clone()));
                 emit_ready(&app, &workspace);
 
@@ -249,6 +261,12 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Prompt(text) => {
                             let expanded = expand_file_mentions(&text, &workspace);
                             let result = agent.run_turn(json!(expanded), None).await;
+                            let _ = session_index.record_turn(
+                                &session_id,
+                                &workspace,
+                                &agent.session,
+                                &log_path,
+                            );
                             emit(
                                 &app,
                                 UiEvent::Done {
@@ -258,9 +276,12 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             );
                         }
                         Command::Reload => match build_agent(approver.clone()) {
-                            Ok((a, ws)) => {
+                            Ok((a, ws, sid, lp, idx)) => {
                                 agent = a;
                                 workspace = ws;
+                                session_id = sid;
+                                log_path = lp;
+                                session_index = idx;
                                 agent.set_event_sink(make_sink(app.clone()));
                                 emit_ready(&app, &workspace);
                             }

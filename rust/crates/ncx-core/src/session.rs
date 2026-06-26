@@ -5,6 +5,12 @@
 //! they go straight onto the wire. The system prompt is held separately and
 //! prepended by [`Session::for_model`].
 
+use std::collections::HashSet;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone)]
@@ -44,21 +50,68 @@ pub struct ContextMessages {
 pub struct Session {
     pub system: String,
     pub messages: Vec<Value>,
+    pub log_path: Option<PathBuf>,
+    pub restored_count: usize,
 }
 
 impl Session {
     pub fn new(system: impl Into<String>) -> Self {
+        Self::with_log(system, None)
+    }
+
+    pub fn with_log(system: impl Into<String>, log_path: Option<PathBuf>) -> Self {
+        if let Some(path) = &log_path {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+        }
         Session {
             system: system.into(),
             messages: Vec::new(),
+            log_path,
+            restored_count: 0,
         }
+    }
+
+    pub fn resume(system: impl Into<String>, log_path: Option<PathBuf>) -> Self {
+        let restored = read_log(log_path.as_deref())
+            .into_iter()
+            .filter(|m| role(m) != Some("system"))
+            .collect::<Vec<_>>();
+        let body = sanitize_restored_messages(restored, "[interrupted: tool result not recorded]");
+        let mut session = Self::with_log(system, log_path);
+        session.restored_count = body.len();
+        session.messages = body;
+        session
+    }
+
+    pub fn fork(
+        system: impl Into<String>,
+        seed_messages: Vec<Value>,
+        log_path: Option<PathBuf>,
+    ) -> Self {
+        let body = seed_messages
+            .into_iter()
+            .filter(|m| role(m) != Some("system"))
+            .collect::<Vec<_>>();
+        let body = sanitize_restored_messages(body, "[interrupted: tool result not recorded]");
+        let mut session = Self::with_log(system, log_path);
+        session.restored_count = body.len();
+        session.messages = body;
+        session
+    }
+
+    pub fn full_messages(&self) -> Vec<Value> {
+        let mut out = Vec::with_capacity(self.messages.len() + 1);
+        out.push(json!({"role": "system", "content": self.system}));
+        out.extend(self.messages.clone());
+        out
     }
 
     /// Append a user message. `content` may be a plain string or a multimodal
     /// content array (already a JSON value).
     pub fn add_user(&mut self, content: Value) {
-        self.messages
-            .push(json!({"role": "user", "content": content}));
+        self.append(json!({"role": "user", "content": content}));
     }
 
     pub fn add_user_text(&mut self, text: &str) {
@@ -83,12 +136,12 @@ impl Session {
         if !reasoning.trim().is_empty() {
             msg.insert("reasoning_content".into(), json!(reasoning));
         }
-        self.messages.push(Value::Object(msg));
+        self.append(Value::Object(msg));
     }
 
     /// Append a tool result message answering a specific tool_call id.
     pub fn add_tool_result(&mut self, call_id: &str, name: &str, result: &str) {
-        self.messages.push(json!({
+        self.append(json!({
             "role": "tool",
             "tool_call_id": call_id,
             "name": name,
@@ -211,10 +264,125 @@ impl Session {
             self.add_tool_result(&id, &name, placeholder);
         }
     }
+
+    fn append(&mut self, msg: Value) {
+        self.messages.push(msg.clone());
+        self.append_log(&msg);
+    }
+
+    fn append_log(&self, msg: &Value) {
+        let Some(path) = &self.log_path else {
+            return;
+        };
+        let Some(mut record) = redact_image_data(msg, "[image omitted from log]")
+            .as_object()
+            .cloned()
+        else {
+            return;
+        };
+        record.insert("_ts".into(), json!(now_stamp()));
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+            return;
+        };
+        if let Ok(line) = serde_json::to_string(&Value::Object(record)) {
+            let _ = writeln!(file, "{line}");
+        }
+    }
 }
 
 fn role(msg: &Value) -> Option<&str> {
     msg.get("role").and_then(|v| v.as_str())
+}
+
+fn read_log(path: Option<&Path>) -> Vec<Value> {
+    let Some(path) = path else {
+        return Vec::new();
+    };
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .filter_map(|mut value| {
+            let obj = value.as_object_mut()?;
+            if obj.get("role").and_then(|v| v.as_str()).is_none() {
+                return None;
+            }
+            obj.remove("_ts");
+            Some(value)
+        })
+        .collect()
+}
+
+fn sanitize_restored_messages(messages: Vec<Value>, placeholder: &str) -> Vec<Value> {
+    let mut fulfilled: HashSet<String> = messages
+        .iter()
+        .filter(|m| role(m) == Some("tool"))
+        .filter_map(|m| m.get("tool_call_id").and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .collect();
+    let mut out = Vec::new();
+    for msg in messages {
+        let calls = msg
+            .get("tool_calls")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        out.push(msg);
+        for tc in calls {
+            let Some(id) = tc.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if fulfilled.contains(id) {
+                continue;
+            }
+            let name = tc
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("tool");
+            out.push(json!({
+                "role": "tool",
+                "tool_call_id": id,
+                "name": name,
+                "content": placeholder,
+            }));
+            fulfilled.insert(id.to_string());
+        }
+    }
+    out
+}
+
+pub(crate) fn redact_image_data(msg: &Value, placeholder: &str) -> Value {
+    let mut out = msg.clone();
+    let Some(obj) = out.as_object_mut() else {
+        return out;
+    };
+    let Some(content) = obj.get_mut("content").and_then(|v| v.as_array_mut()) else {
+        return out;
+    };
+    for block in content {
+        let is_data_image = block.get("type").and_then(|v| v.as_str()) == Some("image_url")
+            && block
+                .get("image_url")
+                .and_then(|v| v.get("url"))
+                .and_then(|v| v.as_str())
+                .is_some_and(|url| url.starts_with("data:"));
+        if is_data_image {
+            *block = json!({"type": "text", "text": placeholder});
+        }
+    }
+    out
+}
+
+fn now_stamp() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| format!("{:013}", d.as_millis()))
+        .unwrap_or_else(|_| "0000000000000".into())
 }
 
 fn json_chars(v: &Value) -> usize {
@@ -348,5 +516,88 @@ mod tests {
         assert!(out.stats.dropped_messages > 0);
         assert!(out.stats.edited_chars < out.stats.original_chars);
         assert_eq!(out.messages[0]["role"], "system");
+    }
+
+    #[test]
+    fn logs_messages_as_jsonl_and_resumes_body() {
+        let dir = std::env::temp_dir().join(format!("ncx_session_log_{}", now_stamp()));
+        let path = dir.join("session.jsonl");
+        let mut s = Session::with_log("sys", Some(path.clone()));
+        s.add_user_text("hello");
+        s.add_assistant("hi", None, "");
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("\"role\":\"user\""));
+        assert!(log.contains("\"_ts\""));
+
+        let resumed = Session::resume("fresh sys", Some(path));
+        assert_eq!(resumed.system, "fresh sys");
+        assert_eq!(resumed.restored_count, 2);
+        assert_eq!(resumed.messages[0]["role"], "user");
+        assert_eq!(resumed.messages[1]["content"], "hi");
+    }
+
+    #[test]
+    fn resume_backfills_dangling_tool_call() {
+        let dir = std::env::temp_dir().join(format!("ncx_session_resume_{}", now_stamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"role":"system","content":"old sys"}"#,
+                "\n",
+                r#"{"role":"assistant","content":"","tool_calls":[{"id":"call_1","function":{"name":"shell"}}]}"#,
+            ),
+        )
+        .unwrap();
+
+        let resumed = Session::resume("sys", Some(path));
+        assert_eq!(resumed.messages.len(), 2);
+        assert_eq!(resumed.messages[1]["role"], "tool");
+        assert_eq!(resumed.messages[1]["tool_call_id"], "call_1");
+        assert!(resumed.messages[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("interrupted"));
+    }
+
+    #[test]
+    fn log_redacts_inline_image_data() {
+        let dir = std::env::temp_dir().join(format!("ncx_session_image_{}", now_stamp()));
+        let path = dir.join("session.jsonl");
+        let mut s = Session::with_log("sys", Some(path.clone()));
+        s.add_user(json!([
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        ]));
+
+        let log = std::fs::read_to_string(path).unwrap();
+        assert!(log.contains("[image omitted from log]"));
+        assert!(!log.contains("data:image"));
+    }
+
+    #[test]
+    fn fork_uses_seed_without_touching_source_log() {
+        let dir = std::env::temp_dir().join(format!("ncx_session_fork_{}", now_stamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.jsonl");
+        std::fs::write(&source, "{\"role\":\"user\",\"content\":\"original\"}\n").unwrap();
+        let before = std::fs::read_to_string(&source).unwrap();
+        let fork_log = dir.join("fork.jsonl");
+
+        let mut forked = Session::fork(
+            "fresh",
+            vec![
+                json!({"role": "system", "content": "old"}),
+                json!({"role": "user", "content": "original"}),
+            ],
+            Some(fork_log.clone()),
+        );
+        forked.add_user_text("new");
+
+        assert_eq!(std::fs::read_to_string(source).unwrap(), before);
+        assert!(std::fs::read_to_string(fork_log).unwrap().contains("new"));
+        assert_eq!(forked.restored_count, 1);
     }
 }

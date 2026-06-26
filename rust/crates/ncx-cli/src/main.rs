@@ -11,14 +11,16 @@ mod args;
 mod runner;
 
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use ncx_config::{load_config, Config, Overrides};
 use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    expand_file_mentions, AgentLoop, ContextEditPolicy, MemoryStore, Orchestrator,
-    OrchestratorConfig, Session, TaskBudget, ToolContext, ToolRegistry,
+    expand_file_mentions, new_session_id, AgentLoop, ContextEditPolicy, MemoryStore, Orchestrator,
+    OrchestratorConfig, Session, SessionIndex, SessionSummary, TaskBudget, ToolContext,
+    ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -92,6 +94,10 @@ async fn run(args: Args) -> i32 {
             return 1;
         }
     };
+    if args.history {
+        println!("{}", render_history(&SessionIndex::default().entries(), 20));
+        return 0;
+    }
     if let Err(e) = cfg.validate() {
         eprintln!("ncx: {e}");
         return 1;
@@ -142,10 +148,26 @@ async fn run(args: Args) -> i32 {
         .with_memory(memory)
         .with_hooks(cfg.hooks.clone());
     let tools = ToolRegistry::new(ctx);
-    let session = Session::new(system_prompt);
+    let log_path = session_log_path(&cfg.workspace);
+    let session_id = new_session_id();
+    let session = if args.resume {
+        Session::resume(system_prompt, Some(log_path.clone()))
+    } else {
+        Session::with_log(system_prompt, Some(log_path.clone()))
+    };
+    let restored_count = session.restored_count;
     let mut agent = AgentLoop::new(Box::new(provider), tools, session)
         .with_task_budget(task_budget_from_config(&cfg))
         .with_context_edit(context_edit_from_config(&cfg));
+    let mut recorder = SessionRecorder::new(session_id, cfg.workspace.clone(), log_path);
+
+    if args.resume {
+        if restored_count > 0 {
+            eprintln!("resumed {restored_count} message(s) from the workspace session log.");
+        } else {
+            eprintln!("no previous workspace session log found; starting fresh.");
+        }
+    }
 
     // One-shot mode: run the prompt and exit.
     if let Some(prompt) = &args.prompt {
@@ -154,11 +176,12 @@ async fn run(args: Args) -> i32 {
             return run_orchestrated(cfg, &expanded).await;
         }
         let result = agent.run_turn(json!(expanded), None).await;
+        recorder.record(&agent.session);
         println!("{}", result.final_text);
         return if result.stop_reason == "error" { 1 } else { 0 };
     }
 
-    repl(&mut agent, &cfg).await;
+    repl(&mut agent, &cfg, &mut recorder).await;
     0
 }
 
@@ -195,7 +218,7 @@ async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
 
 /// Interactive REPL. Slash commands are dispatched without a model call; any
 /// other line becomes a turn (with `@file` mention expansion).
-async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config) {
+async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut SessionRecorder) {
     println!(
         "nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit.",
         cfg.model, cfg.sandbox_mode
@@ -224,14 +247,20 @@ async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config) {
             continue;
         }
 
-        run_one_turn(agent, line, cfg).await;
+        run_one_turn(agent, line, cfg, recorder).await;
     }
     println!("bye.");
 }
 
-async fn run_one_turn(agent: &mut AgentLoop, prompt: &str, cfg: &ncx_config::Config) {
+async fn run_one_turn(
+    agent: &mut AgentLoop,
+    prompt: &str,
+    cfg: &ncx_config::Config,
+    recorder: &mut SessionRecorder,
+) {
     let expanded = expand_file_mentions(prompt, &cfg.workspace);
     let result = agent.run_turn(json!(expanded), None).await;
+    recorder.record(&agent.session);
     println!("{}", result.final_text);
 }
 
@@ -252,6 +281,7 @@ fn dispatch_slash(
         "/exit" => SlashOutcome::Exit,
         "/help" => SlashOutcome::Printed(render_help()),
         "/status" => SlashOutcome::Printed(render_status(cfg)),
+        "/history" => SlashOutcome::Printed(render_history(&SessionIndex::default().entries(), 20)),
         "/model" => {
             if arg.is_empty() {
                 SlashOutcome::Printed(format!("model: {}", cfg.model))
@@ -312,6 +342,58 @@ fn render_status(cfg: &ncx_config::Config) -> String {
     )
 }
 
+struct SessionRecorder {
+    index: SessionIndex,
+    session_id: String,
+    workspace: PathBuf,
+    log_path: PathBuf,
+}
+
+impl SessionRecorder {
+    fn new(session_id: String, workspace: PathBuf, log_path: PathBuf) -> Self {
+        SessionRecorder {
+            index: SessionIndex::default(),
+            session_id,
+            workspace,
+            log_path,
+        }
+    }
+
+    fn record(&mut self, session: &Session) {
+        let _ = self
+            .index
+            .record_turn(&self.session_id, &self.workspace, session, &self.log_path);
+    }
+}
+
+fn session_log_path(workspace: &Path) -> PathBuf {
+    workspace.join(".nanocodex").join("session.jsonl")
+}
+
+fn render_history(entries: &[SessionSummary], limit: usize) -> String {
+    if entries.is_empty() {
+        return "No saved sessions.".into();
+    }
+    let mut out = String::from("Saved sessions:");
+    for summary in entries.iter().take(limit) {
+        let title = if summary.title.trim().is_empty() {
+            "(no prompt yet)"
+        } else {
+            summary.title.as_str()
+        };
+        out.push_str(&format!(
+            "\n  {}  {}  {}  users={} assistants={} tools={}",
+            summary.updated_at,
+            summary.session_id,
+            title,
+            summary.user_messages,
+            summary.assistant_messages,
+            summary.tool_calls
+        ));
+    }
+    out
+}
+
 fn positive_usize(value: i64, fallback: usize) -> usize {
     usize::try_from(value)
         .ok()
@@ -360,5 +442,27 @@ mod tests {
         let status = render_status(&cfg);
         assert!(status.contains("****1234"));
         assert!(!status.contains("secret"));
+    }
+
+    #[test]
+    fn history_renders_saved_sessions() {
+        let rows = vec![SessionSummary {
+            session_id: "sid".into(),
+            workspace: "/p".into(),
+            title: "fix bug".into(),
+            snippet: "done".into(),
+            user_messages: 1,
+            assistant_messages: 2,
+            tool_calls: 3,
+            recent_tools: vec!["read_file".into()],
+            created_at: "2026-06-01T09:00:00".into(),
+            updated_at: "2026-06-01T10:00:00".into(),
+            log_path: "/p/.nanocodex/session.jsonl".into(),
+            has_snapshot: true,
+        }];
+        let out = render_history(&rows, 10);
+        assert!(out.contains("sid"));
+        assert!(out.contains("fix bug"));
+        assert!(out.contains("tools=3"));
     }
 }
