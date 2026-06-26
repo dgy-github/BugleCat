@@ -1,0 +1,11 @@
+Create lru.py in the current directory with a class LRUCache implementing a
+least-recently-used cache:
+
+  LRUCache(capacity)   capacity is a positive int
+  get(key)             return the value, or -1 if the key is absent.
+                       A successful get marks the key as most-recently used.
+  put(key, value)      insert/update. If at capacity and inserting a NEW key,
+                       evict the least-recently-used key first. Updating an
+                       existing key refreshes its value and recency.
+
+All operations should be O(1) average. Create the file with your file-editing tool.

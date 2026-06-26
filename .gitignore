@@ -40,3 +40,6 @@ releases/*
 Thumbs.db
 .idea/
 *.swp
+
+# bench-generated reports
+bench/reports/

@@ -1,0 +1,12 @@
+Create wordfreq.py in the current directory with a function:
+
+  top_n(text, n) -> a list of (word, count) tuples for the n most frequent words.
+
+Rules:
+  - Words are maximal runs of alphanumeric characters; everything else is a
+    separator. Matching is case-insensitive and words are returned lowercased.
+  - Sort by count descending; break ties alphabetically (ascending).
+  - Return at most n tuples. If n <= 0 or there are no words, return [].
+
+Example: top_n("The cat the CAT a dog.", 2) == [("cat", 2), ("the", 2)]
+Create the file with your file-editing tool.

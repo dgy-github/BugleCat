@@ -1,0 +1,3 @@
+The file buggy.py has a median(nums) function that is wrong for even-length lists.
+Fix it in place so that median([1,2,3,4]) == 2.5 and median([1,2,3]) == 2.
+Edit the existing file.

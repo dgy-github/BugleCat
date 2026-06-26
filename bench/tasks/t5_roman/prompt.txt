@@ -1,0 +1,7 @@
+Create a Python file named roman.py in the current directory with two functions:
+  to_roman(n)   -> the Roman numeral string for an integer 1 <= n <= 3999 (uppercase)
+  from_roman(s) -> the integer value of a valid Roman numeral string
+
+They must round-trip: from_roman(to_roman(n)) == n for every n in 1..3999.
+Use standard subtractive notation (e.g. 4 = "IV", 9 = "IX", 40 = "XL", 1994 = "MCMXCIV").
+Create the file with your file-editing tool.

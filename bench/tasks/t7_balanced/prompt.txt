@@ -1,0 +1,12 @@
+The file buggy.py has an is_balanced(s) function that is supposed to return True
+only when every (), [], and {} in the string s is correctly matched AND properly
+nested (e.g. "([])" is balanced, "([)]" is not). It is currently broken.
+
+Fix it in place so that:
+  is_balanced("([]{})")  == True
+  is_balanced("([)]")    == False
+  is_balanced("(((")     == False
+  is_balanced(")(")      == False
+  is_balanced("a(b)c")   == True   (ignore non-bracket characters)
+
+Edit the existing file.

@@ -1,0 +1,3 @@
+Create stack.py with a class Stack implementing a LIFO stack:
+  push(x), pop() (raise IndexError when empty), peek() (top without removing),
+  is_empty() -> bool, size() -> int.

@@ -1,0 +1,4 @@
+Create a Python file named mathutils.py in the current directory with two functions:
+  add(a, b) -> returns a + b
+  is_prime(n) -> returns True if n is a prime number (n >= 2), else False
+Create the file with your file-editing tool.
