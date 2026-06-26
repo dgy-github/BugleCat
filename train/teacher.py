@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -138,6 +139,9 @@ class ApiBackend(TeacherBackend):
     def __init__(self):
         self.base_url, self.api_key, self.model = self._resolve()
 
+    # Print the last error so a silently-failing floor teacher is debuggable.
+    last_error: str = ""
+
     @staticmethod
     def _resolve() -> tuple[str, str, str]:
         cfg = HOME / ".nanocodex" / "config.toml"
@@ -145,7 +149,9 @@ class ApiBackend(TeacherBackend):
             d = tomllib.loads(cfg.read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError):
             d = {}
-        key = d.get("api_key") or d.get("ark_api_key") or os.environ.get("DEEPSEEK_API_KEY", "")
+        # Prefer the env key the running ncx already uses; fall back to config.
+        key = (os.environ.get("DEEPSEEK_API_KEY")
+               or d.get("api_key") or d.get("ark_api_key") or "")
         return (str(d.get("base_url", "")).rstrip("/"), str(key), str(d.get("model", "")))
 
     def available(self) -> bool:
@@ -165,8 +171,11 @@ class ApiBackend(TeacherBackend):
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 d = json.loads(resp.read())
             return d["choices"][0]["message"]["content"]
-        except Exception:  # noqa: BLE001  (network/parse — treat as unavailable this round)
-            return None
+        except urllib.error.HTTPError as e:
+            self.last_error = f"HTTP {e.code}: {e.read()[:200]!r}"
+        except Exception as e:  # noqa: BLE001
+            self.last_error = f"{type(e).__name__}: {e}"
+        return None
 
 
 def build_panel(verbose: bool = True) -> list[TeacherBackend]:
