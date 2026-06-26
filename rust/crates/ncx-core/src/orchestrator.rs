@@ -54,6 +54,15 @@ pub enum Complexity {
 pub trait AgentRunner {
     async fn run(&self, tier: Tier, system: &str, task: &str) -> String;
 
+    /// Run a tool-less *reasoning* turn — classify / plan / decompose / verify.
+    /// These nodes judge or plan; they must NOT execute the task. The default
+    /// delegates to [`Self::run`] (fine for mock / read-only runners); the live
+    /// runner overrides it to attach NO tools, so a capable model can't start
+    /// implementing the task during e.g. classification.
+    async fn reason(&self, tier: Tier, system: &str, task: &str) -> String {
+        self.run(tier, system, task).await
+    }
+
     /// Run a parallel worker (always [`Tier::Fast`]). `idx`/`n` let the runner
     /// isolate workers so concurrent writes don't collide (worker 0 is the
     /// primary; others may run against a throwaway workspace copy). The default
@@ -182,7 +191,7 @@ impl<'a> Orchestrator<'a> {
     }
 
     async fn classify(&self, task: &str) -> Complexity {
-        let out = self.runner.run(Tier::Fast, CLASSIFY_SYS, task).await;
+        let out = self.runner.reason(Tier::Fast, CLASSIFY_SYS, task).await;
         parse_complexity(&out)
     }
 
@@ -195,7 +204,7 @@ impl<'a> Orchestrator<'a> {
         verify_tier: Tier,
         n_workers: usize,
     ) -> OrchestratorOutcome {
-        let plan = self.runner.run(Tier::Main, PLAN_SYS, task).await;
+        let plan = self.runner.reason(Tier::Main, PLAN_SYS, task).await;
         self.run_attempts(task, &plan, complexity, verify_tier, n_workers)
             .await
     }
@@ -229,7 +238,7 @@ impl<'a> Orchestrator<'a> {
 
             let verdict = self
                 .runner
-                .run(
+                .reason(
                     verify_tier,
                     VERIFY_SYS,
                     &build_verify_task(task, plan, &worker_results),
@@ -264,10 +273,10 @@ impl<'a> Orchestrator<'a> {
     /// they build on each other — then a single main-tier verify over the whole.
     /// An atomic decomposition (<2 subtasks) falls back to one best-of-N attempt.
     async fn decompose_and_recurse(&self, task: &str, depth: usize) -> OrchestratorOutcome {
-        let plan = self.runner.run(Tier::Main, PLAN_SYS, task).await;
+        let plan = self.runner.reason(Tier::Main, PLAN_SYS, task).await;
         let raw = self
             .runner
-            .run(Tier::Main, DECOMPOSE_SYS, &build_decompose_task(task, &plan))
+            .reason(Tier::Main, DECOMPOSE_SYS, &build_decompose_task(task, &plan))
             .await;
         let subtasks = parse_subtasks(&raw);
         orch_trace(&format!(
@@ -304,7 +313,7 @@ impl<'a> Orchestrator<'a> {
 
         let verdict = self
             .runner
-            .run(
+            .reason(
                 Tier::Main,
                 VERIFY_SYS,
                 &build_verify_task(task, &plan, &sub_results),

@@ -60,7 +60,18 @@ impl LiveRunner {
 
     /// Run one node in a specific `workspace` (defaults to the real one in
     /// [`AgentRunner::run`]; an isolated copy for non-primary workers).
-    async fn run_in(&self, workspace: &Path, tier: Tier, system: &str, task: &str) -> String {
+    ///
+    /// `with_tools = false` builds a tool-less agent for reasoning nodes
+    /// (classify/plan/decompose/verify) so the model can't start executing the
+    /// task — it has no tools to call and must answer directly.
+    async fn run_in(
+        &self,
+        workspace: &Path,
+        tier: Tier,
+        system: &str,
+        task: &str,
+        with_tools: bool,
+    ) -> String {
         let provider = DeepSeekProvider::with_opts(
             self.cfg.api_key.clone(),
             &self.cfg.base_url,
@@ -81,7 +92,11 @@ impl LiveRunner {
             .with_hooks(self.cfg.hooks.clone())
             .with_skills(discover_skills(workspace));
         let skills_index = skills_index_block(&discover_skills(workspace));
-        let tools = ToolRegistry::new(ctx);
+        let tools = if with_tools {
+            ToolRegistry::new(ctx)
+        } else {
+            ToolRegistry::empty(ctx)
+        };
         let recall = self.memory.recall(task, 6, 3000);
         let instructions = load_project_instructions(workspace, 16_000);
         let system = compose_system_prompt(system, &[instructions, recall, skills_index]);
@@ -104,7 +119,14 @@ impl LiveRunner {
 impl AgentRunner for LiveRunner {
     async fn run(&self, tier: Tier, system: &str, task: &str) -> String {
         let ws = self.cfg.workspace.clone();
-        self.run_in(&ws, tier, system, task).await
+        self.run_in(&ws, tier, system, task, true).await
+    }
+
+    async fn reason(&self, tier: Tier, system: &str, task: &str) -> String {
+        // Tool-less: classify/plan/decompose/verify reason over the task text,
+        // they don't touch the workspace.
+        let ws = self.cfg.workspace.clone();
+        self.run_in(&ws, tier, system, task, false).await
     }
 
     async fn run_worker(&self, idx: usize, _n: usize, system: &str, task: &str) -> String {
@@ -126,7 +148,7 @@ impl AgentRunner for LiveRunner {
                 }
             }
         };
-        self.run_in(&ws, Tier::Fast, system, task).await
+        self.run_in(&ws, Tier::Fast, system, task, true).await
     }
 
     async fn promote_worker(&self, idx: usize) {
