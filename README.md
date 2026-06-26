@@ -18,70 +18,106 @@ ships with MCP integration, a skills system, a sandbox/approval state machine,
 context compaction, token-cost accounting, a Windows GUI, a scheduler, and
 git-worktree A/B comparison.
 
-The project has two clear stages:
+The project has two clear stages. The important shift is not just "same
+features in another language"; it is an architectural split and a release
+performance upgrade.
 
 ## Project Phases
 
 ### Stage 1: Python Baseline
 
 The Python implementation under `nanocodex/` is the original feature-complete
-agent line. It established the product surface and proved the workflows before
-the rewrite:
+agent line. It was optimized for fast product exploration: prove the agent
+loop, tool UX, approval model, and desktop workflows before locking the system
+into a stricter runtime.
 
-- **Agent loop:** streaming chat-completions, multi-round tool calls,
-  cancellation, session logs, resume, and fork.
-- **Tool system:** shell, apply_patch, update_plan, read_file, web_search,
-  scheduler, skills, memory, MCP tools, and marketplace management.
-- **Safety layer:** sandbox modes, approval policies, writable-root checks,
-  and Windows policy-level enforcement at the tool boundary.
-- **Context features:** AGENTS.md layering, persistent user memory, skills,
-  deterministic/model compaction, token usage, and cost accounting.
-- **Desktop workflows:** Tkinter GUI with settings, history, file panel, image
-  input, prompt enhancement, scheduler controls, and A/B worktree comparison.
-- **Quality bar:** 420 offline tests with mocked providers, no real key, and
-  no network dependency.
+**Architecture**
+
+- A Python package centered on a compact async agent loop: model call -> tool
+  execution -> session update -> next model call.
+- Tooling, provider, sandbox, MCP, skills, memory, scheduler, compaction, and
+  GUI modules are easy to extend independently while the product surface is
+  still changing.
+- Runtime contracts are intentionally dynamic, which made it cheap to add
+  features such as MCP marketplace entries, prompt enhancement, image input,
+  session resume/fork, and A/B worktree comparison.
+- The Windows GUI uses Tkinter, keeping the first desktop version dependency
+  light and simple to debug.
+
+**Performance and delivery profile**
+
+- Best for iteration speed: no compile step, quick experiments, and a large
+  offline test suite around mocked providers.
+- 420 offline tests validate behavior without API keys or network calls.
+- Runtime delivery still depends on a Python install, package environment, and
+  import-time startup cost; desktop distribution is therefore less clean than a
+  native binary.
+- Dynamic boundaries are productive during exploration, but become harder to
+  reason about as sandboxing, tool execution, memory, MCP, and parallel agent
+  flows grow.
 
 ### Stage 2: Rust Rewrite
 
 The Rust implementation under `rust/` is the current release line. It keeps the
 Python tree intact while rebuilding the core as small crates plus a Tauri
-desktop shell:
+desktop shell. The rewrite keeps the proven Python feature map, but changes the
+internal shape so the project can ship as a smaller, faster, more predictable
+tool.
 
-- **Workspace:** crates for sandboxing, config, provider, tools, core
-  orchestration, and the `ncx` CLI.
-- **CLI:** one-shot prompts, interactive REPL, slash commands, project memory
-  recall, and tiered flash/pro orchestration.
-- **GUI:** `rust/gui/` is a Tauri v2 + Svelte 5 desktop app for chat,
-  approval, settings, and release bundling.
-- **Tools:** `read_file`, `apply_patch`, `shell`, `update_plan`, `grep`,
-  `glob`, `web_search`, and `remember`.
-- **Capability layer:** task classification, main/fast model routing,
-  isolated parallel workers, verifier selection, and promotion of the winning
+**Architecture**
+
+- The workspace is split by responsibility: `ncx-sandbox`, `ncx-config`,
+  `ncx-provider`, `ncx-tools`, `ncx-core`, and `ncx-cli`.
+- Core contracts are typed: provider responses, tool calls, sandbox decisions,
+  session messages, memory entries, and orchestrator results cross crate
+  boundaries explicitly.
+- Tool execution is centralized behind `ToolContext` and `ToolRegistry`, so
+  sandbox policy, approval policy, timeouts, search, and memory are attached at
+  the boundary where actions actually happen.
+- The orchestration layer adds task classification, main/fast model routing,
+  isolated worker workspaces, verifier selection, and promotion of the winning
   worker back into the real workspace.
-- **Memory:** project notes live in `.ncx/memory/LEARNINGS.md`; startup uses a
-  cheap heuristic consolidate, while `ncx --memory-merge` performs an explicit
-  LLM-backed near-duplicate fold with fallback to the newest note.
-- **Search:** Tavily is used when a key is configured, otherwise DuckDuckGo is
-  used as the fallback.
-- **Quality bar:** 174 offline Rust tests, verified on
-  `x86_64-pc-windows-gnu`.
+- Project memory is local to `.ncx/memory/LEARNINGS.md`; startup uses cheap
+  heuristic deduplication, while `ncx --memory-merge` runs the more expensive
+  LLM-backed consolidation only as an explicit maintenance command.
+- The desktop line moves to Tauri v2 + Svelte 5, separating the native backend
+  from the UI surface and preparing a smaller release bundle than the Python GUI
+  path.
+
+**Performance and delivery profile**
+
+- The CLI builds to a native `ncx.exe`, so users do not need Python, virtual
+  environments, or editable installs.
+- Release builds use strip, LTO, size optimization, and a Windows GNU target;
+  the current CLI zip is under 2 MB while still including README, license, and
+  config example files.
+- Startup avoids Python interpreter/import overhead and is suitable for short
+  one-shot commands as well as interactive REPL use.
+- Typed ownership makes parallel worker isolation and result promotion easier
+  to reason about without shared mutable state leaks.
+- 174 offline Rust tests cover the current crate boundary, including memory
+  consolidation, provider request/response parsing, sandbox policy, tools, and
+  orchestration.
 
 ### Why Rust For Stage 2
 
-Rust was chosen for the rewrite because the project had moved from a prototype
-to a distributable desktop tool:
+Rust was chosen because the second stage is about productizing the agent, not
+only adding more features:
 
-- **Single-binary distribution:** ship `ncx.exe` without requiring users to set
-  up Python, virtual environments, or editable installs.
-- **Startup and footprint:** the Rust CLI starts in milliseconds and produces a
-  compact Windows release package.
-- **Stronger boundaries:** ownership and typed module contracts make the
-  sandbox, tool execution, provider responses, and session state harder to
-  accidentally blur.
-- **Safer parallelism:** isolated worker copies, verifier selection, and
-  promotion are easier to reason about with explicit data ownership.
-- **Desktop packaging:** Tauri gives a smaller native desktop path than the
-  earlier Python/Tkinter line while preserving a web-style UI stack.
+- **Architecture hardening:** the sandbox, approval engine, provider adapter,
+  tool registry, memory store, and orchestrator now have explicit typed
+  contracts instead of relying on Python's dynamic object boundaries.
+- **Predictable action boundary:** file, shell, search, and memory operations
+  all pass through one tool context, which keeps approval and sandbox checks
+  close to execution.
+- **Parallel orchestration:** isolated worker copies, verifier selection, and
+  result promotion are safer when ownership is explicit and data movement is
+  visible in the type system.
+- **Native release performance:** a small `ncx.exe` starts without interpreter
+  setup, making one-shot CLI tasks feel immediate and making distribution much
+  easier for Windows users.
+- **Desktop packaging path:** Tauri provides a native shell with a web UI
+  frontend, a better long-term packaging fit than growing the Tkinter prototype.
 
 ## Table of Contents
 

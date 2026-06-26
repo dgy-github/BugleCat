@@ -16,59 +16,80 @@
 MCP 集成、skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Windows
 GUI、定时器，以及 git worktree 的 A/B 对比。
 
-项目分为两个清晰阶段：
+项目分为两个清晰阶段。重点不是“把同一套功能换一种语言写”，而是架构边界和发布性能的
+升级。
 
 ## 项目阶段
 
 ### 第一阶段：Python 基础版
 
-`nanocodex/` 下的 Python 实现是最早的完整功能线，用来验证产品形态和核心工作流：
+`nanocodex/` 下的 Python 实现是最早的完整功能线，目标是快速验证产品形态：先把
+agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪些部分需要更强的工程边界。
 
-- **Agent 循环：** 流式 chat-completions、多轮工具调用、取消、会话日志、resume 和
-  fork。
-- **工具系统：** shell、apply_patch、update_plan、read_file、web_search、定时器、
-  skills、记忆、MCP 工具和 marketplace 管理。
-- **安全层：** 沙箱模式、审批策略、可写根检查，以及 Windows 上工具边界的策略级
-  强制。
-- **上下文能力：** AGENTS.md 分层、持久用户记忆、skills、确定性/模型压缩、token
-  用量和成本统计。
-- **桌面流程：** Tkinter GUI，包含设置、历史、文件面板、图片输入、prompt 增强、
-  定时器控制和 A/B worktree 对比。
-- **质量基线：** 420 个离线测试，mock provider，不需要真实 key，也不依赖网络。
+**架构层面**
+
+- 以一个紧凑的 async agent loop 为中心：调用模型 -> 执行工具 -> 更新 session ->
+  进入下一轮模型调用。
+- 工具、provider、sandbox、MCP、skills、memory、scheduler、compaction、GUI 都是
+  可独立扩展的 Python 模块，适合在产品形态还不稳定时快速迭代。
+- 运行时契约偏动态，因此新增 MCP marketplace、prompt 增强、图片输入、session
+  resume/fork、A/B worktree 对比等功能成本很低。
+- Windows GUI 使用 Tkinter，第一版桌面体验依赖少、调试直接。
+
+**性能与交付层面**
+
+- 优势是迭代速度：没有编译步骤，实验快，mock provider 的离线测试也容易铺开。
+- 420 个离线测试覆盖 Python 功能线，不需要真实 API key，也不依赖网络。
+- 交付仍依赖 Python 解释器、包环境和导入启动成本；对普通 Windows 用户来说，分发
+  体验不如原生二进制直接。
+- 动态边界适合探索期，但当沙箱、工具执行、记忆、MCP、并行 agent flow 变多时，跨模块
+  状态和行为边界会越来越难推理。
 
 ### 第二阶段：Rust 重构版
 
-`rust/` 下的 Rust 实现是当前 release 线。它保留 Python 树不动，同时把核心能力重建
-成多个小 crate，并配套 Tauri 桌面壳：
+`rust/` 下的 Rust 实现是当前 release 线。它不删除 Python 树，而是把已经验证过的
+能力重建成更清晰的 crate 边界，并配套 Tauri 桌面壳，让项目进入可分发工具阶段。
 
-- **工作区：** sandbox、config、provider、tools、core 编排和 `ncx` CLI 等 crate。
-- **CLI：** 一次性 prompt、交互 REPL、斜杠命令、项目记忆召回，以及分层 flash/pro
-  编排。
-- **GUI：** `rust/gui/` 是 Tauri v2 + Svelte 5 桌面应用，覆盖聊天、审批、设置和
-  release 打包。
-- **工具：** `read_file`、`apply_patch`、`shell`、`update_plan`、`grep`、`glob`、
-  `web_search`、`remember`。
-- **能力层：** 任务分类、main/fast 模型路由、隔离并行 worker、verifier 选择，以及
-  把胜出 worker 同步回真实工作区。
-- **记忆：** 项目笔记保存在 `.ncx/memory/LEARNINGS.md`；启动时只做便宜的启发式
-  consolidate，显式运行 `ncx --memory-merge` 才会调用 LLM 合并近似重复记忆，并在
-  模型失败时退回保留最新条目。
-- **搜索：** 有 Tavily key 时走 Tavily，否则回退 DuckDuckGo。
-- **质量基线：** 174 个 Rust 离线测试，已在 `x86_64-pc-windows-gnu` 目标验证。
+**架构层面**
+
+- 工作区按责任拆分为 `ncx-sandbox`、`ncx-config`、`ncx-provider`、`ncx-tools`、
+  `ncx-core`、`ncx-cli`。
+- provider 响应、工具调用、沙箱决策、session 消息、记忆条目、编排结果都有显式类型，
+  跨 crate 边界时不再靠松散 dict/object 传递。
+- 工具执行集中到 `ToolContext` 和 `ToolRegistry` 后面，沙箱策略、审批策略、超时、
+  搜索和记忆都挂在真正执行动作的边界上。
+- 编排层加入任务分类、main/fast 模型路由、隔离 worker 工作区、verifier 选择，以及
+  把胜出 worker promote 回真实工作区。
+- 项目记忆保存在 `.ncx/memory/LEARNINGS.md`；启动时只做便宜的启发式去重，显式运行
+  `ncx --memory-merge` 才会做成本更高的 LLM 记忆合并。
+- 桌面线切到 Tauri v2 + Svelte 5，把原生后端和 UI 表层分离，为比 Python GUI 更小的
+  release bundle 做准备。
+
+**性能与交付层面**
+
+- CLI 构建成原生 `ncx.exe`，用户不需要准备 Python、虚拟环境或 editable install。
+- release 构建启用 strip、LTO、体积优化，并面向 Windows GNU target；当前 CLI zip
+  小于 2 MB，且已经包含 README、LICENSE 和配置样例。
+- 启动路径避开 Python 解释器和 import 开销，适合短的一次性命令，也适合交互 REPL。
+- 显式所有权让并行 worker 隔离、结果选择和 promote 更容易推理，不容易出现共享可变状态
+  泄漏。
+- 174 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
+  沙箱策略、工具和编排器。
 
 ### 第二阶段为什么改用 Rust
 
-切到 Rust 是因为项目从原型验证进入了可分发桌面工具阶段：
+切到 Rust 是因为第二阶段的目标是产品化，而不只是继续加功能：
 
-- **单文件分发：** 可以发布 `ncx.exe`，用户不需要先配置 Python、虚拟环境或 editable
-  install。
-- **启动与体积：** Rust CLI 毫秒级启动，Windows release 包更小。
-- **边界更硬：** 所有权和类型约束让沙箱、工具执行、provider 响应、session 状态更
-  不容易混在一起。
-- **并行更稳：** 隔离 worker 副本、verifier 选择、胜出结果 promote 回真实工作区，
-  用显式数据所有权更容易推理。
-- **桌面打包路径：** Tauri 比早期 Python/Tkinter 线更适合做小体积原生桌面发布，同时
-  能保留 web 风格 UI。
+- **架构硬化：** 沙箱、审批引擎、provider adapter、工具注册表、记忆存储和编排器都有
+  显式类型契约，不再主要依赖 Python 的动态对象边界。
+- **动作边界更清楚：** 文件、shell、搜索、记忆操作都经过同一个 tool context，审批和
+  沙箱检查贴近真实执行点。
+- **并行编排更稳：** 隔离 worker 副本、verifier 选择、结果 promote 回真实工作区这些
+  流程，在显式所有权和类型系统下更容易证明不会互相踩写。
+- **原生发布性能：** 小体积 `ncx.exe` 不需要解释器启动和环境配置，一次性 CLI 任务响应
+  更直接，Windows 用户拿到包即可运行。
+- **桌面打包路径：** Tauri 提供原生 shell + web UI 前端，比继续扩大 Tkinter 原型更适合
+  长期发布。
 
 ## 目录
 
