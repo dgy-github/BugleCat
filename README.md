@@ -155,6 +155,7 @@ only adding more features:
 - [Install](#install)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Custom Slash Commands](#custom-slash-commands)
 - [Local Model / OpenAI-Compatible Endpoint](#local-model--openai-compatible-endpoint)
 - [Sandbox & Approval](#sandbox--approval)
 - [MCP](#mcp)
@@ -181,6 +182,8 @@ only adding more features:
   from a built-in / remote catalog; tools surface as `mcp__<server>__<tool>`.
 - **Skills system** — user skills plus three built-in coding skills; only
   name + description are injected, bodies load on demand.
+- **Custom slash commands** — prompt-backed project/user commands in
+  `.nanocodex/commands`, with `.claude/commands` compatibility.
 - **Persistent memory + AGENTS.md** — durable personal notes and layered
   project instructions injected each turn.
 - **Browsable session history** — JSONL logs, full-transcript snapshots, resume,
@@ -359,6 +362,36 @@ prompt before the model sees it, and `stop` for end-of-turn quality gates or
 notifications. Claude-style event names such as `UserPromptSubmit`, `Stop`,
 `PreToolUse`, and `PostToolUse` are accepted and normalized. Hooks run as local
 subprocesses, so configure only commands you trust.
+
+## Custom Slash Commands
+
+Rust REPL can turn Markdown prompt templates into slash commands. Put project
+commands in `.nanocodex/commands/<name>.md`; for Claude Code compatibility,
+`.claude/commands/<name>.md` is also read. User commands live in
+`~/.nanocodex/commands/<name>.md`, with `~/.claude/commands/<name>.md` as a
+compatibility fallback.
+
+```markdown
+---
+description: Review one file
+---
+Review `$ARGUMENTS[0]` for bugs, regressions, and missing tests.
+```
+
+In the REPL:
+
+```text
+/review rust/crates/ncx-core/src/session.rs
+/project:review rust/crates/ncx-core/src/session.rs
+/user:review rust/crates/ncx-core/src/session.rs
+```
+
+`/name` resolves project commands before user commands. Templates support
+`$ARGUMENTS` for the raw argument string plus `$0`..`$9` and
+`$ARGUMENTS[0]`..`$ARGUMENTS[9]` for simple positional arguments. If a command
+template has no placeholders, the raw arguments are appended under an
+`Arguments:` block. These commands expand to a normal user prompt; they do not
+run local shell code by themselves.
 
 ## Local Model / OpenAI-Compatible Endpoint
 

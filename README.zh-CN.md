@@ -117,6 +117,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - [安装](#安装)
 - [快速开始](#快速开始)
 - [配置](#配置)
+- [自定义 Slash Commands](#自定义-slash-commands)
 - [本地模型 / OpenAI 兼容接口](#本地模型--openai-兼容接口)
 - [沙箱与审批](#沙箱与审批)
 - [MCP](#mcp)
@@ -143,6 +144,8 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   工具以 `mcp__<server>__<tool>` 形式暴露。
 - **Skills 系统** —— 用户 skill 加三个内置编码 skill；只注入名称 + 描述，正文
   按需加载。
+- **自定义 slash commands** —— 项目/用户级 Markdown prompt 模板放在
+  `.nanocodex/commands`，并兼容 `.claude/commands`。
 - **持久记忆 + AGENTS.md** —— 每轮注入的持久个人笔记和分层的项目指令。
 - **可浏览的会话历史** —— JSONL 日志、完整对话快照、恢复（resume）和分叉（fork）。
 - **上下文压缩** —— 零成本的确定性摘要，或可选的模型摘要，按 token 预算触发。
@@ -304,6 +307,33 @@ Hooks 会在环境变量中收到 `NCX_HOOK_EVENT`、`NCX_HOOK_TOOL`、
 `user_prompt` 可以在模型看到 prompt 前阻断或追加系统说明；`stop` 适合做轮次结束质量门
 或通知。`UserPromptSubmit`、`Stop`、`PreToolUse`、`PostToolUse` 这类 Claude 风格
 事件名会自动归一化。Hooks 会作为本地子进程运行，只配置你信任的命令。
+
+## 自定义 Slash Commands
+
+Rust REPL 可以把 Markdown prompt 模板变成 slash command。项目级命令放在
+`.nanocodex/commands/<name>.md`；为了兼容 Claude Code，也会读取
+`.claude/commands/<name>.md`。用户级命令放在 `~/.nanocodex/commands/<name>.md`，
+并兼容 `~/.claude/commands/<name>.md`。
+
+```markdown
+---
+description: Review one file
+---
+Review `$ARGUMENTS[0]` for bugs, regressions, and missing tests.
+```
+
+REPL 中可以这样调用：
+
+```text
+/review rust/crates/ncx-core/src/session.rs
+/project:review rust/crates/ncx-core/src/session.rs
+/user:review rust/crates/ncx-core/src/session.rs
+```
+
+`/name` 会优先解析项目级命令，再解析用户级命令。模板支持 `$ARGUMENTS` 表示原始参数串，
+也支持 `$0`..`$9` 和 `$ARGUMENTS[0]`..`$ARGUMENTS[9]` 作为简单位置参数。模板里没有
+占位符时，原始参数会自动追加到 `Arguments:` 块下。这类命令只会展开成普通用户 prompt，
+不会自己运行本地 shell 代码。
 
 ## 本地模型 / OpenAI 兼容接口
 
