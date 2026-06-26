@@ -10,10 +10,13 @@
 mod args;
 mod runner;
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use ncx_config::{load_config, Config, Overrides};
+use ncx_config::{
+    load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, WRITABLE_KEYS,
+};
 use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
@@ -284,6 +287,7 @@ fn dispatch_slash(
         "/exit" => SlashOutcome::Exit,
         "/help" => SlashOutcome::Printed(render_help()),
         "/status" => SlashOutcome::Printed(render_status(cfg)),
+        "/config" => SlashOutcome::Printed(config_text(cfg, arg)),
         "/history" => SlashOutcome::Printed(render_history(&SessionIndex::default().entries(), 20)),
         "/checkpoint" => SlashOutcome::Printed(create_checkpoint_text(&cfg.workspace, arg)),
         "/checkpoints" => SlashOutcome::Printed(render_checkpoints(
@@ -350,6 +354,78 @@ fn render_status(cfg: &ncx_config::Config) -> String {
         cfg.context_edit_max_tool_result_chars,
         cfg.hooks.len(),
     )
+}
+
+fn config_text(cfg: &ncx_config::Config, arg: &str) -> String {
+    let path = ConfigPaths::default().nanocodex;
+    config_text_at(cfg, arg, &path)
+}
+
+fn config_text_at(cfg: &ncx_config::Config, arg: &str, path: &Path) -> String {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        return render_config_overview(cfg, path);
+    }
+
+    let (key, value) = match parse_config_assignment(arg) {
+        Ok(pair) => pair,
+        Err(e) => return format!("usage: /config key=value\n{e}"),
+    };
+    if !WRITABLE_KEYS.contains(&key.as_str()) {
+        return format!(
+            "Unknown writable config key: {key}\nWritable keys: {}",
+            WRITABLE_KEYS.join(", ")
+        );
+    }
+
+    let mut updates: HashMap<&str, &str> = HashMap::new();
+    updates.insert(key.as_str(), value.as_str());
+    match write_nanocodex_config(&updates, path) {
+        Ok(()) => {
+            let shown = if key.contains("key") {
+                "<redacted>"
+            } else {
+                value.as_str()
+            };
+            format!(
+                "Saved config: {key} = {shown}\npath: {}\nRestart the REPL for provider, model, sandbox, or budget changes to affect the active session.",
+                path.display()
+            )
+        }
+        Err(e) => format!("config write failed: {e}"),
+    }
+}
+
+fn render_config_overview(cfg: &ncx_config::Config, path: &Path) -> String {
+    let red = cfg.redacted();
+    format!(
+        "config path: {}\nmodel:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\napi_key:   {}\nwritable keys: {}",
+        path.display(),
+        cfg.model,
+        cfg.base_url,
+        cfg.sandbox_mode,
+        cfg.approval_policy,
+        red.get("api_key").cloned().unwrap_or_default(),
+        WRITABLE_KEYS.join(", ")
+    )
+}
+
+fn parse_config_assignment(arg: &str) -> Result<(String, String), String> {
+    let Some((key, value)) = arg.split_once('=') else {
+        return Err("missing '='; example: /config model=deepseek-chat".into());
+    };
+    let key = key.trim();
+    let value = value.trim();
+    if key.is_empty() {
+        return Err("config key is empty".into());
+    }
+    if key.chars().any(char::is_whitespace) {
+        return Err("config key cannot contain whitespace".into());
+    }
+    if value.is_empty() {
+        return Err("config value is empty".into());
+    }
+    Ok((key.to_string(), value.to_string()))
 }
 
 struct SessionRecorder {
@@ -542,6 +618,40 @@ mod tests {
         for (cmd, _) in SLASH_HELP {
             assert!(help.contains(cmd), "{cmd}");
         }
+    }
+
+    #[test]
+    fn parse_config_assignment_accepts_trimmed_key_value() {
+        assert_eq!(
+            parse_config_assignment(" model = deepseek-chat ").unwrap(),
+            ("model".into(), "deepseek-chat".into())
+        );
+        assert!(parse_config_assignment("model").is_err());
+        assert!(parse_config_assignment("bad key=value").is_err());
+        assert!(parse_config_assignment("model=").is_err());
+    }
+
+    #[test]
+    fn config_text_writes_known_key_to_path() {
+        let dir = std::env::temp_dir().join(format!("ncx_config_slash_{}", new_session_id()));
+        let path = dir.join("config.toml");
+        let cfg = ncx_config::Config::default();
+        let out = config_text_at(&cfg, "model=deepseek-chat", &path);
+
+        assert!(out.contains("Saved config"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("model = \"deepseek-chat\""), "{text}");
+    }
+
+    #[test]
+    fn config_text_rejects_unknown_key() {
+        let dir = std::env::temp_dir().join(format!("ncx_config_slash_bad_{}", new_session_id()));
+        let path = dir.join("config.toml");
+        let cfg = ncx_config::Config::default();
+        let out = config_text_at(&cfg, "bogus=value", &path);
+
+        assert!(out.contains("Unknown writable config key"));
+        assert!(!path.exists());
     }
 
     #[test]

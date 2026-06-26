@@ -229,6 +229,10 @@ cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
 ```
 
+Rust REPL 里可以用 `/config` 查看解析后的配置文件路径、当前 model/sandbox/approval
+值和可写 key。`/config key=value` 会把设置持久写入 `~/.nanocodex/config.toml`；
+provider、model、sandbox 或预算类变更需要重启 REPL 后影响当前会话。
+
 Python CLI，原始功能线：
 
 ```powershell

@@ -15,6 +15,10 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
         "Show model, sandbox, approval, workspace, and token usage.",
     ),
     (
+        "/config",
+        "Show the config path, or persist a setting: /config key=value.",
+    ),
+    (
         "/model",
         "Show the current model, or switch it: /model <name>.",
     ),
@@ -168,6 +172,7 @@ mod tests {
     fn help_table_covers_core_commands() {
         for c in [
             "/help",
+            "/config",
             "/model",
             "/approvals",
             "/diff",

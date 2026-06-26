@@ -272,6 +272,11 @@ cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
 ```
 
+Inside the Rust REPL, `/config` shows the resolved config file path, current
+model/sandbox/approval values, and writable keys. `/config key=value` persists a
+setting to `~/.nanocodex/config.toml`; restart the REPL for provider, model,
+sandbox, or budget changes to affect the active session.
+
 Python CLI, original line:
 
 ```powershell
