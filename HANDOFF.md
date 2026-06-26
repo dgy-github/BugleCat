@@ -5,30 +5,28 @@
 > 工作已转到 **Rust 重写**；Python 时代的详细交接在 git 历史（此文件早期版本）+ SESSION_MEMORY.md。
 
 ## 元信息
-- 最后更新：2026-06-25
-- 分支：`rust-rewrite`（Python 树 `nanocodex/*.py` 未动，与 Rust 并存）
+- 最后更新：2026-06-26
+- 分支：`rust-capability`（Python 树 `nanocodex/*.py` 未动，与 Rust 并存）
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
 - Rust 工作区：`rust/`（crates 在 `rust/crates/`，GUI 在 `rust/gui/`）
 - 工具链坑：本机无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`
 
-## 当前状态（已完成，全部编译+测试过，~172 测试全绿）
+## 当前状态（已完成，全部编译+测试过，220 个 Rust 离线测试全绿）
 - 6 核心 crate：ncx-sandbox / ncx-config / ncx-provider / ncx-tools / ncx-core / ncx-cli
-- CLI 二进制 `ncx`（一次性 + REPL + 斜杠命令）；Tauri v2 + Svelte 5 GUI（聊天/审批/设置/打包 .msi+.exe）
+- CLI 二进制 `ncx`（一次性 + REPL + 斜杠命令）；Tauri v2 + Svelte 5 GUI（聊天/审批/设置/NSIS installer）
 - 工具集：read_file · apply_patch · shell · update_plan · grep · glob · web_search · remember
 - 分层 flash/pro 编排器（CLI `-o` 标志）：classify→plan(pro)→2×flash worker 并行→verify→闭环重试
 - sub-agent 并行写隔离：每 worker 跑独立工作区副本；verifier 选 `BEST:<n>`、promote 该 worker 回真实 ws
-- memory 自进化：`.ncx/memory/LEARNINGS.md` + remember 工具 + 启动召回注入 + 周期启发式 consolidate
+- memory 自进化：`.ncx/memory/LEARNINGS.md` + remember 工具 + 启动召回注入 + 周期启发式 consolidate + 显式 `--memory-merge` LLM 合并
+- 项目指令：Rust CLI / orchestrator worker / Tauri GUI 会在会话启动时注入 `AGENTS.md` / `CLAUDE.md` / `.claude/CLAUDE.md`（含 `~/.codex`、`~/.claude` 与仓库根到 workspace 分层）
+- 控制面：task budget、context editing、tool search、semantic memory、workspace checkpoints、`/compact`、`/config`、prompt-backed custom slash commands
 - keyed 搜索后端：Tavily（有 key）否则回退 DuckDuckGo
 - 性能：单文件 2.4MB（GUI 2.1–2.9MB 安装包）、启动 ~5ms（约 199× 快于 Python）
-- 测试分布：core 61 / provider 31 / tools 36 / sandbox 15 / config 19 / cli 10
+- 测试分布：cli 22 / config 24 / core 92 / provider 31 / sandbox 15 / tools 36
 
-## 下一步（接手第一件事）
-1. **未完成：LLM 版记忆摘要**（TaskList #17，in_progress）。要做：
-   - `ncx-core/src/memory.rs` 加 `#[async_trait(?Send)] trait Summarizer { async fn merge(&[String])->Option<String> }`
-   - `MemoryStore::summarize_consolidate(&dyn Summarizer, threshold)`：近似簇（Jaccard≥阈值）里 >1 条的让模型合并成 1 条，保留最新 ts + tags 并集；模型失败时 fallback 到「留最新」。mock 测试覆盖。
-   - CLI 加 `LiveSummarizer`（fast provider 一次性）+ `--memory-merge` 维护命令（**别塞进每次启动，太贵**）。
-2. **3 件增强做完且 `cargo test` 全绿后**：`git checkout -b rust-capability`，提交 `rust/` 与 `rust/gui/` 改动
-   （**绝不 add `nanocodex/` 下的 .py**），`git push -u origin rust-capability`。remote 已确认存在。
+## 下一步（建议）
+1. 继续对齐 Claude/Fable 的平台级体验：GUI 侧 memory merge / custom slash command 面板、release 自动化清单、更多可观察性指标。
+2. 做 release 前跑 `cargo test --workspace --target x86_64-pc-windows-gnu`、`cargo check`（Tauri）、`npm.cmd run tauri:installer`，然后再打 tag / release。
 
 ## Do-Not（踩过的坑）
 - 别把 tauri lib 设 `cdylib`/`staticlib`：gnu 链接器报 `export ordinal too large`，桌面用 `crate-type=["lib"]`。

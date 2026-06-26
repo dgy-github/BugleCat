@@ -21,9 +21,9 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    expand_file_mentions, new_session_id, AgentLoop, CheckpointMeta, CheckpointStore,
-    ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Session, SessionIndex,
-    SessionSummary, TaskBudget, ToolContext, ToolRegistry,
+    expand_file_mentions, load_project_instructions, new_session_id, AgentLoop, CheckpointMeta,
+    CheckpointStore, ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Session,
+    SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -139,11 +139,8 @@ async fn run(args: Args) -> i32 {
     let _ = memory.consolidate(0.85);
     let recall_query = args.prompt.as_deref().unwrap_or("");
     let recall = memory.recall(recall_query, 8, 4000);
-    let system_prompt = if recall.is_empty() {
-        SYSTEM_PROMPT.to_string()
-    } else {
-        format!("{SYSTEM_PROMPT}\n\n{recall}")
-    };
+    let instructions = load_project_instructions(&cfg.workspace, 16_000);
+    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
         .with_approval_policy(cfg.approval_policy.clone())
         .with_timeout(cfg.timeout_s as u64)
@@ -218,6 +215,17 @@ async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
     } else {
         1
     }
+}
+
+fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
+    let mut out = base.to_string();
+    for block in blocks {
+        if !block.trim().is_empty() {
+            out.push_str("\n\n");
+            out.push_str(block.trim());
+        }
+    }
+    out
 }
 
 /// Interactive REPL. Slash commands are dispatched without a model call; any

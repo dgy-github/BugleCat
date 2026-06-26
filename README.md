@@ -95,7 +95,7 @@ tool.
   one-shot commands as well as interactive REPL use.
 - Typed ownership makes parallel worker isolation and result promotion easier
   to reason about without shared mutable state leaks.
-- 180 offline Rust tests cover the current crate boundary, including memory
+- 220 offline Rust tests cover the current crate boundary, including memory
   consolidation, provider request/response parsing, sandbox policy, tools, and
   orchestration.
 
@@ -184,7 +184,7 @@ only adding more features:
   name + description are injected, bodies load on demand.
 - **Custom slash commands** — prompt-backed project/user commands in
   `.nanocodex/commands`, with `.claude/commands` compatibility.
-- **Persistent memory + AGENTS.md** — durable personal notes and layered
+- **Persistent memory + AGENTS.md / CLAUDE.md** — durable notes plus layered
   project instructions injected each turn.
 - **Browsable session history** — JSONL logs, full-transcript snapshots, resume,
   and fork.
@@ -507,13 +507,15 @@ Two complementary layers of persistent context, both injected each turn:
 - **User memory** (`~/.nanocodex/memory.md`) — durable personal facts and
   preferences. Written by the `remember` tool, by typing `# something` in the
   GUI composer (quick-capture), or by hand. Wrapped in a `<user_memory>` block.
-- **AGENTS.md** — project instructions layered from `~/.codex/AGENTS.md` down
-  through every `AGENTS.md` from the repo root to the workspace, so nested
-  directories refine their parents. Total size is capped so a huge file can't
-  blow the context.
+- **AGENTS.md / CLAUDE.md** — project instructions layered from
+  `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, then every `AGENTS.md`,
+  `CLAUDE.md`, and `.claude/CLAUDE.md` from the repo root down to the workspace,
+  so nested directories refine their parents. Total size is capped so a huge
+  file can't blow the context. Rust CLI, orchestrator workers, and the Tauri GUI
+  all inject this block at session startup.
 
-Memory is "who/what" (preferences, facts); skills are "how to do X"; AGENTS.md
-is project-scoped guidance.
+Memory is "who/what" (preferences, facts); skills are "how to do X";
+AGENTS.md / CLAUDE.md are project-scoped guidance.
 
 ## Sessions, Resume & History
 

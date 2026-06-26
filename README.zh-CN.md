@@ -73,7 +73,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - 启动路径避开 Python 解释器和 import 开销，适合短的一次性命令，也适合交互 REPL。
 - 显式所有权让并行 worker 隔离、结果选择和 promote 更容易推理，不容易出现共享可变状态
   泄漏。
-- 180 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
+- 220 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
   沙箱策略、工具和编排器。
 
 **平台控制面补齐**
@@ -146,7 +146,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   按需加载。
 - **自定义 slash commands** —— 项目/用户级 Markdown prompt 模板放在
   `.nanocodex/commands`，并兼容 `.claude/commands`。
-- **持久记忆 + AGENTS.md** —— 每轮注入的持久个人笔记和分层的项目指令。
+- **持久记忆 + AGENTS.md / CLAUDE.md** —— 每轮注入的持久笔记和分层项目指令。
 - **可浏览的会话历史** —— JSONL 日志、完整对话快照、恢复（resume）和分叉（fork）。
 - **上下文压缩** —— 零成本的确定性摘要，或可选的模型摘要，按 token 预算触发。
 - **缓存感知的成本统计** —— 用真实的按调用用量，按 DeepSeek 的命中/未命中费率
@@ -442,11 +442,12 @@ Look for behavior regressions first, then missing tests, then maintainability.
 - **用户记忆**（`~/.nanocodex/memory.md`）—— 持久的个人事实和偏好。由 `remember`
   工具写入、在 GUI 输入框里打 `# 内容` 快速捕获、或手工编辑。包在 `<user_memory>`
   块里。
-- **AGENTS.md** —— 项目指令，从 `~/.codex/AGENTS.md` 一路分层到从仓库根到工作区
-  的每个 `AGENTS.md`，所以嵌套目录可以细化父级。总大小有上限，避免一个超大文件
-  撑爆上下文。
+- **AGENTS.md / CLAUDE.md** —— 项目指令，从 `~/.codex/AGENTS.md` 和
+  `~/.claude/CLAUDE.md` 开始，再分层读取从仓库根到工作区的每个 `AGENTS.md`、
+  `CLAUDE.md` 和 `.claude/CLAUDE.md`，所以嵌套目录可以细化父级。总大小有上限，避免
+  一个超大文件撑爆上下文。Rust CLI、orchestrator worker 和 Tauri GUI 都会在会话启动时注入这一块。
 
-记忆讲「谁/什么」（偏好、事实）；skills 讲「怎么做 X」；AGENTS.md 是项目级指引。
+记忆讲「谁/什么」（偏好、事实）；skills 讲「怎么做 X」；AGENTS.md / CLAUDE.md 是项目级指引。
 
 ## 会话、恢复与历史
 

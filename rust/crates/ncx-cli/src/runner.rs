@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
 use ncx_core::{
-    AgentLoop, AgentRunner, ContextEditPolicy, MemoryStore, Session, Summarizer, TaskBudget, Tier,
-    ToolContext, ToolRegistry,
+    load_project_instructions, AgentLoop, AgentRunner, ContextEditPolicy, MemoryStore, Session,
+    Summarizer, TaskBudget, Tier, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -80,11 +80,8 @@ impl LiveRunner {
             .with_hooks(self.cfg.hooks.clone());
         let tools = ToolRegistry::new(ctx);
         let recall = self.memory.recall(task, 6, 3000);
-        let system = if recall.is_empty() {
-            system.to_string()
-        } else {
-            format!("{system}\n\n{recall}")
-        };
+        let instructions = load_project_instructions(workspace, 16_000);
+        let system = compose_system_prompt(system, &[instructions, recall]);
         let session = Session::new(system);
         let mut agent = AgentLoop::new(Box::new(provider), tools, session)
             .with_task_budget(task_budget_from_config(&self.cfg))
@@ -143,6 +140,17 @@ impl AgentRunner for LiveRunner {
 
 /// LLM-backed [`Summarizer`] for `MemoryStore::summarize_consolidate` — folds a
 /// cluster of related notes into one concise note using the FAST model.
+fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
+    let mut out = base.to_string();
+    for block in blocks {
+        if !block.trim().is_empty() {
+            out.push_str("\n\n");
+            out.push_str(block.trim());
+        }
+    }
+    out
+}
+
 fn positive_usize(value: i64, fallback: usize) -> usize {
     usize::try_from(value)
         .ok()
