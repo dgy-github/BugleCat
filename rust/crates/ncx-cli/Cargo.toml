@@ -1,0 +1,19 @@
+[package]
+name = "ncx-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ncx"
+path = "src/main.rs"
+
+[dependencies]
+ncx-config = { path = "../ncx-config" }
+ncx-provider = { path = "../ncx-provider" }
+ncx-sandbox = { path = "../ncx-sandbox" }
+ncx-core = { path = "../ncx-core" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time", "macros"] }
+async-trait = "0.1"

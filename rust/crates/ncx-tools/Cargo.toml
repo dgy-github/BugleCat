@@ -1,0 +1,21 @@
+[package]
+name = "ncx-tools"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ncx-sandbox = { path = "../ncx-sandbox" }
+tokio = { version = "1", features = ["process", "time", "io-util", "rt", "macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Security",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["process", "time", "io-util", "rt", "rt-multi-thread", "macros"] }

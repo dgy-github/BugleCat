@@ -1,0 +1,659 @@
+//! Tool trait, execution context, and registry — Rust port of
+//! `nanocodex/tools/base.py` + the core tool set (`read_file`, `apply_patch`,
+//! `update_plan`) and `nanocodex/tools/__init__.py`'s `ToolRegistry`.
+//!
+//! Single-threaded by design (the REPL runs on a current-thread runtime), so
+//! shared mutable state (the plan) uses `Rc<RefCell<…>>`.
+
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use async_trait::async_trait;
+pub use ncx_sandbox::ApprovalRequest;
+use ncx_sandbox::{Approver, Decision, SandboxPolicy, DANGER_FULL_ACCESS, ON_FAILURE};
+use ncx_tools::{apply_patch, looks_read_only, parse_patch, read_file as rf, PolicyExecutor};
+use serde_json::{json, Value};
+
+use crate::memory::MemoryStore;
+
+/// Asks the user to approve an escalated action (e.g. a patch writing outside
+/// the sandbox). The GUI implements this with a modal round-trip; the CLI with
+/// a yes/no prompt; tests with a canned answer. `?Send` to match the loop.
+///
+/// Named `ApprovalHandler` to avoid clashing with `ncx_sandbox::Approver`
+/// (which is the pure policy classifier, not a prompt).
+#[async_trait(?Send)]
+pub trait ApprovalHandler {
+    async fn request(&self, req: ApprovalRequest) -> bool;
+}
+
+/// Everything a tool needs, shared (cheaply cloned) across tools.
+#[derive(Clone)]
+pub struct ToolContext {
+    pub workspace: PathBuf,
+    pub policy: SandboxPolicy,
+    /// Approval policy name (`on-request` etc.) — drives the `shell` tool's
+    /// auto-approve / ask / deny decision via [`ncx_sandbox::Approver`].
+    pub approval_policy: String,
+    /// Default command timeout (seconds) for the `shell` tool.
+    pub timeout_s: u64,
+    /// Shared mutable plan state for `update_plan` / the CLI to read.
+    pub plan: Rc<RefCell<Vec<Value>>>,
+    /// Optional approval prompt. `None` = no prompting (escalations then rely on
+    /// the policy alone, i.e. an out-of-sandbox write simply fails).
+    pub approver: Option<Rc<dyn ApprovalHandler>>,
+    /// Optional project memory store. When set, the `remember` tool is exposed.
+    pub memory: Option<Rc<MemoryStore>>,
+    /// Web search backend ("duckduckgo" | "tavily") and its key (for tavily).
+    pub search_provider: String,
+    pub search_api_key: String,
+}
+
+impl ToolContext {
+    pub fn new(workspace: PathBuf, policy: SandboxPolicy) -> Self {
+        ToolContext {
+            workspace,
+            policy,
+            approval_policy: "on-request".to_string(),
+            timeout_s: 120,
+            plan: Rc::new(RefCell::new(Vec::new())),
+            approver: None,
+            memory: None,
+            search_provider: "duckduckgo".to_string(),
+            search_api_key: String::new(),
+        }
+    }
+
+    /// Configure the web search backend the `web_search` tool uses.
+    pub fn with_search(mut self, provider: impl Into<String>, api_key: impl Into<String>) -> Self {
+        self.search_provider = provider.into();
+        self.search_api_key = api_key.into();
+        self
+    }
+
+    /// Attach a project memory store (enables the `remember` tool).
+    pub fn with_memory(mut self, memory: Rc<MemoryStore>) -> Self {
+        self.memory = Some(memory);
+        self
+    }
+
+    /// Attach an approval handler (the GUI/CLI supplies one).
+    pub fn with_approver(mut self, approver: Rc<dyn ApprovalHandler>) -> Self {
+        self.approver = Some(approver);
+        self
+    }
+
+    /// Set the approval policy the `shell` tool uses to gate commands.
+    pub fn with_approval_policy(mut self, policy: impl Into<String>) -> Self {
+        self.approval_policy = policy.into();
+        self
+    }
+
+    /// Set the default shell command timeout (seconds).
+    pub fn with_timeout(mut self, secs: u64) -> Self {
+        self.timeout_s = secs;
+        self
+    }
+}
+
+/// An agent capability exposed to the model as an OpenAI function tool.
+#[async_trait(?Send)]
+pub trait Tool {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn parameters(&self) -> Value;
+
+    /// True for pure-read tools (no side effects); the loop may run a run of
+    /// consecutive read-only calls concurrently. Default false.
+    fn read_only(&self) -> bool {
+        false
+    }
+
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String;
+
+    fn to_schema(&self) -> Value {
+        json!({
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": self.parameters(),
+            },
+        })
+    }
+}
+
+/// Holds the tool set and the shared context. `ctx` is public so callers (and
+/// tests) can read the plan after a turn.
+pub struct ToolRegistry {
+    pub ctx: ToolContext,
+    tools: Vec<Box<dyn Tool>>,
+    by_name: HashMap<String, usize>,
+}
+
+impl ToolRegistry {
+    /// Build the default registry: read_file, apply_patch, update_plan, shell.
+    pub fn new(ctx: ToolContext) -> Self {
+        let mut reg = ToolRegistry { ctx, tools: Vec::new(), by_name: HashMap::new() };
+        reg.register(Box::new(ReadFileTool));
+        reg.register(Box::new(ApplyPatchTool));
+        reg.register(Box::new(UpdatePlanTool));
+        reg.register(Box::new(ShellTool));
+        reg.register(Box::new(crate::search::GrepTool));
+        reg.register(Box::new(crate::search::GlobTool));
+        reg.register(Box::new(crate::search::WebSearchTool));
+        // Only expose `remember` when a memory store is wired (CLI/GUI supply it).
+        if reg.ctx.memory.is_some() {
+            reg.register(Box::new(RememberTool));
+        }
+        reg
+    }
+
+    /// Empty registry (tests register exactly what they need).
+    pub fn empty(ctx: ToolContext) -> Self {
+        ToolRegistry { ctx, tools: Vec::new(), by_name: HashMap::new() }
+    }
+
+    pub fn register(&mut self, tool: Box<dyn Tool>) {
+        let name = tool.name().to_string();
+        let idx = self.tools.len();
+        self.tools.push(tool);
+        self.by_name.insert(name, idx);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
+        self.by_name.get(name).map(|&i| self.tools[i].as_ref())
+    }
+
+    pub fn is_read_only(&self, name: &str) -> bool {
+        self.get(name).map(|t| t.read_only()).unwrap_or(false)
+    }
+
+    /// JSON schemas for every registered tool (the `tools` request field).
+    pub fn schemas(&self) -> Vec<Value> {
+        self.tools.iter().map(|t| t.to_schema()).collect()
+    }
+
+    /// Run a tool by name. Unknown tool -> an error string for the model.
+    pub async fn execute(&self, name: &str, args: &Value) -> String {
+        match self.get(name) {
+            Some(tool) => tool.execute(&self.ctx, args).await,
+            None => format!("Error: unknown tool '{name}'."),
+        }
+    }
+}
+
+// ── concrete tools ────────────────────────────────────────────────────────────
+
+/// `read_file` — line-numbered reads. Read-only.
+pub struct ReadFileTool;
+
+#[async_trait(?Send)]
+impl Tool for ReadFileTool {
+    fn name(&self) -> &str {
+        "read_file"
+    }
+    fn description(&self) -> &str {
+        "Read a UTF-8 text file and return its contents as 'LINE| TEXT'. Use \
+         'offset' (1-indexed) and 'limit' for large files."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path (absolute or workspace-relative)."},
+                "offset": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1},
+            },
+            "required": ["path"],
+        })
+    }
+    fn read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
+            return "Error: 'path' is required and must be a string.".into();
+        };
+        let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+        let p = PathBuf::from(path);
+        let abs = if p.is_absolute() { p } else { ctx.workspace.join(path) };
+        let resolved = abs.canonicalize().unwrap_or(abs);
+
+        if !ctx.policy.can_read(&resolved) {
+            return format!("Error: reading {path} is not allowed under the sandbox policy.");
+        }
+        if !resolved.exists() {
+            return format!("Error: file not found: {path}");
+        }
+        if !resolved.is_file() {
+            return format!("Error: not a file: {path}");
+        }
+        let raw = match std::fs::read(&resolved) {
+            Ok(b) => b,
+            Err(e) => return format!("Error reading file: {e}"),
+        };
+        match std::str::from_utf8(&raw) {
+            Ok(text) => rf::render(path, text, offset, limit),
+            Err(_) => format!("Error: cannot read non-UTF-8 file {path}."),
+        }
+    }
+}
+
+/// `apply_patch` — Codex V4A edits. Write (serial).
+pub struct ApplyPatchTool;
+
+#[async_trait(?Send)]
+impl Tool for ApplyPatchTool {
+    fn name(&self) -> &str {
+        "apply_patch"
+    }
+    fn description(&self) -> &str {
+        // The format rules + worked example are load-bearing: without them the
+        // model emits git/unified-diff syntax (--- /dev/null, @@ -0,0 +1 @@),
+        // which this V4A parser rejects, and the turn loops. Mirrors the Python
+        // ApplyPatchTool description exactly.
+        "Create, update, delete, or move files using the V4A patch format. \
+         This is the preferred way to edit code. The patch must be wrapped in \
+         '*** Begin Patch' / '*** End Patch'. Use '*** Add File: <path>', \
+         '*** Update File: <path>', '*** Delete File: <path>', and optional \
+         '*** Move to: <path>'. Inside an Add File, prefix every new line with \
+         '+'. Inside an Update File, prefix context lines with a space, removed \
+         lines with '-', added lines with '+', and use '@@ <context>' to locate \
+         the right spot. Do NOT use git/unified-diff syntax ('--- a/file', \
+         '+++ b/file', '@@ -1,2 +3,4 @@'). Example to create a file:\n\
+         *** Begin Patch\n\
+         *** Add File: src/hello.txt\n\
+         +hi.\n\
+         *** End Patch\n\
+         Example to edit a file:\n\
+         *** Begin Patch\n\
+         *** Update File: src/app.py\n\
+         @@ def main():\n\
+         -    print(\"hi\")\n\
+         +    print(\"hello\")\n\
+         *** End Patch"
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "patch": {"type": "string", "description": "Full patch text incl. Begin/End markers."},
+            },
+            "required": ["patch"],
+        })
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(patch) = args.get("patch").and_then(|v| v.as_str()) else {
+            return "Error: 'patch' is required and must be a string.".into();
+        };
+
+        // Parse up front to find any target outside the writable sandbox. Those
+        // require approval (mirrors how Codex/the Python tool escalates). A parse
+        // error is reported directly without involving the approval layer.
+        let actions = match parse_patch(patch) {
+            Ok(a) => a,
+            Err(e) => return format!("Error applying patch: {e}"),
+        };
+        let root = ctx.workspace.canonicalize().unwrap_or_else(|_| ctx.workspace.clone());
+        let resolve = |rel: &str| -> PathBuf {
+            let joined = root.join(rel);
+            joined.canonicalize().unwrap_or(joined)
+        };
+        let mut escaping: Vec<PathBuf> = Vec::new();
+        for a in &actions {
+            let mut rels = vec![a.path.clone()];
+            if let Some(m) = &a.move_to {
+                rels.push(m.clone());
+            }
+            for rel in rels {
+                let target = resolve(&rel);
+                if !ctx.policy.can_write(&target) && !escaping.contains(&target) {
+                    escaping.push(target);
+                }
+            }
+        }
+
+        let mut approved: HashSet<PathBuf> = HashSet::new();
+        if !escaping.is_empty() {
+            if let Some(approver) = &ctx.approver {
+                let rels = escaping.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+                let ok = approver
+                    .request(ApprovalRequest {
+                        command: format!("apply_patch writing outside the sandbox: {rels}"),
+                        reason: "The patch modifies files outside the writable roots.".into(),
+                        cwd: ctx.workspace.display().to_string(),
+                        escalated: true,
+                        details: patch.to_string(),
+                    })
+                    .await;
+                if !ok {
+                    return "Error: patch not approved by the user.".into();
+                }
+                approved = escaping.into_iter().collect();
+            }
+            // No approver: fall through — can_write rejects and apply_patch errors
+            // with the out-of-sandbox message (the prior behavior).
+        }
+
+        let policy = ctx.policy.clone();
+        let can_write = move |p: &Path| policy.can_write(p) || approved.contains(p);
+        match apply_patch(patch, &ctx.workspace, can_write) {
+            Ok(outcome) => {
+                let summary = outcome.summary();
+                if summary.is_empty() {
+                    "Patch applied (no changes).".into()
+                } else {
+                    format!("Patch applied successfully:\n{summary}")
+                }
+            }
+            Err(e) => format!("Error applying patch: {e}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
+
+    fn tmp_ws(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ncx_approve_{name}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    struct Answer(bool);
+    #[async_trait(?Send)]
+    impl ApprovalHandler for Answer {
+        async fn request(&self, _req: ApprovalRequest) -> bool {
+            self.0
+        }
+    }
+
+    // A patch whose Add-File path climbs out of the workspace needs approval.
+    const ESCAPING: &str = "*** Begin Patch\n*** Add File: ../escape.txt\n+x\n*** End Patch";
+
+    #[tokio::test]
+    async fn denied_escaping_patch_is_blocked() {
+        let ws = tmp_ws("deny");
+        let ctx = ToolContext::new(ws, SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()))
+            .with_approver(Rc::new(Answer(false)));
+        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": ESCAPING })).await;
+        assert!(out.contains("not approved"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn no_approver_escaping_patch_errors_out_of_sandbox() {
+        let ws = tmp_ws("noapprover");
+        let ctx = ToolContext::new(ws, SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()));
+        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": ESCAPING })).await;
+        // Without an approver the write is simply rejected by the policy.
+        assert!(out.contains("Error applying patch"), "{out}");
+        assert!(out.contains("outside the writable sandbox"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn in_workspace_patch_needs_no_approval() {
+        let ws = tmp_ws("inws");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let patch = "*** Begin Patch\n*** Add File: ok.txt\n+hi\n*** End Patch";
+        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": patch })).await;
+        assert!(out.contains("Patch applied successfully"), "{out}");
+        assert_eq!(std::fs::read_to_string(ws.join("ok.txt")).unwrap(), "hi\n");
+    }
+
+    #[tokio::test]
+    async fn shell_read_only_command_auto_runs() {
+        // A read-only command under on-request auto-approves and runs — no approver.
+        let ws = tmp_ws("shell_ro");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let out = ShellTool.execute(&ctx, &json!({ "command": "echo ncx_shell_ok" })).await;
+        assert!(out.contains("ncx_shell_ok"), "{out}");
+        assert!(out.contains("Exit code: 0"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn shell_escalating_command_denied_without_approval() {
+        // read-only sandbox: a write-ish command escalates; a denying approver blocks it.
+        let ws = tmp_ws("shell_esc");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::READ_ONLY, &ws))
+            .with_approver(Rc::new(Answer(false)));
+        let out = ShellTool.execute(&ctx, &json!({ "command": "rm -rf build" })).await;
+        assert!(out.contains("not approved"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn shell_escalating_command_runs_when_approved() {
+        let ws = tmp_ws("shell_ok");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::READ_ONLY, &ws))
+            .with_approver(Rc::new(Answer(true)));
+        // `mkdir` isn't read-only -> escalates; approved -> actually runs (cross-platform).
+        let out = ShellTool.execute(&ctx, &json!({ "command": "mkdir ncxsub" })).await;
+        assert!(!out.contains("not approved"), "{out}");
+        assert!(out.contains("Exit code: 0"), "{out}");
+        assert!(ws.join("ncxsub").is_dir());
+    }
+}
+
+/// `update_plan` — record a step plan into the shared context.
+pub struct UpdatePlanTool;
+
+#[async_trait(?Send)]
+impl Tool for UpdatePlanTool {
+    fn name(&self) -> &str {
+        "update_plan"
+    }
+    fn description(&self) -> &str {
+        "Record or update the current step plan (a list of {step, status})."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "step": {"type": "string"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                        },
+                    },
+                },
+            },
+            "required": ["plan"],
+        })
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(plan) = args.get("plan").and_then(|v| v.as_array()) else {
+            return "Error: 'plan' is required and must be an array.".into();
+        };
+        *ctx.plan.borrow_mut() = plan.clone();
+        let n = plan.len();
+        format!("Plan updated ({n} steps).")
+    }
+}
+
+/// `shell` — run a command under the sandbox + approval state machine. Port of
+/// `nanocodex/tools/shell.py`. Without this the agent can't build, test, or run
+/// git. Not read-only (always sequential).
+pub struct ShellTool;
+
+impl ShellTool {
+    /// Does this command want something the sandbox forbids? (Heuristic, mirrors
+    /// the Python `_needs_escalation`.)
+    fn needs_escalation(ctx: &ToolContext, command: &str, workdir: &Path) -> bool {
+        if ctx.policy.mode == DANGER_FULL_ACCESS {
+            return false;
+        }
+        if !ctx.policy.writes_allowed() {
+            // read-only: anything not plainly read-only escalates.
+            return !looks_read_only(command);
+        }
+        // workspace-write: escalate only if the workdir itself isn't writable.
+        !ctx.policy.can_write(workdir)
+    }
+}
+
+#[async_trait(?Send)]
+impl Tool for ShellTool {
+    fn name(&self) -> &str {
+        "shell"
+    }
+    fn description(&self) -> &str {
+        "Run a shell command in the workspace and return its stdout, stderr, and \
+         exit code. Use this to build, run tests, inspect the tree, run git, etc. \
+         Prefer read_file/apply_patch for reading and editing files. Commands run \
+         under a sandbox policy; some require user approval."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command to run, as typed in a shell."},
+                "workdir": {"type": "string", "description": "Working directory (defaults to the workspace root)."},
+                "timeout": {"type": "integer", "minimum": 1, "maximum": 600, "description": "Timeout in seconds."},
+                "justification": {"type": "string", "description": "Why this is needed; shown if approval is required."},
+            },
+            "required": ["command"],
+        })
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
+            return "Error: 'command' is required and must be a string.".into();
+        };
+        // Resolve workdir (relative -> under workspace).
+        let workdir = match args.get("workdir").and_then(|v| v.as_str()) {
+            Some(w) if !w.is_empty() => {
+                let p = PathBuf::from(w);
+                let abs = if p.is_absolute() { p } else { ctx.workspace.join(w) };
+                abs.canonicalize().unwrap_or(abs)
+            }
+            _ => ctx.workspace.clone(),
+        };
+        if !workdir.exists() {
+            return format!("Error: working directory does not exist: {}", workdir.display());
+        }
+        let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(ctx.timeout_s);
+        let justification = args.get("justification").and_then(|v| v.as_str()).unwrap_or("");
+
+        let needs_esc = ShellTool::needs_escalation(ctx, command, &workdir);
+        let decision = Approver::new(&ctx.approval_policy).classify(command, needs_esc);
+
+        match decision {
+            Decision::AutoDeny => {
+                return "Error: command denied by approval policy 'never' (it requires escalated \
+                        permissions). Adjust the approach to stay within the sandbox, or ask the \
+                        user to change the policy."
+                    .into();
+            }
+            Decision::Ask => match &ctx.approver {
+                Some(h) => {
+                    let reason = if justification.is_empty() {
+                        "Command requires approval.".to_string()
+                    } else {
+                        justification.to_string()
+                    };
+                    let ok = h
+                        .request(ApprovalRequest {
+                            command: command.to_string(),
+                            reason,
+                            cwd: workdir.display().to_string(),
+                            escalated: needs_esc,
+                            details: String::new(),
+                        })
+                        .await;
+                    if !ok {
+                        return "Error: command not approved by the user.".into();
+                    }
+                }
+                None => {
+                    return "Error: command requires approval but no approver is configured.".into();
+                }
+            },
+            Decision::AutoApprove => {}
+        }
+
+        let exec = PolicyExecutor::new();
+        let mut result = exec.run(command, &workdir, timeout).await;
+
+        // on-failure: if the sandboxed run failed (not a timeout), offer to retry.
+        if !result.ok() && ctx.approval_policy == ON_FAILURE && !result.timed_out {
+            if let Some(h) = &ctx.approver {
+                let ok = h
+                    .request(ApprovalRequest {
+                        command: command.to_string(),
+                        reason: format!("Sandboxed run failed (exit {}). {justification}", result.exit_code)
+                            .trim()
+                            .to_string(),
+                        cwd: workdir.display().to_string(),
+                        escalated: true,
+                        details: String::new(),
+                    })
+                    .await;
+                if ok {
+                    result = exec.run(command, &workdir, timeout).await;
+                }
+            }
+        }
+
+        result.render()
+    }
+}
+
+/// `remember` — record a verified, reusable note into project memory. Only the
+/// model should call this for things it has CONFIRMED (a gotcha, a convention, a
+/// working solution), so the store stays trustworthy. Recalled notes are
+/// surfaced as leads, not facts.
+pub struct RememberTool;
+
+#[async_trait(?Send)]
+impl Tool for RememberTool {
+    fn name(&self) -> &str {
+        "remember"
+    }
+    fn description(&self) -> &str {
+        "Save a short, VERIFIED, reusable note to project memory (a gotcha, a \
+         project convention, or a confirmed solution) so future sessions recall \
+         it. Only record things you have actually confirmed — not guesses. \
+         Optionally tag it for retrieval."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "note": {"type": "string", "description": "The verified fact/gotcha/solution, one or two sentences."},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional keywords for retrieval."},
+            },
+            "required": ["note"],
+        })
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(note) = args.get("note").and_then(|v| v.as_str()) else {
+            return "Error: 'note' is required and must be a string.".into();
+        };
+        let Some(store) = &ctx.memory else {
+            return "Error: project memory is not enabled.".into();
+        };
+        let tags: Vec<String> = args
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        match store.remember(note, &tags, now) {
+            Ok(true) => "Saved to project memory.".into(),
+            Ok(false) => "Already in project memory (or empty) — not duplicated.".into(),
+            Err(e) => format!("Error saving to memory: {e}"),
+        }
+    }
+}

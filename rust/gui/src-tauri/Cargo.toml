@@ -1,0 +1,40 @@
+[package]
+name = "ncx-gui"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+license = "MIT"
+
+# Standalone workspace: keeps the heavy Tauri dep tree out of the main
+# `rust/` workspace (so `cargo test` there stays lean). Depends on the ncx
+# crates by path across the workspace boundary.
+[workspace]
+
+# Desktop-only: rlib only. The cdylib/staticlib crate-types (Tauri's mobile
+# template) make the GNU/mingw linker overflow its export-ordinal table
+# ("export ordinal too large") on this windows-gnu toolchain; the .exe links
+# statically and exports nothing, so plain `lib` is correct here.
+[lib]
+name = "ncx_gui_lib"
+crate-type = ["lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "time", "macros", "sync"] }
+async-trait = "0.1"
+
+ncx-config = { path = "../../crates/ncx-config" }
+ncx-provider = { path = "../../crates/ncx-provider" }
+ncx-sandbox = { path = "../../crates/ncx-sandbox" }
+ncx-core = { path = "../../crates/ncx-core" }
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"
+codegen-units = 1

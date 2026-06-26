@@ -14,3 +14,12 @@ edition = "2021"
 version = "0.1.0"
 license = "MIT"
 rust-version = "1.96"
+
+# Release profile tuned for DISTRIBUTION (the rewrite's real win, not throughput
+# — the app is I/O/model-bound). strip + LTO + size-opt shrink the single binary;
+# fat LTO + 1 codegen unit also trims dead code across crates.
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"
+codegen-units = 1

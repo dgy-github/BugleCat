@@ -1,0 +1,22 @@
+//! ncx-config — nanocodex configuration loading.
+//!
+//! Rust port of `nanocodex/config.py`. Resolves a [`Config`] from multiple
+//! sources with this priority order (highest wins):
+//!
+//! ```text
+//! explicit overrides (CLI)
+//!   > environment variables
+//!     > profile bundle (NANOCODEX_PROFILE / [profiles.<name>])
+//!       > ~/.nanocodex/config.toml
+//!         > ~/.deepseek/config.toml
+//!           > ~/.codex/config.toml
+//!             > built-in defaults
+//! ```
+
+pub mod config;
+pub mod loader;
+pub mod writer;
+
+pub use config::{Config, ConfigError, VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES};
+pub use loader::{ConfigPaths, Overrides, list_profiles, list_profiles_at, load_config, load_config_with_paths};
+pub use writer::{dump_nanocodex_toml, write_nanocodex_config};
