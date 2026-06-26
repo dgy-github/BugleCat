@@ -21,6 +21,7 @@ OPTIONS:
     -a, --approval <POLICY> untrusted | on-failure | on-request | never.
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
                             (classify → plan → parallel workers → verify). One-shot only.
+        --memory-merge      Maintenance: LLM-fold near-duplicate project memory notes, then exit.
     -h, --help              Show this help.
     -V, --version           Show version.";
 
@@ -33,6 +34,7 @@ pub struct Args {
     pub sandbox: Option<String>,
     pub approval: Option<String>,
     pub orchestrate: bool,
+    pub memory_merge: bool,
     pub help: bool,
     pub version: bool,
 }
@@ -57,6 +59,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-h" | "--help" => args.help = true,
             "-V" | "--version" => args.version = true,
             "-o" | "--orchestrate" => args.orchestrate = true,
+            "--memory-merge" => args.memory_merge = true,
             "-w" | "--workspace" => {
                 args.workspace = Some(PathBuf::from(take_value(argv, &mut i, a)?));
             }

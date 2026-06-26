@@ -16,6 +16,16 @@
 
 use std::path::PathBuf;
 
+use async_trait::async_trait;
+
+/// Merges several same-topic facts into one concise note (the LLM-backed
+/// consolidation). `None` = couldn't summarize → caller keeps the newest.
+/// Supplied by the CLI/GUI (uses the fast model); tests use a mock.
+#[async_trait(?Send)]
+pub trait Summarizer {
+    async fn merge(&self, facts: &[String]) -> Option<String>;
+}
+
 /// Hard cap so the store can't grow unbounded; oldest are dropped first.
 pub const MAX_ENTRIES: usize = 200;
 const RECALL_HEADER: &str =
@@ -144,6 +154,83 @@ impl MemoryStore {
             out.drain(0..drop);
             removed += drop;
         }
+        if removed > 0 {
+            self.write_all(&out)?;
+        }
+        Ok(removed)
+    }
+
+    /// LLM-backed consolidation: cluster near-duplicates (Jaccard ≥ threshold)
+    /// and, for each cluster of >1, ask `summarizer` to fold them into ONE note
+    /// (keeping the newest timestamp + the union of tags). If the summarizer
+    /// returns `None`, fall back to keeping the cluster's newest entry (same as
+    /// the heuristic [`consolidate`]). Returns how many entries were removed.
+    pub async fn summarize_consolidate(
+        &self,
+        summarizer: &dyn Summarizer,
+        threshold: f64,
+    ) -> std::io::Result<usize> {
+        let entries = self.entries();
+        if entries.len() < 2 {
+            return Ok(0);
+        }
+        let before = entries.len();
+        let mut sorted = entries;
+        sorted.sort_by(|a, b| b.ts.cmp(&a.ts)); // newest first
+
+        // Greedy single-link clustering by word-set similarity.
+        let mut clusters: Vec<Vec<MemoryEntry>> = Vec::new();
+        let mut reps: Vec<std::collections::HashSet<String>> = Vec::new();
+        for e in sorted {
+            let ws = word_set(&e.text);
+            let mut placed = false;
+            for (i, rep) in reps.iter().enumerate() {
+                if jaccard(rep, &ws) >= threshold {
+                    clusters[i].push(e.clone());
+                    placed = true;
+                    break;
+                }
+            }
+            if !placed {
+                reps.push(ws);
+                clusters.push(vec![e]);
+            }
+        }
+
+        let mut out: Vec<MemoryEntry> = Vec::new();
+        for cluster in clusters {
+            if cluster.len() == 1 {
+                out.push(cluster.into_iter().next().unwrap());
+                continue;
+            }
+            let ts = cluster.iter().map(|e| e.ts).max().unwrap_or(0);
+            let mut tags: Vec<String> = Vec::new();
+            for e in &cluster {
+                for t in &e.tags {
+                    if !tags.contains(t) {
+                        tags.push(t.clone());
+                    }
+                }
+            }
+            let texts: Vec<String> = cluster.iter().map(|e| e.text.clone()).collect();
+            match summarizer.merge(&texts).await {
+                Some(m) if !m.trim().is_empty() => {
+                    out.push(MemoryEntry { ts, tags, text: m.trim().to_string() });
+                }
+                _ => {
+                    // Summarizer unavailable → keep the newest (heuristic behavior).
+                    let newest = cluster.into_iter().max_by_key(|e| e.ts).unwrap();
+                    out.push(newest);
+                }
+            }
+        }
+
+        out.sort_by_key(|e| e.ts);
+        if out.len() > MAX_ENTRIES {
+            let drop = out.len() - MAX_ENTRIES;
+            out.drain(0..drop);
+        }
+        let removed = before.saturating_sub(out.len());
         if removed > 0 {
             self.write_all(&out)?;
         }
@@ -331,6 +418,43 @@ mod tests {
         // The newer of the near-dup cluster (ts 2) is the one kept.
         assert!(es.iter().any(|e| e.ts == 2));
         assert!(es.iter().any(|e| e.text.contains("storyboard")));
+    }
+
+    struct FixedMerger(&'static str);
+    #[async_trait(?Send)]
+    impl Summarizer for FixedMerger {
+        async fn merge(&self, _facts: &[String]) -> Option<String> {
+            if self.0.is_empty() { None } else { Some(self.0.to_string()) }
+        }
+    }
+
+    #[tokio::test]
+    async fn summarize_merges_cluster_into_one() {
+        let s = store("llm_merge");
+        s.remember("the gnu toolchain is used for the build", &["build".into()], 1).unwrap();
+        s.remember("the gnu toolchain used for the build here", &[], 2).unwrap();
+        s.remember("the storyboard panel renders thumbnails", &[], 3).unwrap();
+        let removed = s.summarize_consolidate(&FixedMerger("gnu toolchain, no MSVC"), 0.8).await.unwrap();
+        assert_eq!(removed, 1); // the 2-entry cluster folds to one
+        let es = s.entries();
+        assert_eq!(es.len(), 2);
+        let merged = es.iter().find(|e| e.text == "gnu toolchain, no MSVC").unwrap();
+        assert_eq!(merged.ts, 2, "keeps newest ts of the cluster");
+        assert!(merged.tags.contains(&"build".to_string()), "keeps union of tags");
+        assert!(es.iter().any(|e| e.text.contains("storyboard")));
+    }
+
+    #[tokio::test]
+    async fn summarize_falls_back_to_newest_when_merge_none() {
+        let s = store("llm_none");
+        s.remember("the gnu toolchain is used for the build", &[], 1).unwrap();
+        s.remember("the gnu toolchain used for the build here", &[], 2).unwrap();
+        // empty merger → None → fallback keeps the newest of the cluster.
+        let removed = s.summarize_consolidate(&FixedMerger(""), 0.8).await.unwrap();
+        assert_eq!(removed, 1);
+        let es = s.entries();
+        assert_eq!(es.len(), 1);
+        assert_eq!(es[0].ts, 2);
     }
 
     #[test]

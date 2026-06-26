@@ -20,7 +20,7 @@ pub mod slash;
 pub mod tools;
 
 pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TurnResult};
-pub use memory::{MemoryEntry, MemoryStore};
+pub use memory::{MemoryEntry, MemoryStore, Summarizer};
 pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };

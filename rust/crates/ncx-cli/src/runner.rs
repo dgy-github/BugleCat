@@ -16,7 +16,9 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
-use ncx_core::{AgentLoop, AgentRunner, MemoryStore, Session, Tier, ToolContext, ToolRegistry};
+use ncx_core::{
+    AgentLoop, AgentRunner, MemoryStore, Session, Summarizer, Tier, ToolContext, ToolRegistry,
+};
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
 use serde_json::json;
@@ -124,6 +126,52 @@ impl AgentRunner for LiveRunner {
         }
         for (_, dir) in self.scratch.borrow_mut().drain() {
             let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// LLM-backed [`Summarizer`] for `MemoryStore::summarize_consolidate` — folds a
+/// cluster of related notes into one concise note using the FAST model.
+pub struct LiveSummarizer {
+    cfg: Config,
+}
+
+impl LiveSummarizer {
+    pub fn new(cfg: Config) -> Self {
+        LiveSummarizer { cfg }
+    }
+    fn fast_model(&self) -> String {
+        if self.cfg.fast_model.is_empty() {
+            self.cfg.model.clone()
+        } else {
+            self.cfg.fast_model.clone()
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl Summarizer for LiveSummarizer {
+    async fn merge(&self, facts: &[String]) -> Option<String> {
+        let provider = DeepSeekProvider::with_opts(
+            self.cfg.api_key.clone(),
+            &self.cfg.base_url,
+            self.fast_model(),
+            self.cfg.timeout_s as u64,
+            self.cfg.max_retries as u32,
+        );
+        let user = facts
+            .iter()
+            .enumerate()
+            .map(|(i, f)| format!("{}. {f}", i + 1))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let messages = vec![
+            json!({"role": "system", "content": "Merge these related project notes into ONE concise factual note (at most 2 sentences). Output ONLY the merged note — no preamble, no list, no quotes."}),
+            json!({"role": "user", "content": user}),
+        ];
+        match provider.chat(&messages, None, None, None, None).await {
+            Ok(r) if !r.content.trim().is_empty() => Some(r.content.trim().to_string()),
+            _ => None,
         }
     }
 }

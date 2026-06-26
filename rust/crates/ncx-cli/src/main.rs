@@ -25,7 +25,7 @@ use ncx_sandbox::SandboxPolicy;
 use serde_json::json;
 
 use args::{parse_args, Args};
-use runner::LiveRunner;
+use runner::{LiveRunner, LiveSummarizer};
 
 const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use the provided tools \
     (read_file, apply_patch, update_plan) to inspect and edit the workspace. Prefer apply_patch \
@@ -85,6 +85,22 @@ async fn run(args: Args) -> i32 {
     if let Err(e) = cfg.validate() {
         eprintln!("ncx: {e}");
         return 1;
+    }
+
+    // Maintenance: LLM-fold near-duplicate memory notes, then exit.
+    if args.memory_merge {
+        let mem = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+        let summarizer = LiveSummarizer::new(cfg.clone());
+        return match mem.summarize_consolidate(&summarizer, 0.85).await {
+            Ok(n) => {
+                println!("memory: folded {n} near-duplicate note(s) via the LLM.");
+                0
+            }
+            Err(e) => {
+                eprintln!("memory merge failed: {e}");
+                1
+            }
+        };
     }
 
     let provider = DeepSeekProvider::with_opts(
