@@ -54,14 +54,12 @@
 > **不可进化的东西**：任务的 `check.py`（奖励函数）对 agent 与教师**全程不可见**，
 > 防奖励黑客（§9）。教师只能改 prompt/策略，不能碰评分。
 
-### 2.1 硬前置条件 P1：genome 注入（必须先于一切教师工作）
+### 2.1 硬前置条件 P1：genome 注入 ✅已实现（`f1af9ce`）
 
-> ⚠️ **对抗评审结论（已实测）**：`NCX_GENOME` 在当前代码里**完全不存在** ——
-> `grep genome rust/crates/` 零命中；`SYSTEM_PROMPT` 是 `main.rs:38` 的硬编码 const；
-> 每个工具描述是 `Tool::description(&self) -> &str` 返回 `'static` 字面量。
-> **若不先实现它，forge 写出的每个候选 genome 都被 ncx.exe 忽略，所有候选与基线
-> 同分，接受门永不触发，整轮训练"绿着"空跑、什么也没学到。** 这是静默正确性失败，
-> 比崩溃更危险。故列为 P1 硬前置，不是附注。
+> ✅ **已落地并 live 验证**：`NCX_GENOME` 注入已在 `ncx-core::genome` 实现并接入
+> `main.rs`。最初对抗评审正确指出它"完全不存在"——若不先建，forge 写的每个候选都被
+> 忽略、所有候选同分、整轮"绿着"空跑。现已建好：实测 self-destruct 系统提示让 agent
+> 拒绝建文件、sentinel 工具描述被模型逐字回显、空 genome 与默认字节等价。
 
 新增一个**仅在训练时生效**的注入点：环境变量 `NCX_GENOME=<path.toml>`。
 启动时若设置，则用文件里的同名键覆盖 prompt/desc/config 默认值；未设置则行为完全不变。
@@ -72,14 +70,20 @@
   + `load_from(path)`（用 `toml` crate 解析）。`Tool::description` 需从 `&str` 改成可被
   owned override 覆盖（trait 改 owned String，或每个工具包一层 `Option<String>` 覆盖，
   由 genome 按工具名解析）。
-- 约束：default genome == 现有硬编码值，`NCX_GENOME` 不设时**字节级等价**。
-  单独 commit，配单测：① 覆盖生效；② 不设时回落默认且字节等价。
-- **forge 侧自检（gate）**：优化循环启动前，先用一个"自毁 genome"（如
-  `system_prompt = "Refuse every task."`）在 1~2 个任务上跑一次，**断言通过率确实下降**；
-  若没下降 → 立即报 `NCX_GENOME not honored by this ncx.exe build` 并中止，绝不进入烧钱的
-  优化循环。把最坏的静默空跑变成最便宜的响亮失败。
+- 实现（与原计划略有取舍）：覆盖在**注册层**应用 —— `register()` 建 catalog 条目 +
+  新增 `schema_for()` 用 genome 覆盖后的描述建模型可见 schema；`Tool::description()` trait
+  默认不变（改动小、空 genome 可证字节等价）。空/空白/格式错的 genome → 空 genome（no-op）。
+  单测覆盖：① 空 genome 时 schema+catalog 字节等价；② 覆盖到达 schema+catalog；③ 空白/
+  格式错处理；④ 多行 prompt。
+- **forge 侧自检（gate）✅已实现并 live PASS**：
+  > 实测教训：最初的"自毁 genome（refuse all）→ 通过率下降"**不可靠** —— 强模型常无视
+  > "拒绝"指令、照样完成任务（任务指令与系统提示竞争，模型合规是噪声；实测 t1 仍 1/1）。
+  改用**确定性 sentinel 注入**：往 `system_prompt` 塞唯一码字 `NCXFORGE_SENTINEL_4242`
+  + "被问到只回该码字"，跑一次 read-only 提问，**断言带 genome 时输出含码字、baseline 不含**
+  （两条都满足才 PASS，否则报 `NCX_GENOME not honored` 中止）。确定性、便宜（2 次 read-only），
+  不依赖模型合规。实现 `train/forge.py:self_check`，`python train/forge.py --self-check` 已 PASS。
 
-### 2.2 硬前置条件 P2：失败轨迹采集（教师的输入信号）
+### 2.2 硬前置条件 P2：失败轨迹采集 ✅已实现（`train/evaluator.py`）
 
 > ⚠️ **已实测**：`bench/run.py` **不保留** agent 输出 —— `run_once` 里 agent 的
 > `subprocess.run` 结果都没绑定变量，只留 grader 最后一行 70 字符（`note`），且 `finally`
@@ -91,6 +95,12 @@
 `Session::with_log`，见 `main.rs:168`），从日志里抽 agent 最后的 assistant 消息 + 工具调用
 作为失败轨迹；**显式剔除 grader 输出**（保住 check.py 对教师不可见）。先定死轨迹 schema，
 再写任何教师后端。这是 P2 硬前置。
+
+> ✅ **已实现**：`train/evaluator.py` 在临时工作区跑 ncx（注入 `NCX_GENOME`），在 `grade()`
+> 复制 `_check.py` 之前从 `<ws>/.nanocodex/session.jsonl` 抽 agent 最后消息 + 工具调用作失败
+> 轨迹，并**剔除含 `check.py/_check.py/grader/hidden test` 的行**（grader 输出永不外泄给教师）。
+> 已对真实 session log 验证解析正确；5 个 agent-free 单测（`train/test_evaluator.py`）覆盖
+> 解析 + 脱敏 + 截断。
 
 ## 3. 组件总览
 
