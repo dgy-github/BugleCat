@@ -37,18 +37,53 @@ pub struct Skill {
     pub name: String,
     /// One-line "when to use this" summary (frontmatter `description:`).
     pub description: String,
-    /// Path to the `SKILL.md` file.
+    /// Path to the `SKILL.md` file (a synthetic `<builtin>` path for builtins).
     pub path: PathBuf,
     /// The skill's directory (holds `SKILL.md` and any bundled resource files).
     pub dir: PathBuf,
+    /// For builtin skills compiled into the binary: the body, already parsed.
+    /// `None` for filesystem skills (the body is read from `path` on demand).
+    pub embedded: Option<String>,
 }
 
 impl Skill {
     /// Read the full markdown body (everything after the frontmatter block).
+    /// Builtins return their embedded body without touching the filesystem.
     pub fn load_body(&self) -> std::io::Result<String> {
+        if let Some(body) = &self.embedded {
+            return Ok(body.clone());
+        }
         let text = std::fs::read_to_string(&self.path)?;
         Ok(strip_frontmatter(&text).trim().to_string())
     }
+
+    /// True for skills compiled into the binary (no on-disk directory).
+    pub fn is_builtin(&self) -> bool {
+        self.embedded.is_some()
+    }
+}
+
+/// Builtin skills compiled into the binary via `include_str!`. These are always
+/// available; a filesystem skill of the same name shadows the builtin so users
+/// can customize them.
+pub fn builtin_skills() -> Vec<Skill> {
+    // (name, SKILL.md contents). Add new builtins here.
+    const BUILTINS: &[&str] = &[include_str!("../builtin_skills/commit-message/SKILL.md")];
+    let mut out = Vec::new();
+    for text in BUILTINS {
+        let (name, description) = parse_frontmatter(text);
+        let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
+            continue; // a builtin without a name is a packaging bug; skip defensively.
+        };
+        out.push(Skill {
+            name: name.trim().to_string(),
+            description: description.unwrap_or_default().trim().to_string(),
+            path: PathBuf::from("<builtin>"),
+            dir: PathBuf::from("<builtin>"),
+            embedded: Some(strip_frontmatter(text).trim().to_string()),
+        });
+    }
+    out
 }
 
 /// Discover skills under the user-global and workspace skill roots.
@@ -70,8 +105,12 @@ fn discover_skills_with_home(workspace: &Path, home: Option<&Path>) -> Vec<Skill
     }
     roots.push(workspace.join(".ncx").join("skills"));
 
-    // Keyed by name so a later root (workspace) shadows an earlier one (home).
+    // Keyed by name. Builtins seed the map first; a later filesystem root with
+    // the same name shadows it (home then workspace), so users can override.
     let mut by_name: std::collections::BTreeMap<String, Skill> = std::collections::BTreeMap::new();
+    for skill in builtin_skills() {
+        by_name.insert(skill.name.clone(), skill);
+    }
     for root in roots {
         for skill in scan_root(&root) {
             by_name.insert(skill.name.clone(), skill);
@@ -110,6 +149,7 @@ fn scan_root(root: &Path) -> Vec<Skill> {
             description: description.unwrap_or_default().trim().to_string(),
             path: manifest,
             dir,
+            embedded: None,
         });
     }
     out
@@ -227,6 +267,11 @@ mod tests {
         std::fs::write(d.join("SKILL.md"), contents).unwrap();
     }
 
+    /// Skills discovered from disk only (drop builtins) for exact-count asserts.
+    fn fs_only(skills: Vec<Skill>) -> Vec<Skill> {
+        skills.into_iter().filter(|s| !s.is_builtin()).collect()
+    }
+
     #[test]
     fn discovers_and_parses_frontmatter() {
         let ws = tmp("discover");
@@ -235,7 +280,7 @@ mod tests {
             "pdf",
             "---\nname: pdf-forms\ndescription: \"Fill PDF forms. Use for PDFs.\"\n---\n\n# Body\nDetails here.",
         );
-        let skills = discover_skills_with_home(&ws, None);
+        let skills = fs_only(discover_skills_with_home(&ws, None));
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "pdf-forms");
         assert_eq!(skills[0].description, "Fill PDF forms. Use for PDFs.");
@@ -246,9 +291,38 @@ mod tests {
     fn name_falls_back_to_dir() {
         let ws = tmp("fallback");
         write_skill(&ws, "my-tool", "---\ndescription: no name field\n---\nbody");
-        let skills = discover_skills_with_home(&ws, None);
+        let skills = fs_only(discover_skills_with_home(&ws, None));
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "my-tool");
+    }
+
+    #[test]
+    fn builtins_are_always_present_and_loadable() {
+        let ws = tmp("builtins");
+        let skills = discover_skills_with_home(&ws, None);
+        let cm = skills
+            .iter()
+            .find(|s| s.name == "commit-message")
+            .expect("commit-message builtin present");
+        assert!(cm.is_builtin());
+        assert!(cm.load_body().unwrap().contains("Conventional Commits"));
+    }
+
+    #[test]
+    fn filesystem_skill_shadows_builtin() {
+        let ws = tmp("shadow_builtin");
+        write_skill(
+            &ws,
+            "commit-message",
+            "---\nname: commit-message\ndescription: custom override\n---\nmy rules",
+        );
+        let skills = discover_skills_with_home(&ws, None);
+        let cm = skills
+            .iter()
+            .find(|s| s.name == "commit-message")
+            .unwrap();
+        assert!(!cm.is_builtin(), "filesystem skill should win");
+        assert_eq!(cm.description, "custom override");
     }
 
     #[test]
@@ -257,7 +331,7 @@ mod tests {
         let ws = tmp("ws");
         write_skill(&home, "shared", "---\nname: shared\ndescription: from home\n---\nx");
         write_skill(&ws, "shared", "---\nname: shared\ndescription: from workspace\n---\ny");
-        let skills = discover_skills_with_home(&ws, Some(&home));
+        let skills = fs_only(discover_skills_with_home(&ws, Some(&home)));
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].description, "from workspace");
     }
@@ -273,9 +347,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_when_no_skills() {
+    fn empty_when_no_filesystem_skills() {
         let ws = tmp("none");
-        assert!(discover_skills_with_home(&ws, None).is_empty());
+        // Only builtins remain when nothing is on disk.
+        assert!(fs_only(discover_skills_with_home(&ws, None)).is_empty());
         assert_eq!(skills_index_block(&[]), "");
     }
 
@@ -284,7 +359,7 @@ mod tests {
         let ws = tmp("malformed");
         // No frontmatter fence at all -> name falls back to dir, body is whole file.
         write_skill(&ws, "raw", "just a plain body, no frontmatter");
-        let skills = discover_skills_with_home(&ws, None);
+        let skills = fs_only(discover_skills_with_home(&ws, None));
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "raw");
         assert_eq!(skills[0].description, "");

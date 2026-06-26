@@ -189,9 +189,19 @@ async fn run(args: Args) -> i32 {
         let expanded = expand_file_mentions(prompt, &cfg.workspace);
         checkpoint_before_turn(&cfg.workspace, &expanded);
         if args.orchestrate {
+            if !args.images.is_empty() {
+                eprintln!("ncx: --image is ignored with --orchestrate (text-only path).");
+            }
             return run_orchestrated(cfg, &expanded).await;
         }
-        let result = agent.run_turn(json!(expanded), None).await;
+        let user_input = match build_image_user_input(&expanded, &args.images) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("ncx: {e}");
+                return 1;
+            }
+        };
+        let result = agent.run_turn(user_input, None).await;
         recorder.record(&agent.session);
         println!("{}", result.final_text);
         return if result.stop_reason == "error" { 1 } else { 0 };
@@ -247,7 +257,8 @@ fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
 /// other line becomes a turn (with `@file` mention expansion).
 async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut SessionRecorder) {
     println!(
-        "nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit.",
+        "nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit. \
+         (attach images inline: `--image <path> your question`)",
         cfg.model, cfg.sandbox_mode
     );
     let stdin = io::stdin();
@@ -290,12 +301,40 @@ async fn run_one_turn(
     recorder: &mut SessionRecorder,
     usage: &mut UsageTracker,
 ) {
-    let expanded = expand_file_mentions(prompt, &cfg.workspace);
+    // Inline `--image <path>` tokens attach images (vision turn); the rest is text.
+    let (text, images) = split_inline_images(prompt);
+    let expanded = expand_file_mentions(&text, &cfg.workspace);
     checkpoint_before_turn(&cfg.workspace, &expanded);
-    let result = agent.run_turn(json!(expanded), None).await;
+    let user_input = match build_image_user_input(&expanded, &images) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("ncx: {e}");
+            return;
+        }
+    };
+    let result = agent.run_turn(user_input, None).await;
     recorder.record(&agent.session);
     usage.record(&result);
     println!("{}", result.final_text);
+}
+
+/// Pull inline `--image <path>` pairs out of a REPL line, returning the
+/// remaining prompt text and the collected image paths (mirrors the one-shot
+/// `--image` flag so the REPL can also drive vision turns).
+fn split_inline_images(line: &str) -> (String, Vec<PathBuf>) {
+    let mut images = Vec::new();
+    let mut words = Vec::new();
+    let mut it = line.split_whitespace();
+    while let Some(w) = it.next() {
+        if w == "--image" {
+            if let Some(p) = it.next() {
+                images.push(PathBuf::from(p));
+            }
+        } else {
+            words.push(w);
+        }
+    }
+    (words.join(" "), images)
 }
 
 enum SlashOutcome {
@@ -338,6 +377,7 @@ fn dispatch_slash(
                 ))
             }
         }
+        "/skills" => SlashOutcome::Printed(render_skills(&agent.tools.ctx.skills)),
         "/plan" => {
             let plan = agent.tools.ctx.plan.borrow();
             if plan.is_empty() {
@@ -361,6 +401,23 @@ fn dispatch_slash(
             Err(e) => SlashOutcome::Printed(format!("Custom command failed: {e}")),
         },
     }
+}
+
+fn render_skills(skills: &[ncx_core::Skill]) -> String {
+    if skills.is_empty() {
+        return "(no skills available — add SKILL.md dirs under .ncx/skills/)".into();
+    }
+    let mut out = format!("Available skills ({}):", skills.len());
+    for s in skills {
+        let tag = if s.is_builtin() { " [builtin]" } else { "" };
+        if s.description.is_empty() {
+            out.push_str(&format!("\n  {}{tag}", s.name));
+        } else {
+            out.push_str(&format!("\n  {}{tag}\n      {}", s.name, s.description));
+        }
+    }
+    out.push_str("\n\nThe agent loads a skill's full instructions on demand via the `skill` tool.");
+    out
 }
 
 fn render_help() -> String {
@@ -990,6 +1047,65 @@ fn build_vision_provider(cfg: &ncx_config::Config) -> Option<Box<dyn Provider>> 
     )))
 }
 
+/// Build the one-shot user input. With no images it is just the prompt text;
+/// with `--image` paths it becomes an OpenAI-style multimodal `content` array
+/// (`text` block + one `image_url` block per file, each a base64 `data:` URL),
+/// which trips [`AgentLoop`]'s image detection and routes to the vision model.
+fn build_image_user_input(text: &str, images: &[PathBuf]) -> Result<serde_json::Value, String> {
+    if images.is_empty() {
+        return Ok(json!(text));
+    }
+    let mut content = vec![json!({"type": "text", "text": text})];
+    for path in images {
+        let bytes =
+            std::fs::read(path).map_err(|e| format!("cannot read image {}: {e}", path.display()))?;
+        let url = format!("data:{};base64,{}", image_mime(path), base64_encode(&bytes));
+        content.push(json!({"type": "image_url", "image_url": {"url": url}}));
+    }
+    Ok(serde_json::Value::Array(content))
+}
+
+/// Guess an image MIME type from the file extension (defaults to PNG).
+fn image_mime(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    }
+}
+
+/// Standard base64 encoding (RFC 4648, with `=` padding). Hand-rolled to avoid a
+/// new crate dependency for the single image-attachment use site.
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 fn context_edit_from_config(cfg: &ncx_config::Config) -> ContextEditPolicy {
     ContextEditPolicy {
         enabled: cfg.context_edit_enabled,
@@ -1009,6 +1125,55 @@ mod tests {
         for (cmd, _) in SLASH_HELP {
             assert!(help.contains(cmd), "{cmd}");
         }
+    }
+
+    #[test]
+    fn base64_matches_known_vectors() {
+        // RFC 4648 §10 test vectors.
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn image_input_builds_multimodal_content() {
+        let dir = std::env::temp_dir().join(format!("ncx_img_{}", new_session_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = dir.join("pic.jpg");
+        std::fs::write(&img, b"foobar").unwrap();
+
+        // No images -> plain text string.
+        assert_eq!(build_image_user_input("hi", &[]).unwrap(), json!("hi"));
+
+        // With an image -> [text, image_url(data: URL)].
+        let v = build_image_user_input("describe", &[img]).unwrap();
+        let arr = v.as_array().unwrap();
+        assert_eq!(arr[0], json!({"type": "text", "text": "describe"}));
+        assert_eq!(arr[1]["type"], "image_url");
+        assert_eq!(
+            arr[1]["image_url"]["url"].as_str().unwrap(),
+            "data:image/jpeg;base64,Zm9vYmFy"
+        );
+
+        // A missing file is a clean error, not a panic.
+        assert!(build_image_user_input("x", &[dir.join("nope.png")]).is_err());
+    }
+
+    #[test]
+    fn inline_images_split_from_prompt() {
+        // No flag -> all text, no images.
+        let (t, imgs) = split_inline_images("what is this");
+        assert_eq!(t, "what is this");
+        assert!(imgs.is_empty());
+
+        // Flags anywhere are pulled out; remaining words form the prompt.
+        let (t, imgs) = split_inline_images("--image a.png compare these --image b.jpg now");
+        assert_eq!(t, "compare these now");
+        assert_eq!(imgs, vec![PathBuf::from("a.png"), PathBuf::from("b.jpg")]);
     }
 
     #[test]

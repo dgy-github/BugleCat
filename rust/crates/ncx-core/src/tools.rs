@@ -775,6 +775,7 @@ mod tests {
             description: "say hi".into(),
             path: dir.join("SKILL.md"),
             dir: dir.clone(),
+            embedded: None,
         };
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
             .with_skills(vec![skill]);
@@ -801,6 +802,7 @@ mod tests {
                 description: String::new(),
                 path: ws.join("SKILL.md"),
                 dir: ws.clone(),
+                embedded: None,
             }]);
         assert!(ToolRegistry::new(withskill).get("skill").is_some());
     }
@@ -1132,12 +1134,14 @@ impl Tool for SkillTool {
             };
         };
         match skill.load_body() {
-            Ok(body) => format!(
-                "Skill '{}' (files in {}):\n\n{}",
-                skill.name,
-                skill.dir.display(),
-                body
-            ),
+            Ok(body) => {
+                let where_ = if skill.is_builtin() {
+                    "builtin skill".to_string()
+                } else {
+                    format!("files in {}", skill.dir.display())
+                };
+                format!("Skill '{}' ({where_}):\n\n{}", skill.name, body)
+            }
             Err(e) => format!("Error loading skill '{}': {e}", skill.name),
         }
     }
