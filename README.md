@@ -117,6 +117,9 @@ tool.
 - **Deterministic hooks:** `[[hooks]]` can run project commands before or after
   matching tools. A failing `pre_tool` hook blocks the tool; `post_tool` output
   is appended to the result for audit and formatting workflows.
+- **Checkpoint / restore:** the Rust CLI creates file checkpoints before model
+  turns and exposes `/checkpoint`, `/checkpoints`, and `/restore <id>` so risky
+  edits can be rolled back without relying on Git history.
 
 ### Why Rust For Stage 2
 
@@ -481,6 +484,10 @@ is project-scoped guidance.
   `.nanocodex/session.jsonl` before starting and `--history` to list recent
   global session summaries. The Tauri backend records the same snapshots after
   each GUI turn.
+- The Rust CLI also saves a workspace file checkpoint before each model turn.
+  Use `/checkpoints` to list recent checkpoints, `/checkpoint <label>` to create
+  one manually, and `/restore <id>` to restore files. Restore first creates a
+  safety checkpoint of the current state.
 - The original Python GUI can **fork** a saved snapshot to branch a past
   conversation without mutating the source session.
 

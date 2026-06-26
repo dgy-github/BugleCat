@@ -18,9 +18,9 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    expand_file_mentions, new_session_id, AgentLoop, ContextEditPolicy, MemoryStore, Orchestrator,
-    OrchestratorConfig, Session, SessionIndex, SessionSummary, TaskBudget, ToolContext,
-    ToolRegistry,
+    expand_file_mentions, new_session_id, AgentLoop, CheckpointMeta, CheckpointStore,
+    ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Session, SessionIndex,
+    SessionSummary, TaskBudget, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -172,6 +172,7 @@ async fn run(args: Args) -> i32 {
     // One-shot mode: run the prompt and exit.
     if let Some(prompt) = &args.prompt {
         let expanded = expand_file_mentions(prompt, &cfg.workspace);
+        checkpoint_before_turn(&cfg.workspace, &expanded);
         if args.orchestrate {
             return run_orchestrated(cfg, &expanded).await;
         }
@@ -259,6 +260,7 @@ async fn run_one_turn(
     recorder: &mut SessionRecorder,
 ) {
     let expanded = expand_file_mentions(prompt, &cfg.workspace);
+    checkpoint_before_turn(&cfg.workspace, &expanded);
     let result = agent.run_turn(json!(expanded), None).await;
     recorder.record(&agent.session);
     println!("{}", result.final_text);
@@ -282,6 +284,12 @@ fn dispatch_slash(
         "/help" => SlashOutcome::Printed(render_help()),
         "/status" => SlashOutcome::Printed(render_status(cfg)),
         "/history" => SlashOutcome::Printed(render_history(&SessionIndex::default().entries(), 20)),
+        "/checkpoint" => SlashOutcome::Printed(create_checkpoint_text(&cfg.workspace, arg)),
+        "/checkpoints" => SlashOutcome::Printed(render_checkpoints(
+            &CheckpointStore::new(&cfg.workspace).list(),
+            20,
+        )),
+        "/restore" => SlashOutcome::Printed(restore_checkpoint_text(&cfg.workspace, arg)),
         "/model" => {
             if arg.is_empty() {
                 SlashOutcome::Printed(format!("model: {}", cfg.model))
@@ -394,6 +402,95 @@ fn render_history(entries: &[SessionSummary], limit: usize) -> String {
     out
 }
 
+fn checkpoint_before_turn(workspace: &Path, prompt: &str) {
+    let label = format!("auto: {}", clipped_label(prompt, 80));
+    match CheckpointStore::new(workspace).create(&label) {
+        Ok(meta) => eprintln!(
+            "checkpoint {} saved ({} file(s), {} skipped).",
+            meta.id,
+            meta.files.len(),
+            meta.skipped_paths.len()
+        ),
+        Err(e) => eprintln!("checkpoint warning: {e}"),
+    }
+}
+
+fn create_checkpoint_text(workspace: &Path, label: &str) -> String {
+    let label = if label.trim().is_empty() {
+        "manual checkpoint"
+    } else {
+        label.trim()
+    };
+    match CheckpointStore::new(workspace).create(label) {
+        Ok(meta) => format_checkpoint_saved(&meta),
+        Err(e) => format!("checkpoint failed: {e}"),
+    }
+}
+
+fn restore_checkpoint_text(workspace: &Path, id: &str) -> String {
+    if id.trim().is_empty() {
+        return "usage: /restore <checkpoint-id>".into();
+    }
+    match CheckpointStore::new(workspace).restore(id) {
+        Ok(report) => {
+            let safety = report
+                .safety_checkpoint_id
+                .map(|id| format!("\nsafety checkpoint: {id}"))
+                .unwrap_or_else(|| "\nsafety checkpoint: failed".into());
+            format!(
+                "restored checkpoint {}\nrestored_files: {}\ndeleted_files: {}{}",
+                report.checkpoint_id, report.restored_files, report.deleted_files, safety
+            )
+        }
+        Err(e) => format!("restore failed: {e}"),
+    }
+}
+
+fn format_checkpoint_saved(meta: &CheckpointMeta) -> String {
+    format!(
+        "checkpoint: {}\nlabel: {}\nfiles: {}  skipped: {}  bytes: {}",
+        meta.id,
+        meta.label,
+        meta.files.len(),
+        meta.skipped_paths.len(),
+        meta.total_bytes
+    )
+}
+
+fn render_checkpoints(entries: &[CheckpointMeta], limit: usize) -> String {
+    if entries.is_empty() {
+        return "No checkpoints.".into();
+    }
+    let mut out = String::from("Checkpoints:");
+    for meta in entries.iter().take(limit) {
+        out.push_str(&format!(
+            "\n  {}  {}  {}  files={} skipped={}",
+            meta.created_at,
+            meta.id,
+            if meta.label.is_empty() {
+                "(unlabeled)"
+            } else {
+                meta.label.as_str()
+            },
+            meta.files.len(),
+            meta.skipped_paths.len()
+        ));
+    }
+    out
+}
+
+fn clipped_label(text: &str, limit: usize) -> String {
+    let s = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.chars().count() <= limit {
+        s
+    } else {
+        format!(
+            "{}...",
+            s.chars().take(limit.saturating_sub(3)).collect::<String>()
+        )
+    }
+}
+
 fn positive_usize(value: i64, fallback: usize) -> usize {
     usize::try_from(value)
         .ok()
@@ -464,5 +561,21 @@ mod tests {
         assert!(out.contains("sid"));
         assert!(out.contains("fix bug"));
         assert!(out.contains("tools=3"));
+    }
+
+    #[test]
+    fn checkpoints_render_saved_entries() {
+        let rows = vec![CheckpointMeta {
+            id: "cp1".into(),
+            label: "before edit".into(),
+            created_at: "2026-06-01T10:00:00".into(),
+            files: vec!["a.txt".into()],
+            skipped_paths: vec!["target/big".into()],
+            total_bytes: 12,
+        }];
+        let out = render_checkpoints(&rows, 10);
+        assert!(out.contains("cp1"));
+        assert!(out.contains("before edit"));
+        assert!(out.contains("skipped=1"));
     }
 }

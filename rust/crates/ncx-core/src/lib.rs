@@ -10,6 +10,7 @@
 //! * [`slash`] — REPL slash-command parsing.
 
 pub mod agent_loop;
+pub mod checkpoint;
 pub mod hooks;
 pub mod isolate;
 pub mod memory;
@@ -22,6 +23,7 @@ pub mod slash;
 pub mod tools;
 
 pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult};
+pub use checkpoint::{CheckpointMeta, CheckpointStore, RestoreReport};
 pub use hooks::{HookEvent, HookOutcome};
 pub use memory::{MemoryEntry, MemoryStore, Summarizer};
 pub use mentions::{expand_file_mentions, find_mentions};

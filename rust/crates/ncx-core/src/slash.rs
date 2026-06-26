@@ -25,6 +25,12 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
     ("/diff", "Show the working-tree git diff."),
     ("/plan", "Show the current step plan."),
     ("/history", "Show recent saved sessions."),
+    ("/checkpoint", "Create a workspace checkpoint."),
+    ("/checkpoints", "List recent workspace checkpoints."),
+    (
+        "/restore",
+        "Restore files from a checkpoint: /restore <id>.",
+    ),
     (
         "/loop",
         "Repeat a prompt on an interval: /loop [5m] <prompt> (Ctrl+C stops).",
@@ -166,6 +172,9 @@ mod tests {
             "/approvals",
             "/diff",
             "/history",
+            "/checkpoint",
+            "/checkpoints",
+            "/restore",
             "/loop",
             "/compact",
             "/clear",
