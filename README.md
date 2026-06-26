@@ -510,6 +510,10 @@ no tool-call/result pair is split). Two strategies share one interface:
 The trigger estimate uses a Chinese-leaning chars/token ratio so zh-heavy chats
 don't compact too late.
 
+In the Rust CLI, `/compact` materializes the active context-edit policy into the
+live session and rewrites the workspace session log, so future turns and
+`--resume` continue from the compacted history.
+
 ## Token Usage & Cost
 
 The provider returns real `usage` per call, including DeepSeek's
@@ -600,6 +604,12 @@ cd rust\gui
 npm.cmd install
 npm.cmd run tauri:build
 ```
+
+The desktop build now targets the Windows NSIS installer explicitly. The
+installer is emitted under
+`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\bundle\nsis\`.
+The GUI Settings dialog also exposes the resolved `~/.nanocodex/config.toml`
+path and buttons to open the config file or its directory.
 
 The Tauri crate deliberately keeps `crate-type = ["lib"]`; changing it to
 `cdylib` or `staticlib` overflows the Windows GNU linker's export table.

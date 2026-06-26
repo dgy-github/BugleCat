@@ -34,7 +34,12 @@
     sandbox_modes: string[];
     approval_policies: string[];
   };
+  type ConfigLocation = {
+    config_path: string;
+    config_dir: string;
+  };
   let settings = $state<Settings | null>(null);
+  let configLocation = $state<ConfigLocation | null>(null);
   let apiKeyInput = $state("");
   let saving = $state(false);
 
@@ -157,10 +162,33 @@
 
   async function openSettings() {
     try {
-      settings = await invoke<Settings>("get_settings");
+      const [loadedSettings, loadedLocation] = await Promise.all([
+        invoke<Settings>("get_settings"),
+        invoke<ConfigLocation>("get_config_location"),
+      ]);
+      settings = loadedSettings;
+      configLocation = loadedLocation;
       apiKeyInput = "";
     } catch (e) {
       messages.push({ role: "note", text: `Settings load failed: ${e}` });
+    }
+  }
+
+  async function openConfigFile() {
+    try {
+      await invoke("open_config_file");
+      configLocation = await invoke<ConfigLocation>("get_config_location");
+    } catch (e) {
+      messages.push({ role: "note", text: `Open config failed: ${e}` });
+    }
+  }
+
+  async function openConfigDir() {
+    try {
+      await invoke("open_config_dir");
+      configLocation = await invoke<ConfigLocation>("get_config_location");
+    } catch (e) {
+      messages.push({ role: "note", text: `Open config folder failed: ${e}` });
     }
   }
 
@@ -341,6 +369,14 @@
     <div class="overlay">
       <div class="modal">
         <h3>Settings</h3>
+        {#if configLocation}
+          <div class="config-entry">
+            <span>Config</span>
+            <code title={configLocation.config_path}>{configLocation.config_path}</code>
+            <button class="plain" onclick={openConfigFile}>Open file</button>
+            <button class="plain" onclick={openConfigDir}>Open folder</button>
+          </div>
+        {/if}
         <label>
           <span>Model</span>
           <select bind:value={settings.model}>

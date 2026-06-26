@@ -8,6 +8,8 @@
 mod bridge;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::sync::{Arc, Mutex};
 
 use ncx_config::{
@@ -51,6 +53,12 @@ pub struct CheckpointView {
 }
 
 #[derive(Serialize)]
+pub struct ConfigLocation {
+    config_path: String,
+    config_dir: String,
+}
+
+#[derive(Serialize)]
 pub struct RestoreView {
     checkpoint_id: String,
     safety_checkpoint_id: Option<String>,
@@ -88,6 +96,23 @@ fn send_prompt(text: String, state: tauri::State<'_, AppState>) -> Result<(), St
         .tx
         .send(Command::Prompt(text))
         .map_err(|_| "agent thread is not running".to_string())
+}
+
+#[tauri::command]
+fn get_config_location() -> Result<ConfigLocation, String> {
+    config_location()
+}
+
+#[tauri::command]
+fn open_config_file() -> Result<(), String> {
+    let path = ensure_config_file()?;
+    open_file(&path)
+}
+
+#[tauri::command]
+fn open_config_dir() -> Result<(), String> {
+    let dir = ensure_config_dir()?;
+    open_dir(&dir)
 }
 
 /// The editable settings shown in the Settings panel. The API key is never
@@ -162,6 +187,84 @@ fn save_settings(
     // Apply live (fresh session with the new config).
     let _ = state.tx.send(Command::Reload);
     Ok(())
+}
+
+fn config_location() -> Result<ConfigLocation, String> {
+    let path = ConfigPaths::default().nanocodex;
+    let dir = path
+        .parent()
+        .ok_or_else(|| "config path has no parent directory".to_string())?
+        .to_path_buf();
+    Ok(ConfigLocation {
+        config_path: path.display().to_string(),
+        config_dir: dir.display().to_string(),
+    })
+}
+
+fn ensure_config_dir() -> Result<PathBuf, String> {
+    let path = ConfigPaths::default().nanocodex;
+    let dir = path
+        .parent()
+        .ok_or_else(|| "config path has no parent directory".to_string())?
+        .to_path_buf();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn ensure_config_file() -> Result<PathBuf, String> {
+    let path = ConfigPaths::default().nanocodex;
+    if !path.exists() {
+        let empty: HashMap<&str, &str> = HashMap::new();
+        write_nanocodex_config(&empty, &path).map_err(|e| e.to_string())?;
+    }
+    Ok(path)
+}
+
+#[cfg(target_os = "windows")]
+fn open_file(path: &Path) -> Result<(), String> {
+    ProcessCommand::new("notepad.exe")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to open config file: {e}"))
+}
+
+#[cfg(target_os = "windows")]
+fn open_dir(path: &Path) -> Result<(), String> {
+    ProcessCommand::new("explorer.exe")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to open config directory: {e}"))
+}
+
+#[cfg(target_os = "macos")]
+fn open_file(path: &Path) -> Result<(), String> {
+    open_with("open", path, "config file")
+}
+
+#[cfg(target_os = "macos")]
+fn open_dir(path: &Path) -> Result<(), String> {
+    open_with("open", path, "config directory")
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_file(path: &Path) -> Result<(), String> {
+    open_with("xdg-open", path, "config file")
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_dir(path: &Path) -> Result<(), String> {
+    open_with("xdg-open", path, "config directory")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_with(program: &str, path: &Path, label: &str) -> Result<(), String> {
+    ProcessCommand::new(program)
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to open {label}: {e}"))
 }
 
 /// Answer a pending approval request (raised by an `approval` event).
@@ -260,6 +363,9 @@ pub fn run() {
             approve,
             get_settings,
             save_settings,
+            get_config_location,
+            open_config_file,
+            open_config_dir,
             get_checkpoints,
             create_checkpoint,
             restore_checkpoint

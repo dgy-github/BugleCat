@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:build": "tauri build --target x86_64-pc-windows-gnu"
+    "tauri:build": "tauri build --target x86_64-pc-windows-gnu",
+    "tauri:installer": "tauri build --target x86_64-pc-windows-gnu --bundles nsis"
   },
   "dependencies": {
     "@tauri-apps/api": "2.8.0"

@@ -25,11 +25,32 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "dgy-github",
+    "homepage": "https://github.com/dgy-github/nanocodex",
+    "license": "MIT",
+    "category": "DeveloperTool",
+    "shortDescription": "A local coding agent desktop for nanocodex.",
+    "longDescription": "nanocodex desktop wraps the Rust agent loop, workspace tools, approvals, checkpoints, and runtime settings in a Windows desktop app.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": true,
+        "compression": "lzma",
+        "startMenuFolder": "nanocodex"
+      }
+    }
   }
 }

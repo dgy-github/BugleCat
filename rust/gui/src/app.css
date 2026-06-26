@@ -122,6 +122,29 @@ button:disabled { background: #b9c6e6; cursor: default; }
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 .modal h3 { margin: 0 0 0.4rem; }
+.config-entry {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.2rem 0 0.85rem;
+}
+.config-entry span {
+  color: #6b6660;
+  font-size: 0.85rem;
+}
+.config-entry code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #5a544c;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+.config-entry button {
+  padding: 0.35rem 0.65rem;
+}
 .areason { margin: 0 0 0.75rem; color: #5a544c; }
 .afield { display: flex; gap: 0.5rem; align-items: baseline; margin-bottom: 0.3rem; font-size: 0.85rem; }
 .afield span { color: #9a948c; flex: 0 0 3rem; }
@@ -249,4 +272,14 @@ button:disabled { background: #b9c6e6; cursor: default; }
 }
 .modal label.check input {
   flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .config-entry {
+    grid-template-columns: 1fr 1fr;
+  }
+  .config-entry span,
+  .config-entry code {
+    grid-column: 1 / -1;
+  }
 }

@@ -442,6 +442,9 @@ Look for behavior regressions first, then missing tests, then maintainability.
 
 触发估算用偏中文的 chars/token 比例，所以中文为主的对话不会压缩得太晚。
 
+Rust CLI 里的 `/compact` 会把当前 context-edit 策略物化到 live session，并重写工作区
+session 日志；后续对话和 `--resume` 都会从压缩后的历史继续。
+
 ## Token 用量与成本
 
 provider 每次调用返回真实 `usage`，包含 DeepSeek 的缓存命中/未命中拆分。
@@ -526,6 +529,11 @@ cd rust\gui
 npm.cmd install
 npm.cmd run tauri:build
 ```
+
+桌面构建现在明确产出 Windows NSIS installer，安装包位于
+`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\bundle\nsis\`。
+GUI 的 Settings 弹窗也会展示解析后的 `~/.nanocodex/config.toml` 路径，并提供打开配置文件
+和配置目录的入口。
 
 Tauri crate 特意保留 `crate-type = ["lib"]`；改成 `cdylib` 或 `staticlib` 会让
 Windows GNU 链接器的 export ordinal 表溢出。
