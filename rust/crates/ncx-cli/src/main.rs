@@ -241,7 +241,7 @@ async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut Se
 
         let (cmd, arg) = parse_slash(line);
         if let Some(cmd) = cmd {
-            match dispatch_slash(&cmd, &arg, agent, cfg) {
+            match dispatch_slash(&cmd, &arg, agent, cfg, recorder) {
                 SlashOutcome::Exit => break,
                 SlashOutcome::Printed(text) => println!("{text}"),
             }
@@ -276,8 +276,9 @@ enum SlashOutcome {
 fn dispatch_slash(
     cmd: &str,
     arg: &str,
-    agent: &AgentLoop,
+    agent: &mut AgentLoop,
     cfg: &ncx_config::Config,
+    recorder: &mut SessionRecorder,
 ) -> SlashOutcome {
     match cmd {
         "/exit" => SlashOutcome::Exit,
@@ -290,6 +291,7 @@ fn dispatch_slash(
             20,
         )),
         "/restore" => SlashOutcome::Printed(restore_checkpoint_text(&cfg.workspace, arg)),
+        "/compact" => SlashOutcome::Printed(compact_session_text(agent, recorder)),
         "/model" => {
             if arg.is_empty() {
                 SlashOutcome::Printed(format!("model: {}", cfg.model))
@@ -400,6 +402,18 @@ fn render_history(entries: &[SessionSummary], limit: usize) -> String {
         ));
     }
     out
+}
+
+fn compact_session_text(agent: &mut AgentLoop, recorder: &mut SessionRecorder) -> String {
+    let stats = agent.session.compact(&agent.context_edit);
+    recorder.record(&agent.session);
+    format!(
+        "Compacted session: chars {} -> {}; compressed_tool_results={} dropped_messages={}",
+        stats.original_chars,
+        stats.edited_chars,
+        stats.compressed_tool_results,
+        stats.dropped_messages
+    )
 }
 
 fn checkpoint_before_turn(workspace: &Path, prompt: &str) {

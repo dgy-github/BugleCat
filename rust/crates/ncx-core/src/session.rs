@@ -169,6 +169,42 @@ impl Session {
         system_notes: &[String],
         policy: &ContextEditPolicy,
     ) -> ContextMessages {
+        let (body, mut stats) = self.edited_body(system_notes, policy);
+
+        let mut out = Vec::with_capacity(self.messages.len() + 1);
+        out.push(json!({"role": "system", "content": self.system}));
+        for note in system_notes {
+            if !note.trim().is_empty() {
+                out.push(json!({"role": "system", "content": note}));
+            }
+        }
+        out.extend(body);
+        stats.edited_chars = out.iter().map(json_chars).sum();
+        ContextMessages {
+            messages: out,
+            stats,
+        }
+    }
+
+    /// Materialize the send-time context editing policy into the live session.
+    /// This powers `/compact`: after it runs, future turns and `--resume` see
+    /// the compacted history instead of only a temporary provider view.
+    pub fn compact(&mut self, policy: &ContextEditPolicy) -> ContextEditStats {
+        let mut policy = policy.clone();
+        policy.enabled = true;
+        let (body, stats) = self.edited_body(&[], &policy);
+        if stats.compressed_tool_results > 0 || stats.dropped_messages > 0 {
+            self.messages = body;
+            self.rewrite_log();
+        }
+        stats
+    }
+
+    fn edited_body(
+        &self,
+        system_notes: &[String],
+        policy: &ContextEditPolicy,
+    ) -> (Vec<Value>, ContextEditStats) {
         let original_chars = total_chars(&self.system, system_notes, &self.messages);
         let mut body = self.messages.clone();
         let mut stats = ContextEditStats {
@@ -180,10 +216,11 @@ impl Session {
         if policy.enabled {
             let recent_cutoff = body.len().saturating_sub(policy.keep_recent_messages);
             for (i, msg) in body.iter_mut().enumerate() {
-                if i < recent_cutoff && role(msg) == Some("tool") {
-                    if compress_tool_result(msg, policy.max_tool_result_chars) {
-                        stats.compressed_tool_results += 1;
-                    }
+                if i < recent_cutoff
+                    && role(msg) == Some("tool")
+                    && compress_tool_result(msg, policy.max_tool_result_chars)
+                {
+                    stats.compressed_tool_results += 1;
                 }
             }
 
@@ -204,19 +241,8 @@ impl Session {
             }
         }
 
-        let mut out = Vec::with_capacity(self.messages.len() + 1);
-        out.push(json!({"role": "system", "content": self.system}));
-        for note in system_notes {
-            if !note.trim().is_empty() {
-                out.push(json!({"role": "system", "content": note}));
-            }
-        }
-        out.extend(body);
-        stats.edited_chars = out.iter().map(json_chars).sum();
-        ContextMessages {
-            messages: out,
-            stats,
-        }
+        stats.edited_chars = total_chars(&self.system, system_notes, &body);
+        (body, stats)
     }
 
     /// Set of tool_call ids that already have a `tool` reply.
@@ -289,6 +315,35 @@ impl Session {
         };
         if let Ok(line) = serde_json::to_string(&Value::Object(record)) {
             let _ = writeln!(file, "{line}");
+        }
+    }
+
+    fn rewrite_log(&self) {
+        let Some(path) = &self.log_path else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+        else {
+            return;
+        };
+        for msg in &self.messages {
+            let Some(mut record) = redact_image_data(msg, "[image omitted from log]")
+                .as_object()
+                .cloned()
+            else {
+                continue;
+            };
+            record.insert("_ts".into(), json!(now_stamp()));
+            if let Ok(line) = serde_json::to_string(&Value::Object(record)) {
+                let _ = writeln!(file, "{line}");
+            }
         }
     }
 }
@@ -516,6 +571,49 @@ mod tests {
         assert!(out.stats.dropped_messages > 0);
         assert!(out.stats.edited_chars < out.stats.original_chars);
         assert_eq!(out.messages[0]["role"], "system");
+    }
+
+    #[test]
+    fn compact_materializes_context_edit_and_rewrites_log() {
+        let dir = std::env::temp_dir().join(format!("ncx_session_compact_{}", now_stamp()));
+        let path = dir.join("session.jsonl");
+        let mut s = Session::with_log("sys", Some(path.clone()));
+        for i in 0..8 {
+            s.add_user_text(&format!("old user {i} {}", "x".repeat(40)));
+            s.add_assistant(&format!("old answer {i} {}", "y".repeat(40)), None, "");
+        }
+        let before = s.messages.len();
+
+        let stats = s.compact(&ContextEditPolicy {
+            enabled: true,
+            max_chars: 500,
+            keep_recent_messages: 4,
+            max_tool_result_chars: 20,
+        });
+
+        assert!(stats.dropped_messages > 0);
+        assert!(s.messages.len() < before);
+        let resumed = Session::resume("fresh", Some(path));
+        assert_eq!(resumed.messages.len(), s.messages.len());
+        assert_eq!(resumed.messages[0]["role"], "user");
+    }
+
+    #[test]
+    fn compact_noops_when_under_budget() {
+        let mut s = Session::new("sys");
+        s.add_user_text("hello");
+        s.add_assistant("hi", None, "");
+
+        let stats = s.compact(&ContextEditPolicy {
+            enabled: true,
+            max_chars: 10_000,
+            keep_recent_messages: 4,
+            max_tool_result_chars: 20,
+        });
+
+        assert_eq!(stats.dropped_messages, 0);
+        assert_eq!(stats.compressed_tool_results, 0);
+        assert_eq!(s.messages.len(), 2);
     }
 
     #[test]
