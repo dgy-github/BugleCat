@@ -24,8 +24,8 @@ use async_trait::async_trait;
 use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
     expand_file_mentions, new_session_id, AgentLoop, ApprovalHandler, ApprovalRequest,
-    ContextEditPolicy, LoopEvent, MemoryStore, Session, SessionIndex, TaskBudget, ToolContext,
-    ToolRegistry,
+    CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Session, SessionIndex, TaskBudget,
+    ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -260,6 +260,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     match cmd {
                         Command::Prompt(text) => {
                             let expanded = expand_file_mentions(&text, &workspace);
+                            save_auto_checkpoint(&workspace, &expanded);
                             let result = agent.run_turn(json!(expanded), None).await;
                             let _ = session_index.record_turn(
                                 &session_id,
@@ -292,4 +293,21 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
             });
         })
         .expect("spawn ncx-agent thread");
+}
+
+fn save_auto_checkpoint(workspace: &std::path::Path, prompt: &str) {
+    let label = format!("gui: {}", clipped_label(prompt, 80));
+    let _ = CheckpointStore::new(workspace).create(&label);
+}
+
+fn clipped_label(text: &str, limit: usize) -> String {
+    let s = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if s.chars().count() <= limit {
+        s
+    } else {
+        format!(
+            "{}...",
+            s.chars().take(limit.saturating_sub(3)).collect::<String>()
+        )
+    }
 }

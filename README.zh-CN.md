@@ -100,9 +100,9 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   流程，在显式所有权和类型系统下更容易证明不会互相踩写。
 - **运行时控制面：** task budget、context editing、tool search、semantic memory 放在
   Rust runtime 边界里，而不是只靠模型提示词约定。
-- **Checkpoint / restore：** Rust CLI 会在模型轮次前创建文件 checkpoint，并提供
-  `/checkpoint`、`/checkpoints`、`/restore <id>`，让高风险编辑可以在不依赖 Git
-  历史的情况下回滚。
+- **Checkpoint / restore：** Rust CLI 和 Tauri GUI 都会在模型轮次前创建文件
+  checkpoint。CLI 提供 `/checkpoint`、`/checkpoints`、`/restore <id>`；GUI 提供
+  checkpoint 面板用于手动保存、列表查看和恢复。
 - **原生发布性能：** 小体积 `ncx.exe` 不需要解释器启动和环境配置，一次性 CLI 任务响应
   更直接，Windows 用户拿到包即可运行。
 - **桌面打包路径：** Tauri 提供原生 shell + web UI 前端，比继续扩大 Tkinter 原型更适合
@@ -423,9 +423,10 @@ Look for behavior regressions first, then missing tests, then maintainability.
 - Rust CLI 支持 `--resume`，启动前读回工作区 `.nanocodex/session.jsonl`；
   也支持 `--history` 列出最近的全局会话摘要。Tauri 后端每轮 GUI 对话结束后会记录
   同一套 snapshot。
-- Rust CLI 还会在每个模型轮次前保存工作区文件 checkpoint。用 `/checkpoints` 查看，
-  `/checkpoint <label>` 手动创建，`/restore <id>` 恢复文件；恢复前会先给当前状态
-  创建一个 safety checkpoint。
+- Rust CLI 和 Tauri GUI 还会在每个模型轮次前保存工作区文件 checkpoint。CLI 用
+  `/checkpoints` 查看，`/checkpoint <label>` 手动创建，`/restore <id>` 恢复文件；
+  GUI 则在 checkpoint 面板里提供同一套保存 / 列表 / 恢复流程。恢复前会先给当前
+  状态创建一个 safety checkpoint。
 - 原 Python GUI 可以从保存的 snapshot **分叉（fork）**一条历史会话，且不会修改源会话。
 
 ## 上下文压缩

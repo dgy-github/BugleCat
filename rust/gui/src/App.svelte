@@ -38,6 +38,25 @@
   let apiKeyInput = $state("");
   let saving = $state(false);
 
+  type Checkpoint = {
+    id: string;
+    label: string;
+    created_at: string;
+    files: number;
+    skipped: number;
+    total_bytes: number;
+  };
+  type RestoreReport = {
+    checkpoint_id: string;
+    safety_checkpoint_id?: string | null;
+    restored_files: number;
+    deleted_files: number;
+  };
+  let checkpointOpen = $state(false);
+  let checkpoints = $state<Checkpoint[]>([]);
+  let checkpointLabel = $state("");
+  let checkpointBusy = $state(false);
+
   type Msg =
     | { role: "user" | "assistant" | "note"; text: string }
     | { role: "tool"; name: string; args?: string; result?: string };
@@ -171,6 +190,51 @@
     }
     saving = false;
   }
+
+  async function loadCheckpoints() {
+    checkpoints = await invoke<Checkpoint[]>("get_checkpoints");
+  }
+
+  async function openCheckpoints() {
+    checkpointOpen = true;
+    checkpointBusy = true;
+    try {
+      await loadCheckpoints();
+    } catch (e) {
+      messages.push({ role: "note", text: `Checkpoint load failed: ${e}` });
+    }
+    checkpointBusy = false;
+  }
+
+  async function saveCheckpoint() {
+    checkpointBusy = true;
+    try {
+      const cp = await invoke<Checkpoint>("create_checkpoint", { label: checkpointLabel });
+      checkpointLabel = "";
+      await loadCheckpoints();
+      messages.push({ role: "note", text: `Checkpoint saved: ${cp.id}` });
+    } catch (e) {
+      messages.push({ role: "note", text: `Checkpoint failed: ${e}` });
+    }
+    checkpointBusy = false;
+  }
+
+  async function restoreCheckpoint(id: string) {
+    if (busy || checkpointBusy) return;
+    if (!window.confirm(`Restore checkpoint ${id}?`)) return;
+    checkpointBusy = true;
+    try {
+      const report = await invoke<RestoreReport>("restore_checkpoint", { id });
+      await loadCheckpoints();
+      messages.push({
+        role: "note",
+        text: `Restored ${report.checkpoint_id}: ${report.restored_files} file(s), ${report.deleted_files} removed.`,
+      });
+    } catch (e) {
+      messages.push({ role: "note", text: `Restore failed: ${e}` });
+    }
+    checkpointBusy = false;
+  }
 </script>
 
 <main>
@@ -179,6 +243,7 @@
     <span class="meta">{header}</span>
     {#if busy}<span class="spinner" title="working…">●</span>{/if}
     <button class="gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
+    <button class="toolbtn" title="Checkpoints" onclick={openCheckpoints} aria-label="Checkpoints">CP</button>
   </header>
 
   <div class="scroll" bind:this={scroller}>
@@ -230,6 +295,43 @@
         <div class="abtns">
           <button class="deny" onclick={() => decide(false)}>Deny</button>
           <button class="ok" onclick={() => decide(true)}>Approve</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if checkpointOpen}
+    <div class="overlay">
+      <div class="modal">
+        <h3>Checkpoints</h3>
+        <div class="checkpoint-create">
+          <input bind:value={checkpointLabel} placeholder="Label" />
+          <button onclick={saveCheckpoint} disabled={checkpointBusy}>Save</button>
+          <button class="plain" onclick={loadCheckpoints} disabled={checkpointBusy}>Refresh</button>
+        </div>
+        <div class="checkpoint-list">
+          {#if checkpoints.length === 0}
+            <p class="emptyline">No checkpoints.</p>
+          {/if}
+          {#each checkpoints as cp}
+            <div class="checkpoint-row">
+              <div class="checkpoint-main">
+                <strong>{cp.label || "(unlabeled)"}</strong>
+                <code>{cp.id}</code>
+              </div>
+              <div class="checkpoint-meta">
+                <span>{cp.created_at}</span>
+                <span>{cp.files} files</span>
+                <span>{cp.skipped} skipped</span>
+              </div>
+              <button class="restore" onclick={() => restoreCheckpoint(cp.id)} disabled={busy || checkpointBusy}>
+                Restore
+              </button>
+            </div>
+          {/each}
+        </div>
+        <div class="abtns">
+          <button class="deny" onclick={() => (checkpointOpen = false)}>Close</button>
         </div>
       </div>
     </div>

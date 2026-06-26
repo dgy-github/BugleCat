@@ -153,6 +153,84 @@ button:disabled { background: #b9c6e6; cursor: default; }
 }
 .gear:hover { background: #f0ede8; }
 
+.toolbtn {
+  background: #fff;
+  color: #5a544c;
+  border: 1px solid #d9d5cf;
+  border-radius: 6px;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+.toolbtn:hover,
+.plain:hover { background: #f0ede8; }
+
+.checkpoint-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.checkpoint-create input {
+  min-width: 0;
+  border: 1px solid #d9d5cf;
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+}
+.plain {
+  background: #fff;
+  color: #5a544c;
+  border: 1px solid #d9d5cf;
+}
+.checkpoint-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 46vh;
+  overflow: auto;
+}
+.checkpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem 0.75rem;
+  align-items: center;
+  border: 1px solid #e6e3df;
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+}
+.checkpoint-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+}
+.checkpoint-main strong,
+.checkpoint-main code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.checkpoint-main code {
+  color: #6b6660;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+.checkpoint-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: #7a736b;
+  font-size: 0.78rem;
+}
+.restore {
+  background: #1f7a3d;
+  padding: 0.35rem 0.65rem;
+}
+.emptyline {
+  color: #9a948c;
+  margin: 0.3rem 0;
+}
+
 .modal label {
   display: flex;
   align-items: center;

@@ -14,6 +14,7 @@ use ncx_config::{
     load_config, write_nanocodex_config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
 };
+use ncx_core::{CheckpointMeta, CheckpointStore, RestoreReport};
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -37,6 +38,24 @@ pub struct Status {
 struct AppState {
     tx: UnboundedSender<Command>,
     pending: PendingMap,
+}
+
+#[derive(Serialize)]
+pub struct CheckpointView {
+    id: String,
+    label: String,
+    created_at: String,
+    files: usize,
+    skipped: usize,
+    total_bytes: u64,
+}
+
+#[derive(Serialize)]
+pub struct RestoreView {
+    checkpoint_id: String,
+    safety_checkpoint_id: Option<String>,
+    restored_files: usize,
+    deleted_files: usize,
 }
 
 /// Load the resolved config and return a display-safe snapshot.
@@ -157,6 +176,71 @@ fn approve(id: u64, approved: bool, state: tauri::State<'_, AppState>) -> Result
     }
 }
 
+#[tauri::command]
+fn get_checkpoints() -> Result<Vec<CheckpointView>, String> {
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(CheckpointStore::new(&cfg.workspace)
+        .list()
+        .into_iter()
+        .map(checkpoint_view)
+        .collect())
+}
+
+#[tauri::command]
+fn create_checkpoint(label: String) -> Result<CheckpointView, String> {
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    let label = if label.trim().is_empty() {
+        "manual checkpoint"
+    } else {
+        label.trim()
+    };
+    CheckpointStore::new(&cfg.workspace)
+        .create(label)
+        .map(checkpoint_view)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn restore_checkpoint(id: String) -> Result<RestoreView, String> {
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    CheckpointStore::new(&cfg.workspace)
+        .restore(&id)
+        .map(restore_view)
+        .map_err(|e| e.to_string())
+}
+
+fn checkpoint_view(meta: CheckpointMeta) -> CheckpointView {
+    CheckpointView {
+        id: meta.id,
+        label: meta.label,
+        created_at: meta.created_at,
+        files: meta.files.len(),
+        skipped: meta.skipped_paths.len(),
+        total_bytes: meta.total_bytes,
+    }
+}
+
+fn restore_view(report: RestoreReport) -> RestoreView {
+    RestoreView {
+        checkpoint_id: report.checkpoint_id,
+        safety_checkpoint_id: report.safety_checkpoint_id,
+        restored_files: report.restored_files,
+        deleted_files: report.deleted_files,
+    }
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -175,7 +259,10 @@ pub fn run() {
             send_prompt,
             approve,
             get_settings,
-            save_settings
+            save_settings,
+            get_checkpoints,
+            create_checkpoint,
+            restore_checkpoint
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
