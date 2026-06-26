@@ -22,6 +22,21 @@
 模型的能力天花板**（plan/verify 跑在主模型上）。这不是"提高智商"，是"把现有智商用满、
 少犯工程错误"。memory 里已记过结论：*model is the real lever*——本框架是第二根杠杆。
 
+### 训练器 / 被训者边界（务必看清）
+
+仓库里有两套实现：遗留 Python agent `nanocodex/*.py`（已弃）和 Rust 重写 `rust/crates/...`。
+**本框架只训 Rust 版**：
+
+- **被训者（trainee）= Rust `ncx.exe`**。可进化的 genome 字段全部指向 **Rust 源**：
+  `SYSTEM_PROMPT`（`rust/crates/ncx-cli/src/main.rs`）、各工具 `description()`
+  （`rust/crates/ncx-core/src/tools.rs`）、orchestrator `*_SYS`（`orchestrator.rs`）。
+  `genome.py` 的 `extract_current_genome()` 取的是这些 **Rust 默认值**，与 `nanocodex/*.py` 无关。
+- **训练器（trainer）= `train/` 纯 Python + 复用 `bench/`**。它只通过 **subprocess**
+  驱动 `ncx.exe`（注入 `NCX_GENOME`）和教师 CLI（codex/claude）。**不 import、不依赖**
+  遗留 Python agent 包 `nanocodex/*.py`（genome TOML 用 Python 标准库 `tomllib` 读、
+  自带小 writer 或 `tomli_w` 写，保持 train/ 自包含）。
+- **唯一的 Rust 改动** = §2.1 的 P1 genome 注入。其余全是 train/ 侧 Python，零 Rust 冲突。
+
 ## 2. 核心抽象：基因组（Genome）
 
 把当前**硬编码/散落**的可调骨架，外置成一份带版本号的 genome 文件
