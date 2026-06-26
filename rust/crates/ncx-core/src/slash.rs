@@ -15,6 +15,14 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
         "Show model, sandbox, approval, workspace, and token usage.",
     ),
     (
+        "/usage",
+        "Show token usage for the last turn and current REPL session.",
+    ),
+    (
+        "/cost",
+        "Alias for /usage (raw token usage; no price table).",
+    ),
+    (
         "/config",
         "Show the config path, or persist a setting: /config key=value.",
     ),
@@ -173,6 +181,8 @@ mod tests {
         for c in [
             "/help",
             "/config",
+            "/usage",
+            "/cost",
             "/model",
             "/approvals",
             "/diff",

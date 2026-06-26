@@ -19,7 +19,7 @@
 - sub-agent 并行写隔离：每 worker 跑独立工作区副本；verifier 选 `BEST:<n>`、promote 该 worker 回真实 ws
 - memory 自进化：`.ncx/memory/LEARNINGS.md` + remember 工具 + 启动召回注入 + 周期启发式 consolidate + 显式 `--memory-merge` LLM 合并
 - 项目指令：Rust CLI / orchestrator worker / Tauri GUI 会在会话启动时注入 `AGENTS.md` / `CLAUDE.md` / `.claude/CLAUDE.md`（含 `~/.codex`、`~/.claude` 与仓库根到 workspace 分层）
-- 控制面：task budget、context editing、tool search、semantic memory、workspace checkpoints、`/compact`、`/config`、prompt-backed custom slash commands
+- 控制面：task budget、context editing、tool search、semantic memory、workspace checkpoints、`/compact`、`/config`、`/usage`/`/cost` raw token usage、prompt-backed custom slash commands
 - keyed 搜索后端：Tavily（有 key）否则回退 DuckDuckGo
 - 性能：单文件 2.4MB（GUI 2.1–2.9MB 安装包）、启动 ~5ms（约 199× 快于 Python）
 - 测试分布：cli 22 / config 24 / core 92 / provider 31 / sandbox 15 / tools 36

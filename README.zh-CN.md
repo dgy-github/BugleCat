@@ -234,7 +234,8 @@ cargo run -p ncx-cli -- --memory-merge
 
 Rust REPL 里可以用 `/config` 查看解析后的配置文件路径、当前 model/sandbox/approval
 值和可写 key。`/config key=value` 会把设置持久写入 `~/.nanocodex/config.toml`；
-provider、model、sandbox 或预算类变更需要重启 REPL 后影响当前会话。
+provider、model、sandbox 或预算类变更需要重启 REPL 后影响当前会话。`/usage`（或
+`/cost`）会显示上一轮和当前 REPL session 的原始 token 用量。
 
 Python CLI，原始功能线：
 
@@ -482,8 +483,10 @@ session 日志；后续对话和 `--resume` 都会从压缩后的历史继续。
 
 ## Token 用量与成本
 
-provider 每次调用返回真实 `usage`，包含 DeepSeek 的缓存命中/未命中拆分。
-`pricing.py` 把它折算成美元成本：
+provider 每次调用返回真实 `usage`，包含 DeepSeek 的缓存命中/未命中拆分。Rust REPL
+里的 `/usage` 和 `/cost` 会显示上一轮和 session 累计的模型调用数、工具调用数、输入
+token、输出 token、缓存命中/未命中 token。Rust 命令刻意只展示原始用量；Python 线的
+`pricing.py` 会把 usage 折算成美元成本：
 
 - **缓存感知** —— 一个缓存命中的输入 token 比未命中便宜约 120×；各按自己的费率
   计价。拆分缺失时，整段 prompt 按未命中费率计，所以成本永不低估。

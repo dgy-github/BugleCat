@@ -10,6 +10,7 @@
 mod args;
 mod runner;
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -23,7 +24,7 @@ use std::rc::Rc;
 use ncx_core::{
     expand_file_mentions, load_project_instructions, new_session_id, AgentLoop, CheckpointMeta,
     CheckpointStore, ContextEditPolicy, MemoryStore, Orchestrator, OrchestratorConfig, Session,
-    SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry,
+    SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry, TurnResult,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -236,6 +237,7 @@ async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut Se
         cfg.model, cfg.sandbox_mode
     );
     let stdin = io::stdin();
+    let mut usage = UsageTracker::default();
     loop {
         print!("\n› ");
         let _ = io::stdout().flush();
@@ -252,15 +254,17 @@ async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut Se
 
         let (cmd, arg) = parse_slash(line);
         if let Some(cmd) = cmd {
-            match dispatch_slash(&cmd, &arg, agent, cfg, recorder) {
+            match dispatch_slash(&cmd, &arg, agent, cfg, recorder, &usage) {
                 SlashOutcome::Exit => break,
                 SlashOutcome::Printed(text) => println!("{text}"),
-                SlashOutcome::Prompt(text) => run_one_turn(agent, &text, cfg, recorder).await,
+                SlashOutcome::Prompt(text) => {
+                    run_one_turn(agent, &text, cfg, recorder, &mut usage).await
+                }
             }
             continue;
         }
 
-        run_one_turn(agent, line, cfg, recorder).await;
+        run_one_turn(agent, line, cfg, recorder, &mut usage).await;
     }
     println!("bye.");
 }
@@ -270,11 +274,13 @@ async fn run_one_turn(
     prompt: &str,
     cfg: &ncx_config::Config,
     recorder: &mut SessionRecorder,
+    usage: &mut UsageTracker,
 ) {
     let expanded = expand_file_mentions(prompt, &cfg.workspace);
     checkpoint_before_turn(&cfg.workspace, &expanded);
     let result = agent.run_turn(json!(expanded), None).await;
     recorder.record(&agent.session);
+    usage.record(&result);
     println!("{}", result.final_text);
 }
 
@@ -292,11 +298,13 @@ fn dispatch_slash(
     agent: &mut AgentLoop,
     cfg: &ncx_config::Config,
     recorder: &mut SessionRecorder,
+    usage: &UsageTracker,
 ) -> SlashOutcome {
     match cmd {
         "/exit" => SlashOutcome::Exit,
         "/help" => SlashOutcome::Printed(render_help_for_workspace(&cfg.workspace)),
         "/status" => SlashOutcome::Printed(render_status(cfg)),
+        "/usage" | "/cost" => SlashOutcome::Printed(usage.render()),
         "/config" => SlashOutcome::Printed(config_text(cfg, arg)),
         "/history" => SlashOutcome::Printed(render_history(&SessionIndex::default().entries(), 20)),
         "/checkpoint" => SlashOutcome::Printed(create_checkpoint_text(&cfg.workspace, arg)),
@@ -679,6 +687,95 @@ fn parse_config_assignment(arg: &str) -> Result<(String, String), String> {
     Ok((key.to_string(), value.to_string()))
 }
 
+#[derive(Debug, Default, Clone)]
+struct UsageTracker {
+    last: Option<TurnUsage>,
+    total: BTreeMap<String, i64>,
+    total_model_calls: usize,
+    total_tool_calls: usize,
+}
+
+#[derive(Debug, Clone)]
+struct TurnUsage {
+    usage: BTreeMap<String, i64>,
+    model_calls: usize,
+    tool_calls: usize,
+    stop_reason: String,
+}
+
+impl UsageTracker {
+    fn record(&mut self, result: &TurnResult) {
+        self.total_model_calls += result.iterations;
+        self.total_tool_calls += result.tools_used.len();
+        add_usage(&mut self.total, &result.usage);
+        self.last = Some(TurnUsage {
+            usage: result.usage.clone(),
+            model_calls: result.iterations,
+            tool_calls: result.tools_used.len(),
+            stop_reason: result.stop_reason.clone(),
+        });
+    }
+
+    fn render(&self) -> String {
+        let Some(last) = &self.last else {
+            return "No token usage recorded yet.".into();
+        };
+        format!(
+            "Last turn:\n{}\n\nSession total:\n{}\n\nCost: raw token usage only; no Rust price table is configured.",
+            format_usage_block(
+                last.model_calls,
+                last.tool_calls,
+                Some(&last.stop_reason),
+                &last.usage
+            ),
+            format_usage_block(
+                self.total_model_calls,
+                self.total_tool_calls,
+                None,
+                &self.total
+            )
+        )
+    }
+}
+
+fn add_usage(total: &mut BTreeMap<String, i64>, usage: &BTreeMap<String, i64>) {
+    for (key, value) in usage {
+        *total.entry(key.clone()).or_insert(0) += *value;
+    }
+}
+
+fn format_usage_block(
+    model_calls: usize,
+    tool_calls: usize,
+    stop_reason: Option<&str>,
+    usage: &BTreeMap<String, i64>,
+) -> String {
+    let prompt = usage_value(usage, "prompt_tokens");
+    let completion = usage_value(usage, "completion_tokens");
+    let hit = usage_value(usage, "prompt_cache_hit_tokens");
+    let miss = usage_value(usage, "prompt_cache_miss_tokens");
+    let total = prompt + completion;
+    let mut lines = vec![
+        format!("model_calls: {model_calls}"),
+        format!("tool_calls:  {tool_calls}"),
+    ];
+    if let Some(reason) = stop_reason {
+        lines.push(format!("stop_reason: {reason}"));
+    }
+    lines.push(format!("prompt_tokens:     {prompt}"));
+    lines.push(format!("completion_tokens: {completion}"));
+    lines.push(format!("total_tokens:      {total}"));
+    if hit > 0 || miss > 0 {
+        lines.push(format!("prompt_cache_hit_tokens:  {hit}"));
+        lines.push(format!("prompt_cache_miss_tokens: {miss}"));
+    }
+    lines.join("\n")
+}
+
+fn usage_value(usage: &BTreeMap<String, i64>, key: &str) -> i64 {
+    usage.get(key).copied().unwrap_or(0)
+}
+
 struct SessionRecorder {
     index: SessionIndex,
     session_id: String,
@@ -946,6 +1043,46 @@ mod tests {
         assert!(parse_config_assignment("model").is_err());
         assert!(parse_config_assignment("bad key=value").is_err());
         assert!(parse_config_assignment("model=").is_err());
+    }
+
+    #[test]
+    fn usage_tracker_renders_last_and_total_usage() {
+        let mut tracker = UsageTracker::default();
+        assert_eq!(tracker.render(), "No token usage recorded yet.");
+
+        let mut first_usage = BTreeMap::new();
+        first_usage.insert("prompt_tokens".into(), 100);
+        first_usage.insert("completion_tokens".into(), 20);
+        first_usage.insert("prompt_cache_hit_tokens".into(), 80);
+        first_usage.insert("prompt_cache_miss_tokens".into(), 20);
+        tracker.record(&TurnResult {
+            final_text: "ok".into(),
+            iterations: 2,
+            stop_reason: "completed".into(),
+            tools_used: vec!["read_file".into()],
+            usage: first_usage,
+        });
+
+        let mut second_usage = BTreeMap::new();
+        second_usage.insert("prompt_tokens".into(), 10);
+        second_usage.insert("completion_tokens".into(), 5);
+        tracker.record(&TurnResult {
+            final_text: "ok".into(),
+            iterations: 1,
+            stop_reason: "completed".into(),
+            tools_used: vec![],
+            usage: second_usage,
+        });
+
+        let rendered = tracker.render();
+        assert!(rendered.contains("Last turn"));
+        assert!(rendered.contains("Session total"));
+        assert!(rendered.contains("model_calls: 3"));
+        assert!(rendered.contains("tool_calls:  1"));
+        assert!(rendered.contains("prompt_tokens:     110"));
+        assert!(rendered.contains("completion_tokens: 25"));
+        assert!(rendered.contains("prompt_cache_hit_tokens:  80"));
+        assert!(rendered.contains("raw token usage only"));
     }
 
     #[test]

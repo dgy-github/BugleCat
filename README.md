@@ -278,7 +278,8 @@ cargo run -p ncx-cli -- --memory-merge
 Inside the Rust REPL, `/config` shows the resolved config file path, current
 model/sandbox/approval values, and writable keys. `/config key=value` persists a
 setting to `~/.nanocodex/config.toml`; restart the REPL for provider, model,
-sandbox, or budget changes to affect the active session.
+sandbox, or budget changes to affect the active session. `/usage` (or `/cost`)
+shows raw token usage for the last turn and current REPL session.
 
 Python CLI, original line:
 
@@ -557,7 +558,10 @@ live session and rewrites the workspace session log, so future turns and
 ## Token Usage & Cost
 
 The provider returns real `usage` per call, including DeepSeek's
-cache-hit/miss split. `pricing.py` turns that into a USD cost:
+cache-hit/miss split. In the Rust REPL, `/usage` and `/cost` show the last turn
+and session total model calls, tool calls, prompt tokens, completion tokens, and
+cache hit/miss tokens. The Rust command intentionally reports raw usage only;
+`pricing.py` turns usage into a USD cost for the Python line:
 
 - **Cache-aware** — a cache-hit input token is ~120× cheaper than a miss; each is
   billed at its own rate. When the split is absent, the whole prompt is billed at
