@@ -38,6 +38,8 @@ OPTIONS:
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
                             (classify → plan → parallel workers → verify). One-shot only.
         --memory-merge      Maintenance: LLM-fold near-duplicate project memory notes, then exit.
+        --dump-genome       Print the default harness genome (system_prompt + core tool
+                            descriptions) as TOML, then exit. Used by the ncx-forge trainer.
     -h, --help              Show this help.
     -V, --version           Show version.";
 
@@ -61,6 +63,8 @@ pub struct Args {
     pub history: bool,
     pub orchestrate: bool,
     pub memory_merge: bool,
+    /// Print the default genome (system_prompt + core tool descriptions) as TOML and exit.
+    pub dump_genome: bool,
     pub help: bool,
     pub version: bool,
 }
@@ -88,6 +92,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-r" | "--resume" => args.resume = true,
             "--history" => args.history = true,
             "--memory-merge" => args.memory_merge = true,
+            "--dump-genome" => args.dump_genome = true,
             "--disable-context-edit" => args.disable_context_edit = true,
             "-w" | "--workspace" => {
                 args.workspace = Some(PathBuf::from(take_value(argv, &mut i, a)?));
@@ -220,5 +225,11 @@ mod tests {
     #[test]
     fn unknown_flag_errors() {
         assert!(args(&["--bogus"]).is_err());
+    }
+
+    #[test]
+    fn dump_genome_flag() {
+        assert!(args(&["--dump-genome"]).unwrap().dump_genome);
+        assert!(!args(&[]).unwrap().dump_genome);
     }
 }

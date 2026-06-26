@@ -168,6 +168,13 @@ async fn run(args: Args) -> i32 {
         .with_skills(skills)
         .with_genome(genome);
     let mut tools = ToolRegistry::new(ctx);
+    // ncx-forge: emit the default harness genome (base prompt + core tool
+    // descriptions) as TOML and exit. Done BEFORE MCP registration so the dump
+    // contains only the evolvable core surface, not server-provided tools.
+    if args.dump_genome {
+        print!("{}", dump_genome_toml(&base_prompt, &tools.ctx.tool_catalog.borrow()));
+        return 0;
+    }
     for srv in load_mcp_servers() {
         match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await {
             Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
@@ -252,6 +259,38 @@ async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
     } else {
         1
     }
+}
+
+/// Emit the default harness genome as TOML for the ncx-forge trainer: the base
+/// system prompt + each registered (core) tool's description. Single-line basic
+/// strings with `\n`/`\"` escapes so it round-trips through any TOML parser.
+fn dump_genome_toml(system_prompt: &str, catalog: &[ncx_core::tools::ToolCatalogEntry]) -> String {
+    let mut out = String::new();
+    out.push_str("# Default nanocodex harness genome (ncx --dump-genome).\n");
+    out.push_str("# Edit system_prompt and tool_desc.* to evolve the agent.\n\n");
+    out.push_str(&format!("system_prompt = \"{}\"\n\n", toml_escape(system_prompt)));
+    out.push_str("[tool_desc]\n");
+    for entry in catalog {
+        out.push_str(&format!("{} = \"{}\"\n", entry.name, toml_escape(&entry.description)));
+    }
+    out
+}
+
+/// Escape a string for a TOML single-line basic string (the content between the
+/// surrounding quotes): backslash, double-quote, and the common control chars.
+fn toml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
