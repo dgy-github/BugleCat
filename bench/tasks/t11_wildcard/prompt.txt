@@ -1,0 +1,19 @@
+Create wildcard.py in the current directory with a function is_match(s, p)
+that returns whether the string s matches the wildcard pattern p in full.
+
+Pattern rules:
+  - '?' matches any single character.
+  - '*' matches any sequence of characters, including the empty sequence.
+  - Every other character matches itself.
+  - The match must cover the ENTIRE string (not a substring).
+
+Return a bool (True / False).
+
+Examples:
+  is_match("abc", "a?c")   -> True
+  is_match("abc", "a*c")   -> True
+  is_match("abc", "a*d")   -> False
+  is_match("", "*")        -> True
+  is_match("adceb", "*a*b")-> True
+
+Create the file with your file-editing tool.

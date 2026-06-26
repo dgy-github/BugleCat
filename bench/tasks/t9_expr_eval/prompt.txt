@@ -1,0 +1,19 @@
+Create expr.py in the current directory with a function evaluate(s) that
+evaluates an arithmetic expression given as a string and returns the numeric
+result.
+
+Requirements:
+  - Support binary operators + - * / with the usual precedence (* and / bind
+    tighter than + and -) and left-to-right associativity.
+  - Support parentheses for grouping, nested to any depth.
+  - Operands are non-negative integers (one or more digits).
+  - Whitespace anywhere in the string must be ignored.
+  - Division is normal (float) division.
+
+Examples:
+  evaluate("2+3*4")          -> 14
+  evaluate("(2+3)*4")        -> 20
+  evaluate(" 2 * (3 + 4) - 5") -> 9
+  evaluate("100/10/5")       -> 2.0
+
+Create the file with your file-editing tool.

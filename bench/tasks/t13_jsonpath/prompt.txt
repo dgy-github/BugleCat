@@ -1,0 +1,20 @@
+Create jsonpath.py in the current directory with a function
+get(data, path, default=None) that resolves a dotted path into a nested
+structure of dicts and lists.
+
+  - path is a string of segments separated by '.', e.g. "a.b.0.c".
+  - At a dict, a segment is used as the key.
+  - At a list, a segment that is all digits is used as a 0-based index.
+  - If any segment is missing, the index is out of range, or the type does not
+    match (e.g. a key segment on a list), return default.
+  - A path that resolves successfully returns the value found (which may itself
+    be a dict, list, or scalar — including 0, "", or None).
+
+Examples:
+  d = {"a": {"b": [10, {"c": 42}]}}
+  get(d, "a.b.0")     -> 10
+  get(d, "a.b.1.c")   -> 42
+  get(d, "a.x", "NA") -> "NA"
+  get(d, "a.b.9", -1) -> -1
+
+Create the file with your file-editing tool.
