@@ -77,7 +77,11 @@ pub fn write_nanocodex_config(
     // Merge: start from existing writable keys, apply updates on top.
     let mut merged: HashMap<&str, String> = HashMap::new();
     for key in WRITABLE_KEYS {
-        if let Some(v) = current.get(*key).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(v) = current
+            .get(*key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             merged.insert(key, v.to_string());
         }
     }
@@ -88,8 +92,7 @@ pub fn write_nanocodex_config(
     }
 
     // Serialize via dump_nanocodex_toml (borrows &str).
-    let str_map: HashMap<&str, &str> =
-        merged.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let str_map: HashMap<&str, &str> = merged.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let text = dump_nanocodex_toml(&str_map);
 
     if let Some(parent) = path.parent() {
@@ -117,7 +120,10 @@ mod tests {
         ]));
         let parsed = text.parse::<toml::Value>().unwrap();
         assert_eq!(parsed["api_key"].as_str().unwrap(), r#"sk-with"quote"#);
-        assert_eq!(parsed["base_url"].as_str().unwrap(), "https://api.deepseek.com/beta");
+        assert_eq!(
+            parsed["base_url"].as_str().unwrap(),
+            "https://api.deepseek.com/beta"
+        );
         assert_eq!(parsed["model"].as_str().unwrap(), "deepseek-v4-pro");
     }
 
@@ -125,7 +131,10 @@ mod tests {
     fn dump_skips_empty_and_unknown() {
         let text = dump_nanocodex_toml(&map(&[("api_key", ""), ("model", "m"), ("bogus", "x")]));
         let parsed = text.parse::<toml::Value>().unwrap();
-        assert!(!parsed.as_table().unwrap().contains_key("api_key"), "empty should be skipped");
+        assert!(
+            !parsed.as_table().unwrap().contains_key("api_key"),
+            "empty should be skipped"
+        );
         let t = parsed.as_table().unwrap();
         assert!(!t.contains_key("bogus"), "unknown key should be skipped");
         assert_eq!(t["model"].as_str().unwrap(), "m");
@@ -143,7 +152,10 @@ mod tests {
 
         write_nanocodex_config(&map(&[("model", "deepseek-chat")]), &target).unwrap();
 
-        let parsed = std::fs::read_to_string(&target).unwrap().parse::<toml::Value>().unwrap();
+        let parsed = std::fs::read_to_string(&target)
+            .unwrap()
+            .parse::<toml::Value>()
+            .unwrap();
         assert_eq!(parsed["api_key"].as_str().unwrap(), "sk-1");
         assert_eq!(parsed["model"].as_str().unwrap(), "deepseek-chat");
     }
@@ -156,7 +168,10 @@ mod tests {
         let _ = std::fs::remove_file(&target);
 
         write_nanocodex_config(&map(&[("api_key", "sk-1"), ("bogus", "nope")]), &target).unwrap();
-        let parsed = std::fs::read_to_string(&target).unwrap().parse::<toml::Value>().unwrap();
+        let parsed = std::fs::read_to_string(&target)
+            .unwrap()
+            .parse::<toml::Value>()
+            .unwrap();
         assert!(!parsed.as_table().unwrap().contains_key("bogus"));
     }
 }

@@ -12,8 +12,15 @@
 use std::path::Path;
 
 /// Dirs never copied into an isolated workspace (huge / generated / irrelevant).
-const SKIP_DIRS: &[&str] =
-    &[".git", "target", "node_modules", ".ncx", "dist", ".venv", "__pycache__"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    "node_modules",
+    ".ncx",
+    "dist",
+    ".venv",
+    "__pycache__",
+];
 
 /// Recursively copy `src` into `dst` (created if absent), skipping [`SKIP_DIRS`].
 /// Returns the number of files copied.
@@ -70,7 +77,10 @@ mod tests {
         assert_eq!(n, 2, "a.txt + sub/b.txt; target/ skipped");
         assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "A");
         assert_eq!(std::fs::read_to_string(dst.join("sub/b.txt")).unwrap(), "B");
-        assert!(!dst.join("target").exists(), "ignored dir must not be copied");
+        assert!(
+            !dst.join("target").exists(),
+            "ignored dir must not be copied"
+        );
     }
 
     #[test]

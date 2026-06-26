@@ -108,7 +108,11 @@ impl Config {
             if key.is_empty() {
                 return "(unset)".to_string();
             }
-            let tail = if key.len() >= 4 { &key[key.len() - 4..] } else { "" };
+            let tail = if key.len() >= 4 {
+                &key[key.len() - 4..]
+            } else {
+                ""
+            };
             format!("****{tail}")
         };
         let mut m = HashMap::new();

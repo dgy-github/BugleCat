@@ -18,6 +18,22 @@ use serde_json::{json, Value};
 
 use crate::memory::MemoryStore;
 
+const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 9;
+const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
+    "read_file",
+    "apply_patch",
+    "update_plan",
+    "shell",
+    "tool_search",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCatalogEntry {
+    pub name: String,
+    pub description: String,
+    pub read_only: bool,
+}
+
 /// Asks the user to approve an escalated action (e.g. a patch writing outside
 /// the sandbox). The GUI implements this with a modal round-trip; the CLI with
 /// a yes/no prompt; tests with a canned answer. `?Send` to match the loop.
@@ -49,6 +65,10 @@ pub struct ToolContext {
     /// Web search backend ("duckduckgo" | "tavily") and its key (for tavily).
     pub search_provider: String,
     pub search_api_key: String,
+    /// Catalog used by `tool_search` and dynamic schema exposure.
+    pub tool_catalog: Rc<RefCell<Vec<ToolCatalogEntry>>>,
+    /// Tool names requested by `tool_search`; included in the next schema view.
+    pub tool_hints: Rc<RefCell<Vec<String>>>,
 }
 
 impl ToolContext {
@@ -63,6 +83,8 @@ impl ToolContext {
             memory: None,
             search_provider: "duckduckgo".to_string(),
             search_api_key: String::new(),
+            tool_catalog: Rc::new(RefCell::new(Vec::new())),
+            tool_hints: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -136,7 +158,11 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     /// Build the default registry: read_file, apply_patch, update_plan, shell.
     pub fn new(ctx: ToolContext) -> Self {
-        let mut reg = ToolRegistry { ctx, tools: Vec::new(), by_name: HashMap::new() };
+        let mut reg = ToolRegistry {
+            ctx,
+            tools: Vec::new(),
+            by_name: HashMap::new(),
+        };
         reg.register(Box::new(ReadFileTool));
         reg.register(Box::new(ApplyPatchTool));
         reg.register(Box::new(UpdatePlanTool));
@@ -144,6 +170,7 @@ impl ToolRegistry {
         reg.register(Box::new(crate::search::GrepTool));
         reg.register(Box::new(crate::search::GlobTool));
         reg.register(Box::new(crate::search::WebSearchTool));
+        reg.register(Box::new(ToolSearchTool));
         // Only expose `remember` when a memory store is wired (CLI/GUI supply it).
         if reg.ctx.memory.is_some() {
             reg.register(Box::new(RememberTool));
@@ -153,12 +180,21 @@ impl ToolRegistry {
 
     /// Empty registry (tests register exactly what they need).
     pub fn empty(ctx: ToolContext) -> Self {
-        ToolRegistry { ctx, tools: Vec::new(), by_name: HashMap::new() }
+        ToolRegistry {
+            ctx,
+            tools: Vec::new(),
+            by_name: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         let name = tool.name().to_string();
         let idx = self.tools.len();
+        self.ctx.tool_catalog.borrow_mut().push(ToolCatalogEntry {
+            name: name.clone(),
+            description: tool.description().to_string(),
+            read_only: tool.read_only(),
+        });
         self.tools.push(tool);
         self.by_name.insert(name, idx);
     }
@@ -173,7 +209,57 @@ impl ToolRegistry {
 
     /// JSON schemas for every registered tool (the `tools` request field).
     pub fn schemas(&self) -> Vec<Value> {
-        self.tools.iter().map(|t| t.to_schema()).collect()
+        self.schemas_for_query("")
+    }
+
+    /// JSON schemas for the tool view relevant to the current task. Small
+    /// registries expose everything; larger ones expose core tools, recent
+    /// `tool_search` hits, and the best lexical matches for `query`.
+    pub fn schemas_for_query(&self, query: &str) -> Vec<Value> {
+        self.schemas_limited_for_query(query, DEFAULT_VISIBLE_TOOL_LIMIT)
+    }
+
+    pub fn schemas_limited_for_query(&self, query: &str, limit: usize) -> Vec<Value> {
+        if self.tools.len() <= limit {
+            return self.tools.iter().map(|t| t.to_schema()).collect();
+        }
+
+        let mut selected: HashSet<String> = HashSet::new();
+        for name in ALWAYS_VISIBLE_TOOLS {
+            if self.by_name.contains_key(*name) {
+                selected.insert((*name).to_string());
+            }
+        }
+        for name in self.ctx.tool_hints.borrow().iter() {
+            if self.by_name.contains_key(name) {
+                selected.insert(name.clone());
+            }
+        }
+
+        let q = tool_words(query);
+        let mut scored: Vec<(i64, String)> = self
+            .ctx
+            .tool_catalog
+            .borrow()
+            .iter()
+            .filter(|e| !selected.contains(&e.name))
+            .map(|e| (catalog_score(e, &q), e.name.clone()))
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (score, name) in scored {
+            if selected.len() >= limit {
+                break;
+            }
+            if score > 0 || q.is_empty() {
+                selected.insert(name);
+            }
+        }
+
+        self.tools
+            .iter()
+            .filter(|t| selected.contains(t.name()))
+            .map(|t| t.to_schema())
+            .collect()
     }
 
     /// Run a tool by name. Unknown tool -> an error string for the model.
@@ -186,6 +272,103 @@ impl ToolRegistry {
 }
 
 // ── concrete tools ────────────────────────────────────────────────────────────
+
+/// `tool_search` — discover tools by name/description when the registry is too
+/// large to expose every schema every turn. Read-only.
+pub struct ToolSearchTool;
+
+#[async_trait(?Send)]
+impl Tool for ToolSearchTool {
+    fn name(&self) -> &str {
+        "tool_search"
+    }
+    fn description(&self) -> &str {
+        "Search available tools by keyword when you need a capability that is not currently visible. Returns matching tool names and makes them available next turn."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Capability or tool keywords to search for."},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["query"],
+        })
+    }
+    fn read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(query) = args.get("query").and_then(|v| v.as_str()) else {
+            return "Error: 'query' is required and must be a string.".into();
+        };
+        let max = args
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(8)
+            .clamp(1, 20) as usize;
+        let q = tool_words(query);
+        let catalog = ctx.tool_catalog.borrow();
+        let mut scored: Vec<(i64, &ToolCatalogEntry)> = catalog
+            .iter()
+            .map(|e| (catalog_score(e, &q), e))
+            .filter(|(s, _)| *s > 0)
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        let mut hints = ctx.tool_hints.borrow_mut();
+        hints.clear();
+        if scored.is_empty() {
+            return format!("No tools matched '{query}'.");
+        }
+        let mut out = format!("Tools matching '{query}':");
+        for (_, entry) in scored.into_iter().take(max) {
+            hints.push(entry.name.clone());
+            out.push_str(&format!(
+                "\n- {}{}: {}",
+                entry.name,
+                if entry.read_only { " (read-only)" } else { "" },
+                entry.description
+            ));
+        }
+        out
+    }
+}
+
+fn tool_words(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in s
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+    {
+        let w = raw.trim_matches('_');
+        if w.len() >= 2 && !out.iter().any(|x| x == w) {
+            out.push(w.to_string());
+        }
+    }
+    out
+}
+
+fn catalog_score(entry: &ToolCatalogEntry, query_words: &[String]) -> i64 {
+    if query_words.is_empty() {
+        return 0;
+    }
+    let hay = format!(
+        "{} {}",
+        entry.name.to_lowercase(),
+        entry.description.to_lowercase()
+    );
+    let mut score = 0;
+    for q in query_words {
+        if entry.name.eq_ignore_ascii_case(q) {
+            score += 100;
+        } else if entry.name.to_lowercase().contains(q) {
+            score += 50;
+        } else if hay.contains(q) {
+            score += 20;
+        }
+    }
+    score
+}
 
 /// `read_file` — line-numbered reads. Read-only.
 pub struct ReadFileTool;
@@ -221,7 +404,11 @@ impl Tool for ReadFileTool {
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
         let p = PathBuf::from(path);
-        let abs = if p.is_absolute() { p } else { ctx.workspace.join(path) };
+        let abs = if p.is_absolute() {
+            p
+        } else {
+            ctx.workspace.join(path)
+        };
         let resolved = abs.canonicalize().unwrap_or(abs);
 
         if !ctx.policy.can_read(&resolved) {
@@ -299,7 +486,10 @@ impl Tool for ApplyPatchTool {
             Ok(a) => a,
             Err(e) => return format!("Error applying patch: {e}"),
         };
-        let root = ctx.workspace.canonicalize().unwrap_or_else(|_| ctx.workspace.clone());
+        let root = ctx
+            .workspace
+            .canonicalize()
+            .unwrap_or_else(|_| ctx.workspace.clone());
         let resolve = |rel: &str| -> PathBuf {
             let joined = root.join(rel);
             joined.canonicalize().unwrap_or(joined)
@@ -321,7 +511,11 @@ impl Tool for ApplyPatchTool {
         let mut approved: HashSet<PathBuf> = HashSet::new();
         if !escaping.is_empty() {
             if let Some(approver) = &ctx.approver {
-                let rels = escaping.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+                let rels = escaping
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let ok = approver
                     .request(ApprovalRequest {
                         command: format!("apply_patch writing outside the sandbox: {rels}"),
@@ -382,17 +576,27 @@ mod tests {
     #[tokio::test]
     async fn denied_escaping_patch_is_blocked() {
         let ws = tmp_ws("deny");
-        let ctx = ToolContext::new(ws, SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()))
-            .with_approver(Rc::new(Answer(false)));
-        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": ESCAPING })).await;
+        let ctx = ToolContext::new(
+            ws,
+            SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()),
+        )
+        .with_approver(Rc::new(Answer(false)));
+        let out = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": ESCAPING }))
+            .await;
         assert!(out.contains("not approved"), "{out}");
     }
 
     #[tokio::test]
     async fn no_approver_escaping_patch_errors_out_of_sandbox() {
         let ws = tmp_ws("noapprover");
-        let ctx = ToolContext::new(ws, SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()));
-        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": ESCAPING })).await;
+        let ctx = ToolContext::new(
+            ws,
+            SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()),
+        );
+        let out = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": ESCAPING }))
+            .await;
         // Without an approver the write is simply rejected by the policy.
         assert!(out.contains("Error applying patch"), "{out}");
         assert!(out.contains("outside the writable sandbox"), "{out}");
@@ -403,7 +607,9 @@ mod tests {
         let ws = tmp_ws("inws");
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
         let patch = "*** Begin Patch\n*** Add File: ok.txt\n+hi\n*** End Patch";
-        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": patch })).await;
+        let out = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": patch }))
+            .await;
         assert!(out.contains("Patch applied successfully"), "{out}");
         assert_eq!(std::fs::read_to_string(ws.join("ok.txt")).unwrap(), "hi\n");
     }
@@ -413,7 +619,9 @@ mod tests {
         // A read-only command under on-request auto-approves and runs — no approver.
         let ws = tmp_ws("shell_ro");
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
-        let out = ShellTool.execute(&ctx, &json!({ "command": "echo ncx_shell_ok" })).await;
+        let out = ShellTool
+            .execute(&ctx, &json!({ "command": "echo ncx_shell_ok" }))
+            .await;
         assert!(out.contains("ncx_shell_ok"), "{out}");
         assert!(out.contains("Exit code: 0"), "{out}");
     }
@@ -424,7 +632,9 @@ mod tests {
         let ws = tmp_ws("shell_esc");
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::READ_ONLY, &ws))
             .with_approver(Rc::new(Answer(false)));
-        let out = ShellTool.execute(&ctx, &json!({ "command": "rm -rf build" })).await;
+        let out = ShellTool
+            .execute(&ctx, &json!({ "command": "rm -rf build" }))
+            .await;
         assert!(out.contains("not approved"), "{out}");
     }
 
@@ -434,10 +644,57 @@ mod tests {
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::READ_ONLY, &ws))
             .with_approver(Rc::new(Answer(true)));
         // `mkdir` isn't read-only -> escalates; approved -> actually runs (cross-platform).
-        let out = ShellTool.execute(&ctx, &json!({ "command": "mkdir ncxsub" })).await;
+        let out = ShellTool
+            .execute(&ctx, &json!({ "command": "mkdir ncxsub" }))
+            .await;
         assert!(!out.contains("not approved"), "{out}");
         assert!(out.contains("Exit code: 0"), "{out}");
         assert!(ws.join("ncxsub").is_dir());
+    }
+
+    struct NamedTool(&'static str, &'static str);
+    #[async_trait(?Send)]
+    impl Tool for NamedTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            self.1
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            "ok".into()
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_search_returns_matches_and_hints_schema_exposure() {
+        let ws = tmp_ws("tool_search");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let mut reg = ToolRegistry::empty(ctx);
+        reg.register(Box::new(ToolSearchTool));
+        reg.register(Box::new(NamedTool("alpha", "general alpha helper")));
+        reg.register(Box::new(NamedTool(
+            "deploy",
+            "build release packages and installers",
+        )));
+        reg.register(Box::new(NamedTool("debugger", "inspect failures")));
+
+        let out = reg
+            .execute("tool_search", &json!({"query": "installer release"}))
+            .await;
+        assert!(out.contains("deploy"), "{out}");
+        assert!(reg.ctx.tool_hints.borrow().contains(&"deploy".to_string()));
+
+        let schemas = reg.schemas_limited_for_query("", 2);
+        let names: Vec<String> = schemas
+            .iter()
+            .filter_map(|s| s["function"]["name"].as_str().map(String::from))
+            .collect();
+        assert!(names.contains(&"tool_search".to_string()));
+        assert!(names.contains(&"deploy".to_string()));
     }
 }
 
@@ -532,16 +789,29 @@ impl Tool for ShellTool {
         let workdir = match args.get("workdir").and_then(|v| v.as_str()) {
             Some(w) if !w.is_empty() => {
                 let p = PathBuf::from(w);
-                let abs = if p.is_absolute() { p } else { ctx.workspace.join(w) };
+                let abs = if p.is_absolute() {
+                    p
+                } else {
+                    ctx.workspace.join(w)
+                };
                 abs.canonicalize().unwrap_or(abs)
             }
             _ => ctx.workspace.clone(),
         };
         if !workdir.exists() {
-            return format!("Error: working directory does not exist: {}", workdir.display());
+            return format!(
+                "Error: working directory does not exist: {}",
+                workdir.display()
+            );
         }
-        let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(ctx.timeout_s);
-        let justification = args.get("justification").and_then(|v| v.as_str()).unwrap_or("");
+        let timeout = args
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(ctx.timeout_s);
+        let justification = args
+            .get("justification")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         let needs_esc = ShellTool::needs_escalation(ctx, command, &workdir);
         let decision = Approver::new(&ctx.approval_policy).classify(command, needs_esc);
@@ -574,7 +844,8 @@ impl Tool for ShellTool {
                     }
                 }
                 None => {
-                    return "Error: command requires approval but no approver is configured.".into();
+                    return "Error: command requires approval but no approver is configured."
+                        .into();
                 }
             },
             Decision::AutoApprove => {}
@@ -589,9 +860,12 @@ impl Tool for ShellTool {
                 let ok = h
                     .request(ApprovalRequest {
                         command: command.to_string(),
-                        reason: format!("Sandboxed run failed (exit {}). {justification}", result.exit_code)
-                            .trim()
-                            .to_string(),
+                        reason: format!(
+                            "Sandboxed run failed (exit {}). {justification}",
+                            result.exit_code
+                        )
+                        .trim()
+                        .to_string(),
                         cwd: workdir.display().to_string(),
                         escalated: true,
                         details: String::new(),
@@ -644,7 +918,11 @@ impl Tool for RememberTool {
         let tags: Vec<String> = args
             .get("tags")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

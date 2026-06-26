@@ -62,7 +62,10 @@ pub fn parse_completion(resp: &Value) -> ModelResponse {
         .to_string();
 
     let mut tool_calls = Vec::new();
-    if let Some(tcs) = msg.and_then(|m| m.get("tool_calls")).and_then(|v| v.as_array()) {
+    if let Some(tcs) = msg
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(|v| v.as_array())
+    {
         for tc in tcs {
             let func = tc.get("function");
             let name = func
@@ -75,8 +78,16 @@ pub fn parse_completion(resp: &Value) -> ModelResponse {
                 .and_then(|v| v.as_str())
                 .unwrap_or("{}");
             let parsed = parse_args(raw_args);
-            let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            tool_calls.push(ToolCall { id, name, arguments: parsed });
+            let id = tc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            tool_calls.push(ToolCall {
+                id,
+                name,
+                arguments: parsed,
+            });
         }
     }
 
@@ -90,7 +101,13 @@ pub fn parse_completion(resp: &Value) -> ModelResponse {
     let reasoning = msg.map(extract_reasoning).unwrap_or_default();
     let usage = extract_usage(resp.get("usage"));
 
-    ModelResponse { content, tool_calls, finish_reason, reasoning, usage }
+    ModelResponse {
+        content,
+        tool_calls,
+        finish_reason,
+        reasoning,
+        usage,
+    }
 }
 
 /// Parse tool-call argument JSON; non-object or invalid collapses to `{}`.
@@ -110,7 +127,10 @@ mod tests {
 
     #[test]
     fn extract_reasoning_accepts_reasoning_alias() {
-        assert_eq!(extract_reasoning(&json!({"reasoning": "proxy reasoning"})), "proxy reasoning");
+        assert_eq!(
+            extract_reasoning(&json!({"reasoning": "proxy reasoning"})),
+            "proxy reasoning"
+        );
     }
 
     #[test]

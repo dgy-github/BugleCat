@@ -16,7 +16,15 @@ use serde_json::{json, Value};
 use crate::tools::{Tool, ToolContext};
 
 /// Directories never walked (noise / huge / generated).
-const IGNORE_DIRS: &[&str] = &[".git", "target", "node_modules", ".ncx", "dist", ".venv", "__pycache__"];
+const IGNORE_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    "node_modules",
+    ".ncx",
+    "dist",
+    ".venv",
+    "__pycache__",
+];
 /// Safety caps so a search can't run away on a giant tree.
 const MAX_FILES: usize = 20_000;
 const MAX_FILE_BYTES: usize = 2_000_000;
@@ -31,7 +39,9 @@ pub fn walk_files(root: &Path) -> Vec<PathBuf> {
         if out.len() >= MAX_FILES {
             break;
         }
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in rd.flatten() {
             let p = entry.path();
             let Ok(ft) = entry.file_type() else { continue };
@@ -95,7 +105,12 @@ pub fn glob_to_regex(pattern: &str) -> Regex {
 }
 
 /// grep: regex over file contents → `rel/path:line: text` lines (capped).
-pub fn grep(root: &Path, pattern: &str, path_glob: Option<&str>, max_results: usize) -> Result<String, String> {
+pub fn grep(
+    root: &Path,
+    pattern: &str,
+    path_glob: Option<&str>,
+    max_results: usize,
+) -> Result<String, String> {
     let re = Regex::new(pattern).map_err(|e| format!("invalid regex: {e}"))?;
     let path_re = path_glob.map(glob_to_regex);
     let mut hits: Vec<String> = Vec::new();
@@ -111,12 +126,18 @@ pub fn grep(root: &Path, pattern: &str, path_glob: Option<&str>, max_results: us
                 continue;
             }
         }
-        let Ok(meta) = std::fs::metadata(&f) else { continue };
+        let Ok(meta) = std::fs::metadata(&f) else {
+            continue;
+        };
         if meta.len() as usize > MAX_FILE_BYTES {
             continue;
         }
-        let Ok(bytes) = std::fs::read(&f) else { continue };
-        let Ok(text) = std::str::from_utf8(&bytes) else { continue }; // skip binary
+        let Ok(bytes) = std::fs::read(&f) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            continue;
+        }; // skip binary
         scanned += 1;
         for (n, line) in text.lines().enumerate() {
             if re.is_match(line) {
@@ -130,7 +151,9 @@ pub fn grep(root: &Path, pattern: &str, path_glob: Option<&str>, max_results: us
     }
 
     if hits.is_empty() {
-        return Ok(format!("No matches for /{pattern}/ (scanned {scanned} files)."));
+        return Ok(format!(
+            "No matches for /{pattern}/ (scanned {scanned} files)."
+        ));
     }
     let capped = hits.len() >= max_results;
     let mut out = hits.join("\n");
@@ -196,7 +219,10 @@ impl Tool for GrepTool {
             return "Error: 'pattern' is required and must be a string.".into();
         };
         let path_glob = args.get("path_glob").and_then(|v| v.as_str());
-        let max = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
+        let max = args
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
         match grep(&ctx.workspace, pattern, path_glob, max) {
             Ok(s) => s,
             Err(e) => format!("Error: {e}"),
@@ -234,7 +260,10 @@ impl Tool for GlobTool {
         let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) else {
             return "Error: 'pattern' is required and must be a string.".into();
         };
-        let max = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
+        let max = args
+            .get("max_results")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
         glob(&ctx.workspace, pattern, max)
     }
 }
@@ -300,10 +329,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("src")).unwrap();
         std::fs::create_dir_all(d.join("target")).unwrap(); // ignored
-        std::fs::write(d.join("src/main.rs"), "fn main() {\n    let x = 42;\n    println!(\"hi\");\n}\n").unwrap();
+        std::fs::write(
+            d.join("src/main.rs"),
+            "fn main() {\n    let x = 42;\n    println!(\"hi\");\n}\n",
+        )
+        .unwrap();
         std::fs::write(d.join("src/util.rs"), "pub fn helper() -> i32 { 42 }\n").unwrap();
         std::fs::write(d.join("README.md"), "# Title\nsome TODO here\n").unwrap();
-        std::fs::write(d.join("target/junk.rs"), "fn should_be_ignored() { let x = 42; }\n").unwrap();
+        std::fs::write(
+            d.join("target/junk.rs"),
+            "fn should_be_ignored() { let x = 42; }\n",
+        )
+        .unwrap();
         d
     }
 

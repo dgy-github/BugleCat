@@ -35,7 +35,12 @@ impl LiveRunner {
     pub fn new(cfg: Config) -> Self {
         let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
         let _ = memory.consolidate(0.85); // tidy near-dups at startup (idempotent)
-        LiveRunner { cfg, memory, counter: Cell::new(0), scratch: RefCell::new(HashMap::new()) }
+        LiveRunner {
+            cfg,
+            memory,
+            counter: Cell::new(0),
+            scratch: RefCell::new(HashMap::new()),
+        }
     }
 
     fn model_for(&self, tier: Tier) -> String {
@@ -66,7 +71,10 @@ impl LiveRunner {
         let ctx = ToolContext::new(workspace.to_path_buf(), policy)
             .with_approval_policy(self.cfg.approval_policy.clone())
             .with_timeout(self.cfg.timeout_s as u64)
-            .with_search(self.cfg.search_provider.clone(), self.cfg.search_api_key.clone())
+            .with_search(
+                self.cfg.search_provider.clone(),
+                self.cfg.search_api_key.clone(),
+            )
             .with_memory(self.memory.clone()); // memory is project-level, not per-copy
         let tools = ToolRegistry::new(ctx);
         let recall = self.memory.recall(task, 6, 3000);

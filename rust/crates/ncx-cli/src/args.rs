@@ -80,7 +80,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
 
 /// Consume the next argv element as a flag's value, advancing the cursor.
 fn take_value(argv: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
-    let next = argv.get(*i + 1).ok_or_else(|| format!("option '{flag}' needs a value"))?;
+    let next = argv
+        .get(*i + 1)
+        .ok_or_else(|| format!("option '{flag}' needs a value"))?;
     *i += 1;
     Ok(next.clone())
 }

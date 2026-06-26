@@ -69,7 +69,10 @@ fn err<T>(msg: impl Into<String>) -> Result<T, PatchError> {
 
 /// Parse a V4A patch envelope into structured file actions.
 pub fn parse_patch(text: &str) -> Result<Vec<FileAction>, PatchError> {
-    let lines: Vec<&str> = text.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
     if lines.is_empty() || lines[0].trim() != BEGIN {
         return err("patch must start with '*** Begin Patch'");
     }
@@ -99,7 +102,11 @@ pub fn parse_patch(text: &str) -> Result<Vec<FileAction>, PatchError> {
                     }
                 }
                 // strip the leading marker byte (ASCII '+'/' ')
-                new_lines.push(if content.is_empty() { String::new() } else { content[1..].to_string() });
+                new_lines.push(if content.is_empty() {
+                    String::new()
+                } else {
+                    content[1..].to_string()
+                });
                 i += 1;
             }
             actions.push(FileAction {
@@ -242,7 +249,9 @@ fn match_at(haystack: &[String], needle: &[String], start: usize) -> Option<usiz
     for norm in normalizers {
         let nn: Vec<&str> = needle.iter().map(|s| norm(s)).collect();
         for idx in start..=(haystack.len() - needle.len()) {
-            let window: Vec<&str> = (0..needle.len()).map(|k| norm(&haystack[idx + k])).collect();
+            let window: Vec<&str> = (0..needle.len())
+                .map(|k| norm(&haystack[idx + k]))
+                .collect();
             if window == nn {
                 return Some(idx);
             }
@@ -285,7 +294,10 @@ fn apply_update(original: &str, action: &FileAction) -> Result<String, PatchErro
                     chunk.del_lines.join("\n")
                 ));
             };
-            result.splice(idx..idx + chunk.del_lines.len(), chunk.ins_lines.iter().cloned());
+            result.splice(
+                idx..idx + chunk.del_lines.len(),
+                chunk.ins_lines.iter().cloned(),
+            );
             cursor = idx + chunk.ins_lines.len();
         } else {
             let insert_at = search_from;
@@ -337,9 +349,7 @@ where
     F: Fn(&Path) -> bool,
 {
     let actions = parse_patch(text)?;
-    let root = root
-        .canonicalize()
-        .unwrap_or_else(|_| root.to_path_buf());
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
 
     let resolve = |rel: &str| -> PathBuf {
         let joined = root.join(rel);
@@ -354,7 +364,10 @@ where
     for action in &actions {
         let target = resolve(&action.path);
         if !can_write(&target) {
-            return err(format!("path is outside the writable sandbox: {}", action.path));
+            return err(format!(
+                "path is outside the writable sandbox: {}",
+                action.path
+            ));
         }
         match action.action {
             ActionType::Add => {
@@ -416,7 +429,8 @@ where
         }
     }
     for path in &staged_deletes {
-        std::fs::remove_file(path).map_err(|e| PatchError(format!("delete {}: {e}", path.display())))?;
+        std::fs::remove_file(path)
+            .map_err(|e| PatchError(format!("delete {}: {e}", path.display())))?;
     }
 
     Ok(outcome)
@@ -447,7 +461,9 @@ mod tests {
 
     #[test]
     fn parse_add_file() {
-        let actions = parse_patch("*** Begin Patch\n*** Add File: a.txt\n+hello\n+world\n*** End Patch").unwrap();
+        let actions =
+            parse_patch("*** Begin Patch\n*** Add File: a.txt\n+hello\n+world\n*** End Patch")
+                .unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].action, ActionType::Add);
         assert_eq!(actions[0].new_lines, vec!["hello", "world"]);
@@ -500,7 +516,11 @@ mod tests {
     #[test]
     fn update_replaces_matched_lines() {
         let root = tmpdir("update");
-        std::fs::write(root.join("a.py"), "def main():\n    print(\"hi\")\n    return 0\n").unwrap();
+        std::fs::write(
+            root.join("a.py"),
+            "def main():\n    print(\"hi\")\n    return 0\n",
+        )
+        .unwrap();
         let patch = "*** Begin Patch\n*** Update File: a.py\n-    print(\"hi\")\n+    print(\"hello\")\n*** End Patch";
         let outcome = apply_patch(patch, &root, allow_all).unwrap();
         assert_eq!(outcome.updated, vec!["a.py"]);
@@ -511,14 +531,11 @@ mod tests {
     #[test]
     fn update_uses_locator_to_disambiguate() {
         let root = tmpdir("locator");
-        std::fs::write(
-            root.join("a.py"),
-            "x = 1\nfoo()\nx = 1\nbar()\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("a.py"), "x = 1\nfoo()\nx = 1\nbar()\n").unwrap();
         // locator 'bar()' must steer the match to the SECOND 'x = 1'... but the
         // change targets the line after the locator: replace 'bar()'.
-        let patch = "*** Begin Patch\n*** Update File: a.py\n@@ foo()\n-x = 1\n+x = 99\n*** End Patch";
+        let patch =
+            "*** Begin Patch\n*** Update File: a.py\n@@ foo()\n-x = 1\n+x = 99\n*** End Patch";
         apply_patch(patch, &root, allow_all).unwrap();
         let written = std::fs::read_to_string(root.join("a.py")).unwrap();
         assert_eq!(written, "x = 1\nfoo()\nx = 99\nbar()\n");
@@ -529,7 +546,8 @@ mod tests {
         let root = tmpdir("ws");
         std::fs::write(root.join("a.txt"), "  spaced line  \n").unwrap();
         // del line lacks the trailing spaces -> rstrip/strip fallback matches.
-        let patch = "*** Begin Patch\n*** Update File: a.txt\n-spaced line\n+changed\n*** End Patch";
+        let patch =
+            "*** Begin Patch\n*** Update File: a.txt\n-spaced line\n+changed\n*** End Patch";
         apply_patch(patch, &root, allow_all).unwrap();
         let written = std::fs::read_to_string(root.join("a.txt")).unwrap();
         assert_eq!(written, "changed\n");
@@ -543,7 +561,10 @@ mod tests {
         let e = apply_patch(patch, &root, allow_all).unwrap_err();
         assert!(e.to_string().contains("could not locate"));
         // file untouched
-        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "real content\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "real content\n"
+        );
     }
 
     #[test]
@@ -566,9 +587,15 @@ mod tests {
         std::fs::write(root.join("old.txt"), "a\nb\n").unwrap();
         let patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n-a\n+A\n*** End Patch";
         let outcome = apply_patch(patch, &root, allow_all).unwrap();
-        assert_eq!(outcome.moved, vec![("old.txt".to_string(), "new.txt".to_string())]);
+        assert_eq!(
+            outcome.moved,
+            vec![("old.txt".to_string(), "new.txt".to_string())]
+        );
         assert!(!root.join("old.txt").exists());
-        assert_eq!(std::fs::read_to_string(root.join("new.txt")).unwrap(), "A\nb\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("new.txt")).unwrap(),
+            "A\nb\n"
+        );
     }
 
     #[test]

@@ -57,21 +57,33 @@ pub fn expand_file_mentions(text: &str, workspace: &Path) -> String {
             break;
         }
         let p = Path::new(&tok);
-        let abs = if p.is_absolute() { p.to_path_buf() } else { workspace.join(&tok) };
+        let abs = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            workspace.join(&tok)
+        };
         let resolved = abs.canonicalize().unwrap_or(abs);
         if seen.contains(&resolved) || !resolved.is_file() {
             continue;
         }
-        let Ok(data) = std::fs::read(&resolved) else { continue };
+        let Ok(data) = std::fs::read(&resolved) else {
+            continue;
+        };
         if data.is_empty() {
             continue;
         }
         let truncated = data.len() > MAX_FILE_BYTES;
-        let slice = if truncated { &data[..MAX_FILE_BYTES] } else { &data[..] };
+        let slice = if truncated {
+            &data[..MAX_FILE_BYTES]
+        } else {
+            &data[..]
+        };
         if total + slice.len() > MAX_TOTAL_BYTES {
             break;
         }
-        let Ok(content) = std::str::from_utf8(slice) else { continue };
+        let Ok(content) = std::str::from_utf8(slice) else {
+            continue;
+        };
         seen.push(resolved);
         total += slice.len();
         let suffix = if truncated { "\n... (truncated)" } else { "" };
@@ -99,7 +111,10 @@ mod tests {
 
     #[test]
     fn find_mentions_basic_and_trailing_punct() {
-        assert_eq!(find_mentions("look at @src/a.py and @b.txt."), vec!["src/a.py", "b.txt"]);
+        assert_eq!(
+            find_mentions("look at @src/a.py and @b.txt."),
+            vec!["src/a.py", "b.txt"]
+        );
         assert_eq!(find_mentions("mail me@example.com"), Vec::<String>::new());
     }
 

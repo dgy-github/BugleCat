@@ -7,8 +7,27 @@
 
 /// Commands considered read-only (leading token of each chained segment).
 const READ_ONLY_PREFIXES: &[&str] = &[
-    "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "rg", "find", "which", "type",
-    "file", "stat", "tree", "git status", "git log", "git diff", "git show", "git branch", "dir",
+    "ls",
+    "cat",
+    "pwd",
+    "echo",
+    "head",
+    "tail",
+    "wc",
+    "grep",
+    "rg",
+    "find",
+    "which",
+    "type",
+    "file",
+    "stat",
+    "tree",
+    "git status",
+    "git log",
+    "git diff",
+    "git show",
+    "git branch",
+    "dir",
     // NB: `python -c` / `node -e` are intentionally NOT here — they run arbitrary code.
 ];
 
@@ -78,7 +97,12 @@ mod tests {
 
     #[test]
     fn plain_writes_do_not_pass() {
-        for cmd in ["rm -rf build", "mkdir x", "git commit -m x", "pip install foo"] {
+        for cmd in [
+            "rm -rf build",
+            "mkdir x",
+            "git commit -m x",
+            "pip install foo",
+        ] {
             assert!(!looks_read_only(cmd), "{cmd}");
         }
     }
@@ -105,7 +129,12 @@ mod tests {
 
     #[test]
     fn redirection_does_not_pass() {
-        for cmd in ["cat a > out.txt", "echo hi >> log", "ls > files.txt", "cat a &> b"] {
+        for cmd in [
+            "cat a > out.txt",
+            "echo hi >> log",
+            "ls > files.txt",
+            "cat a &> b",
+        ] {
             assert!(!looks_read_only(cmd), "{cmd}");
         }
     }
@@ -120,7 +149,9 @@ mod tests {
     #[test]
     fn arbitrary_code_runners_not_assumed_read_only() {
         assert!(!looks_read_only("python -c \"open('x','w').write('1')\""));
-        assert!(!looks_read_only("node -e \"require('fs').writeFileSync('x','1')\""));
+        assert!(!looks_read_only(
+            "node -e \"require('fs').writeFileSync('x','1')\""
+        ));
     }
 
     #[test]

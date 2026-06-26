@@ -65,7 +65,8 @@ const CLASSIFY_SYS: &str = "You are a task-complexity classifier. Reply with exa
     low-risk change; medium = multi-step but routine; high = risky, broad, or easy to get wrong.";
 const PLAN_SYS: &str = "You are a senior engineer. Produce a short, concrete step-by-step plan to \
     accomplish the task. Do not write code — just the plan.";
-const WORKER_SYS: &str = "You are an implementation worker. Carry out the task following the plan, \
+const WORKER_SYS: &str =
+    "You are an implementation worker. Carry out the task following the plan, \
     using your tools. Describe what you did and the outcome.";
 const VERIFY_SYS: &str = "You are a strict reviewer. Given the task, plan, and the workers' \
     results, decide whether the task is correctly and completely done. Start your reply with PASS \
@@ -83,7 +84,10 @@ pub struct OrchestratorConfig {
 
 impl Default for OrchestratorConfig {
     fn default() -> Self {
-        OrchestratorConfig { workers: 2, max_verify_retries: 1 }
+        OrchestratorConfig {
+            workers: 2,
+            max_verify_retries: 1,
+        }
     }
 }
 
@@ -140,7 +144,12 @@ impl<'a> Orchestrator<'a> {
 
     /// plan(main) → workers(fast, parallel) → verify(`verify_tier`); on FAIL,
     /// feed the verdict back and retry up to `max_verify_retries` times.
-    async fn pipeline(&self, task: &str, complexity: Complexity, verify_tier: Tier) -> OrchestratorOutcome {
+    async fn pipeline(
+        &self,
+        task: &str,
+        complexity: Complexity,
+        verify_tier: Tier,
+    ) -> OrchestratorOutcome {
         let n = self.cfg.workers.max(1);
         let plan = self.runner.run(Tier::Main, PLAN_SYS, task).await;
 
@@ -162,7 +171,11 @@ impl<'a> Orchestrator<'a> {
 
             let verdict = self
                 .runner
-                .run(verify_tier, VERIFY_SYS, &build_verify_task(task, &plan, &worker_results))
+                .run(
+                    verify_tier,
+                    VERIFY_SYS,
+                    &build_verify_task(task, &plan, &worker_results),
+                )
                 .await;
             verify_passed = verdict_passed(&verdict);
 
@@ -208,7 +221,11 @@ fn verdict_passed(verdict: &str) -> bool {
 }
 
 fn build_worker_task(task: &str, plan: &str, feedback: &str, i: usize, n: usize) -> String {
-    let mut s = format!("Task:\n{task}\n\nPlan:\n{plan}\n\n(You are worker {} of {}.)", i + 1, n);
+    let mut s = format!(
+        "Task:\n{task}\n\nPlan:\n{plan}\n\n(You are worker {} of {}.)",
+        i + 1,
+        n
+    );
     if !feedback.is_empty() {
         s.push_str(&format!(
             "\n\nThe previous attempt was rejected. Address this feedback:\n{feedback}"
@@ -228,7 +245,11 @@ fn build_verify_task(task: &str, plan: &str, results: &[String]) -> String {
 }
 
 fn synthesize(results: &[String], best_idx: usize, verdict: &str, passed: bool) -> String {
-    let best = results.get(best_idx).or_else(|| results.first()).cloned().unwrap_or_default();
+    let best = results
+        .get(best_idx)
+        .or_else(|| results.first())
+        .cloned()
+        .unwrap_or_default();
     if passed {
         best
     } else {
@@ -303,7 +324,12 @@ mod tests {
             self.calls.borrow_mut().push((tier, stage));
             match stage {
                 "classify" => self.complexity.to_string(),
-                "verify" => self.verdicts.borrow_mut().pop().unwrap_or("PASS").to_string(),
+                "verify" => self
+                    .verdicts
+                    .borrow_mut()
+                    .pop()
+                    .unwrap_or("PASS")
+                    .to_string(),
                 "plan" => "1. do a thing".to_string(),
                 _ => "worker result".to_string(),
             }
@@ -314,7 +340,10 @@ mod tests {
     }
 
     fn count(calls: &[(Tier, &str)], tier: Tier, stage: &str) -> usize {
-        calls.iter().filter(|(t, s)| *t == tier && *s == stage).count()
+        calls
+            .iter()
+            .filter(|(t, s)| *t == tier && *s == stage)
+            .count()
     }
 
     #[tokio::test]
@@ -363,7 +392,13 @@ mod tests {
     async fn closed_loop_retries_on_fail_then_passes() {
         // Popped from the back: first verify → "FAIL needs work", second → "PASS good".
         let m = MockRunner::new("medium", vec!["PASS good", "FAIL needs work"]);
-        let o = Orchestrator::new(&m, OrchestratorConfig { workers: 2, max_verify_retries: 1 });
+        let o = Orchestrator::new(
+            &m,
+            OrchestratorConfig {
+                workers: 2,
+                max_verify_retries: 1,
+            },
+        );
         let out = o.handle("tricky change").await;
         assert!(out.verify_passed);
         assert_eq!(out.verify_rounds, 2);
@@ -376,11 +411,21 @@ mod tests {
     async fn verifier_selects_best_worker_and_promotes_it() {
         // Verifier names worker 2 (1-based) as best → 0-based index 1 promoted.
         let m = MockRunner::new("medium", vec!["PASS good\nBEST:2"]);
-        let o = Orchestrator::new(&m, OrchestratorConfig { workers: 3, max_verify_retries: 1 });
+        let o = Orchestrator::new(
+            &m,
+            OrchestratorConfig {
+                workers: 3,
+                max_verify_retries: 1,
+            },
+        );
         let out = o.handle("pick best").await;
         assert!(out.verify_passed);
         assert_eq!(out.best_worker, 1, "BEST:2 -> 0-based 1");
-        assert_eq!(*m.promoted.borrow(), vec![1], "the chosen worker is promoted");
+        assert_eq!(
+            *m.promoted.borrow(),
+            vec![1],
+            "the chosen worker is promoted"
+        );
     }
 
     #[tokio::test]
@@ -395,7 +440,13 @@ mod tests {
     #[tokio::test]
     async fn retries_are_capped() {
         let m = MockRunner::new("medium", vec!["FAIL", "FAIL", "FAIL"]);
-        let o = Orchestrator::new(&m, OrchestratorConfig { workers: 2, max_verify_retries: 1 });
+        let o = Orchestrator::new(
+            &m,
+            OrchestratorConfig {
+                workers: 2,
+                max_verify_retries: 1,
+            },
+        );
         let out = o.handle("impossible").await;
         assert!(!out.verify_passed);
         assert_eq!(out.verify_rounds, 2); // initial + 1 retry, then give up

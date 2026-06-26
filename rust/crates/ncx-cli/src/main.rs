@@ -153,7 +153,11 @@ async fn run(args: Args) -> i32 {
 /// Run a single prompt through the tiered flash/pro orchestrator and print the
 /// outcome (complexity, verify status, final text).
 async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
-    let fast = if cfg.fast_model.is_empty() { cfg.model.clone() } else { cfg.fast_model.clone() };
+    let fast = if cfg.fast_model.is_empty() {
+        cfg.model.clone()
+    } else {
+        cfg.fast_model.clone()
+    };
     eprintln!("[orchestrator] main={}  fast={}", cfg.model, fast);
     let runner = LiveRunner::new(cfg);
     let orch = Orchestrator::new(&runner, OrchestratorConfig::default());
@@ -161,19 +165,29 @@ async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
     eprintln!(
         "[orchestrator] complexity={:?}  verify={}  rounds={}  best_worker={}",
         outcome.complexity,
-        if outcome.verify_passed { "PASS" } else { "UNVERIFIED" },
+        if outcome.verify_passed {
+            "PASS"
+        } else {
+            "UNVERIFIED"
+        },
         outcome.verify_rounds,
         outcome.best_worker,
     );
     println!("{}", outcome.final_text);
-    if outcome.verify_passed { 0 } else { 1 }
+    if outcome.verify_passed {
+        0
+    } else {
+        1
+    }
 }
 
 /// Interactive REPL. Slash commands are dispatched without a model call; any
 /// other line becomes a turn (with `@file` mention expansion).
 async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config) {
-    println!("nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit.",
-        cfg.model, cfg.sandbox_mode);
+    println!(
+        "nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit.",
+        cfg.model, cfg.sandbox_mode
+    );
     let stdin = io::stdin();
     loop {
         print!("\n› ");
@@ -216,7 +230,12 @@ enum SlashOutcome {
 
 /// Handle a slash command that doesn't require a model call. Returns the text to
 /// print, an exit signal, or (for unknown commands) treats the line as a prompt.
-fn dispatch_slash(cmd: &str, arg: &str, agent: &AgentLoop, cfg: &ncx_config::Config) -> SlashOutcome {
+fn dispatch_slash(
+    cmd: &str,
+    arg: &str,
+    agent: &AgentLoop,
+    cfg: &ncx_config::Config,
+) -> SlashOutcome {
     match cmd {
         "/exit" => SlashOutcome::Exit,
         "/help" => SlashOutcome::Printed(render_help()),

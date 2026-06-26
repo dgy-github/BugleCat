@@ -10,15 +10,24 @@ pub const DEFAULT_LOOP_INTERVAL_S: u64 = 600;
 /// command -> one-line help, in display order. Mirrors `SLASH_HELP`.
 pub const SLASH_HELP: &[(&str, &str)] = &[
     ("/help", "Show this help."),
-    ("/status", "Show model, sandbox, approval, workspace, and token usage."),
-    ("/model", "Show the current model, or switch it: /model <name>."),
+    (
+        "/status",
+        "Show model, sandbox, approval, workspace, and token usage.",
+    ),
+    (
+        "/model",
+        "Show the current model, or switch it: /model <name>.",
+    ),
     (
         "/approvals",
         "Show the approval policy, or set it: /approvals <untrusted|on-failure|on-request|never>.",
     ),
     ("/diff", "Show the working-tree git diff."),
     ("/plan", "Show the current step plan."),
-    ("/loop", "Repeat a prompt on an interval: /loop [5m] <prompt> (Ctrl+C stops)."),
+    (
+        "/loop",
+        "Repeat a prompt on an interval: /loop [5m] <prompt> (Ctrl+C stops).",
+    ),
     ("/compact", "Fold the conversation now to the token budget."),
     ("/clear", "Start a fresh conversation (keep settings)."),
     ("/exit", "Quit the REPL (also /quit)."),
@@ -128,8 +137,14 @@ mod tests {
 
     #[test]
     fn command_with_argument() {
-        assert_eq!(ps("/model deepseek-chat"), (Some("/model".into()), "deepseek-chat".into()));
-        assert_eq!(ps("/approvals never"), (Some("/approvals".into()), "never".into()));
+        assert_eq!(
+            ps("/model deepseek-chat"),
+            (Some("/model".into()), "deepseek-chat".into())
+        );
+        assert_eq!(
+            ps("/approvals never"),
+            (Some("/approvals".into()), "never".into())
+        );
     }
 
     #[test]
@@ -144,7 +159,16 @@ mod tests {
 
     #[test]
     fn help_table_covers_core_commands() {
-        for c in ["/help", "/model", "/approvals", "/diff", "/loop", "/compact", "/clear", "/exit"] {
+        for c in [
+            "/help",
+            "/model",
+            "/approvals",
+            "/diff",
+            "/loop",
+            "/compact",
+            "/clear",
+            "/exit",
+        ] {
             assert!(is_known(c), "{c}");
         }
     }
@@ -167,8 +191,14 @@ mod tests {
 
     #[test]
     fn split_loop_arg_with_leading_interval() {
-        assert_eq!(split_loop_arg("5m run the tests", DEFAULT_LOOP_INTERVAL_S), (300, "run the tests".into()));
-        assert_eq!(split_loop_arg("30s /diff", DEFAULT_LOOP_INTERVAL_S), (30, "/diff".into()));
+        assert_eq!(
+            split_loop_arg("5m run the tests", DEFAULT_LOOP_INTERVAL_S),
+            (300, "run the tests".into())
+        );
+        assert_eq!(
+            split_loop_arg("30s /diff", DEFAULT_LOOP_INTERVAL_S),
+            (30, "/diff".into())
+        );
     }
 
     #[test]
@@ -185,6 +215,9 @@ mod tests {
 
     #[test]
     fn split_loop_arg_empty() {
-        assert_eq!(split_loop_arg("", DEFAULT_LOOP_INTERVAL_S), (DEFAULT_LOOP_INTERVAL_S, String::new()));
+        assert_eq!(
+            split_loop_arg("", DEFAULT_LOOP_INTERVAL_S),
+            (DEFAULT_LOOP_INTERVAL_S, String::new())
+        );
     }
 }

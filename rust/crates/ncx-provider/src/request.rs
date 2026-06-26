@@ -73,7 +73,10 @@ pub fn apply_reasoning_effort(kwargs: &mut Map<String, Value>, model: &str, effo
         } else if matches!(normalized.as_str(), "xhigh" | "max" | "highest") {
             extra.insert("reasoning_effort".into(), json!("max"));
             extra.insert("thinking".into(), json!({"type": "enabled"}));
-        } else if matches!(normalized.as_str(), "low" | "minimal" | "medium" | "mid" | "high") {
+        } else if matches!(
+            normalized.as_str(),
+            "low" | "minimal" | "medium" | "mid" | "high"
+        ) {
             // DeepSeek maps low/medium to high in its current thinking-mode API.
             extra.insert("reasoning_effort".into(), json!("high"));
             extra.insert("thinking".into(), json!({"type": "enabled"}));
@@ -113,7 +116,9 @@ pub fn sanitize_reasoning_replay(
     }
     let mut out = messages.to_vec();
     for msg in &mut out {
-        let Some(obj) = msg.as_object_mut() else { continue };
+        let Some(obj) = msg.as_object_mut() else {
+            continue;
+        };
         if obj.get("role").and_then(|v| v.as_str()) != Some("assistant") {
             continue;
         }
@@ -124,7 +129,10 @@ pub fn sanitize_reasoning_replay(
         if !has_tool_calls {
             continue;
         }
-        let current = obj.get("reasoning_content").and_then(|v| v.as_str()).unwrap_or("");
+        let current = obj
+            .get("reasoning_content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if current.trim().is_empty() {
             obj.insert("reasoning_content".into(), json!(REASONING_PLACEHOLDER));
         }
@@ -193,7 +201,11 @@ mod tests {
             "(reasoning omitted)"
         );
         // original history is not mutated
-        assert!(messages[1].as_object().unwrap().get("reasoning_content").is_none());
+        assert!(messages[1]
+            .as_object()
+            .unwrap()
+            .get("reasoning_content")
+            .is_none());
     }
 
     #[test]
@@ -223,7 +235,10 @@ mod tests {
             .unwrap()
             .get("reasoning_content")
             .is_none());
-        assert_eq!(kwargs["extra_body"]["thinking"], json!({"type": "disabled"}));
+        assert_eq!(
+            kwargs["extra_body"]["thinking"],
+            json!({"type": "disabled"})
+        );
     }
 
     #[test]
@@ -278,14 +293,25 @@ mod tests {
                 None,
                 Some(tier),
             );
-            assert_eq!(kwargs.get("reasoning_effort"), Some(&json!(expected)), "{tier}");
+            assert_eq!(
+                kwargs.get("reasoning_effort"),
+                Some(&json!(expected)),
+                "{tier}"
+            );
             assert!(!kwargs.contains_key("extra_body"));
         }
     }
 
     #[test]
     fn generic_model_off_omits_reasoning_field() {
-        let kwargs = build_body("Qwen3.6-27B", &[user_msg("x")], None, None, None, Some("off"));
+        let kwargs = build_body(
+            "Qwen3.6-27B",
+            &[user_msg("x")],
+            None,
+            None,
+            None,
+            Some("off"),
+        );
         assert!(!kwargs.contains_key("reasoning_effort"));
         assert!(!kwargs.contains_key("extra_body"));
     }
@@ -304,7 +330,14 @@ mod tests {
     #[test]
     fn tools_add_tool_choice_auto() {
         let tools = vec![json!({"type": "function", "function": {"name": "x"}})];
-        let kwargs = build_body("deepseek-chat", &[user_msg("x")], Some(&tools), None, None, None);
+        let kwargs = build_body(
+            "deepseek-chat",
+            &[user_msg("x")],
+            Some(&tools),
+            None,
+            None,
+            None,
+        );
         assert_eq!(kwargs["tool_choice"], json!("auto"));
         assert_eq!(kwargs["tools"].as_array().unwrap().len(), 1);
     }

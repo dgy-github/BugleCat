@@ -94,11 +94,17 @@ impl SandboxPolicy {
         // `starts_with` is component-wise, so it covers both `target == root`
         // and `root` being an ancestor of `target` (and won't match a mere
         // string prefix like `/a/bc` under `/a/b`).
-        self.writable_dirs().iter().any(|root| target.starts_with(root))
+        self.writable_dirs()
+            .iter()
+            .any(|root| target.starts_with(root))
     }
 
     pub fn describe(&self) -> String {
-        let net = if self.network_access { "network on" } else { "network off" };
+        let net = if self.network_access {
+            "network on"
+        } else {
+            "network off"
+        };
         match self.mode.as_str() {
             DANGER_FULL_ACCESS => format!("{} (no restrictions, {net})", self.mode),
             READ_ONLY => format!("{} (no writes, {net})", self.mode),

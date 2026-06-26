@@ -18,5 +18,7 @@ pub mod loader;
 pub mod writer;
 
 pub use config::{Config, ConfigError, VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES};
-pub use loader::{ConfigPaths, Overrides, list_profiles, list_profiles_at, load_config, load_config_with_paths};
+pub use loader::{
+    list_profiles, list_profiles_at, load_config, load_config_with_paths, ConfigPaths, Overrides,
+};
 pub use writer::{dump_nanocodex_toml, write_nanocodex_config};

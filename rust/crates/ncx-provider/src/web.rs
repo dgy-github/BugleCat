@@ -38,14 +38,21 @@ pub async fn tavily_search(query: &str, api_key: &str, max_results: u32) -> Resu
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status().as_u16()));
     }
-    let v: Value = resp.json().await.map_err(|e| format!("decode error: {e}"))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode error: {e}"))?;
     Ok(format_tavily(&v, query))
 }
 
 /// Build a compact block from a Tavily response (`answer` + `results[]`).
 fn format_tavily(v: &Value, query: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(a) = v.get("answer").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(a) = v
+        .get("answer")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
         parts.push(format!("Answer: {a}"));
     }
     if let Some(results) = v.get("results").and_then(|x| x.as_array()) {
@@ -53,8 +60,15 @@ fn format_tavily(v: &Value, query: &str) -> String {
             let title = r.get("title").and_then(|x| x.as_str()).unwrap_or("");
             let url = r.get("url").and_then(|x| x.as_str()).unwrap_or("");
             let content = r.get("content").and_then(|x| x.as_str()).unwrap_or("");
-            let snippet = if content.len() > 300 { &content[..300] } else { content };
-            parts.push(format!("- {title} ({url})\n  {}", snippet.replace('\n', " ")));
+            let snippet = if content.len() > 300 {
+                &content[..300]
+            } else {
+                content
+            };
+            parts.push(format!(
+                "- {title} ({url})\n  {}",
+                snippet.replace('\n', " ")
+            ));
         }
     }
     if parts.is_empty() {
@@ -86,7 +100,10 @@ pub async fn ddg_instant_answer(query: &str) -> Result<String, String> {
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status().as_u16()));
     }
-    let v: Value = resp.json().await.map_err(|e| format!("decode error: {e}"))?;
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode error: {e}"))?;
     Ok(format_answer(&v, query))
 }
 
@@ -94,10 +111,18 @@ pub async fn ddg_instant_answer(query: &str) -> Result<String, String> {
 fn format_answer(v: &Value, query: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
 
-    if let Some(a) = v.get("Answer").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(a) = v
+        .get("Answer")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
         parts.push(format!("Answer: {a}"));
     }
-    if let Some(abs) = v.get("AbstractText").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+    if let Some(abs) = v
+        .get("AbstractText")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
         let url = v.get("AbstractURL").and_then(|x| x.as_str()).unwrap_or("");
         if url.is_empty() {
             parts.push(abs.to_string());
@@ -105,13 +130,28 @@ fn format_answer(v: &Value, query: &str) -> String {
             parts.push(format!("{abs}\n  {url}"));
         }
     }
-    if let Some(def) = v.get("Definition").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
-        let url = v.get("DefinitionURL").and_then(|x| x.as_str()).unwrap_or("");
-        parts.push(if url.is_empty() { format!("Definition: {def}") } else { format!("Definition: {def}\n  {url}") });
+    if let Some(def) = v
+        .get("Definition")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        let url = v
+            .get("DefinitionURL")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        parts.push(if url.is_empty() {
+            format!("Definition: {def}")
+        } else {
+            format!("Definition: {def}\n  {url}")
+        });
     }
     if let Some(rt) = v.get("RelatedTopics").and_then(|x| x.as_array()) {
         for t in rt.iter().take(5) {
-            if let Some(text) = t.get("Text").and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+            if let Some(text) = t
+                .get("Text")
+                .and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+            {
                 let url = t.get("FirstURL").and_then(|x| x.as_str()).unwrap_or("");
                 if url.is_empty() {
                     parts.push(format!("- {text}"));

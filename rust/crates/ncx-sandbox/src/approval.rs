@@ -71,8 +71,21 @@ const TRUSTED_COMMANDS: &[&str] = &[
 
 /// git subcommands that are NOT read-only -> still need approval under untrusted.
 const GIT_WRITE_SUBCMDS: &[&str] = &[
-    "push", "commit", "reset", "rebase", "merge", "clean", "checkout", "branch", "tag", "stash",
-    "rm", "mv", "cherry-pick", "revert", "am",
+    "push",
+    "commit",
+    "reset",
+    "rebase",
+    "merge",
+    "clean",
+    "checkout",
+    "branch",
+    "tag",
+    "stash",
+    "rm",
+    "mv",
+    "cherry-pick",
+    "revert",
+    "am",
 ];
 
 /// Patterns that always require approval regardless of the leading token.
@@ -95,7 +108,11 @@ fn dangerous_patterns() -> &'static [Regex] {
 }
 
 fn first_token(command: &str) -> String {
-    command.split_whitespace().next().unwrap_or("").to_lowercase()
+    command
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_lowercase()
 }
 
 /// Whether a command is in the read-only-ish allowlist (untrusted policy).
@@ -132,7 +149,9 @@ pub struct Approver {
 
 impl Approver {
     pub fn new(policy: impl Into<String>) -> Self {
-        Approver { policy: policy.into() }
+        Approver {
+            policy: policy.into(),
+        }
     }
 
     /// Pure decision: can this run automatically, must we ask, or auto-deny?
@@ -242,7 +261,10 @@ mod tests {
             Decision::AutoApprove
         );
         // auto-deny is never softened.
-        assert_eq!(step_decision(Decision::AutoDeny, true, true), Decision::AutoDeny);
+        assert_eq!(
+            step_decision(Decision::AutoDeny, true, true),
+            Decision::AutoDeny
+        );
     }
 
     #[test]
@@ -251,7 +273,13 @@ mod tests {
         // (An unquoted path with spaces would split on the space — same as the
         // Python shlex behavior — so that's not a realistic trusted invocation.)
         let a = Approver::new(UNTRUSTED);
-        assert_eq!(a.classify("/usr/bin/git status", false), Decision::AutoApprove);
-        assert_eq!(a.classify(r"C:\tools\git.exe status", false), Decision::AutoApprove);
+        assert_eq!(
+            a.classify("/usr/bin/git status", false),
+            Decision::AutoApprove
+        );
+        assert_eq!(
+            a.classify(r"C:\tools\git.exe status", false),
+            Decision::AutoApprove
+        );
     }
 }

@@ -217,8 +217,11 @@ fn as_int(s: Option<&str>, default: i64) -> i64 {
 fn model_list(csv: Option<&str>, active: &str) -> Vec<String> {
     let names: Vec<String> = match csv {
         Some(s) => {
-            let v: Vec<String> =
-                s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+            let v: Vec<String> = s
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
             if v.is_empty() {
                 DEFAULT_MODELS.iter().map(|s| s.to_string()).collect()
             } else {
@@ -265,7 +268,10 @@ pub fn load_config(overrides: Overrides) -> Result<Config, ConfigError> {
 }
 
 /// Resolve a [`Config`] with injectable paths (and real env vars).
-pub fn load_config_with_paths(overrides: Overrides, paths: &ConfigPaths) -> Result<Config, ConfigError> {
+pub fn load_config_with_paths(
+    overrides: Overrides,
+    paths: &ConfigPaths,
+) -> Result<Config, ConfigError> {
     let env: HashMap<String, String> = std::env::vars().collect();
     load_config_impl(overrides, paths, &env)
 }
@@ -294,7 +300,9 @@ pub(crate) fn load_config_impl(
         .or_else(|| str_val(&nano_raw, "profile"));
     if let Some(name) = &prof_name {
         let profiles = nano_raw.get("profiles").and_then(|v| v.as_table());
-        let selected = profiles.and_then(|t| t.get(name)).and_then(|v| v.as_table());
+        let selected = profiles
+            .and_then(|t| t.get(name))
+            .and_then(|v| v.as_table());
         let Some(table) = selected else {
             let available = profiles
                 .map(|t| {
@@ -322,7 +330,10 @@ pub(crate) fn load_config_impl(
         ("vl_model", &["NANOCODEX_VL_MODEL"]),
         ("ark_api_key", &["ARK_API_KEY", "NANOCODEX_ARK_API_KEY"]),
         ("search_provider", &["NANOCODEX_SEARCH_PROVIDER"]),
-        ("search_api_key", &["TAVILY_API_KEY", "NANOCODEX_SEARCH_API_KEY"]),
+        (
+            "search_api_key",
+            &["TAVILY_API_KEY", "NANOCODEX_SEARCH_API_KEY"],
+        ),
         ("sandbox_mode", &["NANOCODEX_SANDBOX"]),
         ("approval_policy", &["NANOCODEX_APPROVAL"]),
         ("context_token_budget", &["NANOCODEX_CONTEXT_BUDGET"]),
@@ -374,15 +385,20 @@ pub(crate) fn load_config_impl(
         merged.insert("available_models".into(), models.join(","));
     }
 
-    let active_model =
-        merged.get("model").map(|s| s.as_str()).unwrap_or(DEFAULT_MODEL).to_string();
-    let sandbox_mode =
-        merged.get("sandbox_mode").cloned().unwrap_or_else(|| "workspace-write".into());
+    let active_model = merged
+        .get("model")
+        .map(|s| s.as_str())
+        .unwrap_or(DEFAULT_MODEL)
+        .to_string();
+    let sandbox_mode = merged
+        .get("sandbox_mode")
+        .cloned()
+        .unwrap_or_else(|| "workspace-write".into());
     let network_access = sandbox_mode == "danger-full-access";
 
-    let workspace_base = overrides.workspace.unwrap_or_else(|| {
-        std::env::current_dir().unwrap_or_default()
-    });
+    let workspace_base = overrides
+        .workspace
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let workspace = workspace_base.canonicalize().unwrap_or(workspace_base);
 
     let cfg = Config {
@@ -521,9 +537,15 @@ approval_policy = "on-request"
             codex: tmp.join("nope.toml"),
             nanocodex: tmp.join("nope-nano.toml"),
         };
-        let cfg =
-            load_config_impl(Overrides { workspace: Some(tmp.clone()), ..Default::default() }, &paths, &empty_env())
-                .unwrap();
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
+            &paths,
+            &empty_env(),
+        )
+        .unwrap();
         cfg.validate().unwrap();
         assert_eq!(cfg.api_key, "sk-fromfile");
         assert_eq!(cfg.base_url, "https://api.deepseek.com/beta");
@@ -535,7 +557,10 @@ approval_policy = "on-request"
         let tmp = std::env::temp_dir().join("ncx_config_test_override");
         fs::create_dir_all(&tmp).unwrap();
         let ds = tmp.join("deepseek.toml");
-        write(&ds, "api_key = \"k\"\ndefault_text_model = \"deepseek-v4-pro\"\n");
+        write(
+            &ds,
+            "api_key = \"k\"\ndefault_text_model = \"deepseek-v4-pro\"\n",
+        );
         let paths = ConfigPaths {
             deepseek: ds,
             codex: tmp.join("nope.toml"),
@@ -566,9 +591,15 @@ approval_policy = "on-request"
             codex: tmp.join("nope.toml"),
             nanocodex: tmp.join("nope-nano.toml"),
         };
-        let cfg =
-            load_config_impl(Overrides { workspace: Some(tmp.clone()), ..Default::default() }, &paths, &empty_env())
-                .unwrap();
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
+            &paths,
+            &empty_env(),
+        )
+        .unwrap();
         assert_eq!(cfg.api_key, "sk-nested");
     }
 
@@ -579,7 +610,10 @@ approval_policy = "on-request"
         let paths = no_paths(&tmp);
 
         let cfg = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &paths,
             &empty_env(),
         )
@@ -587,7 +621,11 @@ approval_policy = "on-request"
         assert_eq!(cfg.max_iterations, 60);
 
         let cfg2 = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), max_iterations: Some(100), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                max_iterations: Some(100),
+                ..Default::default()
+            },
             &paths,
             &empty_env(),
         )
@@ -600,7 +638,10 @@ approval_policy = "on-request"
         let tmp = std::env::temp_dir().join("ncx_config_test_maxiter_env");
         fs::create_dir_all(&tmp).unwrap();
         let cfg = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &no_paths(&tmp),
             &env1("NANOCODEX_MAX_ITERATIONS", "80"),
         )
@@ -614,16 +655,25 @@ approval_policy = "on-request"
         fs::create_dir_all(&tmp).unwrap();
         let ds = tmp.join("deepseek.toml");
         let nano = tmp.join("nano.toml");
-        write(&ds, "api_key = \"sk-ds\"\ndefault_text_model = \"deepseek-v4-pro\"\n");
+        write(
+            &ds,
+            "api_key = \"sk-ds\"\ndefault_text_model = \"deepseek-v4-pro\"\n",
+        );
         write(&nano, "api_key = \"sk-nano\"\nmodel = \"deepseek-chat\"\n");
         let paths = ConfigPaths {
             deepseek: ds,
             codex: tmp.join("nope.toml"),
             nanocodex: nano,
         };
-        let cfg =
-            load_config_impl(Overrides { workspace: Some(tmp.clone()), ..Default::default() }, &paths, &empty_env())
-                .unwrap();
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
+            &paths,
+            &empty_env(),
+        )
+        .unwrap();
         assert_eq!(cfg.api_key, "sk-nano");
         assert_eq!(cfg.model, "deepseek-chat");
     }
@@ -640,7 +690,10 @@ approval_policy = "on-request"
             nanocodex: nano,
         };
         let cfg = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &paths,
             &env1("DEEPSEEK_API_KEY", "sk-env"),
         )
@@ -654,7 +707,10 @@ approval_policy = "on-request"
         fs::create_dir_all(&tmp).unwrap();
         // Default 3
         let cfg = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &no_paths(&tmp),
             &env1("DEEPSEEK_API_KEY", "sk-env"),
         )
@@ -665,7 +721,10 @@ approval_policy = "on-request"
         let mut e = env1("DEEPSEEK_API_KEY", "sk-env");
         e.insert("NANOCODEX_MAX_RETRIES".into(), "5".into());
         let cfg2 = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &no_paths(&tmp),
             &e,
         )
@@ -676,7 +735,10 @@ approval_policy = "on-request"
         let mut e3 = env1("DEEPSEEK_API_KEY", "sk-env");
         e3.insert("NANOCODEX_MAX_RETRIES".into(), "not-a-number".into());
         let cfg3 = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &no_paths(&tmp),
             &e3,
         )
@@ -742,7 +804,10 @@ approval_policy = "on-request"
         let tmp = std::env::temp_dir().join("ncx_config_test_profile_env");
         fs::create_dir_all(&tmp).unwrap();
         let nano = tmp.join("nano.toml");
-        write(&nano, "api_key = \"sk-base\"\n[profiles.fast]\nmodel = \"m-fast\"\n");
+        write(
+            &nano,
+            "api_key = \"sk-base\"\n[profiles.fast]\nmodel = \"m-fast\"\n",
+        );
         let paths = ConfigPaths {
             deepseek: tmp.join("nope-ds.toml"),
             codex: tmp.join("nope-cx.toml"),
@@ -751,7 +816,10 @@ approval_policy = "on-request"
 
         // Name from env
         let cfg = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &paths,
             &env1("NANOCODEX_PROFILE", "fast"),
         )
@@ -760,7 +828,10 @@ approval_policy = "on-request"
 
         // Unknown name -> error mentioning the name
         let err = load_config_impl(
-            Overrides { workspace: Some(tmp.clone()), ..Default::default() },
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
             &paths,
             &env1("NANOCODEX_PROFILE", "ghost"),
         )
@@ -773,7 +844,10 @@ approval_policy = "on-request"
         let tmp = std::env::temp_dir().join("ncx_config_test_listprof");
         fs::create_dir_all(&tmp).unwrap();
         let nano = tmp.join("nano.toml");
-        write(&nano, "[profiles.a]\nmodel=\"x\"\n[profiles.b]\nmodel=\"y\"\n");
+        write(
+            &nano,
+            "[profiles.a]\nmodel=\"x\"\n[profiles.b]\nmodel=\"y\"\n",
+        );
         let names = list_profiles_at(&nano);
         assert_eq!(names, vec!["a", "b"]);
     }

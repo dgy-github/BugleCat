@@ -24,7 +24,11 @@ const STREAM_OPEN_TIMEOUT_MAX_S: u64 = 300;
 
 /// Bounded override for the streaming response-header wait (seconds).
 pub fn stream_open_timeout_s() -> u64 {
-    stream_open_timeout_from(std::env::var("NANOCODEX_STREAM_OPEN_TIMEOUT_S").ok().as_deref())
+    stream_open_timeout_from(
+        std::env::var("NANOCODEX_STREAM_OPEN_TIMEOUT_S")
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// Pure inner helper — injectable for tests (mirrors `_stream_open_timeout_s`).
@@ -85,7 +89,14 @@ impl DeepSeekProvider {
         max_tokens: Option<i64>,
         reasoning_effort: Option<&str>,
     ) -> serde_json::Map<String, Value> {
-        build_body(&self.model, messages, tools, temperature, max_tokens, reasoning_effort)
+        build_body(
+            &self.model,
+            messages,
+            tools,
+            temperature,
+            max_tokens,
+            reasoning_effort,
+        )
     }
 
     /// Non-streaming completion. Retries transient failures with backoff.
@@ -128,16 +139,19 @@ impl DeepSeekProvider {
 
         let status = resp.status();
         if status.is_success() {
-            return resp
-                .json::<Value>()
-                .await
-                .map_err(|e| HttpErr { message: format!("decode error: {e}"), transient: false });
+            return resp.json::<Value>().await.map_err(|e| HttpErr {
+                message: format!("decode error: {e}"),
+                transient: false,
+            });
         }
         // 408/409/429/5xx are transient; other 4xx are permanent.
         let code = status.as_u16();
         let transient = matches!(code, 408 | 409 | 429) || (500..600).contains(&code);
         let text = resp.text().await.unwrap_or_default();
-        Err(HttpErr { message: format!("HTTP {code}: {text}"), transient })
+        Err(HttpErr {
+            message: format!("HTTP {code}: {text}"),
+            transient,
+        })
     }
 
     /// Streaming completion. Invokes the two callbacks with incremental text and
@@ -188,7 +202,8 @@ impl DeepSeekProvider {
             return Err(ProviderError(format!("HTTP {code}: {text}")));
         }
 
-        self.consume_sse(resp, &mut on_content, &mut on_reasoning).await
+        self.consume_sse(resp, &mut on_content, &mut on_reasoning)
+            .await
     }
 
     async fn consume_sse<C, R>(
@@ -212,7 +227,9 @@ impl DeepSeekProvider {
             while let Some(nl) = buf.find('\n') {
                 let line = buf[..nl].trim_end_matches('\r').to_string();
                 buf.drain(..=nl);
-                let Some(data) = line.strip_prefix("data:") else { continue };
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
                 let data = data.trim();
                 if data.is_empty() {
                     continue;
@@ -259,13 +276,17 @@ impl StreamAgg {
                 self.usage = extract_usage(Some(u));
             }
         }
-        let Some(choice) = chunk.get("choices").and_then(|c| c.get(0)) else { return };
+        let Some(choice) = chunk.get("choices").and_then(|c| c.get(0)) else {
+            return;
+        };
         if let Some(fr) = choice.get("finish_reason").and_then(|v| v.as_str()) {
             if !fr.is_empty() {
                 self.finish_reason = fr.to_string();
             }
         }
-        let Some(delta) = choice.get("delta") else { return };
+        let Some(delta) = choice.get("delta") else {
+            return;
+        };
 
         let r = extract_reasoning(delta);
         if !r.is_empty() {
@@ -307,7 +328,11 @@ impl StreamAgg {
             if frag.name.is_empty() {
                 continue;
             }
-            let id = if frag.id.is_empty() { format!("call_{idx}") } else { frag.id.clone() };
+            let id = if frag.id.is_empty() {
+                format!("call_{idx}")
+            } else {
+                frag.id.clone()
+            };
             tool_calls.push(ToolCall {
                 id,
                 name: frag.name.clone(),
@@ -337,7 +362,10 @@ impl HttpErr {
     fn from_reqwest(e: reqwest::Error) -> Self {
         // Connection / timeout errors are transient and worth retrying.
         let transient = e.is_timeout() || e.is_connect() || e.is_request();
-        HttpErr { message: format!("RequestError: {e}"), transient }
+        HttpErr {
+            message: format!("RequestError: {e}"),
+            transient,
+        }
     }
 }
 
@@ -374,7 +402,13 @@ mod tests {
 
     #[test]
     fn provider_sets_max_retries() {
-        let p = DeepSeekProvider::with_opts("sk-test", "https://example.invalid", "deepseek-chat", 120, 5);
+        let p = DeepSeekProvider::with_opts(
+            "sk-test",
+            "https://example.invalid",
+            "deepseek-chat",
+            120,
+            5,
+        );
         assert_eq!(p.max_retries, 5);
     }
 
@@ -392,8 +426,16 @@ mod tests {
         let mut on_c = |s: &str| content.push_str(s);
         let mut on_r = |s: &str| reasoning.push_str(s);
 
-        agg.ingest(&json!({"choices": [{"delta": {"content": "Hel"}}]}), &mut on_c, &mut on_r);
-        agg.ingest(&json!({"choices": [{"delta": {"content": "lo"}}]}), &mut on_c, &mut on_r);
+        agg.ingest(
+            &json!({"choices": [{"delta": {"content": "Hel"}}]}),
+            &mut on_c,
+            &mut on_r,
+        );
+        agg.ingest(
+            &json!({"choices": [{"delta": {"content": "lo"}}]}),
+            &mut on_c,
+            &mut on_r,
+        );
         agg.ingest(
             &json!({"choices": [{"delta": {"tool_calls": [{
                 "index": 0, "id": "c1", "function": {"name": "f", "arguments": "{\"a\":"}

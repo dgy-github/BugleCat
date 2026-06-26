@@ -73,8 +73,20 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - 启动路径避开 Python 解释器和 import 开销，适合短的一次性命令，也适合交互 REPL。
 - 显式所有权让并行 worker 隔离、结果选择和 promote 更容易推理，不容易出现共享可变状态
   泄漏。
-- 174 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
+- 180 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
   沙箱策略、工具和编排器。
+
+**平台控制面补齐**
+
+- **Task budget：** 每次模型调用都会收到当前运行预算，包括模型调用次数、工具调用次数
+  和上下文限制；模型调用或工具调用超预算时，loop 会干净停止，并补齐未执行工具调用的
+  tool result，保证消息历史仍然有效。
+- **Context editing：** 本地完整 session 不会被删；发给 provider 的是发送时编辑视图，
+  会压缩旧 tool result，并在超过上下文预算时丢弃更早的前缀。
+- **Tool search：** 工具注册时会进入 catalog。小工具集仍全量暴露；工具变多时只暴露核心
+  工具和 `tool_search`，搜索命中的工具会在下一轮 schema 里出现。
+- **Semantic memory：** 项目记忆检索从纯关键词升级为混合语义排序：关键词、标签、短语、
+  Jaccard 相似度、时间新近度，以及一小组 agent/runtime 领域同义词。
 
 ### 第二阶段为什么改用 Rust
 
@@ -86,6 +98,8 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   沙箱检查贴近真实执行点。
 - **并行编排更稳：** 隔离 worker 副本、verifier 选择、结果 promote 回真实工作区这些
   流程，在显式所有权和类型系统下更容易证明不会互相踩写。
+- **运行时控制面：** task budget、context editing、tool search、semantic memory 放在
+  Rust runtime 边界里，而不是只靠模型提示词约定。
 - **原生发布性能：** 小体积 `ncx.exe` 不需要解释器启动和环境配置，一次性 CLI 任务响应
   更直接，Windows 用户拿到包即可运行。
 - **桌面打包路径：** Tauri 提供原生 shell + web UI 前端，比继续扩大 Tkinter 原型更适合

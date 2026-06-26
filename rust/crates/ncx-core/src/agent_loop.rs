@@ -13,7 +13,7 @@ use futures_util::future::join_all;
 use ncx_provider::{DeepSeekProvider, ModelResponse, ToolCall};
 use serde_json::{json, Value};
 
-use crate::session::Session;
+use crate::session::{ContextEditPolicy, ContextEditStats, Session};
 use crate::tools::ToolRegistry;
 
 /// Minimal async chat interface the loop drives. `?Send` so trait objects can
@@ -46,7 +46,8 @@ impl Provider for DeepSeekProvider {
         reasoning_effort: Option<&str>,
     ) -> ModelResponse {
         let tools_opt = if tools.is_empty() { None } else { Some(tools) };
-        match DeepSeekProvider::chat(self, messages, tools_opt, None, None, reasoning_effort).await {
+        match DeepSeekProvider::chat(self, messages, tools_opt, None, None, reasoning_effort).await
+        {
             Ok(resp) => resp,
             Err(e) => ModelResponse {
                 content: e.to_string(),
@@ -64,6 +65,23 @@ pub struct TurnResult {
     pub stop_reason: String,
     pub tools_used: Vec<String>,
     pub usage: std::collections::BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskBudget {
+    /// Maximum model calls for a single user task.
+    pub max_model_calls: usize,
+    /// Maximum tool calls for a single user task.
+    pub max_tool_calls: usize,
+}
+
+impl Default for TaskBudget {
+    fn default() -> Self {
+        TaskBudget {
+            max_model_calls: 60,
+            max_tool_calls: 120,
+        }
+    }
 }
 
 /// Progress events emitted during a turn, for a UI to render live activity.
@@ -94,6 +112,8 @@ pub struct AgentLoop {
     pub tools: ToolRegistry,
     pub session: Session,
     pub max_iterations: usize,
+    pub task_budget: TaskBudget,
+    pub context_edit: ContextEditPolicy,
     pub reasoning_effort: Option<String>,
     use_vision_this_turn: bool,
     event_sink: Option<EventSink>,
@@ -107,6 +127,8 @@ impl AgentLoop {
             tools,
             session,
             max_iterations: 60,
+            task_budget: TaskBudget::default(),
+            context_edit: ContextEditPolicy::default(),
             reasoning_effort: None,
             use_vision_this_turn: false,
             event_sink: None,
@@ -115,6 +137,22 @@ impl AgentLoop {
 
     pub fn with_max_iterations(mut self, n: usize) -> Self {
         self.max_iterations = n;
+        self.task_budget.max_model_calls = n;
+        self
+    }
+
+    pub fn with_task_budget(mut self, budget: TaskBudget) -> Self {
+        let budget = TaskBudget {
+            max_model_calls: budget.max_model_calls.max(1),
+            max_tool_calls: budget.max_tool_calls,
+        };
+        self.max_iterations = budget.max_model_calls;
+        self.task_budget = budget;
+        self
+    }
+
+    pub fn with_context_edit(mut self, policy: ContextEditPolicy) -> Self {
+        self.context_edit = policy;
         self
     }
 
@@ -133,10 +171,20 @@ impl AgentLoop {
         self.provider.as_ref()
     }
 
-    async fn call_model(&self, schemas: &[Value]) -> ModelResponse {
-        let messages = self.session.for_model();
+    async fn call_model(
+        &self,
+        schemas: &[Value],
+        system_notes: &[String],
+    ) -> (ModelResponse, ContextEditStats) {
+        let edited = self
+            .session
+            .for_model_edited(system_notes, &self.context_edit);
         let effort = self.reasoning_effort.as_deref();
-        self.active_provider().chat(&messages, schemas, effort).await
+        let response = self
+            .active_provider()
+            .chat(&edited.messages, schemas, effort)
+            .await;
+        (response, edited.stats)
     }
 
     /// Run one tool call but abandon it (drop = cancel) if `cancel` flips while
@@ -171,7 +219,9 @@ impl AgentLoop {
         // Take the sink out so the inner loop can emit through a local without
         // borrow-conflicting with `&mut self`; restore it after (one return path).
         let mut sink = self.event_sink.take();
-        let result = self.run_turn_inner(user_input, cancel_check, &mut sink).await;
+        let result = self
+            .run_turn_inner(user_input, cancel_check, &mut sink)
+            .await;
         self.event_sink = sink;
         result
     }
@@ -182,17 +232,19 @@ impl AgentLoop {
         cancel_check: Option<&dyn Fn() -> bool>,
         sink: &mut Option<EventSink>,
     ) -> TurnResult {
-        self.use_vision_this_turn =
-            self.vision_provider.is_some() && has_image_block(&user_input);
+        self.use_vision_this_turn = self.vision_provider.is_some() && has_image_block(&user_input);
+        let tool_query = user_query_text(&user_input);
         self.session.add_user(user_input);
 
         let mut tools_used: Vec<String> = Vec::new();
-        let schemas = self.tools.schemas();
         let mut turn_usage: std::collections::BTreeMap<String, i64> = Default::default();
 
         let cancelled = || cancel_check.map(|c| c()).unwrap_or(false);
 
-        for iteration in 0..self.max_iterations {
+        let max_model_calls = self
+            .max_iterations
+            .min(self.task_budget.max_model_calls.max(1));
+        for iteration in 0..max_model_calls {
             if cancelled() {
                 let text = "Stopped by user.".to_string();
                 self.session.add_assistant(&text, None, "");
@@ -205,18 +257,28 @@ impl AgentLoop {
                 };
             }
 
-            let response = self.call_model(&schemas).await;
+            let schemas = self.tools.schemas_for_query(&tool_query);
+            let notes = vec![self.budget_note(iteration + 1, tools_used.len())];
+            let (response, edit_stats) = self.call_model(&schemas, &notes).await;
             add_usage(&mut turn_usage, &response.usage);
             if trace_on() {
                 eprintln!(
-                    "[ncx-trace] iter={} finish={} n_tools={} content={:?}",
+                    "[ncx-trace] iter={} finish={} n_tools={} ctx={}/{} compressed={} dropped={} content={:?}",
                     iteration,
                     response.finish_reason,
                     response.tool_calls.len(),
+                    edit_stats.edited_chars,
+                    edit_stats.original_chars,
+                    edit_stats.compressed_tool_results,
+                    edit_stats.dropped_messages,
                     truncate(&response.content, 120)
                 );
                 for tc in &response.tool_calls {
-                    eprintln!("[ncx-trace]   call {} args={}", tc.name, truncate(&tc.arguments.to_string(), 200));
+                    eprintln!(
+                        "[ncx-trace]   call {} args={}",
+                        tc.name,
+                        truncate(&tc.arguments.to_string(), 200)
+                    );
                 }
             }
 
@@ -278,6 +340,13 @@ impl AgentLoop {
                 if cancelled() {
                     return self.cancel_result(true, iteration, tools_used, turn_usage);
                 }
+                let remaining_tools = self
+                    .task_budget
+                    .max_tool_calls
+                    .saturating_sub(tools_used.len());
+                if remaining_tools == 0 {
+                    return self.budget_result(iteration, tools_used, turn_usage);
+                }
 
                 let parallel_run = self.tools.is_read_only(&calls[idx].name)
                     && idx + 1 < n_calls
@@ -286,43 +355,62 @@ impl AgentLoop {
                 if parallel_run {
                     // Gather the run of consecutive read-only calls.
                     let mut batch: Vec<&ToolCall> = Vec::new();
-                    while idx < n_calls && self.tools.is_read_only(&calls[idx].name) {
+                    while idx < n_calls
+                        && self.tools.is_read_only(&calls[idx].name)
+                        && batch.len() < remaining_tools
+                    {
                         batch.push(&calls[idx]);
                         idx += 1;
                     }
                     for tc in &batch {
                         tools_used.push(tc.name.clone());
-                        emit(sink, LoopEvent::ToolStart {
-                            name: tc.name.clone(),
-                            args: dump_args(&tc.arguments),
-                        });
+                        emit(
+                            sink,
+                            LoopEvent::ToolStart {
+                                name: tc.name.clone(),
+                                args: dump_args(&tc.arguments),
+                            },
+                        );
                     }
                     let futures = batch
                         .iter()
                         .map(|tc| self.execute_cancellable(tc, &cancel_check));
                     let results = join_all(futures).await;
                     for (tc, result) in batch.iter().zip(results) {
-                        emit(sink, LoopEvent::ToolResult {
-                            name: tc.name.clone(),
-                            result: result.clone(),
-                        });
+                        emit(
+                            sink,
+                            LoopEvent::ToolResult {
+                                name: tc.name.clone(),
+                                result: result.clone(),
+                            },
+                        );
                         self.session.add_tool_result(&tc.id, &tc.name, &result);
                     }
                 } else {
                     let tc = &calls[idx];
                     tools_used.push(tc.name.clone());
-                    emit(sink, LoopEvent::ToolStart {
-                        name: tc.name.clone(),
-                        args: dump_args(&tc.arguments),
-                    });
+                    emit(
+                        sink,
+                        LoopEvent::ToolStart {
+                            name: tc.name.clone(),
+                            args: dump_args(&tc.arguments),
+                        },
+                    );
                     let result = self.execute_cancellable(tc, &cancel_check).await;
                     if trace_on() {
-                        eprintln!("[ncx-trace]   result {} -> {:?}", tc.name, truncate(&result, 200));
+                        eprintln!(
+                            "[ncx-trace]   result {} -> {:?}",
+                            tc.name,
+                            truncate(&result, 200)
+                        );
                     }
-                    emit(sink, LoopEvent::ToolResult {
-                        name: tc.name.clone(),
-                        result: result.clone(),
-                    });
+                    emit(
+                        sink,
+                        LoopEvent::ToolResult {
+                            name: tc.name.clone(),
+                            result: result.clone(),
+                        },
+                    );
                     self.session.add_tool_result(&tc.id, &tc.name, &result);
                     idx += 1;
                 }
@@ -335,17 +423,28 @@ impl AgentLoop {
         }
 
         let text = format!(
-            "Reached the maximum of {} steps without finishing. The task may be incomplete.",
-            self.max_iterations
+            "Reached the task budget of {} model calls without finishing. The task may be incomplete.",
+            max_model_calls
         );
         self.session.add_assistant(&text, None, "");
         TurnResult {
             final_text: text,
-            iterations: self.max_iterations,
-            stop_reason: "max_iterations".into(),
+            iterations: max_model_calls,
+            stop_reason: "task_budget".into(),
             tools_used,
             usage: turn_usage,
         }
+    }
+
+    fn budget_note(&self, model_call: usize, tool_calls_used: usize) -> String {
+        format!(
+            "Runtime task budget: model_call {}/{}; tool_calls {}/{}; context_limit_chars {}. Stay within this budget, prefer direct progress, and summarize before asking for more work.",
+            model_call,
+            self.task_budget.max_model_calls,
+            tool_calls_used,
+            self.task_budget.max_tool_calls,
+            self.context_edit.max_chars,
+        )
     }
 
     fn cancel_result(
@@ -371,6 +470,32 @@ impl AgentLoop {
             usage: turn_usage,
         }
     }
+
+    fn budget_result(
+        &mut self,
+        iteration: usize,
+        tools_used: Vec<String>,
+        turn_usage: std::collections::BTreeMap<String, i64>,
+    ) -> TurnResult {
+        self.session.backfill_unanswered_tool_calls(
+            "[interrupted: task budget exhausted before this tool ran]",
+        );
+        let text = format!(
+            "Stopped because the task budget was exhausted (model calls: {}/{}, tool calls: {}/{}). The task may be incomplete.",
+            iteration + 1,
+            self.task_budget.max_model_calls,
+            tools_used.len(),
+            self.task_budget.max_tool_calls,
+        );
+        self.session.add_assistant(&text, None, "");
+        TurnResult {
+            final_text: text,
+            iterations: iteration + 1,
+            stop_reason: "task_budget".into(),
+            tools_used,
+            usage: turn_usage,
+        }
+    }
 }
 
 /// True when the user content carries at least one `image_url` block.
@@ -378,9 +503,31 @@ fn has_image_block(user_input: &Value) -> bool {
     user_input
         .as_array()
         .map(|blocks| {
-            blocks.iter().any(|b| b.get("type").and_then(|v| v.as_str()) == Some("image_url"))
+            blocks
+                .iter()
+                .any(|b| b.get("type").and_then(|v| v.as_str()) == Some("image_url"))
         })
         .unwrap_or(false)
+}
+
+fn user_query_text(user_input: &Value) -> String {
+    if let Some(s) = user_input.as_str() {
+        return s.to_string();
+    }
+    if let Some(blocks) = user_input.as_array() {
+        return blocks
+            .iter()
+            .filter_map(|b| {
+                if b.get("type").and_then(|v| v.as_str()) == Some("text") {
+                    b.get("text").and_then(|v| v.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    user_input.to_string()
 }
 
 fn dump_args(arguments: &Value) -> String {
@@ -388,7 +535,9 @@ fn dump_args(arguments: &Value) -> String {
 }
 
 fn trace_on() -> bool {
-    std::env::var("NCX_TRACE").map(|v| !v.is_empty()).unwrap_or(false)
+    std::env::var("NCX_TRACE")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -401,7 +550,10 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Sum token usage across model calls (mirrors `pricing.add_usage`).
-fn add_usage(acc: &mut std::collections::BTreeMap<String, i64>, usage: &std::collections::BTreeMap<String, i64>) {
+fn add_usage(
+    acc: &mut std::collections::BTreeMap<String, i64>,
+    usage: &std::collections::BTreeMap<String, i64>,
+) {
     for (k, v) in usage {
         *acc.entry(k.clone()).or_insert(0) += v;
     }
@@ -416,6 +568,7 @@ mod tests {
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
     use std::cell::Cell;
     use std::path::PathBuf;
+    use std::rc::Rc;
 
     /// Returns a pre-scripted sequence of responses, one per chat() call.
     struct ScriptedProvider {
@@ -425,7 +578,10 @@ mod tests {
     use std::cell::RefCell;
     impl ScriptedProvider {
         fn new(responses: Vec<ModelResponse>) -> Self {
-            ScriptedProvider { responses: RefCell::new(responses), calls: RefCell::new(0) }
+            ScriptedProvider {
+                responses: RefCell::new(responses),
+                calls: RefCell::new(0),
+            }
         }
     }
     #[async_trait(?Send)]
@@ -437,7 +593,10 @@ mod tests {
             *self.calls.borrow_mut() += 1;
             let mut r = self.responses.borrow_mut();
             if r.is_empty() {
-                ModelResponse { content: "(no more scripted responses)".into(), ..Default::default() }
+                ModelResponse {
+                    content: "(no more scripted responses)".into(),
+                    ..Default::default()
+                }
             } else {
                 r.remove(0)
             }
@@ -460,7 +619,11 @@ mod tests {
     }
 
     fn tc(id: &str, name: &str, args: Value) -> ToolCall {
-        ToolCall { id: id.into(), name: name.into(), arguments: args }
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: args,
+        }
     }
 
     fn assistant_toolcall(calls: Vec<ToolCall>) -> ModelResponse {
@@ -474,7 +637,10 @@ mod tests {
 
     #[tokio::test]
     async fn returns_final_text_without_tools() {
-        let p = ScriptedProvider::new(vec![ModelResponse { content: "All done.".into(), ..Default::default() }]);
+        let p = ScriptedProvider::new(vec![ModelResponse {
+            content: "All done.".into(),
+            ..Default::default()
+        }]);
         let ws = tmpdir("notools");
         let mut loop_ = build(&ws, Box::new(p));
         let r = loop_.run_turn(json!("say hi"), None).await;
@@ -488,12 +654,18 @@ mod tests {
         let patch = "*** Begin Patch\n*** Add File: out.txt\n+hello\n*** End Patch";
         let p = ScriptedProvider::new(vec![
             assistant_toolcall(vec![tc("c1", "apply_patch", json!({"patch": patch}))]),
-            ModelResponse { content: "Created out.txt.".into(), ..Default::default() },
+            ModelResponse {
+                content: "Created out.txt.".into(),
+                ..Default::default()
+            },
         ]);
         let ws = tmpdir("applypatch");
         let mut loop_ = build(&ws, Box::new(p));
         let r = loop_.run_turn(json!("create out.txt"), None).await;
-        assert_eq!(std::fs::read_to_string(ws.join("out.txt")).unwrap(), "hello\n");
+        assert_eq!(
+            std::fs::read_to_string(ws.join("out.txt")).unwrap(),
+            "hello\n"
+        );
         assert_eq!(r.stop_reason, "completed");
         assert!(r.tools_used.contains(&"apply_patch".to_string()));
         // Second call saw a tool message in history.
@@ -505,7 +677,10 @@ mod tests {
         let patch = "*** Begin Patch\n*** Add File: ev.txt\n+hi\n*** End Patch";
         let p = ScriptedProvider::new(vec![
             assistant_toolcall(vec![tc("c1", "apply_patch", json!({"patch": patch}))]),
-            ModelResponse { content: "done".into(), ..Default::default() },
+            ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            },
         ]);
         let ws = tmpdir("events");
         let mut loop_ = build(&ws, Box::new(p));
@@ -514,9 +689,15 @@ mod tests {
         loop_.set_event_sink(Box::new(move |e| sink.borrow_mut().push(e)));
         loop_.run_turn(json!("create ev.txt"), None).await;
         let evs = events.borrow();
-        assert!(evs.iter().any(|e| matches!(e, LoopEvent::ToolStart { name, .. } if name == "apply_patch")));
-        assert!(evs.iter().any(|e| matches!(e, LoopEvent::ToolResult { name, .. } if name == "apply_patch")));
-        assert!(evs.iter().any(|e| matches!(e, LoopEvent::AssistantText(t) if t == "done")));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, LoopEvent::ToolStart { name, .. } if name == "apply_patch")));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, LoopEvent::ToolResult { name, .. } if name == "apply_patch")));
+        assert!(evs
+            .iter()
+            .any(|e| matches!(e, LoopEvent::AssistantText(t) if t == "done")));
     }
 
     #[tokio::test]
@@ -526,7 +707,10 @@ mod tests {
         first.reasoning = "I need to create a file before answering.".into();
         let p = ScriptedProvider::new(vec![
             first,
-            ModelResponse { content: "Created reasoned.txt.".into(), ..Default::default() },
+            ModelResponse {
+                content: "Created reasoned.txt.".into(),
+                ..Default::default()
+            },
         ]);
         let ws = tmpdir("reasoning");
         let mut loop_ = build(&ws, Box::new(p));
@@ -537,7 +721,10 @@ mod tests {
             .iter()
             .find(|m| m["role"] == "assistant" && m.get("tool_calls").is_some())
             .unwrap();
-        assert_eq!(m["reasoning_content"], "I need to create a file before answering.");
+        assert_eq!(
+            m["reasoning_content"],
+            "I need to create a file before answering."
+        );
     }
 
     #[tokio::test]
@@ -555,7 +742,10 @@ mod tests {
                 r.content = "planning".into();
                 r
             },
-            ModelResponse { content: "done".into(), ..Default::default() },
+            ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            },
         ]);
         let ws = tmpdir("plan");
         let mut loop_ = build(&ws, Box::new(p));
@@ -569,14 +759,88 @@ mod tests {
     #[tokio::test]
     async fn stops_at_max_iterations() {
         let looping: Vec<ModelResponse> = (0..20)
-            .map(|i| assistant_toolcall(vec![tc(&format!("c{i}"), "read_file", json!({"path": "nope.txt"}))]))
+            .map(|i| {
+                assistant_toolcall(vec![tc(
+                    &format!("c{i}"),
+                    "read_file",
+                    json!({"path": "nope.txt"}),
+                )])
+            })
             .collect();
         let p = ScriptedProvider::new(looping);
         let ws = tmpdir("maxiter");
         let mut loop_ = build(&ws, Box::new(p));
         let r = loop_.run_turn(json!("loop forever"), None).await;
-        assert_eq!(r.stop_reason, "max_iterations");
+        assert_eq!(r.stop_reason, "task_budget");
         assert_eq!(r.iterations, 10);
+    }
+
+    struct CapturingProvider {
+        seen: Rc<RefCell<Vec<Value>>>,
+    }
+    #[async_trait(?Send)]
+    impl Provider for CapturingProvider {
+        fn model(&self) -> &str {
+            "capturing"
+        }
+        async fn chat(&self, messages: &[Value], _t: &[Value], _r: Option<&str>) -> ModelResponse {
+            *self.seen.borrow_mut() = messages.to_vec();
+            ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn task_budget_is_visible_to_model() {
+        let ws = tmpdir("budget_note");
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut loop_ = build(&ws, Box::new(CapturingProvider { seen: seen.clone() }))
+            .with_task_budget(TaskBudget {
+                max_model_calls: 3,
+                max_tool_calls: 4,
+            });
+        let r = loop_.run_turn(json!("do it"), None).await;
+        assert_eq!(r.stop_reason, "completed");
+        let messages = seen.borrow();
+        assert!(messages.iter().any(|m| {
+            m["role"] == "system"
+                && m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("Runtime task budget")
+                && m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("tool_calls 0/4")
+        }));
+    }
+
+    #[tokio::test]
+    async fn tool_budget_stops_and_backfills_unanswered_calls() {
+        let p = ScriptedProvider::new(vec![assistant_toolcall(vec![
+            tc("r1", "read_file", json!({"path": "none1.txt"})),
+            tc("r2", "read_file", json!({"path": "none2.txt"})),
+            tc("r3", "read_file", json!({"path": "none3.txt"})),
+        ])]);
+        let ws = tmpdir("tool_budget");
+        let mut loop_ = build(&ws, Box::new(p)).with_task_budget(TaskBudget {
+            max_model_calls: 5,
+            max_tool_calls: 2,
+        });
+        let r = loop_.run_turn(json!("read three files"), None).await;
+        assert_eq!(r.stop_reason, "task_budget");
+        assert_eq!(r.tools_used.len(), 2);
+        assert!(answered(&loop_.session.messages));
+        assert!(loop_.session.messages.iter().any(|m| {
+            m["role"] == "tool"
+                && m["tool_call_id"] == "r3"
+                && m["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("task budget exhausted")
+        }));
     }
 
     fn answered(messages: &[Value]) -> bool {
@@ -628,7 +892,10 @@ mod tests {
 
     #[tokio::test]
     async fn image_turn_routes_to_vision_provider() {
-        let main = ScriptedProvider::new(vec![ModelResponse { content: "text reply".into(), ..Default::default() }]);
+        let main = ScriptedProvider::new(vec![ModelResponse {
+            content: "text reply".into(),
+            ..Default::default()
+        }]);
         let vision = ScriptedProvider::new(vec![ModelResponse {
             content: "vision reply: I see a cat".into(),
             ..Default::default()
@@ -664,15 +931,23 @@ mod tests {
             }
             async fn execute(&self, _ctx: &ToolContext, args: &Value) -> String {
                 tokio::time::sleep(Duration::from_millis(300)).await;
-                format!("read {}", args.get("i").and_then(|v| v.as_i64()).unwrap_or(-1))
+                format!(
+                    "read {}",
+                    args.get("i").and_then(|v| v.as_i64()).unwrap_or(-1)
+                )
             }
         }
 
         let p = ScriptedProvider::new(vec![
             assistant_toolcall(
-                (0..4).map(|i| tc(&format!("c{i}"), "slow_read", json!({"i": i}))).collect(),
+                (0..4)
+                    .map(|i| tc(&format!("c{i}"), "slow_read", json!({"i": i})))
+                    .collect(),
             ),
-            ModelResponse { content: "done".into(), ..Default::default() },
+            ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            },
         ]);
         let ws = tmpdir("concurrent");
         let mut loop_ = build(&ws, Box::new(p));
@@ -702,7 +977,10 @@ mod tests {
                 tc("w1", "apply_patch", json!({"patch": patch})),
                 tc("r2", "read_file", json!({"path": "none2.txt"})),
             ]),
-            ModelResponse { content: "done".into(), ..Default::default() },
+            ModelResponse {
+                content: "done".into(),
+                ..Default::default()
+            },
         ]);
         let ws = tmpdir("serial");
         let mut loop_ = build(&ws, Box::new(p));
@@ -758,6 +1036,10 @@ mod tests {
         .await
         .expect("must finish under 5s");
         assert_eq!(r.stop_reason, "cancelled");
-        assert!(loop_.session.messages.iter().any(|m| m["role"] == "tool" && m["tool_call_id"] == "h1"));
+        assert!(loop_
+            .session
+            .messages
+            .iter()
+            .any(|m| m["role"] == "tool" && m["tool_call_id"] == "h1"));
     }
 }

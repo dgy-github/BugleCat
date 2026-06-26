@@ -95,9 +95,25 @@ tool.
   one-shot commands as well as interactive REPL use.
 - Typed ownership makes parallel worker isolation and result promotion easier
   to reason about without shared mutable state leaks.
-- 174 offline Rust tests cover the current crate boundary, including memory
+- 180 offline Rust tests cover the current crate boundary, including memory
   consolidation, provider request/response parsing, sandbox policy, tools, and
   orchestration.
+
+**Platform control-plane upgrades**
+
+- **Task budget:** every model call receives a runtime budget note with current
+  model-call, tool-call, and context limits; the loop stops cleanly when model
+  or tool budgets are exhausted and backfills unanswered tool calls so the
+  message history stays valid.
+- **Context editing:** the full local session remains intact, but the provider
+  sees a send-time edited view that compresses old tool results and drops older
+  prefixes once the context budget is exceeded.
+- **Tool search:** tools are registered into a catalog. Small registries expose
+  all tools; larger registries expose core tools plus `tool_search`, and search
+  hits are made visible in the next schema view.
+- **Semantic memory:** project memory retrieval now uses a hybrid lexical
+  semantic ranker: keywords, tags, phrase matches, Jaccard similarity, recency,
+  and a small domain synonym map for agent/runtime terms.
 
 ### Why Rust For Stage 2
 
@@ -113,6 +129,9 @@ only adding more features:
 - **Parallel orchestration:** isolated worker copies, verifier selection, and
   result promotion are safer when ownership is explicit and data movement is
   visible in the type system.
+- **Runtime control plane:** task budgets, context editing, tool search, and
+  semantic memory sit in the Rust runtime boundary rather than depending on
+  model-side conventions alone.
 - **Native release performance:** a small `ncx.exe` starts without interpreter
   setup, making one-shot CLI tasks feel immediate and making distribution much
   easier for Windows users.

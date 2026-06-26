@@ -19,12 +19,12 @@ pub mod session;
 pub mod slash;
 pub mod tools;
 
-pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TurnResult};
+pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult};
 pub use memory::{MemoryEntry, MemoryStore, Summarizer};
+pub use mentions::{expand_file_mentions, find_mentions};
 pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
-pub use mentions::{expand_file_mentions, find_mentions};
-pub use session::Session;
+pub use session::{ContextEditPolicy, ContextEditStats, Session};
 pub use slash::{parse_slash, split_loop_arg, SLASH_HELP};
 pub use tools::{ApprovalHandler, ApprovalRequest, Tool, ToolContext, ToolRegistry};

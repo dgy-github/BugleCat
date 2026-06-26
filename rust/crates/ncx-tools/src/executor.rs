@@ -88,7 +88,9 @@ pub struct PolicyExecutor {
 impl Default for PolicyExecutor {
     fn default() -> Self {
         // 512 mirrors WindowsJobExecutor.ACTIVE_PROCESS_LIMIT.
-        PolicyExecutor { active_process_limit: 512 }
+        PolicyExecutor {
+            active_process_limit: 512,
+        }
     }
 }
 
@@ -128,7 +130,9 @@ impl PolicyExecutor {
         };
 
         #[cfg(windows)]
-        let _job = child.id().and_then(|pid| win_job::Job::contain(pid, self.active_process_limit));
+        let _job = child
+            .id()
+            .and_then(|pid| win_job::Job::contain(pid, self.active_process_limit));
 
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
@@ -163,7 +167,11 @@ impl PolicyExecutor {
                     j.terminate();
                 }
                 let _ = child.start_kill();
-                ExecResult { exit_code: 124, timed_out: true, ..Default::default() }
+                ExecResult {
+                    exit_code: 124,
+                    timed_out: true,
+                    ..Default::default()
+                }
             }
         }
     }
@@ -205,8 +213,14 @@ fn build_env() -> HashMap<String, String> {
     {
         let sysroot = get("SYSTEMROOT", r"C:\Windows");
         env.insert("SYSTEMROOT".into(), sysroot.clone());
-        env.insert("COMSPEC".into(), get("COMSPEC", &format!("{sysroot}\\system32\\cmd.exe")));
-        env.insert("PATH".into(), get("PATH", &format!("{sysroot}\\system32;{sysroot}")));
+        env.insert(
+            "COMSPEC".into(),
+            get("COMSPEC", &format!("{sysroot}\\system32\\cmd.exe")),
+        );
+        env.insert(
+            "PATH".into(),
+            get("PATH", &format!("{sysroot}\\system32;{sysroot}")),
+        );
         env.insert("PATHEXT".into(), get("PATHEXT", ".COM;.EXE;.BAT;.CMD"));
         env.insert("USERPROFILE".into(), get("USERPROFILE", ""));
         env.insert("TEMP".into(), get("TEMP", &format!("{sysroot}\\Temp")));
@@ -230,11 +244,13 @@ fn build_env() -> HashMap<String, String> {
 mod win_job {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
-        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
 
     pub struct Job {
         job: HANDLE,
@@ -318,13 +334,25 @@ mod tests {
     #[test]
     fn ok_requires_zero_exit() {
         assert!(ExecResult::default().ok());
-        assert!(!ExecResult { exit_code: 1, ..Default::default() }.ok());
-        assert!(!ExecResult { timed_out: true, ..Default::default() }.ok());
+        assert!(!ExecResult {
+            exit_code: 1,
+            ..Default::default()
+        }
+        .ok());
+        assert!(!ExecResult {
+            timed_out: true,
+            ..Default::default()
+        }
+        .ok());
     }
 
     #[test]
     fn render_includes_exit_code() {
-        let r = ExecResult { exit_code: 0, stdout: "hello".into(), ..Default::default() };
+        let r = ExecResult {
+            exit_code: 0,
+            stdout: "hello".into(),
+            ..Default::default()
+        };
         let out = r.render();
         assert!(out.contains("hello"));
         assert!(out.contains("Exit code: 0"));
@@ -356,7 +384,10 @@ mod tests {
 
     #[test]
     fn render_truncates_huge_output() {
-        let r = ExecResult { stdout: "x".repeat(40_000), ..Default::default() };
+        let r = ExecResult {
+            stdout: "x".repeat(40_000),
+            ..Default::default()
+        };
         let out = r.render();
         assert!(out.contains("chars truncated"));
         assert!(out.chars().count() < 40_000);
@@ -368,7 +399,11 @@ mod tests {
         let cwd = std::env::temp_dir();
         let result = exec.run("echo ncx_hello", &cwd, 30).await;
         assert!(result.ok(), "render: {}", result.render());
-        assert!(result.stdout.contains("ncx_hello"), "stdout: {:?}", result.stdout);
+        assert!(
+            result.stdout.contains("ncx_hello"),
+            "stdout: {:?}",
+            result.stdout
+        );
     }
 
     #[tokio::test]
