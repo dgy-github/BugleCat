@@ -185,11 +185,20 @@ Trajectory Store 从第一天就按 **SFT/RL 友好 schema** 落盘：
 - **M2｜搜索增强**：小种群 / Pareto（通过率×token）/ lineage 可视化。
 - **M3｜数据导出**：Trajectory Store 成型 + `export.py`，对接未来 GPU 训练。
 
-## 12. 开放问题（评审时定）
+## 12. 决策记录（评审已定 2026-06-26）
 
-1. 教师模型用哪个？（建议：主模型的最强档；与被训 agent 解耦，避免自我打分偏置）
-2. 第一阶段先优化"直跑骨架"还是"编排策略"？（建议直跑骨架先，变量少、归因清）
-3. genome 注入用 env+TOML 文件，还是复用现有 config profile 机制？（倾向独立文件，
-   不污染用户 config；但可共用 `ncx-config` 的 TOML 解析）
-4. TaskGen 的任务难度分布与"能力维度"清单由谁定义？（建议先人工列 6~8 个维度种子）
+1. **教师模型 = 主模型最强档**（`cfg.model`）。与被训 agent 的 fast worker 解耦，
+   避免自评偏置。后续若要换外部更强模型，`teacher.py` 留 endpoint/key 开关。
+2. **M0 先优化"直跑骨架"**：只进化 `system_prompt` + 工具描述，评测跑 `nanocodex`
+   直跑 arm。变量少、归因清。编排策略（orchestrator 基因）推到 M1+。
+3. **genome 注入 = 独立 `NCX_GENOME` TOML 文件**（env 指定），不污染用户 config；
+   解析复用 `ncx-config` 的 TOML 能力。default genome 与现有 const 字节级等价。
+4. （未定，TaskGen 阶段再议）能力维度清单：先人工列 6~8 个种子维度。
+
+### M0 范围冻结（据上述决策）
+
+可进化字段仅：`system_prompt`、`tool_desc.*`。
+固定不动：所有 orchestrator 基因、memory_seed。
+评测 arm：`nanocodex`（非 `-o`）。教师：`cfg.model` 最强档。注入：`NCX_GENOME` 文件。
+验收：跑 ≥5 代，champion 在 val 集不低于 gen0 baseline，全程报告 + lineage。
 ```
