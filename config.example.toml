@@ -25,3 +25,11 @@ reasoning_effort = "auto"
 # context_edit_keep_recent_messages = 30
 # context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
+
+# Deterministic hooks around tool execution. A non-zero pre_tool hook blocks
+# the tool; post_tool hook output is appended to the tool result for audit.
+# [[hooks]]
+# event = "pre_tool"          # pre_tool | post_tool
+# matcher = "shell|apply_patch"
+# command = "echo checking %NCX_HOOK_TOOL%"
+# timeout_s = 10

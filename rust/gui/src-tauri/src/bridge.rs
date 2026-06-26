@@ -180,6 +180,7 @@ fn build_agent(approver: Rc<dyn ApprovalHandler>) -> Result<(AgentLoop, PathBuf)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
+        .with_hooks(cfg.hooks.clone())
         .with_approver(approver);
     let tools = ToolRegistry::new(ctx);
     let session = Session::new(system_prompt);

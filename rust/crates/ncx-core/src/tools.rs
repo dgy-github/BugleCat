@@ -11,11 +11,13 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use async_trait::async_trait;
+use ncx_config::HookConfig;
 pub use ncx_sandbox::ApprovalRequest;
 use ncx_sandbox::{Approver, Decision, SandboxPolicy, DANGER_FULL_ACCESS, ON_FAILURE};
 use ncx_tools::{apply_patch, looks_read_only, parse_patch, read_file as rf, PolicyExecutor};
 use serde_json::{json, Value};
 
+use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::memory::MemoryStore;
 
 const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 9;
@@ -69,6 +71,8 @@ pub struct ToolContext {
     pub tool_catalog: Rc<RefCell<Vec<ToolCatalogEntry>>>,
     /// Tool names requested by `tool_search`; included in the next schema view.
     pub tool_hints: Rc<RefCell<Vec<String>>>,
+    /// Deterministic project hooks configured from `[[hooks]]`.
+    pub hooks: Rc<Vec<HookConfig>>,
 }
 
 impl ToolContext {
@@ -85,6 +89,7 @@ impl ToolContext {
             search_api_key: String::new(),
             tool_catalog: Rc::new(RefCell::new(Vec::new())),
             tool_hints: Rc::new(RefCell::new(Vec::new())),
+            hooks: Rc::new(Vec::new()),
         }
     }
 
@@ -116,6 +121,12 @@ impl ToolContext {
     /// Set the default shell command timeout (seconds).
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_s = secs;
+        self
+    }
+
+    /// Attach deterministic project hooks.
+    pub fn with_hooks(mut self, hooks: Vec<HookConfig>) -> Self {
+        self.hooks = Rc::new(hooks);
         self
     }
 }
@@ -265,7 +276,41 @@ impl ToolRegistry {
     /// Run a tool by name. Unknown tool -> an error string for the model.
     pub async fn execute(&self, name: &str, args: &Value) -> String {
         match self.get(name) {
-            Some(tool) => tool.execute(&self.ctx, args).await,
+            Some(tool) => {
+                let pre = run_matching_hooks(
+                    &self.ctx.hooks,
+                    HookEvent::PreTool,
+                    name,
+                    args,
+                    None,
+                    &self.ctx.workspace,
+                )
+                .await;
+                if pre.blocked {
+                    return format!("Error: {name} blocked by pre_tool hook.\n{}", pre.notes);
+                }
+
+                let mut result = tool.execute(&self.ctx, args).await;
+                let post = run_matching_hooks(
+                    &self.ctx.hooks,
+                    HookEvent::PostTool,
+                    name,
+                    args,
+                    Some(&result),
+                    &self.ctx.workspace,
+                )
+                .await;
+                let hook_notes = [pre.notes, post.notes]
+                    .into_iter()
+                    .filter(|s| !s.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                if !hook_notes.is_empty() {
+                    result.push_str("\n\n[hook output]\n");
+                    result.push_str(&hook_notes);
+                }
+                result
+            }
             None => format!("Error: unknown tool '{name}'."),
         }
     }
@@ -695,6 +740,45 @@ mod tests {
             .collect();
         assert!(names.contains(&"tool_search".to_string()));
         assert!(names.contains(&"deploy".to_string()));
+    }
+
+    #[tokio::test]
+    async fn pre_tool_hook_can_block_execution() {
+        let ws = tmp_ws("hook_pre_block");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_hooks(vec![HookConfig {
+                event: "pre_tool".into(),
+                matcher: "dummy".into(),
+                command: "exit 1".into(),
+                timeout_s: 3,
+            }]);
+        let mut reg = ToolRegistry::empty(ctx);
+        reg.register(Box::new(NamedTool("dummy", "test tool")));
+
+        let out = reg.execute("dummy", &json!({})).await;
+
+        assert!(out.contains("blocked by pre_tool hook"), "{out}");
+        assert!(!out.ends_with("ok"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn post_tool_hook_output_is_returned() {
+        let ws = tmp_ws("hook_post_note");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_hooks(vec![HookConfig {
+                event: "post_tool".into(),
+                matcher: "*".into(),
+                command: "echo post-ok".into(),
+                timeout_s: 3,
+            }]);
+        let mut reg = ToolRegistry::empty(ctx);
+        reg.register(Box::new(NamedTool("dummy", "test tool")));
+
+        let out = reg.execute("dummy", &json!({})).await;
+
+        assert!(out.contains("ok"), "{out}");
+        assert!(out.contains("[hook output]"), "{out}");
+        assert!(out.contains("post-ok"), "{out}");
     }
 }
 

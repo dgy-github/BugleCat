@@ -10,6 +10,18 @@ pub const DEFAULT_MODELS: &[&str] = &["deepseek-v4-pro", "deepseek-chat", "deeps
 
 pub const VALID_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
 pub const VALID_APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
+pub const VALID_HOOK_EVENTS: &[&str] = &["pre_tool", "post_tool"];
+
+/// Project-level deterministic hook. Hooks are configured from `[[hooks]]` in
+/// `~/.nanocodex/config.toml` and executed around tool calls.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookConfig {
+    pub event: String,
+    /// Tool matcher: `*`, an exact tool name, or a `|`/`,` separated list.
+    pub matcher: String,
+    pub command: String,
+    pub timeout_s: i64,
+}
 
 /// Resolved runtime configuration — mirrors the Python `Config` dataclass.
 ///
@@ -51,6 +63,7 @@ pub struct Config {
     pub context_edit_keep_recent_messages: i64,
     pub context_edit_max_tool_result_chars: i64,
     pub available_models: Vec<String>,
+    pub hooks: Vec<HookConfig>,
 }
 
 impl Default for Config {
@@ -83,6 +96,7 @@ impl Default for Config {
             context_edit_keep_recent_messages: 30,
             context_edit_max_tool_result_chars: 4_000,
             available_models: DEFAULT_MODELS.iter().map(|s| s.to_string()).collect(),
+            hooks: vec![],
         }
     }
 }
@@ -108,6 +122,24 @@ impl Config {
                 "Invalid approval_policy {:?}; expected one of {:?}.",
                 self.approval_policy, VALID_APPROVAL_POLICIES
             )));
+        }
+        for (idx, hook) in self.hooks.iter().enumerate() {
+            if !VALID_HOOK_EVENTS.contains(&hook.event.as_str()) {
+                return Err(ConfigError(format!(
+                    "Invalid hooks[{idx}].event {:?}; expected one of {:?}.",
+                    hook.event, VALID_HOOK_EVENTS
+                )));
+            }
+            if hook.command.trim().is_empty() {
+                return Err(ConfigError(format!(
+                    "Invalid hooks[{idx}].command: command must not be empty."
+                )));
+            }
+            if hook.timeout_s <= 0 {
+                return Err(ConfigError(format!(
+                    "Invalid hooks[{idx}].timeout_s: expected a positive integer."
+                )));
+            }
         }
         Ok(())
     }
@@ -157,6 +189,7 @@ impl Config {
             "context_edit_max_tool_result_chars",
             self.context_edit_max_tool_result_chars.to_string(),
         );
+        m.insert("hooks", self.hooks.len().to_string());
         m
     }
 }

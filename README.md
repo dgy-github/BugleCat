@@ -114,6 +114,9 @@ tool.
 - **Semantic memory:** project memory retrieval now uses a hybrid lexical
   semantic ranker: keywords, tags, phrase matches, Jaccard similarity, recency,
   and a small domain synonym map for agent/runtime terms.
+- **Deterministic hooks:** `[[hooks]]` can run project commands before or after
+  matching tools. A failing `pre_tool` hook blocks the tool; `post_tool` output
+  is appended to the result for audit and formatting workflows.
 
 ### Why Rust For Stage 2
 
@@ -317,6 +320,12 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # context_edit_keep_recent_messages = 30
 # context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
+
+# [[hooks]]
+# event = "pre_tool"          # pre_tool | post_tool
+# matcher = "shell|apply_patch"
+# command = "echo checking %NCX_HOOK_TOOL%"
+# timeout_s = 10
 ```
 
 Runtime control-plane settings can also be set with environment variables:
@@ -329,6 +338,12 @@ Runtime control-plane settings can also be set with environment variables:
 `--disable-context-edit`.
 
 A full example lives in `config.example.toml`.
+
+Hooks receive `NCX_HOOK_EVENT`, `NCX_HOOK_TOOL`, `NCX_HOOK_ARGS`,
+`NCX_HOOK_RESULT`, and `NCX_HOOK_WORKSPACE` in their environment. Use
+`pre_tool` for deterministic guards such as blocking risky shell commands, and
+`post_tool` for audit, formatting, or notifications. Hooks run as local
+subprocesses, so configure only commands you trust.
 
 ## Local Model / OpenAI-Compatible Endpoint
 
@@ -579,6 +594,8 @@ The Tauri crate deliberately keeps `crate-type = ["lib"]`; changing it to
   roots, but is not kernel isolation.
 - **MCP tools run outside the sandbox** as external subprocesses. Only enable
   servers you trust; the marketplace validates names but does not vet behavior.
+- **Hooks run local commands** around tool execution. Treat hook configuration
+  like code and review it before enabling it in a project.
 - External content (file contents, command output, web/MCP results) is treated
   as untrusted data, not as instructions.
 

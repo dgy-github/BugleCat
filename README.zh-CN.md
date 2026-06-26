@@ -279,9 +279,20 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # context_edit_keep_recent_messages = 30
 # context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
+
+# [[hooks]]
+# event = "pre_tool"          # pre_tool | post_tool
+# matcher = "shell|apply_patch"
+# command = "echo checking %NCX_HOOK_TOOL%"
+# timeout_s = 10
 ```
 
 完整示例见 `config.example.toml`。
+
+Hooks 会在环境变量中收到 `NCX_HOOK_EVENT`、`NCX_HOOK_TOOL`、
+`NCX_HOOK_ARGS`、`NCX_HOOK_RESULT` 和 `NCX_HOOK_WORKSPACE`。`pre_tool`
+适合做确定性的风险拦截，例如阻止危险 shell 命令；`post_tool` 适合做审计、
+格式化或通知。Hooks 会作为本地子进程运行，只配置你信任的命令。
 
 ## 本地模型 / OpenAI 兼容接口
 
@@ -512,6 +523,7 @@ Windows GNU 链接器的 export ordinal 表溢出。
 - 在 Windows 上沙箱是**策略级**的——它拦截工具行为和可写根，但不是内核级隔离。
 - **MCP 工具运行在沙箱之外**，作为外部子进程。只启用你信任的服务；市场会校验
   名称但不审查行为。
+- **Hooks 会在工具执行前后运行本地命令**。把 hook 配置当作代码审查后再启用。
 - 外部内容（文件内容、命令输出、web/MCP 结果）被当作不可信数据，而非指令。
 
 ## 许可证

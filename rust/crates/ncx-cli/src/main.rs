@@ -139,7 +139,8 @@ async fn run(args: Args) -> i32 {
         .with_approval_policy(cfg.approval_policy.clone())
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
-        .with_memory(memory);
+        .with_memory(memory)
+        .with_hooks(cfg.hooks.clone());
     let tools = ToolRegistry::new(ctx);
     let session = Session::new(system_prompt);
     let mut agent = AgentLoop::new(Box::new(provider), tools, session)
@@ -293,7 +294,7 @@ fn render_help() -> String {
 fn render_status(cfg: &ncx_config::Config) -> String {
     let red = cfg.redacted();
     format!(
-        "model:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\nworkspace: {}\napi_key:   {}\nmodel_budget: {}  tool_budget: {}  retries: {}\ncontext_edit: {}  max_chars: {}  keep_recent: {}  tool_result_chars: {}",
+        "model:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\nworkspace: {}\napi_key:   {}\nmodel_budget: {}  tool_budget: {}  retries: {}\ncontext_edit: {}  max_chars: {}  keep_recent: {}  tool_result_chars: {}\nhooks:     {}",
         cfg.model,
         cfg.base_url,
         cfg.sandbox_mode,
@@ -307,6 +308,7 @@ fn render_status(cfg: &ncx_config::Config) -> String {
         cfg.context_edit_max_chars,
         cfg.context_edit_keep_recent_messages,
         cfg.context_edit_max_tool_result_chars,
+        cfg.hooks.len(),
     )
 }
 

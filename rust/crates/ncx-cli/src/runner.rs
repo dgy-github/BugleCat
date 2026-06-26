@@ -76,7 +76,8 @@ impl LiveRunner {
                 self.cfg.search_provider.clone(),
                 self.cfg.search_api_key.clone(),
             )
-            .with_memory(self.memory.clone()); // memory is project-level, not per-copy
+            .with_memory(self.memory.clone()) // memory is project-level, not per-copy
+            .with_hooks(self.cfg.hooks.clone());
         let tools = ToolRegistry::new(ctx);
         let recall = self.memory.recall(task, 6, 3000);
         let system = if recall.is_empty() {

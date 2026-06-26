@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use toml::map::Map as TomlMap;
 use toml::Value;
 
-use crate::config::{Config, ConfigError, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_MODELS};
+use crate::config::{
+    Config, ConfigError, HookConfig, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_MODELS,
+};
 
 type Table = TomlMap<String, Value>;
 
@@ -242,6 +244,30 @@ fn as_bool(s: Option<&str>, default: bool) -> bool {
 
 fn selected_scalar(raw: &Table, key: &str) -> Option<String> {
     raw.get(key).and_then(to_string_val)
+}
+
+fn parse_hooks(raw: &Table) -> Vec<HookConfig> {
+    raw.get("hooks")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_table())
+                .map(|table| {
+                    let command = str_val(table, "command").unwrap_or_default();
+                    HookConfig {
+                        event: str_val(table, "event").unwrap_or_else(|| "pre_tool".into()),
+                        matcher: str_val(table, "matcher").unwrap_or_else(|| "*".into()),
+                        command,
+                        timeout_s: table
+                            .get("timeout_s")
+                            .and_then(|v| v.as_integer())
+                            .unwrap_or(10),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Build the model-switcher list: active model first, then extras, deduped.
@@ -517,6 +543,7 @@ pub(crate) fn load_config_impl(
             merged.get("available_models").map(|s| s.as_str()),
             &active_model,
         ),
+        hooks: parse_hooks(&nano_raw),
     };
     Ok(cfg)
 }
@@ -765,6 +792,83 @@ approval_policy = "on-request"
         assert_eq!(cfg.context_edit_max_chars, 12_345);
         assert_eq!(cfg.context_edit_keep_recent_messages, 11);
         assert_eq!(cfg.context_edit_max_tool_result_chars, 700);
+    }
+
+    #[test]
+    fn hooks_load_from_nanocodex_file() {
+        let tmp = std::env::temp_dir().join("ncx_config_test_hooks");
+        fs::create_dir_all(&tmp).unwrap();
+        let nano = tmp.join("nano.toml");
+        write(
+            &nano,
+            r#"
+api_key = "sk-base"
+
+[[hooks]]
+event = "pre_tool"
+matcher = "shell|apply_patch"
+command = "echo hook"
+timeout_s = 3
+
+[[hooks]]
+event = "post_tool"
+command = "echo post"
+"#,
+        );
+        let paths = ConfigPaths {
+            deepseek: tmp.join("nope-ds.toml"),
+            codex: tmp.join("nope-cx.toml"),
+            nanocodex: nano,
+        };
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp),
+                ..Default::default()
+            },
+            &paths,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(cfg.hooks.len(), 2);
+        assert_eq!(cfg.hooks[0].matcher, "shell|apply_patch");
+        assert_eq!(cfg.hooks[0].timeout_s, 3);
+        assert_eq!(cfg.hooks[1].matcher, "*");
+    }
+
+    #[test]
+    fn hook_missing_command_fails_validation() {
+        let tmp = std::env::temp_dir().join("ncx_config_test_hook_missing_command");
+        fs::create_dir_all(&tmp).unwrap();
+        let nano = tmp.join("nano.toml");
+        write(
+            &nano,
+            r#"
+api_key = "sk-base"
+
+[[hooks]]
+event = "pre_tool"
+matcher = "shell"
+"#,
+        );
+        let paths = ConfigPaths {
+            deepseek: tmp.join("nope-ds.toml"),
+            codex: tmp.join("nope-cx.toml"),
+            nanocodex: nano,
+        };
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp),
+                ..Default::default()
+            },
+            &paths,
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(cfg.hooks.len(), 1);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("command must not be empty"));
     }
 
     #[test]

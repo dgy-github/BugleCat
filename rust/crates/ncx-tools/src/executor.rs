@@ -101,7 +101,23 @@ impl PolicyExecutor {
 
     /// Run `command` in `cwd` with a wall-clock `timeout_s`.
     pub async fn run(&self, command: &str, cwd: &Path, timeout_s: u64) -> ExecResult {
-        let env = build_env();
+        self.run_with_env(command, cwd, timeout_s, &HashMap::new())
+            .await
+    }
+
+    /// Run `command` with additional environment variables layered on top of
+    /// the minimal sandbox environment.
+    pub async fn run_with_env(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout_s: u64,
+        extra_env: &HashMap<String, String>,
+    ) -> ExecResult {
+        let mut env = build_env();
+        for (k, v) in extra_env {
+            env.insert(k.clone(), v.clone());
+        }
         let mut cmd = base_command(command);
         cmd.current_dir(cwd)
             .stdout(Stdio::piped())
