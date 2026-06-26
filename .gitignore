@@ -32,6 +32,8 @@ _probe_*.py
 *.log
 HANDOFF.md
 .claude/worktrees/
+releases/*
+!releases/.gitkeep
 
 # OS / editor
 .DS_Store

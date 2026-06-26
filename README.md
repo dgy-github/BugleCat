@@ -95,7 +95,7 @@ tool.
   one-shot commands as well as interactive REPL use.
 - Typed ownership makes parallel worker isolation and result promotion easier
   to reason about without shared mutable state leaks.
-- 220 offline Rust tests cover the current crate boundary, including memory
+- 221 offline Rust tests cover the current crate boundary, including memory
   consolidation, provider request/response parsing, sandbox policy, tools, and
   orchestration.
 
@@ -634,19 +634,32 @@ key or network call required.
 
 ## Release Packaging
 
-Windows GNU CLI release:
+Recommended Windows release entry point:
+
+```powershell
+.\scripts\build-rust-release.ps1
+```
+
+The script runs the Rust workspace tests, builds the Windows GNU release binary,
+creates `releases\nanocodex-<version>-x86_64-pc-windows-gnu.zip`, builds the
+Tauri NSIS installer, then writes `releases\SHA256SUMS.txt` and
+`releases\release-manifest.json`. Use `-SkipTauri` for a CLI-only package or
+`-SkipTests` only after the same target has already passed in CI/local release
+validation.
+
+Manual Windows GNU CLI release:
 
 ```powershell
 cd rust
 cargo build --release --workspace --target x86_64-pc-windows-gnu
 ```
 
-Tauri desktop release:
+Manual Tauri desktop installer:
 
 ```powershell
 cd rust\gui
-npm.cmd install
-npm.cmd run tauri:build
+npm.cmd ci
+npm.cmd run tauri:installer
 ```
 
 The desktop build now targets the Windows NSIS installer explicitly. The

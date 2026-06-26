@@ -11,7 +11,7 @@
 - Rust 工作区：`rust/`（crates 在 `rust/crates/`，GUI 在 `rust/gui/`）
 - 工具链坑：本机无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`
 
-## 当前状态（已完成，全部编译+测试过，220 个 Rust 离线测试全绿）
+## 当前状态（已完成，全部编译+测试过，221 个 Rust 离线测试全绿）
 - 6 核心 crate：ncx-sandbox / ncx-config / ncx-provider / ncx-tools / ncx-core / ncx-cli
 - CLI 二进制 `ncx`（一次性 + REPL + 斜杠命令）；Tauri v2 + Svelte 5 GUI（聊天/审批/设置/NSIS installer）
 - 工具集：read_file · apply_patch · shell · update_plan · grep · glob · web_search · remember
@@ -21,12 +21,13 @@
 - 项目指令：Rust CLI / orchestrator worker / Tauri GUI 会在会话启动时注入 `AGENTS.md` / `CLAUDE.md` / `.claude/CLAUDE.md`（含 `~/.codex`、`~/.claude` 与仓库根到 workspace 分层）
 - 控制面：task budget、context editing、tool search、semantic memory、workspace checkpoints、`/compact`、`/config`、`/usage`/`/cost` raw token usage、prompt-backed custom slash commands
 - keyed 搜索后端：Tavily（有 key）否则回退 DuckDuckGo
+- release 自动化：`scripts/build-rust-release.ps1` 产出 CLI zip、可选 Tauri NSIS installer、SHA256SUMS 和 manifest
 - 性能：单文件 2.4MB（GUI 2.1–2.9MB 安装包）、启动 ~5ms（约 199× 快于 Python）
-- 测试分布：cli 22 / config 24 / core 92 / provider 31 / sandbox 15 / tools 36
+- 测试分布：cli 23 / config 24 / core 92 / provider 31 / sandbox 15 / tools 36
 
 ## 下一步（建议）
-1. 继续对齐 Claude/Fable 的平台级体验：GUI 侧 memory merge / custom slash command 面板、release 自动化清单、更多可观察性指标。
-2. 做 release 前跑 `cargo test --workspace --target x86_64-pc-windows-gnu`、`cargo check`（Tauri）、`npm.cmd run tauri:installer`，然后再打 tag / release。
+1. 继续对齐 Claude/Fable 的平台级体验：GUI 侧 memory merge / custom slash command 面板、更多可观察性指标。
+2. 做 release 前跑 `scripts/build-rust-release.ps1`（完整 Tauri installer 路径），确认 `releases\SHA256SUMS.txt` 与 manifest 后再打 tag / GitHub release。
 
 ## Do-Not（踩过的坑）
 - 别把 tauri lib 设 `cdylib`/`staticlib`：gnu 链接器报 `export ordinal too large`，桌面用 `crate-type=["lib"]`。

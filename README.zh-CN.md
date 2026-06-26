@@ -73,7 +73,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - 启动路径避开 Python 解释器和 import 开销，适合短的一次性命令，也适合交互 REPL。
 - 显式所有权让并行 worker 隔离、结果选择和 promote 更容易推理，不容易出现共享可变状态
   泄漏。
-- 220 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
+- 221 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
   沙箱策略、工具和编排器。
 
 **平台控制面补齐**
@@ -553,19 +553,31 @@ python -m pytest -q
 
 ## Release 打包
 
-Windows GNU CLI release：
+推荐的 Windows release 入口：
+
+```powershell
+.\scripts\build-rust-release.ps1
+```
+
+脚本会先跑 Rust workspace 测试，再构建 Windows GNU release 二进制，生成
+`releases\nanocodex-<version>-x86_64-pc-windows-gnu.zip`，构建 Tauri NSIS
+installer，并写出 `releases\SHA256SUMS.txt` 和 `releases\release-manifest.json`。
+只需要 CLI 包时可加 `-SkipTauri`；只有同 target 已在 CI 或本地 release 验证通过时，
+才建议加 `-SkipTests`。
+
+手动 Windows GNU CLI release：
 
 ```powershell
 cd rust
 cargo build --release --workspace --target x86_64-pc-windows-gnu
 ```
 
-Tauri 桌面 release：
+手动 Tauri 桌面 installer：
 
 ```powershell
 cd rust\gui
-npm.cmd install
-npm.cmd run tauri:build
+npm.cmd ci
+npm.cmd run tauri:installer
 ```
 
 桌面构建现在明确产出 Windows NSIS installer，安装包位于
