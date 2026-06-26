@@ -21,10 +21,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ncx_config::{load_config, Overrides};
+use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
-    expand_file_mentions, ApprovalHandler, ApprovalRequest, AgentLoop, LoopEvent, MemoryStore,
-    Session, ToolContext, ToolRegistry,
+    expand_file_mentions, AgentLoop, ApprovalHandler, ApprovalRequest, ContextEditPolicy,
+    LoopEvent, MemoryStore, Session, TaskBudget, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -58,7 +58,11 @@ pub enum Command {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UiEvent {
     /// The agent thread is ready (config loaded) — carries a status snapshot.
-    Ready { model: String, sandbox: String, workspace: String },
+    Ready {
+        model: String,
+        sandbox: String,
+        workspace: String,
+    },
     /// Assistant produced visible text.
     Assistant { text: String },
     /// A tool is about to run.
@@ -67,9 +71,18 @@ pub enum UiEvent {
     ToolResult { name: String, result: String },
     /// An escalated action needs the user's yes/no. Answer via the `approve`
     /// command with this `id`.
-    Approval { id: u64, command: String, reason: String, cwd: String, details: String },
+    Approval {
+        id: u64,
+        command: String,
+        reason: String,
+        cwd: String,
+        details: String,
+    },
     /// The turn finished.
-    Done { final_text: String, stop_reason: String },
+    Done {
+        final_text: String,
+        stop_reason: String,
+    },
     /// Fatal setup/turn error.
     Error { message: String },
 }
@@ -97,11 +110,14 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path) {
         workspace: Some(workspace.to_path_buf()),
         ..Default::default()
     }) {
-        emit(app, UiEvent::Ready {
-            model: cfg.model,
-            sandbox: cfg.sandbox_mode,
-            workspace: workspace.display().to_string(),
-        });
+        emit(
+            app,
+            UiEvent::Ready {
+                model: cfg.model,
+                sandbox: cfg.sandbox_mode,
+                workspace: workspace.display().to_string(),
+            },
+        );
     }
 }
 
@@ -118,13 +134,16 @@ impl ApprovalHandler for GuiApprover {
         let id = self.counter.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
-        emit(&self.app, UiEvent::Approval {
-            id,
-            command: req.command,
-            reason: req.reason,
-            cwd: req.cwd,
-            details: req.details,
-        });
+        emit(
+            &self.app,
+            UiEvent::Approval {
+                id,
+                command: req.command,
+                reason: req.reason,
+                cwd: req.cwd,
+                details: req.details,
+            },
+        );
         // Window closed / channel dropped -> treat as denied (fail safe).
         rx.await.unwrap_or(false)
     }
@@ -133,7 +152,10 @@ impl ApprovalHandler for GuiApprover {
 /// Build the agent loop and its workspace from the resolved config.
 fn build_agent(approver: Rc<dyn ApprovalHandler>) -> Result<(AgentLoop, PathBuf), String> {
     let workspace = std::env::current_dir().ok();
-    let overrides = Overrides { workspace, ..Default::default() };
+    let overrides = Overrides {
+        workspace,
+        ..Default::default()
+    };
     let cfg = load_config(overrides).map_err(|e| e.to_string())?;
     cfg.validate().map_err(|e| e.to_string())?;
 
@@ -162,8 +184,36 @@ fn build_agent(approver: Rc<dyn ApprovalHandler>) -> Result<(AgentLoop, PathBuf)
     let tools = ToolRegistry::new(ctx);
     let session = Session::new(system_prompt);
     let agent = AgentLoop::new(Box::new(provider), tools, session)
-        .with_max_iterations(cfg.max_iterations as usize);
+        .with_task_budget(task_budget_from_config(&cfg))
+        .with_context_edit(context_edit_from_config(&cfg));
     Ok((agent, cfg.workspace.clone()))
+}
+
+fn positive_usize(value: i64, fallback: usize) -> usize {
+    usize::try_from(value)
+        .ok()
+        .filter(|v| *v > 0)
+        .unwrap_or(fallback)
+}
+
+fn nonnegative_usize(value: i64, fallback: usize) -> usize {
+    usize::try_from(value).ok().unwrap_or(fallback)
+}
+
+fn task_budget_from_config(cfg: &Config) -> TaskBudget {
+    TaskBudget {
+        max_model_calls: positive_usize(cfg.max_iterations, 60),
+        max_tool_calls: nonnegative_usize(cfg.max_tool_calls, 120),
+    }
+}
+
+fn context_edit_from_config(cfg: &Config) -> ContextEditPolicy {
+    ContextEditPolicy {
+        enabled: cfg.context_edit_enabled,
+        max_chars: positive_usize(cfg.context_edit_max_chars, 120_000),
+        keep_recent_messages: positive_usize(cfg.context_edit_keep_recent_messages, 30),
+        max_tool_result_chars: positive_usize(cfg.context_edit_max_tool_result_chars, 4_000),
+    }
 }
 
 /// Spawn the dedicated agent thread. Returns immediately; the thread lives for
@@ -198,10 +248,13 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Prompt(text) => {
                             let expanded = expand_file_mentions(&text, &workspace);
                             let result = agent.run_turn(json!(expanded), None).await;
-                            emit(&app, UiEvent::Done {
-                                final_text: result.final_text,
-                                stop_reason: result.stop_reason,
-                            });
+                            emit(
+                                &app,
+                                UiEvent::Done {
+                                    final_text: result.final_text,
+                                    stop_reason: result.stop_reason,
+                                },
+                            );
                         }
                         Command::Reload => match build_agent(approver.clone()) {
                             Ok((a, ws)) => {

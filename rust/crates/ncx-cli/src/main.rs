@@ -17,8 +17,8 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    expand_file_mentions, AgentLoop, MemoryStore, Orchestrator, OrchestratorConfig, Session,
-    ToolContext, ToolRegistry,
+    expand_file_mentions, AgentLoop, ContextEditPolicy, MemoryStore, Orchestrator,
+    OrchestratorConfig, Session, TaskBudget, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -71,6 +71,16 @@ async fn run(args: Args) -> i32 {
         model: args.model.clone(),
         sandbox_mode: args.sandbox.clone(),
         approval_policy: args.approval.clone(),
+        max_iterations: args.max_iterations,
+        max_tool_calls: args.max_tool_calls,
+        context_edit_enabled: if args.disable_context_edit {
+            Some(false)
+        } else {
+            None
+        },
+        context_edit_max_chars: args.context_edit_max_chars,
+        context_edit_keep_recent_messages: args.context_edit_keep_recent_messages,
+        context_edit_max_tool_result_chars: args.context_edit_max_tool_result_chars,
         profile: args.profile.clone(),
         ..Default::default()
     };
@@ -133,7 +143,8 @@ async fn run(args: Args) -> i32 {
     let tools = ToolRegistry::new(ctx);
     let session = Session::new(system_prompt);
     let mut agent = AgentLoop::new(Box::new(provider), tools, session)
-        .with_max_iterations(cfg.max_iterations as usize);
+        .with_task_budget(task_budget_from_config(&cfg))
+        .with_context_edit(context_edit_from_config(&cfg));
 
     // One-shot mode: run the prompt and exit.
     if let Some(prompt) = &args.prompt {
@@ -282,7 +293,7 @@ fn render_help() -> String {
 fn render_status(cfg: &ncx_config::Config) -> String {
     let red = cfg.redacted();
     format!(
-        "model:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\nworkspace: {}\napi_key:   {}\nmax_iter:  {}  retries: {}",
+        "model:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\nworkspace: {}\napi_key:   {}\nmodel_budget: {}  tool_budget: {}  retries: {}\ncontext_edit: {}  max_chars: {}  keep_recent: {}  tool_result_chars: {}",
         cfg.model,
         cfg.base_url,
         cfg.sandbox_mode,
@@ -290,8 +301,40 @@ fn render_status(cfg: &ncx_config::Config) -> String {
         cfg.workspace.display(),
         red.get("api_key").cloned().unwrap_or_default(),
         cfg.max_iterations,
+        cfg.max_tool_calls,
         cfg.max_retries,
+        cfg.context_edit_enabled,
+        cfg.context_edit_max_chars,
+        cfg.context_edit_keep_recent_messages,
+        cfg.context_edit_max_tool_result_chars,
     )
+}
+
+fn positive_usize(value: i64, fallback: usize) -> usize {
+    usize::try_from(value)
+        .ok()
+        .filter(|v| *v > 0)
+        .unwrap_or(fallback)
+}
+
+fn nonnegative_usize(value: i64, fallback: usize) -> usize {
+    usize::try_from(value).ok().unwrap_or(fallback)
+}
+
+fn task_budget_from_config(cfg: &ncx_config::Config) -> TaskBudget {
+    TaskBudget {
+        max_model_calls: positive_usize(cfg.max_iterations, 60),
+        max_tool_calls: nonnegative_usize(cfg.max_tool_calls, 120),
+    }
+}
+
+fn context_edit_from_config(cfg: &ncx_config::Config) -> ContextEditPolicy {
+    ContextEditPolicy {
+        enabled: cfg.context_edit_enabled,
+        max_chars: positive_usize(cfg.context_edit_max_chars, 120_000),
+        keep_recent_messages: positive_usize(cfg.context_edit_keep_recent_messages, 30),
+        max_tool_result_chars: positive_usize(cfg.context_edit_max_tool_result_chars, 4_000),
+    }
 }
 
 #[cfg(test)]

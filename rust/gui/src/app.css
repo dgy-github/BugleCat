@@ -169,3 +169,6 @@ button:disabled { background: #b9c6e6; cursor: default; }
   font: inherit;
   background: #fff;
 }
+.modal label.check input {
+  flex: 0 0 auto;
+}

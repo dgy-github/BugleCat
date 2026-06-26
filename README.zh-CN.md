@@ -272,6 +272,12 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # 可选
 # context_token_budget = 512000
 # context_window = 1048576
+# max_iterations = 60
+# max_tool_calls = 120
+# context_edit_enabled = true
+# context_edit_max_chars = 120000
+# context_edit_keep_recent_messages = 30
+# context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
 ```
 
@@ -493,8 +499,7 @@ Tauri 桌面 release：
 ```powershell
 cd rust\gui
 npm.cmd install
-npm.cmd run build
-npx.cmd @tauri-apps/cli@latest build --target x86_64-pc-windows-gnu
+npm.cmd run tauri:build
 ```
 
 Tauri crate 特意保留 `crate-type = ["lib"]`；改成 `cdylib` 或 `staticlib` 会让

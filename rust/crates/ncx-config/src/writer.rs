@@ -19,6 +19,12 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "vl_api_key",
     "vl_model",
     "ark_api_key",
+    "max_iterations",
+    "max_tool_calls",
+    "context_edit_enabled",
+    "context_edit_max_chars",
+    "context_edit_keep_recent_messages",
+    "context_edit_max_tool_result_chars",
 ];
 
 /// Escape a string for a TOML basic (double-quoted) string value.
@@ -173,5 +179,34 @@ mod tests {
             .parse::<toml::Value>()
             .unwrap();
         assert!(!parsed.as_table().unwrap().contains_key("bogus"));
+    }
+
+    #[test]
+    fn write_persists_runtime_control_keys() {
+        let text = dump_nanocodex_toml(&map(&[
+            ("max_iterations", "12"),
+            ("max_tool_calls", "34"),
+            ("context_edit_enabled", "false"),
+            ("context_edit_max_chars", "9000"),
+            ("context_edit_keep_recent_messages", "8"),
+            ("context_edit_max_tool_result_chars", "600"),
+        ]));
+        let parsed = text.parse::<toml::Value>().unwrap();
+        assert_eq!(parsed["max_iterations"].as_str().unwrap(), "12");
+        assert_eq!(parsed["max_tool_calls"].as_str().unwrap(), "34");
+        assert_eq!(parsed["context_edit_enabled"].as_str().unwrap(), "false");
+        assert_eq!(parsed["context_edit_max_chars"].as_str().unwrap(), "9000");
+        assert_eq!(
+            parsed["context_edit_keep_recent_messages"]
+                .as_str()
+                .unwrap(),
+            "8"
+        );
+        assert_eq!(
+            parsed["context_edit_max_tool_result_chars"]
+                .as_str()
+                .unwrap(),
+            "600"
+        );
     }
 }

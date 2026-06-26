@@ -19,6 +19,18 @@ OPTIONS:
     -p, --profile <NAME>    Config profile from ~/.nanocodex/config.toml.
     -s, --sandbox <MODE>    read-only | workspace-write | danger-full-access.
     -a, --approval <POLICY> untrusted | on-failure | on-request | never.
+        --max-iterations <N>
+                            Max model calls for one task (default: config/60).
+        --max-tool-calls <N>
+                            Max tool calls for one task (default: config/120).
+        --context-edit-max-chars <N>
+                            Provider-view context character budget.
+        --context-edit-keep-recent <N>
+                            Messages kept before older prefixes may be dropped.
+        --context-edit-tool-result-chars <N>
+                            Max chars for compressed old tool results.
+        --disable-context-edit
+                            Send full history without runtime context editing.
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
                             (classify → plan → parallel workers → verify). One-shot only.
         --memory-merge      Maintenance: LLM-fold near-duplicate project memory notes, then exit.
@@ -33,6 +45,12 @@ pub struct Args {
     pub profile: Option<String>,
     pub sandbox: Option<String>,
     pub approval: Option<String>,
+    pub max_iterations: Option<i64>,
+    pub max_tool_calls: Option<i64>,
+    pub context_edit_max_chars: Option<i64>,
+    pub context_edit_keep_recent_messages: Option<i64>,
+    pub context_edit_max_tool_result_chars: Option<i64>,
+    pub disable_context_edit: bool,
     pub orchestrate: bool,
     pub memory_merge: bool,
     pub help: bool,
@@ -60,6 +78,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-V" | "--version" => args.version = true,
             "-o" | "--orchestrate" => args.orchestrate = true,
             "--memory-merge" => args.memory_merge = true,
+            "--disable-context-edit" => args.disable_context_edit = true,
             "-w" | "--workspace" => {
                 args.workspace = Some(PathBuf::from(take_value(argv, &mut i, a)?));
             }
@@ -67,6 +86,17 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-p" | "--profile" => args.profile = Some(take_value(argv, &mut i, a)?),
             "-s" | "--sandbox" => args.sandbox = Some(take_value(argv, &mut i, a)?),
             "-a" | "--approval" => args.approval = Some(take_value(argv, &mut i, a)?),
+            "--max-iterations" => args.max_iterations = Some(take_i64(argv, &mut i, a)?),
+            "--max-tool-calls" => args.max_tool_calls = Some(take_i64(argv, &mut i, a)?),
+            "--context-edit-max-chars" => {
+                args.context_edit_max_chars = Some(take_i64(argv, &mut i, a)?);
+            }
+            "--context-edit-keep-recent" => {
+                args.context_edit_keep_recent_messages = Some(take_i64(argv, &mut i, a)?);
+            }
+            "--context-edit-tool-result-chars" => {
+                args.context_edit_max_tool_result_chars = Some(take_i64(argv, &mut i, a)?);
+            }
             other => return Err(format!("unknown option '{other}'")),
         }
         i += 1;
@@ -85,6 +115,12 @@ fn take_value(argv: &[String], i: &mut usize, flag: &str) -> Result<String, Stri
         .ok_or_else(|| format!("option '{flag}' needs a value"))?;
     *i += 1;
     Ok(next.clone())
+}
+
+fn take_i64(argv: &[String], i: &mut usize, flag: &str) -> Result<i64, String> {
+    let raw = take_value(argv, i, flag)?;
+    raw.parse::<i64>()
+        .map_err(|_| format!("option '{flag}' needs an integer value"))
 }
 
 #[cfg(test)]
@@ -111,10 +147,24 @@ mod tests {
 
     #[test]
     fn options_with_values() {
-        let a = args(&["-m", "deepseek-chat", "-s", "read-only", "-p", "fast"]).unwrap();
+        let a = args(&[
+            "-m",
+            "deepseek-chat",
+            "-s",
+            "read-only",
+            "-p",
+            "fast",
+            "--max-iterations",
+            "7",
+            "--max-tool-calls",
+            "9",
+        ])
+        .unwrap();
         assert_eq!(a.model.as_deref(), Some("deepseek-chat"));
         assert_eq!(a.sandbox.as_deref(), Some("read-only"));
         assert_eq!(a.profile.as_deref(), Some("fast"));
+        assert_eq!(a.max_iterations, Some(7));
+        assert_eq!(a.max_tool_calls, Some(9));
     }
 
     #[test]
@@ -140,6 +190,13 @@ mod tests {
     #[test]
     fn missing_value_errors() {
         assert!(args(&["--model"]).is_err());
+    }
+
+    #[test]
+    fn numeric_flags_validate_integer_values() {
+        assert!(args(&["--max-tool-calls", "abc"]).is_err());
+        let a = args(&["--disable-context-edit"]).unwrap();
+        assert!(a.disable_context_edit);
     }
 
     #[test]

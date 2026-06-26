@@ -60,9 +60,14 @@ pub struct Overrides {
     pub vl_model: Option<String>,
     pub ark_api_key: Option<String>,
     pub max_iterations: Option<i64>,
+    pub max_tool_calls: Option<i64>,
     pub max_retries: Option<i64>,
     pub context_token_budget: Option<i64>,
     pub context_window: Option<i64>,
+    pub context_edit_enabled: Option<bool>,
+    pub context_edit_max_chars: Option<i64>,
+    pub context_edit_keep_recent_messages: Option<i64>,
+    pub context_edit_max_tool_result_chars: Option<i64>,
     pub available_models: Option<Vec<String>>,
     pub profile: Option<String>,
 }
@@ -153,8 +158,17 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "ark_api_key",
         "search_provider",
         "search_api_key",
+        "max_iterations",
+        "max_tool_calls",
+        "max_retries",
+        "context_token_budget",
+        "context_window",
+        "context_edit_enabled",
+        "context_edit_max_chars",
+        "context_edit_keep_recent_messages",
+        "context_edit_max_tool_result_chars",
     ] {
-        if let Some(v) = str_val(raw, key) {
+        if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);
         }
     }
@@ -192,9 +206,14 @@ const PROFILE_KEYS: &[&str] = &[
     "vl_model",
     "ark_api_key",
     "max_iterations",
+    "max_tool_calls",
     "max_retries",
     "context_token_budget",
     "context_window",
+    "context_edit_enabled",
+    "context_edit_max_chars",
+    "context_edit_keep_recent_messages",
+    "context_edit_max_tool_result_chars",
 ];
 
 fn profile_values(selected: &Table) -> BTreeMap<String, String> {
@@ -211,6 +230,18 @@ fn profile_values(selected: &Table) -> BTreeMap<String, String> {
 
 fn as_int(s: Option<&str>, default: i64) -> i64 {
     s.and_then(|v| v.parse::<i64>().ok()).unwrap_or(default)
+}
+
+fn as_bool(s: Option<&str>, default: bool) -> bool {
+    match s.map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if matches!(v.as_str(), "true" | "1" | "yes" | "on") => true,
+        Some(v) if matches!(v.as_str(), "false" | "0" | "no" | "off") => false,
+        _ => default,
+    }
+}
+
+fn selected_scalar(raw: &Table, key: &str) -> Option<String> {
+    raw.get(key).and_then(to_string_val)
 }
 
 /// Build the model-switcher list: active model first, then extras, deduped.
@@ -338,8 +369,22 @@ pub(crate) fn load_config_impl(
         ("approval_policy", &["NANOCODEX_APPROVAL"]),
         ("context_token_budget", &["NANOCODEX_CONTEXT_BUDGET"]),
         ("context_window", &["NANOCODEX_CONTEXT_WINDOW"]),
+        ("context_edit_enabled", &["NANOCODEX_CONTEXT_EDIT_ENABLED"]),
+        (
+            "context_edit_max_chars",
+            &["NANOCODEX_CONTEXT_EDIT_MAX_CHARS"],
+        ),
+        (
+            "context_edit_keep_recent_messages",
+            &["NANOCODEX_CONTEXT_EDIT_KEEP_RECENT"],
+        ),
+        (
+            "context_edit_max_tool_result_chars",
+            &["NANOCODEX_CONTEXT_EDIT_TOOL_RESULT_CHARS"],
+        ),
         ("available_models", &["NANOCODEX_MODELS"]),
         ("max_iterations", &["NANOCODEX_MAX_ITERATIONS"]),
+        ("max_tool_calls", &["NANOCODEX_MAX_TOOL_CALLS"]),
         ("max_retries", &["NANOCODEX_MAX_RETRIES"]),
     ];
     for (field, env_keys) in env_map {
@@ -366,6 +411,13 @@ pub(crate) fn load_config_impl(
             }
         };
     }
+    macro_rules! apply_bool {
+        ($field:ident) => {
+            if let Some(v) = overrides.$field {
+                merged.insert(stringify!($field).to_string(), v.to_string());
+            }
+        };
+    }
     apply_str!(api_key);
     apply_str!(base_url);
     apply_str!(model);
@@ -378,9 +430,14 @@ pub(crate) fn load_config_impl(
     apply_str!(vl_model);
     apply_str!(ark_api_key);
     apply_int!(max_iterations);
+    apply_int!(max_tool_calls);
     apply_int!(max_retries);
     apply_int!(context_token_budget);
     apply_int!(context_window);
+    apply_bool!(context_edit_enabled);
+    apply_int!(context_edit_max_chars);
+    apply_int!(context_edit_keep_recent_messages);
+    apply_int!(context_edit_max_tool_result_chars);
     if let Some(models) = overrides.available_models {
         merged.insert("available_models".into(), models.join(","));
     }
@@ -431,6 +488,7 @@ pub(crate) fn load_config_impl(
         writable_roots: vec![],
         network_access,
         max_iterations: as_int(merged.get("max_iterations").map(|s| s.as_str()), 60),
+        max_tool_calls: as_int(merged.get("max_tool_calls").map(|s| s.as_str()), 120),
         timeout_s: 120,
         max_retries: as_int(merged.get("max_retries").map(|s| s.as_str()), 3),
         context_token_budget: as_int(
@@ -438,6 +496,23 @@ pub(crate) fn load_config_impl(
             512_000,
         ),
         context_window: as_int(merged.get("context_window").map(|s| s.as_str()), 1_048_576),
+        context_edit_enabled: as_bool(merged.get("context_edit_enabled").map(|s| s.as_str()), true),
+        context_edit_max_chars: as_int(
+            merged.get("context_edit_max_chars").map(|s| s.as_str()),
+            120_000,
+        ),
+        context_edit_keep_recent_messages: as_int(
+            merged
+                .get("context_edit_keep_recent_messages")
+                .map(|s| s.as_str()),
+            30,
+        ),
+        context_edit_max_tool_result_chars: as_int(
+            merged
+                .get("context_edit_max_tool_result_chars")
+                .map(|s| s.as_str()),
+            4_000,
+        ),
         available_models: model_list(
             merged.get("available_models").map(|s| s.as_str()),
             &active_model,
@@ -647,6 +722,49 @@ approval_policy = "on-request"
         )
         .unwrap();
         assert_eq!(cfg.max_iterations, 80);
+    }
+
+    #[test]
+    fn runtime_budget_and_context_edit_fields_load_from_file_env_and_overrides() {
+        let tmp = std::env::temp_dir().join("ncx_config_test_runtime_control");
+        fs::create_dir_all(&tmp).unwrap();
+        let nano = tmp.join("nano.toml");
+        write(
+            &nano,
+            concat!(
+                "api_key = \"sk-base\"\n",
+                "max_tool_calls = 33\n",
+                "context_edit_enabled = false\n",
+                "context_edit_max_chars = 9000\n",
+                "context_edit_keep_recent_messages = 11\n",
+                "context_edit_max_tool_result_chars = 700\n",
+            ),
+        );
+        let paths = ConfigPaths {
+            deepseek: tmp.join("nope-ds.toml"),
+            codex: tmp.join("nope-cx.toml"),
+            nanocodex: nano,
+        };
+        let mut env = HashMap::new();
+        env.insert("NANOCODEX_MAX_TOOL_CALLS".into(), "44".into());
+        env.insert("NANOCODEX_CONTEXT_EDIT_ENABLED".into(), "true".into());
+
+        let cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp.clone()),
+                context_edit_max_chars: Some(12_345),
+                ..Default::default()
+            },
+            &paths,
+            &env,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.max_tool_calls, 44);
+        assert!(cfg.context_edit_enabled);
+        assert_eq!(cfg.context_edit_max_chars, 12_345);
+        assert_eq!(cfg.context_edit_keep_recent_messages, 11);
+        assert_eq!(cfg.context_edit_max_tool_result_chars, 700);
     }
 
     #[test]

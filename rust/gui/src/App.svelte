@@ -22,6 +22,12 @@
     sandbox_mode: string;
     approval_policy: string;
     reasoning_effort: string;
+    max_iterations: number;
+    max_tool_calls: number;
+    context_edit_enabled: boolean;
+    context_edit_max_chars: number;
+    context_edit_keep_recent_messages: number;
+    context_edit_max_tool_result_chars: number;
     api_key_masked: string;
     has_api_key: boolean;
     available_models: string[];
@@ -148,6 +154,12 @@
       sandbox_mode: settings.sandbox_mode,
       approval_policy: settings.approval_policy,
       reasoning_effort: settings.reasoning_effort,
+      max_iterations: String(settings.max_iterations),
+      max_tool_calls: String(settings.max_tool_calls),
+      context_edit_enabled: String(settings.context_edit_enabled),
+      context_edit_max_chars: String(settings.context_edit_max_chars),
+      context_edit_keep_recent_messages: String(settings.context_edit_keep_recent_messages),
+      context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),
     };
     if (apiKeyInput.trim()) updates.api_key = apiKeyInput.trim();
     try {
@@ -248,6 +260,30 @@
         <label>
           <span>Reasoning</span>
           <input bind:value={settings.reasoning_effort} placeholder="auto | low | medium | high | max | off" />
+        </label>
+        <label>
+          <span>Model calls</span>
+          <input type="number" min="1" bind:value={settings.max_iterations} />
+        </label>
+        <label>
+          <span>Tool calls</span>
+          <input type="number" min="0" bind:value={settings.max_tool_calls} />
+        </label>
+        <label class="check">
+          <span>Context edit</span>
+          <input type="checkbox" bind:checked={settings.context_edit_enabled} />
+        </label>
+        <label>
+          <span>Context chars</span>
+          <input type="number" min="1" bind:value={settings.context_edit_max_chars} />
+        </label>
+        <label>
+          <span>Recent messages</span>
+          <input type="number" min="1" bind:value={settings.context_edit_keep_recent_messages} />
+        </label>
+        <label>
+          <span>Tool result chars</span>
+          <input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} />
         </label>
         <label>
           <span>Base URL</span>

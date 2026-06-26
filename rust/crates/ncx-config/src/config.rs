@@ -40,11 +40,16 @@ pub struct Config {
     pub writable_roots: Vec<PathBuf>,
     pub network_access: bool,
     pub max_iterations: i64,
+    pub max_tool_calls: i64,
     pub timeout_s: i64,
     /// SDK retry count for transient errors (408/409/429/5xx); default 3.
     pub max_retries: i64,
     pub context_token_budget: i64,
     pub context_window: i64,
+    pub context_edit_enabled: bool,
+    pub context_edit_max_chars: i64,
+    pub context_edit_keep_recent_messages: i64,
+    pub context_edit_max_tool_result_chars: i64,
     pub available_models: Vec<String>,
 }
 
@@ -68,10 +73,15 @@ impl Default for Config {
             writable_roots: vec![],
             network_access: false,
             max_iterations: 60,
+            max_tool_calls: 120,
             timeout_s: 120,
             max_retries: 3,
             context_token_budget: 512_000,
             context_window: 1_048_576,
+            context_edit_enabled: true,
+            context_edit_max_chars: 120_000,
+            context_edit_keep_recent_messages: 30,
+            context_edit_max_tool_result_chars: 4_000,
             available_models: DEFAULT_MODELS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -128,8 +138,25 @@ impl Config {
         m.insert("ark_api_key", mask(&self.ark_api_key));
         m.insert("workspace", self.workspace.to_string_lossy().to_string());
         m.insert("max_iterations", self.max_iterations.to_string());
+        m.insert("max_tool_calls", self.max_tool_calls.to_string());
         m.insert("timeout_s", self.timeout_s.to_string());
         m.insert("max_retries", self.max_retries.to_string());
+        m.insert(
+            "context_edit_enabled",
+            self.context_edit_enabled.to_string(),
+        );
+        m.insert(
+            "context_edit_max_chars",
+            self.context_edit_max_chars.to_string(),
+        );
+        m.insert(
+            "context_edit_keep_recent_messages",
+            self.context_edit_keep_recent_messages.to_string(),
+        );
+        m.insert(
+            "context_edit_max_tool_result_chars",
+            self.context_edit_max_tool_result_chars.to_string(),
+        );
         m
     }
 }

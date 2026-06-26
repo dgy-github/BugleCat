@@ -310,8 +310,23 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # Optional
 # context_token_budget = 512000
 # context_window = 1048576
+# max_iterations = 60
+# max_tool_calls = 120
+# context_edit_enabled = true
+# context_edit_max_chars = 120000
+# context_edit_keep_recent_messages = 30
+# context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
 ```
+
+Runtime control-plane settings can also be set with environment variables:
+`NANOCODEX_MAX_ITERATIONS`, `NANOCODEX_MAX_TOOL_CALLS`,
+`NANOCODEX_CONTEXT_EDIT_ENABLED`, `NANOCODEX_CONTEXT_EDIT_MAX_CHARS`,
+`NANOCODEX_CONTEXT_EDIT_KEEP_RECENT`, and
+`NANOCODEX_CONTEXT_EDIT_TOOL_RESULT_CHARS`. The Rust CLI also accepts
+`--max-iterations`, `--max-tool-calls`, `--context-edit-max-chars`,
+`--context-edit-keep-recent`, `--context-edit-tool-result-chars`, and
+`--disable-context-edit`.
 
 A full example lives in `config.example.toml`.
 
@@ -549,8 +564,7 @@ Tauri desktop release:
 ```powershell
 cd rust\gui
 npm.cmd install
-npm.cmd run build
-npx.cmd @tauri-apps/cli@latest build --target x86_64-pc-windows-gnu
+npm.cmd run tauri:build
 ```
 
 The Tauri crate deliberately keeps `crate-type = ["lib"]`; changing it to

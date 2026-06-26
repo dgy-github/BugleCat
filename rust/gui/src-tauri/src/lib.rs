@@ -27,6 +27,10 @@ pub struct Status {
     workspace: String,
     /// Masked (`****1234`) — never the real key.
     api_key: String,
+    max_iterations: i64,
+    max_tool_calls: i64,
+    context_edit_enabled: bool,
+    context_edit_max_chars: i64,
 }
 
 /// Tauri managed state: the channel into the agent thread + pending approvals.
@@ -39,7 +43,10 @@ struct AppState {
 #[tauri::command]
 fn get_status() -> Result<Status, String> {
     let workspace = std::env::current_dir().ok();
-    let overrides = Overrides { workspace, ..Default::default() };
+    let overrides = Overrides {
+        workspace,
+        ..Default::default()
+    };
     let cfg = load_config(overrides).map_err(|e| e.to_string())?;
     let red = cfg.redacted();
     Ok(Status {
@@ -48,6 +55,10 @@ fn get_status() -> Result<Status, String> {
         approval: cfg.approval_policy.clone(),
         workspace: cfg.workspace.display().to_string(),
         api_key: red.get("api_key").cloned().unwrap_or_default(),
+        max_iterations: cfg.max_iterations,
+        max_tool_calls: cfg.max_tool_calls,
+        context_edit_enabled: cfg.context_edit_enabled,
+        context_edit_max_chars: cfg.context_edit_max_chars,
     })
 }
 
@@ -69,6 +80,12 @@ pub struct Settings {
     sandbox_mode: String,
     approval_policy: String,
     reasoning_effort: String,
+    max_iterations: i64,
+    max_tool_calls: i64,
+    context_edit_enabled: bool,
+    context_edit_max_chars: i64,
+    context_edit_keep_recent_messages: i64,
+    context_edit_max_tool_result_chars: i64,
     api_key_masked: String,
     has_api_key: bool,
     available_models: Vec<String>,
@@ -80,7 +97,11 @@ pub struct Settings {
 #[tauri::command]
 fn get_settings() -> Result<Settings, String> {
     let workspace = std::env::current_dir().ok();
-    let cfg = load_config(Overrides { workspace, ..Default::default() }).map_err(|e| e.to_string())?;
+    let cfg = load_config(Overrides {
+        workspace,
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
     let masked = cfg.redacted().get("api_key").cloned().unwrap_or_default();
     Ok(Settings {
         model: cfg.model.clone(),
@@ -88,11 +109,20 @@ fn get_settings() -> Result<Settings, String> {
         sandbox_mode: cfg.sandbox_mode.clone(),
         approval_policy: cfg.approval_policy.clone(),
         reasoning_effort: cfg.reasoning_effort.clone(),
+        max_iterations: cfg.max_iterations,
+        max_tool_calls: cfg.max_tool_calls,
+        context_edit_enabled: cfg.context_edit_enabled,
+        context_edit_max_chars: cfg.context_edit_max_chars,
+        context_edit_keep_recent_messages: cfg.context_edit_keep_recent_messages,
+        context_edit_max_tool_result_chars: cfg.context_edit_max_tool_result_chars,
         api_key_masked: masked,
         has_api_key: !cfg.api_key.is_empty(),
         available_models: cfg.available_models.clone(),
         sandbox_modes: VALID_SANDBOX_MODES.iter().map(|s| s.to_string()).collect(),
-        approval_policies: VALID_APPROVAL_POLICIES.iter().map(|s| s.to_string()).collect(),
+        approval_policies: VALID_APPROVAL_POLICIES
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
     })
 }
 
@@ -104,8 +134,10 @@ fn save_settings(
     updates: std::collections::HashMap<String, String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let borrowed: HashMap<&str, &str> =
-        updates.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let borrowed: HashMap<&str, &str> = updates
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     let path = ConfigPaths::default().nanocodex;
     write_nanocodex_config(&borrowed, &path).map_err(|e| e.to_string())?;
     // Apply live (fresh session with the new config).
@@ -118,7 +150,9 @@ fn save_settings(
 fn approve(id: u64, approved: bool, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let sender = state.pending.lock().unwrap().remove(&id);
     match sender {
-        Some(tx) => tx.send(approved).map_err(|_| "approval already resolved".to_string()),
+        Some(tx) => tx
+            .send(approved)
+            .map_err(|_| "approval already resolved".to_string()),
         None => Err(format!("no pending approval with id {id}")),
     }
 }
