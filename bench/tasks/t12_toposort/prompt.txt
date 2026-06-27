@@ -1,0 +1,16 @@
+Create toposort.py in the current directory with a function toposort(graph).
+
+  - graph is a dict mapping each node to a list of its dependencies. A node
+    depends on every node in its list, so each dependency must appear BEFORE
+    the node in the result.
+  - Return a list containing every node exactly once, in an order that respects
+    all dependencies (a topological order).
+  - If the graph contains a cycle (no valid order exists), raise ValueError.
+  - Every dependency referenced is also a key in the graph.
+
+Example:
+  toposort({"a": [], "b": ["a"], "c": ["a", "b"], "d": ["c"]})
+  -> some order where a is before b, a and b before c, c before d
+     (e.g. ["a", "b", "c", "d"])
+
+Create the file with your file-editing tool.

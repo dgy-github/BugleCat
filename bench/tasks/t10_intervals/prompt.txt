@@ -1,0 +1,15 @@
+Create intervals.py in the current directory with a function merge(intervals)
+that merges all overlapping or touching intervals.
+
+  - Input: a list of [start, end] pairs (integers, start <= end), in any order.
+  - Output: a new list of merged [start, end] lists, sorted ascending by start.
+  - Intervals that merely touch at an endpoint (e.g. [1,2] and [2,3]) merge into
+    one ([1,3]).
+  - The input may be empty.
+
+Examples:
+  merge([[1,3],[2,6],[8,10],[15,18]]) -> [[1,6],[8,10],[15,18]]
+  merge([[1,4],[4,5]])                -> [[1,5]]
+  merge([[5,6],[1,2]])                -> [[1,2],[5,6]]
+
+Return lists (not tuples). Create the file with your file-editing tool.

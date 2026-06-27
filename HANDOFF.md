@@ -9,6 +9,7 @@
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
 - 路径：crates `rust/crates/`，GUI `rust/gui/`，基准 `bench/`。
 - 工具链：无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`。
+- ⚠️ **新工作线 `feat/train`**（基于 rust-capability）：ncx-forge 训练框架（`genome.rs` 读 `NCX_GENOME` 覆盖 prompt/工具描述 + `docs(train)` 设计 + `train/DESIGN.md`）。其 main.rs/tools.rs/lib.rs/genome.rs 改动**只在 feat/train**，未回灌 rust-capability。
 
 ## ncx-forge 训练框架（分支 `feat/train`，已推 origin）— 当前活跃工作线
 目标：让强模型当"教师"迭代优化 agent 骨架（system_prompt + 工具描述），用 bench 通过率当
@@ -88,8 +89,8 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
 | **A 分支 feat/mcp** ✅完成(`dc56233`，已并入) | ncx-mcp crate(stdio JSON-RPC client) + McpTool(`Rc<Mutex<McpClient>>`，非只读走审批) + `~/.nanocodex/mcp.toml` loader + main.rs 启动注册。mock server live 测过。⚠️ 之前这些文件未入库导致 HEAD 干净 checkout 编不过，已修复 | `ncx-core/src/mcp_tool.rs`、`crates/ncx-mcp/`、`ncx-config` servers 字段 | 无 |
 | **B 分支 feat/skills** ✅完成(`b70907b`) | SKILL.md 发现 + 渐进披露注入 + `skill` 工具(已 live 验) | `ncx-core/src/skills.rs`(新)；tools/lib/cli/runner/gui 各加几行 | 无 |
 | **C 分支 feat/vision** ✅完成(已并入) | VL 视觉分流：`with_vision_provider` + `has_image_block` 路由；CLI `--image`(可重复)/REPL 内联 `--image`；base64 多模态 content；`vl_base_url/vl_api_key/vl_model` 配置；含测试 | `agent_loop`、`cli/main.rs`、`ncx-config` vl 字段 | 无 |
-| **D 分支 feat/orch** ✅完成(`3207b43`，已并入) | high 任务递归分解：plan→decompose→每子任务 recurse(顺序、各自 promote)→main verify；atomic/depth 耗尽回退 best-of-N(`high_workers`=3)。新旋钮 `high_workers`/`max_depth`(0=关)。`LocalBoxFuture` 保 ?Send。5 个新测试 | **独占 `ncx-core/src/orchestrator.rs`** | 无 |
-| **E 分支 feat/bench** ✅完成(`b175a74`，已并入 rust-capability) | bench 入库：+4 难任务(t5_roman/t6_lru/t7_balanced/t8_wordfreq) + 每任务 `--repeats`(默认3)出通过率 + md/json 报告(`bench/reports/`已 gitignore) + `--tasks` 过滤；Claude 臂沿用已有接线。smoke 验：nanocodex×2 跑 t6/t7 全过 | **整个 `bench/`（纯 Python，零 Rust 冲突）** | 无 |
+| **D 分支 feat/orch** ✅完成(`3207b43`+`3090436`+`23c993a`) | high 任务递归分解：plan→decompose→每子任务 recurse(顺序、各自 promote)→main verify；atomic/depth 耗尽回退 best-of-N(`high_workers`=3)。旋钮 `high_workers`/`max_depth`(0=关)/`max_subtasks`(默认6，防过度拆分)。reasoning 节点(classify/plan/decompose/verify)**无工具**(`reason()`，否则强模型边分类边执行)。`parse_subtasks` 容错(SUBTASK:→编号/项目符号回退，live 模型常不守格式)。`LocalBoxFuture` 保 ?Send。13 测试。`NCX_TRACE` 有 `[orch]` 行。**live 验证**：classify High→decompose→recurse 已触发；但分类器保守(小任务判 Medium)+全 pro 慢，整条 High 递归未跑到完成 | **独占 `ncx-core/src/orchestrator.rs`** | 无 |
+| **E 分支 feat/bench** ✅完成(`b175a74`+`96730f0`) | bench：`--repeats`(默认3)通过率 + md/json 报告 + `--tasks` 过滤 + Claude 臂。任务 t1–t13：**新增 5 个难任务** t9_expr_eval(递归下降+优先级)/t10_intervals/t11_wildcard(DP)/t12_toposort(环检测)/t13_jsonpath(嵌套+falsy 边界)，grader 均经参考解验证 well-formed + live 5/5 | **整个 `bench/`（纯 Python，零 Rust 冲突）** | 无 |
 
 **冲突热点（只有这几处，纪律）**：`tools.rs`(register 行)、`lib.rs`(mod/export)、`Cargo.toml`(deps)、`cli/main.rs`(接线)。
 **约定**：每条流对这些共享文件只加 **1–2 行**、加在末尾/固定锚点 → 合并是 trivial。
@@ -113,6 +114,7 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
 - 预期校准：这些抬完成率/触达面，**不抬硬推理天花板**（封顶在 deepseek-v4-pro < Fable）。真正上限杠杆=main 换强模型（`DeepSeekProvider` 已 OpenAI 兼容，改 base_url/key/model 零代码）。
 - 残留：`git stash list` 的 `stash@{0}`=会话前 Python 时代 README/config.example 旧改动（已被远程取代，可丢）。
 - MCP on Windows：`Command::new("npx")` 找不到 `.cmd` 脚本；`mcp.toml` 里用 `command="cmd"` + `args=["/c","npx",...]` 才能启动。
+- 编排器 live 坑：`run_in` 给**所有**节点挂全部工具时，强模型在 classify 回合就 apply_patch 把活干了（classify 永不快速返回）→ 已用 `reason()` 无工具修。子任务隐患：分类器保守 + 无 fast_model 时全 pro，high 递归子任务多→跑不完；用 `max_subtasks` 限。要确定性验 high 递归，需 fast_model 或一个 `-o` 强制 complexity 的开关（尚无）。
 
 ## 记忆指针（auto-memory）
 rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · rust-tauri-gui-gotchas · rust-orchestrator-capability
