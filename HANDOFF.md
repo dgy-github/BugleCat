@@ -45,9 +45,17 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   *model is the lever*）。
 - **修了个 live bug**（`21400af`）：失败任务若 timeout→空轨迹，旧逻辑误判"train 全过"停在 gen0；
   现 evaluator 给无轨迹失败合成信号（"timed out"），forge 区分"全过"与"有失败但无信号"。
-- **下一步**：① codex(gpt-5.4) 可用时重跑 `forge --train --teacher codex`（更强教师才可能抬升）；
-  ② M2 小种群/Pareto/lineage 可视化；③ promote 好的 gen_* 进 committed bench/tasks。
-- **已知限制**：强基线把多数任务全过；教师=agent 同模型时几乎不可能自我超越，必须上更强教师。
+- **codex(gpt-5.4) 教师重跑已做**：codex 恢复可用，`forge --train --teacher codex`
+  (train=stable_topo+csv) 全闭环跑通：gen0 1/2 → codex **两轮都提出实质合法变异**
+  (R1 system_prompt 192→663 + read_file/shell/update_plan 扩写；R2 192→866 不同改法) →
+  两轮评测都 **1/2 无提升** → 接受门**均正确拒绝**(+0<margin) → 无回归。耗时 1321s。
+  **结论：即便上 gpt-5.4 强教师，也没抬升 deepseek agent 在这些算法任务上的通过率** ——
+  因为这些 task 的失败是底层推理/效率所致、非 prompt 可修；强力印证 *model is the lever*。
+  框架本身完全正确：强教师真engaged、提出高质量候选、噪声门顶住不伪造提升。
+- **要看到真 lift 需 prompt-可修的失败模式**（如 agent 用错 patch 格式/过早放弃/不先读文件），
+  而非纯算法正确性任务。下一步可造这类"骨架敏感"任务再测；或 M2 搜索增强。
+- **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对
+  "工程习惯门"有效。教师必须比 agent 强，且任务失败须 prompt-可修，才可能抬升。
 - **forge Do-Not**：① 别硬编码 codex 模型名（本机经 CLIProxyAPI 代理=gpt-5.4，`-m gpt-5`→502）；
   ② claude 401 是 rc=0+`is_error:true`，只能按字段判；③ api 地板优先用 `$DEEPSEEK_API_KEY`
   （config 里是 `ark_api_key`，未必对）；④ 自检别用"refuse genome→通过率降"（模型常无视，不可靠），
