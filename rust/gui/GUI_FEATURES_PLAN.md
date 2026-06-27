@@ -24,11 +24,16 @@ required or the app loads the dev URL — see the blank-page gotcha).
 
 ## Phases
 
-- **P1 (this branch, first):** git branches + git diff + session history LIST
-  (read-only display). No bridge. Verifiable by build+launch.
-- **P2:** session resume + fork (bridge Command::{Resume, Fork}).
-- **P3:** file/image upload (bridge Command::Prompt { text, images }).
-- **P4:** orchestrate toggle + plan/usage panels (bridge + shared snapshot).
+- **P1 ✅ DONE (`56301f8`):** git branches + git diff + session history LIST.
+- **Hermes ✅ DONE (`5b9b618`):** project-memory self-evolution panel
+  (memory_list / memory_consolidate / memory_add). LLM-merge still TODO (needs
+  the model via the bridge).
+- **P3 ✅ DONE (`c1c0801`):** file/image upload — tauri-plugin-dialog picker;
+  Command::Prompt { text, images }; images→vision multimodal, files→@mention.
+- **P2 (next):** session resume + fork (bridge Command::{Resume, Fork} seeded
+  from a SessionIndex snapshot; core Session::fork exists).
+- **P4:** orchestrate toggle + plan/usage panels (bridge + shared Arc<Mutex>
+  snapshot of the plan/usage the !Send agent thread holds). Plus Hermes LLM-merge.
 
 ## Notes
 - Frontend is Svelte 5 (runes). Follow App.svelte's existing modal pattern
