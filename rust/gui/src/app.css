@@ -814,6 +814,9 @@ main.app { flex-direction: row; }
 
 .sidebar {
   flex: 0 0 250px;
+  width: 250px;
+  min-width: 0;
+  max-width: 250px;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -861,6 +864,7 @@ main.app { flex-direction: row; }
 .side-recents {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -875,7 +879,7 @@ main.app { flex-direction: row; }
   padding: var(--sp-2) var(--sp-2) var(--sp-1);
 }
 .side-empty { color: var(--ink-3); font-size: var(--fs-sm); padding: 0 var(--sp-2); }
-.recent-item { display: flex; align-items: center; border-radius: var(--r-sm); }
+.recent-item { display: flex; align-items: center; border-radius: var(--r-sm); min-width: 0; }
 .recent-item:hover { background: var(--paper); }
 .recent-main {
   flex: 1 1 auto;
@@ -941,7 +945,7 @@ main.app { flex-direction: row; }
 }
 .foot-gear:hover { background: var(--paper); }
 
-.main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; height: 100vh; }
+.main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; height: 100vh; overflow: hidden; }
 .topbar {
   flex: 0 0 auto;
   display: flex;
