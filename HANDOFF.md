@@ -9,7 +9,7 @@
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
 - 路径：crates `rust/crates/`，GUI `rust/gui/`，基准 `bench/`。
 - 工具链：无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`。
-- ⚠️ **新工作线 `feat/train`**（基于 rust-capability）：ncx-forge 训练框架（`genome.rs` 读 `NCX_GENOME` 覆盖 prompt/工具描述 + `docs(train)` 设计 + `train/DESIGN.md`）。其 main.rs/tools.rs/lib.rs/genome.rs 改动**只在 feat/train**，未回灌 rust-capability。
+- ✅ **`feat/train` 已并入 rust-capability**（merge `a26793b`）：ncx-forge 训练框架全部回灌 —— `genome.rs` 读 `NCX_GENOME` 覆盖 prompt/工具描述、`--dump-genome`/`--from-genome` CLI、`train/` 纯 Python 框架。详见下节 + `train/DESIGN.md`。
 
 ## ncx-forge 训练框架（分支 `feat/train`，已推 origin）— 当前活跃工作线
 目标：让强模型当"教师"迭代优化 agent 骨架（system_prompt + 工具描述），用 bench 通过率当
