@@ -113,6 +113,28 @@ fn get_config_location() -> Result<ConfigLocation, String> {
     config_location()
 }
 
+/// Switch the agent's workspace (the directory it operates on). Sets the process
+/// working directory — which every command resolves against — then reloads the
+/// agent so the new root, its project instructions, memory, and git all apply.
+#[tauri::command]
+fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let p = PathBuf::from(path.trim());
+    if !p.is_dir() {
+        return Err(format!("not a directory: {}", p.display()));
+    }
+    std::env::set_current_dir(&p).map_err(|e| format!("cannot enter {}: {e}", p.display()))?;
+    let _ = state.tx.send(Command::Reload);
+    Ok(p.display().to_string())
+}
+
+/// The current workspace (process working directory).
+#[tauri::command]
+fn get_workspace() -> Result<String, String> {
+    std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn open_config_file() -> Result<(), String> {
     let path = ensure_config_file()?;
@@ -545,7 +567,9 @@ pub fn run() {
             list_sessions,
             memory_list,
             memory_consolidate,
-            memory_add
+            memory_add,
+            set_workspace,
+            get_workspace
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");

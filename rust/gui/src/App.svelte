@@ -76,6 +76,7 @@
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let busy = $state(false);
   let header = $state("connecting…");
+  let workspace = $state("");
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -96,6 +97,7 @@
       switch (p.kind) {
         case "ready":
           header = `${p.model} · ${p.sandbox}`;
+          workspace = p.workspace;
           break;
         case "assistant":
           messages.push({ role: "assistant", text: p.text });
@@ -145,6 +147,18 @@
 
   function removeAttachment(p: string) {
     attached = attached.filter((x) => x !== p);
+  }
+
+  async function chooseWorkspace() {
+    try {
+      const dir = await open({ directory: true, multiple: false });
+      if (!dir || Array.isArray(dir)) return;
+      const set = await invoke<string>("set_workspace", { path: dir });
+      workspace = set;
+      messages.push({ role: "note", text: `Workspace switched to ${set}. Agent reloaded.` });
+    } catch (e) {
+      messages.push({ role: "note", text: `Set workspace failed: ${e}` });
+    }
   }
 
   async function send() {
@@ -387,7 +401,7 @@
     try {
       await loadNotes();
     } catch (e) {
-      messages.push({ role: "note", text: `Hermes load failed: ${e}` });
+      messages.push({ role: "note", text: `Memory load failed: ${e}` });
     }
     hermesBusy = false;
   }
@@ -395,10 +409,10 @@
     hermesBusy = true;
     try {
       const removed = await invoke<number>("memory_consolidate");
-      messages.push({ role: "note", text: `Hermes: folded ${removed} near-duplicate note(s).` });
+      messages.push({ role: "note", text: `Memory: folded ${removed} near-duplicate note(s).` });
       await loadNotes();
     } catch (e) {
-      messages.push({ role: "note", text: `Hermes consolidate failed: ${e}` });
+      messages.push({ role: "note", text: `Memory consolidate failed: ${e}` });
     }
     hermesBusy = false;
   }
@@ -408,12 +422,12 @@
     try {
       const tags = newNoteTags.split(",").map((t) => t.trim()).filter(Boolean);
       const saved = await invoke<boolean>("memory_add", { note: newNote, tags });
-      messages.push({ role: "note", text: saved ? "Hermes: note saved." : "Hermes: already known (not duplicated)." });
+      messages.push({ role: "note", text: saved ? "Memory: note saved." : "Memory: already known (not duplicated)." });
       newNote = "";
       newNoteTags = "";
       await loadNotes();
     } catch (e) {
-      messages.push({ role: "note", text: `Hermes add failed: ${e}` });
+      messages.push({ role: "note", text: `Memory add failed: ${e}` });
     }
     hermesBusy = false;
   }
@@ -430,11 +444,16 @@
   <header>
     <span class="brand">nanocodex</span>
     <span class="meta">{header}</span>
+    {#if workspace}
+      <button class="toolbtn" title={`Workspace: ${workspace}  (click to switch)`} onclick={chooseWorkspace} aria-label="Workspace" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📁 {baseName(workspace)}</button>
+    {:else}
+      <button class="toolbtn" title="Choose workspace" onclick={chooseWorkspace} aria-label="Workspace">📁</button>
+    {/if}
     {#if busy}<span class="spinner" title="working…">●</span>{/if}
     <button class="toolbtn" title="Branches" onclick={openBranches} aria-label="Branches">⎇</button>
     <button class="toolbtn" title="Diff" onclick={openDiff} aria-label="Diff">±</button>
     <button class="toolbtn" title="History" onclick={openHistory} aria-label="History">⌃</button>
-    <button class="toolbtn" title="Hermes (self-evolution memory)" onclick={openHermes} aria-label="Hermes">🧠</button>
+    <button class="toolbtn" title="Project memory" onclick={openHermes} aria-label="Memory">📒</button>
     <button class="gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
     <button class="toolbtn" title="Checkpoints" onclick={openCheckpoints} aria-label="Checkpoints">CP</button>
   </header>
@@ -621,15 +640,15 @@
   {#if hermesOpen}
     <div class="overlay">
       <div class="modal">
-        <h3>Hermes — self-evolution memory</h3>
-        <p class="emptyline">Verified learnings recalled into future sessions as leads. Trigger maintenance to fold near-duplicates.</p>
+        <h3>Project memory</h3>
+        <p class="emptyline">Verified learnings recalled into future sessions as leads. (Harness self-evolution / "Hermes" is a separate feature — see forge.)</p>
         <div class="checkpoint-create">
           <input bind:value={newNote} placeholder="Record a verified learning…" />
           <input bind:value={newNoteTags} placeholder="tags (comma)" style="max-width:140px" />
           <button onclick={addNote} disabled={hermesBusy}>Add</button>
         </div>
         <div class="checkpoint-create">
-          <button onclick={consolidateMemory} disabled={hermesBusy}>Evolve: fold duplicates</button>
+          <button onclick={consolidateMemory} disabled={hermesBusy}>Tidy: fold duplicates</button>
           <button class="plain" onclick={loadNotes} disabled={hermesBusy}>Refresh</button>
           <span class="emptyline">{notes.length} note(s)</span>
         </div>
