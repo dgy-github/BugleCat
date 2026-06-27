@@ -1107,3 +1107,34 @@ main.app { flex-direction: row; }
   color: var(--ink);
   text-align: left;
 }
+
+/* ── File explorer + queued chips ─────────────────────────────────────────── */
+.queued-chip { background: var(--accent-soft); color: var(--accent-deep); }
+.fx-bar { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0; }
+.fx-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.fx-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: var(--ink);
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.55rem;
+  font-weight: 500;
+}
+.fx-row:hover { background: var(--paper-2); }
+.fx-ic { flex: 0 0 1.1rem; }
+.fx-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-go { flex: 0 0 auto; color: var(--ink-3); }

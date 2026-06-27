@@ -582,6 +582,67 @@ fn git_file_diff(path: String) -> Result<String, String> {
     }
 }
 
+#[derive(Serialize)]
+pub struct DirEntry {
+    name: String,
+    path: String, // workspace-relative, forward slashes
+    is_dir: bool,
+}
+
+/// List a directory under the workspace (`rel` = "" for the root). Skips heavy
+/// noise dirs; dirs first, then files, alphabetical.
+#[tauri::command]
+fn list_dir(rel: String) -> Result<Vec<DirEntry>, String> {
+    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
+    let wsc = ws.canonicalize().unwrap_or(ws.clone());
+    let target = if rel.trim().is_empty() {
+        wsc.clone()
+    } else {
+        wsc.join(&rel)
+    };
+    let target = target.canonicalize().map_err(|e| e.to_string())?;
+    if !target.starts_with(&wsc) {
+        return Err("path is outside the workspace".into());
+    }
+    const SKIP: &[&str] = &[".git", "node_modules", "target", ".nanocodex"];
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&target).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if SKIP.contains(&name.as_str()) {
+            continue;
+        }
+        let p = entry.path();
+        let is_dir = p.is_dir();
+        let path = p
+            .strip_prefix(&wsc)
+            .unwrap_or(&p)
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(DirEntry { name, path, is_dir });
+    }
+    out.sort_by(|a, b| {
+        (!a.is_dir, a.name.to_lowercase()).cmp(&(!b.is_dir, b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
+/// Write pasted/clipboard image bytes to a temp file and return its path, so it
+/// can be attached through the normal image pipeline.
+#[tauri::command]
+fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
+    let dir = std::env::temp_dir().join("ncx_gui_paste");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let ext = if ext.trim().is_empty() { "png".into() } else { ext };
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("paste_{n}.{ext}"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn list_sessions() -> Result<Vec<SessionRow>, String> {
     let mut entries = SessionIndex::default().entries();
@@ -687,6 +748,8 @@ pub fn run() {
             git_diff,
             git_changes,
             git_file_diff,
+            list_dir,
+            save_temp_image,
             list_sessions,
             memory_list,
             memory_consolidate,

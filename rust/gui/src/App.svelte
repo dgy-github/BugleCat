@@ -75,7 +75,13 @@
   let messages = $state<Msg[]>([]);
   let input = $state("");
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
+  let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   let busy = $state(false);
+  // File explorer (workspace tree)
+  type DirEntry = { name: string; path: string; is_dir: boolean };
+  let filesOpen = $state(false);
+  let filesPath = $state("");
+  let filesEntries = $state<DirEntry[]>([]);
   let header = $state("connecting…");
   let workspace = $state("");
   let sessionTitle = $state("New session");
@@ -138,6 +144,7 @@
           }
           busy = false;
           refreshSessions();
+          dequeue();
           break;
         case "loaded":
           messages = p.messages.map((m) =>
@@ -171,6 +178,54 @@
     attached = attached.filter((x) => x !== p);
   }
 
+  // Paste an image from the clipboard (Ctrl+V) → temp file → attach.
+  async function handlePaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const it of items) {
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = it.getAsFile();
+        if (!file) continue;
+        try {
+          const buf = new Uint8Array(await file.arrayBuffer());
+          const ext = (it.type.split("/")[1] || "png").replace("jpeg", "jpg");
+          const path = await invoke<string>("save_temp_image", { bytes: Array.from(buf), ext });
+          if (!attached.includes(path)) attached.push(path);
+        } catch (err) {
+          messages.push({ role: "note", text: `Paste image failed: ${err}` });
+        }
+      }
+    }
+  }
+
+  // File explorer over the workspace.
+  async function loadDir(rel: string) {
+    try {
+      filesEntries = await invoke<DirEntry[]>("list_dir", { rel });
+      filesPath = rel;
+    } catch (e) {
+      messages.push({ role: "note", text: `List dir failed: ${e}` });
+    }
+  }
+  async function openFiles() {
+    filesOpen = true;
+    await loadDir("");
+  }
+  function filesUp() {
+    if (!filesPath) return;
+    const parent = filesPath.includes("/") ? filesPath.slice(0, filesPath.lastIndexOf("/")) : "";
+    loadDir(parent);
+  }
+  function pickFile(entry: DirEntry) {
+    if (entry.is_dir) {
+      loadDir(entry.path);
+    } else {
+      input = input ? `${input} @${entry.path}` : `@${entry.path}`;
+      filesOpen = false;
+    }
+  }
+
   async function chooseWorkspace() {
     try {
       const dir = await open({ directory: true, multiple: false });
@@ -183,27 +238,46 @@
     }
   }
 
-  async function send() {
+  async function dispatch(text: string, images: string[], shown: string) {
+    messages.push({ role: "user", text: shown });
+    busy = true;
+    scrollDown();
+    try {
+      await invoke("send_prompt", { text, images });
+    } catch (e) {
+      messages.push({ role: "note", text: `Failed to send: ${e}` });
+      busy = false;
+      dequeue();
+    }
+  }
+  function dequeue() {
+    if (!busy && queued.length > 0) {
+      const next = queued.shift();
+      if (next) dispatch(next.text, next.images, next.shown);
+    }
+  }
+  function send() {
     const text = input.trim();
-    if ((!text && attached.length === 0) || busy) return;
+    if (!text && attached.length === 0) return;
     // Images route through the vision pipeline; other files become @mentions.
     const images = attached.filter(isImage);
     const files = attached.filter((p) => !isImage(p));
     const mentions = files.map((p) => `@${p}`).join(" ");
     const fullText = [text, mentions].filter(Boolean).join("\n");
     const shown = attached.length ? `${text}${text ? "\n" : ""}📎 ${attached.map(baseName).join(", ")}` : text;
-    messages.push({ role: "user", text: shown });
     input = "";
-    const sentImages = images;
+    const imgs = images;
     attached = [];
-    busy = true;
-    scrollDown();
-    try {
-      await invoke("send_prompt", { text: fullText, images: sentImages });
-    } catch (e) {
-      messages.push({ role: "note", text: `Failed to send: ${e}` });
-      busy = false;
+    if (busy) {
+      // Queue up to 2 follow-up turns while the agent works.
+      if (queued.length >= 2) {
+        messages.push({ role: "note", text: "Queue is full (2). Wait for the current turn." });
+        return;
+      }
+      queued.push({ text: fullText, images: imgs, shown });
+      return;
     }
+    dispatch(fullText, imgs, shown);
   }
 
   function onKey(e: KeyboardEvent) {
@@ -526,6 +600,7 @@
     <button class="new-session" onclick={newSession}>＋ New session</button>
 
     <nav class="side-nav">
+      <button class="nav-item" onclick={openFiles}><span class="ni">🗂</span> Files</button>
       <button class="nav-item" onclick={openBranches}><span class="ni">⎇</span> Branches</button>
       <button class="nav-item" onclick={openDiff}><span class="ni">±</span> Diff</button>
       <button class="nav-item" onclick={openHermes}><span class="ni">📒</span> Memory</button>
@@ -618,6 +693,16 @@
           {/if}
         </div>
       </div>
+      {#if queued.length}
+        <div class="attachments">
+          {#each queued as q, i}
+            <span class="chip queued-chip" title={q.shown}>
+              ⏳ {q.shown.split("\n")[0].slice(0, 40)}
+              <button class="chipx" onclick={() => (queued = queued.filter((_, j) => j !== i))} aria-label="Remove">×</button>
+            </span>
+          {/each}
+        </div>
+      {/if}
       {#if attached.length}
         <div class="attachments">
           {#each attached as p}
@@ -633,10 +718,13 @@
         <textarea
           bind:value={input}
           onkeydown={onKey}
-          placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline)"
+          onpaste={handlePaste}
+          placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline; Ctrl+V to paste an image)"
           rows="2"
         ></textarea>
-        <button onclick={send} disabled={busy || (input.trim() === "" && attached.length === 0)}>Send</button>
+        <button onclick={send} disabled={(input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
+          {busy ? "Queue" : "Send"}
+        </button>
       </div>
     </footer>
   </section>
@@ -722,6 +810,33 @@
         </div>
         <div class="abtns">
           <button class="deny" onclick={() => (branchOpen = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if filesOpen}
+    <div class="overlay">
+      <div class="modal modal-wide">
+        <h3>Files <span class="wt-sub">— workspace</span></h3>
+        <div class="fx-bar">
+          <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ Up</button>
+          <code class="fx-path">/{filesPath}</code>
+        </div>
+        <div class="wt-list">
+          {#if filesEntries.length === 0}
+            <p class="emptyline">(empty)</p>
+          {/if}
+          {#each filesEntries as e}
+            <button class="fx-row" onclick={() => pickFile(e)} title={e.is_dir ? "Open folder" : "Insert @mention"}>
+              <span class="fx-ic">{e.is_dir ? "📁" : "📄"}</span>
+              <span class="fx-name">{e.name}</span>
+              {#if e.is_dir}<span class="fx-go">›</span>{/if}
+            </button>
+          {/each}
+        </div>
+        <div class="abtns">
+          <button class="deny" onclick={() => (filesOpen = false)}>Close</button>
         </div>
       </div>
     </div>
