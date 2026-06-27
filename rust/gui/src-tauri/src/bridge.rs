@@ -56,6 +56,12 @@ pub enum Command {
     /// Rebuild the agent from the (just-saved) config — applies model / sandbox
     /// / key changes live. Starts a fresh session.
     Reload,
+    /// Continue a saved session: reseed the agent from its snapshot, keeping the
+    /// same session id (future turns append to it).
+    Resume(String),
+    /// Branch a saved session: reseed a NEW session from the snapshot, leaving
+    /// the source untouched (explore an alternative continuation).
+    Fork(String),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -88,8 +94,18 @@ pub enum UiEvent {
         final_text: String,
         stop_reason: String,
     },
+    /// A session was resumed/forked — the UI should replace its transcript with
+    /// these restored messages.
+    Loaded { messages: Vec<UiMsg> },
     /// Fatal setup/turn error.
     Error { message: String },
+}
+
+/// A restored conversation message for the `loaded` event.
+#[derive(Clone, Serialize)]
+pub struct UiMsg {
+    pub role: String,
+    pub text: String,
 }
 
 fn emit(app: &AppHandle, ev: UiEvent) {
@@ -155,8 +171,12 @@ impl ApprovalHandler for GuiApprover {
 }
 
 /// Build the agent loop and its workspace from the resolved config.
+///
+/// `seed` reseeds the conversation: `(session_id, messages)` — used by Resume
+/// (keep the id) and Fork (a new id). `None` starts a fresh session.
 fn build_agent(
     approver: Rc<dyn ApprovalHandler>,
+    seed: Option<(String, Vec<Value>)>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
     let workspace = std::env::current_dir().ok();
     let overrides = Overrides {
@@ -193,8 +213,16 @@ fn build_agent(
         .with_approver(approver);
     let tools = ToolRegistry::new(ctx);
     let log_path = cfg.workspace.join(".nanocodex").join("session.jsonl");
-    let session_id = new_session_id();
-    let session = Session::with_log(system_prompt, Some(log_path.clone()));
+    let (session_id, session) = match seed {
+        Some((id, messages)) => (
+            id,
+            Session::fork(system_prompt, messages, Some(log_path.clone())),
+        ),
+        None => (
+            new_session_id(),
+            Session::with_log(system_prompt, Some(log_path.clone())),
+        ),
+    };
     let agent = AgentLoop::new(Box::new(provider), tools, session)
         .with_task_budget(task_budget_from_config(&cfg))
         .with_context_edit(context_edit_from_config(&cfg))
@@ -264,7 +292,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     counter: AtomicU64::new(1),
                 });
                 let (mut agent, mut workspace, mut session_id, mut log_path, mut session_index) =
-                    match build_agent(approver.clone()) {
+                    match build_agent(approver.clone(), None) {
                         Ok(v) => v,
                         Err(e) => {
                             emit(&app, UiEvent::Error { message: e });
@@ -301,7 +329,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 },
                             );
                         }
-                        Command::Reload => match build_agent(approver.clone()) {
+                        Command::Reload => match build_agent(approver.clone(), None) {
                             Ok((a, ws, sid, lp, idx)) => {
                                 agent = a;
                                 workspace = ws;
@@ -313,11 +341,98 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             }
                             Err(e) => emit(&app, UiEvent::Error { message: e }),
                         },
+                        Command::Resume(id) | Command::Fork(id)
+                            if session_index.load_snapshot(&id).is_none() =>
+                        {
+                            emit(
+                                &app,
+                                UiEvent::Error {
+                                    message: format!("no saved snapshot for session {id}"),
+                                },
+                            );
+                        }
+                        Command::Resume(id) => {
+                            let msgs = session_index.load_snapshot(&id).unwrap_or_default();
+                            let ui = snapshot_to_ui(&msgs);
+                            match build_agent(approver.clone(), Some((id, msgs))) {
+                                Ok((a, ws, sid, lp, idx)) => {
+                                    agent = a;
+                                    workspace = ws;
+                                    session_id = sid;
+                                    log_path = lp;
+                                    session_index = idx;
+                                    agent.set_event_sink(make_sink(app.clone()));
+                                    emit(&app, UiEvent::Loaded { messages: ui });
+                                    emit_ready(&app, &workspace);
+                                }
+                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                            }
+                        }
+                        Command::Fork(id) => {
+                            let msgs = session_index.load_snapshot(&id).unwrap_or_default();
+                            let ui = snapshot_to_ui(&msgs);
+                            match build_agent(approver.clone(), Some((new_session_id(), msgs))) {
+                                Ok((a, ws, sid, lp, idx)) => {
+                                    agent = a;
+                                    workspace = ws;
+                                    session_id = sid;
+                                    log_path = lp;
+                                    session_index = idx;
+                                    agent.set_event_sink(make_sink(app.clone()));
+                                    emit(&app, UiEvent::Loaded { messages: ui });
+                                    emit_ready(&app, &workspace);
+                                }
+                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                            }
+                        }
                     }
                 }
             });
         })
         .expect("spawn ncx-agent thread");
+}
+
+/// Convert snapshot messages (OpenAI shape) into UI transcript entries for the
+/// `loaded` event. Skips the system message; renders tool calls as a note line.
+fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
+    let mut out = Vec::new();
+    for m in messages {
+        let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        match role {
+            "user" => out.push(UiMsg {
+                role: "user".into(),
+                text: content.to_string(),
+            }),
+            "assistant" => {
+                if !content.trim().is_empty() {
+                    out.push(UiMsg {
+                        role: "assistant".into(),
+                        text: content.to_string(),
+                    });
+                }
+                if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
+                    let names: Vec<String> = calls
+                        .iter()
+                        .filter_map(|c| {
+                            c.get("function")
+                                .and_then(|f| f.get("name"))
+                                .and_then(|n| n.as_str())
+                                .map(String::from)
+                        })
+                        .collect();
+                    if !names.is_empty() {
+                        out.push(UiMsg {
+                            role: "note".into(),
+                            text: format!("⚙ {}", names.join(", ")),
+                        });
+                    }
+                }
+            }
+            _ => {} // skip system + tool-result messages in the transcript
+        }
+    }
+    out
 }
 
 fn save_auto_checkpoint(workspace: &std::path::Path, prompt: &str) {

@@ -16,6 +16,7 @@
     | { kind: "tool_result"; name: string; result: string }
     | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
     | { kind: "done"; final_text: string; stop_reason: string }
+    | { kind: "loaded"; messages: { role: string; text: string }[] }
     | { kind: "error"; message: string };
 
   type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
@@ -123,6 +124,14 @@
           if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
+          busy = false;
+          break;
+        case "loaded":
+          messages = p.messages.map((m) =>
+            m.role === "user" || m.role === "assistant"
+              ? { role: m.role, text: m.text }
+              : { role: "note", text: m.text },
+          );
           busy = false;
           break;
         case "error":
@@ -383,6 +392,27 @@
       messages.push({ role: "note", text: `History load failed: ${e}` });
     }
   }
+  async function resumeSession(id: string) {
+    historyOpen = false;
+    busy = true;
+    try {
+      await invoke("resume_session", { sessionId: id });
+    } catch (e) {
+      busy = false;
+      messages.push({ role: "note", text: `Resume failed: ${e}` });
+    }
+  }
+  async function forkSession(id: string) {
+    historyOpen = false;
+    busy = true;
+    try {
+      await invoke("fork_session", { sessionId: id });
+      messages.push({ role: "note", text: "Forked a new branch from this session." });
+    } catch (e) {
+      busy = false;
+      messages.push({ role: "note", text: `Fork failed: ${e}` });
+    }
+  }
 
   // ── Hermes: project-memory self-evolution ─────────────────────────────────
   type MemoryNote = { ts: number; tags: string[]; text: string };
@@ -620,10 +650,14 @@
                 <strong>{s.title || "(untitled)"}</strong>
                 <code>{s.snippet}</code>
               </div>
+              <div class="session-actions">
+                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={busy || !s.has_snapshot} title="Continue this session">Resume</button>
+                <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="Branch a new conversation from here">⑂ Fork</button>
+              </div>
               <div class="checkpoint-meta">
                 <span>{s.updated_at}</span>
                 <span>{s.user_messages}u / {s.assistant_messages}a / {s.tool_calls}t</span>
-                {#if s.has_snapshot}<span>snapshot</span>{/if}
+                {#if !s.has_snapshot}<span>(no snapshot)</span>{/if}
               </div>
             </div>
           {/each}

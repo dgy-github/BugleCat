@@ -806,3 +806,5 @@ button:disabled {
   }
   main { background: var(--paper); }
 }
+
+.session-actions { display: flex; gap: 0.4rem; align-items: center; }
