@@ -31,7 +31,7 @@ class FakeTeacher(T.TeacherBackend):
         return f"```toml\n{self._toml}\n```"
 
 
-def _mock_eval(genome_path, tasks, repeats, timeout):
+def _mock_eval(genome_path, tasks, repeats, timeout, model=None):
     """t_a is the 'hard' task; t_b always passes. STRONG genome passes both
     (slow); CHEAP genome matches baseline pass-rate but is much faster."""
     content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
@@ -104,7 +104,7 @@ def test_reeval_parents_rescores_surviving_members():
     calls = {"n": 0}
     seen_costs = {}
 
-    def drifting_eval(genome_path, tasks, repeats, timeout):
+    def drifting_eval(genome_path, tasks, repeats, timeout, model=None):
         calls["n"] += 1
         content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
         r = ev.EvalResult(genome=str(genome_path))

@@ -148,7 +148,17 @@ def _parse_tokens(stderr: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[bool, float, str, int]:
+def _agent_cmd(prompt: str, model: str | None) -> list[str]:
+    """bench's nanocodex command, optionally with a base-model override (`-m`)
+    so a WEAKER base agent can be trained (where harness headroom is larger)."""
+    cmd = bench.agent_cmd("nanocodex", prompt)
+    if model:
+        cmd = [cmd[0], "-m", model] + cmd[1:]
+    return cmd
+
+
+def _run_task_once(task: Path, genome_path: str | None, timeout: int,
+                   model: str | None = None) -> tuple[bool, float, str, int]:
     """One (task, genome) attempt. Returns (passed, elapsed_s, trajectory_if_failed, tokens)."""
     prompt = (task / "prompt.txt").read_text(encoding="utf-8")
     ws = Path(tempfile.mkdtemp(prefix=f"forge_{task.name}_"))
@@ -164,7 +174,7 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[b
         tokens = 0
         try:
             proc = subprocess.run(
-                bench.agent_cmd("nanocodex", prompt),
+                _agent_cmd(prompt, model),
                 cwd=str(ws), env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout,
             )
@@ -188,8 +198,9 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[b
 
 
 def evaluate(genome_path: str | None, task_names: list[str] | None,
-             repeats: int = 3, timeout: int = 180) -> EvalResult:
-    """Evaluate a genome (or baseline when None) over the given tasks."""
+             repeats: int = 3, timeout: int = 180, model: str | None = None) -> EvalResult:
+    """Evaluate a genome (or baseline when None) over the given tasks. `model`
+    overrides the agent's base model (e.g. a weaker one with more headroom)."""
     all_tasks = bench.tasks()
     if task_names:
         all_tasks = [t for t in all_tasks if t.name in task_names]
@@ -197,7 +208,7 @@ def evaluate(genome_path: str | None, task_names: list[str] | None,
     for task in all_tasks:
         passes, times, toks, traj = 0, [], [], ""
         for _ in range(max(1, repeats)):
-            ok, elapsed, t, tokens = _run_task_once(task, genome_path, timeout)
+            ok, elapsed, t, tokens = _run_task_once(task, genome_path, timeout, model)
             passes += 1 if ok else 0
             times.append(elapsed)
             if tokens > 0:

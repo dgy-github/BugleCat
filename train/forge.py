@@ -287,7 +287,8 @@ def _objectives(ev_result) -> PA.Objectives:
 def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
            repeats: int, timeout: int, budget_s: float, teachers: str, stamp: str,
            pop_cap: int = 4, test_tasks: list[str] | None = None,
-           from_genome: str | None = None, reeval_parents: bool = True) -> dict:
+           from_genome: str | None = None, reeval_parents: bool = True,
+           model: str | None = None) -> dict:
     """Small-population, multi-objective (Pareto) search (M2).
 
     Maintains a population that is the Pareto front (pass-rate ↑ vs cost ↓),
@@ -324,7 +325,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         gid = "gen0_start" if gen == 0 else new_id(tag)
         path = GENOMES_DIR / f"{stamp}_{gid}.toml"
         genome.save(path)
-        ev_r = ev.evaluate(str(path), train_tasks, repeats, timeout)
+        ev_r = ev.evaluate(str(path), train_tasks, repeats, timeout, model)
         obj = _objectives(ev_r)
         return {"id": gid, "genome": genome, "path": path, "ev": ev_r, "obj": obj,
                 "gen": gen, "parent": parent, "teacher": teacher}
@@ -351,7 +352,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         # draw so a lucky early evaluation can't permanently pin the front.
         if reeval_parents and rnd > 1:
             for m in population:
-                m["ev"] = ev.evaluate(str(m["path"]), train_tasks, repeats, timeout)
+                m["ev"] = ev.evaluate(str(m["path"]), train_tasks, repeats, timeout, model)
                 m["obj"] = _objectives(m["ev"])
             print(f"[forge]   gen{rnd}: re-eval front "
                   f"{[(m['id'], round(m['obj'].passrate, 2), m['obj'].cost) for m in population]}")
@@ -401,8 +402,8 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         print(f"[forge] champion vs baseline:\n{G.diff(baseline, champ['genome'])}")
         if test_tasks:
             base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_start.toml"),
-                                    test_tasks, repeats, timeout)
-            champ_test = ev.evaluate(str(champ_final), test_tasks, repeats, timeout)
+                                    test_tasks, repeats, timeout, model)
+            champ_test = ev.evaluate(str(champ_final), test_tasks, repeats, timeout, model)
             print(f"[forge] FINAL on test {test_tasks}: baseline {base_test.total_passes}/"
                   f"{base_test.total_runs} → champion {champ_test.total_passes}/{champ_test.total_runs}")
             lineage["test"] = {"tasks": test_tasks, "baseline": base_test.total_passes,
@@ -439,6 +440,9 @@ def main() -> int:
     ap.add_argument("--population", action="store_true",
                     help="multi-objective Pareto population search (M2; self-check gates it)")
     ap.add_argument("--pop-cap", type=int, default=4, help="population size cap (--population)")
+    ap.add_argument("--base-model", default="",
+                    help="override the AGENT's base model (e.g. a weaker one with more "
+                         "harness headroom); applies to --population")
     ap.add_argument("--tasks", default="", help="comma-separated task names (for --baseline)")
     ap.add_argument("--train-tasks", default="",
                     help="override train split (comma-separated); default = splits.json train")
@@ -497,7 +501,8 @@ def main() -> int:
         print(f"[forge] splits — train={train_tasks} val={holdout_tasks} test={test_tasks}")
         evolve(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
                a.budget_s, a.teacher, stamp, pop_cap=a.pop_cap, test_tasks=test_tasks,
-               from_genome=(a.from_genome or None), reeval_parents=not a.no_reeval)
+               from_genome=(a.from_genome or None), reeval_parents=not a.no_reeval,
+               model=(a.base_model or None))
         return 0
     print("nothing to do — pass --self-check | --baseline | --train | --population. See train/DESIGN.md")
     return 0

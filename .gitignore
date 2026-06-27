@@ -53,3 +53,4 @@ bench/tasks/gen_*/
 train/genomes/
 train/runs/
 train/splits.json
+train/data/

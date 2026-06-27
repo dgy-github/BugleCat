@@ -343,7 +343,13 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
     lucky 早抽不再钉死 front（4 population 单测）；③ **ncx 吐真 token**：一次性模式 stderr 打
     `[ncx-usage] ... total_tokens=N`，evaluator 解析进 `mean_tokens`，**Pareto cost 优先用真
     token、无则回退 mean_s**（live 验：cost=33515 tokens）。26 Python 单测全过。
-- **M3｜数据导出**：Trajectory Store 成型 + `export.py`，对接未来 GPU 训练。
+- **M3｜数据导出 ✅完成**：`train/export.py` 跑 genome×任务，抓**完整 session 轨迹** + 可验证
+  reward(0/1) + tokens，写 SFT/RL JSONL（schema `ncx-forge-trajectory/v1`：system_prompt /
+  messages / final / reward / tokens / model / genome_id）。`--reward-pass-only` 出 SFT 模仿集；
+  system_prompt 取 genome base（ncx 不 log 系统消息）。3 单测；live 验（reward=1, tokens, 完整 14 轮轨迹）。
+  → 未来有 GPU：reward=1 轨迹做 SFT、全量做 RL(GRPO/PPO，reward=bench 通过)，进化出的 prompt 当系统提示初值。
+- **更弱 base 跑真 lift**：`forge --population --base-model <weak>`（evaluator/forge 加 model 透传，
+  `-m` 注入 ncx）。弱 base（如 deepseek-chat）默认骨架余量更大 → 强教师(codex)更可能抬升。
 
 ## 12. 决策记录（评审已定 2026-06-26）
 
