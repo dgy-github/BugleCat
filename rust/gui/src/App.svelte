@@ -345,8 +345,10 @@
   let branches = $state<BranchInfo[]>([]);
   let newBranch = $state("");
   let branchBusy = $state(false);
+  type FileChange = { path: string; added: number; removed: number; kind: string };
   let diffOpen = $state(false);
-  let diffText = $state("");
+  let diffFiles = $state<FileChange[]>([]);
+  let diffOpenFiles = $state<Record<string, string>>({}); // path -> loaded diff text
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
 
@@ -390,11 +392,25 @@
   }
   async function openDiff() {
     diffOpen = true;
-    diffText = "loading…";
+    diffOpenFiles = {};
     try {
-      diffText = await invoke<string>("git_diff");
+      diffFiles = await invoke<FileChange[]>("git_changes");
     } catch (e) {
-      diffText = `diff failed: ${e}`;
+      diffFiles = [];
+      messages.push({ role: "note", text: `Diff failed: ${e}` });
+    }
+  }
+  async function toggleFile(path: string) {
+    if (path in diffOpenFiles) {
+      const { [path]: _drop, ...rest } = diffOpenFiles;
+      diffOpenFiles = rest;
+      return;
+    }
+    try {
+      const d = await invoke<string>("git_file_diff", { path });
+      diffOpenFiles = { ...diffOpenFiles, [path]: d };
+    } catch (e) {
+      diffOpenFiles = { ...diffOpenFiles, [path]: `diff failed: ${e}` };
     }
   }
   async function refreshSessions() {
@@ -713,9 +729,29 @@
 
   {#if diffOpen}
     <div class="overlay">
-      <div class="modal">
-        <h3>Working-tree diff</h3>
-        <pre style="max-height:60vh;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:12px;text-align:left;background:rgba(0,0,0,0.04);padding:8px;border-radius:6px">{diffText}</pre>
+      <div class="modal modal-wide">
+        <h3>Working tree <span class="wt-sub">— {diffFiles.length} changed file{diffFiles.length === 1 ? "" : "s"}</span></h3>
+        <div class="wt-list">
+          {#if diffFiles.length === 0}
+            <p class="emptyline">No changes in the working tree.</p>
+          {/if}
+          {#each diffFiles as f}
+            <div class="wt-file">
+              <button class="wt-head" onclick={() => toggleFile(f.path)}>
+                <span class="wt-caret">{f.path in diffOpenFiles ? "▾" : "▸"}</span>
+                <span class="wt-kind wt-{f.kind}">{f.kind[0].toUpperCase()}</span>
+                <span class="wt-path">{f.path}</span>
+                <span class="wt-stat">
+                  {#if f.added >= 0}<span class="wt-add">+{f.added}</span>{/if}
+                  {#if f.removed >= 0}<span class="wt-del">-{f.removed}</span>{/if}
+                </span>
+              </button>
+              {#if f.path in diffOpenFiles}
+                <pre class="wt-diff">{diffOpenFiles[f.path]}</pre>
+              {/if}
+            </div>
+          {/each}
+        </div>
         <div class="abtns">
           <button class="plain" onclick={openDiff}>Refresh</button>
           <button class="deny" onclick={() => (diffOpen = false)}>Close</button>

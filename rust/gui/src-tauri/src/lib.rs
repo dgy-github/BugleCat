@@ -497,6 +497,91 @@ fn git_diff() -> Result<String, String> {
     })
 }
 
+#[derive(Serialize)]
+pub struct FileChange {
+    path: String,
+    added: i64,   // -1 = unknown (binary/untracked)
+    removed: i64,
+    kind: String, // modified | added | deleted | renamed | untracked
+}
+
+/// The working-tree change set vs HEAD: one entry per changed file with +/-
+/// line counts (like the reference's working-tree panel).
+#[tauri::command]
+fn git_changes() -> Result<Vec<FileChange>, String> {
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<String, FileChange> = BTreeMap::new();
+    // Tracked changes vs HEAD: added \t removed \t path.
+    if let Ok(numstat) = run_git(&["diff", "HEAD", "--numstat"]) {
+        for line in numstat.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() == 3 {
+                let path = parts[2].trim().to_string();
+                map.insert(
+                    path.clone(),
+                    FileChange {
+                        added: parts[0].parse().unwrap_or(-1),
+                        removed: parts[1].parse().unwrap_or(-1),
+                        kind: "modified".into(),
+                        path,
+                    },
+                );
+            }
+        }
+    }
+    // Status pass: refine kind + add untracked files.
+    if let Ok(st) = run_git(&["status", "--porcelain"]) {
+        for line in st.lines() {
+            if line.len() < 4 {
+                continue;
+            }
+            let code = &line[..2];
+            let path = line[3..].trim().trim_matches('"').to_string();
+            let kind = if code.contains('?') {
+                "untracked"
+            } else if code.contains('A') {
+                "added"
+            } else if code.contains('D') {
+                "deleted"
+            } else if code.contains('R') {
+                "renamed"
+            } else {
+                "modified"
+            };
+            map.entry(path.clone())
+                .and_modify(|f| f.kind = kind.to_string())
+                .or_insert(FileChange {
+                    path,
+                    added: -1,
+                    removed: -1,
+                    kind: kind.to_string(),
+                });
+        }
+    }
+    Ok(map.into_values().collect())
+}
+
+/// The diff for a single file (vs HEAD). Untracked files show their content as
+/// added lines.
+#[tauri::command]
+fn git_file_diff(path: String) -> Result<String, String> {
+    let out = run_git(&["diff", "HEAD", "--", &path]).unwrap_or_default();
+    if !out.trim().is_empty() {
+        return Ok(out);
+    }
+    // Untracked / no tracked diff: show the file content as added lines.
+    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
+    match std::fs::read_to_string(ws.join(&path)) {
+        Ok(c) => Ok(c
+            .lines()
+            .take(500)
+            .map(|l| format!("+{l}"))
+            .collect::<Vec<_>>()
+            .join("\n")),
+        Err(_) => Ok("(no textual diff — binary or unreadable)".into()),
+    }
+}
+
 #[tauri::command]
 fn list_sessions() -> Result<Vec<SessionRow>, String> {
     let mut entries = SessionIndex::default().entries();
@@ -600,6 +685,8 @@ pub fn run() {
             git_create_branch,
             git_switch_branch,
             git_diff,
+            git_changes,
+            git_file_diff,
             list_sessions,
             memory_list,
             memory_consolidate,

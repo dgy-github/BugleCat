@@ -1042,3 +1042,68 @@ main.app { flex-direction: row; }
 .opt-text { display: flex; flex-direction: column; min-width: 0; }
 .opt-name { font-size: var(--fs-sm); }
 .opt-id { font-size: var(--fs-xs); color: var(--ink-3); font-family: var(--font-mono); }
+
+/* ── Working-tree diff panel ──────────────────────────────────────────────── */
+.modal-wide { width: min(820px, 94vw); }
+.wt-sub { font-weight: 400; color: var(--ink-3); font-size: var(--fs-sm); }
+.wt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 66vh;
+  overflow: auto;
+  margin: var(--sp-2) 0;
+}
+.wt-file { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.wt-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  color: var(--ink);
+  border: none;
+  padding: 0.45rem 0.6rem;
+  font-weight: 500;
+}
+.wt-head:hover { background: var(--paper-2); }
+.wt-caret { flex: 0 0 0.8rem; color: var(--ink-3); }
+.wt-kind {
+  flex: 0 0 1.1rem;
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  border-radius: 4px;
+  color: var(--ink-2);
+  background: var(--paper-2);
+}
+.wt-untracked { color: var(--accent); }
+.wt-deleted { color: var(--danger); }
+.wt-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+.wt-stat { flex: 0 0 auto; display: flex; gap: 0.5rem; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.wt-add { color: var(--ok); }
+.wt-del { color: var(--danger); }
+.wt-diff {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--paper-3);
+  color: var(--ink);
+  text-align: left;
+}
