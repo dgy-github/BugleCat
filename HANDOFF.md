@@ -35,9 +35,19 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   **自校验**：参考解过 check×2 + seed 态失败才入库，→ `bench/tasks/gen_*` gitignore) +
   forge 噪声感知接受(每代重评 incumbent + `--accept-margin` + test 末尾打无偏分)。
   live：api 造出 Unicode/ZWJ 重叠子串难任务并入库；trivial 任务被正确拒。6+3+5 单测全过。
-- **下一步 = M2**：小种群/Pareto(通过率×token)/lineage 可视化；或先用 taskgen 批量造题扩 corpus
-  再真跑一轮 `forge --train` 看教师能否在难任务上抬升。
-- **已知限制**：t1–t8 太易，强基线全过；要看教师真抬升须先用 taskgen 扩出更难的 train 集。
+- **临门一脚已做（真能训验证）**：workflow 12 个 Opus 并行造题 → 自校验门 **9/12 入库**
+  （3 个"参考解过不了自己的 check"被正确拒）→ bench 现有 10 个 gen_* 难任务（gitignore）。
+  baseline 扫：deepseek-v4-pro **9/10 全过**（仅 stable_topo 失败）→ 强基线，harness 余量薄。
+  `forge --train`（train=stable_topo）**全闭环跑通**：gen0 0/1 → 教师(api)真提出合法变异
+  (system_prompt 192→748 + web_fetch 描述) → 评测仍 0/1 → 噪声接受门**正确拒绝**(+0<margin) →
+  无回归。**结论：框架真能训**（propose→validate→evaluate→accept 全活、不伪造提升）；本轮教师
+  没抬升，因 codex/claude 当时不可用、教师=agent 同模型 + 硬推理任务 prompt 改不动（印证
+  *model is the lever*）。
+- **修了个 live bug**（`21400af`）：失败任务若 timeout→空轨迹，旧逻辑误判"train 全过"停在 gen0；
+  现 evaluator 给无轨迹失败合成信号（"timed out"），forge 区分"全过"与"有失败但无信号"。
+- **下一步**：① codex(gpt-5.4) 可用时重跑 `forge --train --teacher codex`（更强教师才可能抬升）；
+  ② M2 小种群/Pareto/lineage 可视化；③ promote 好的 gen_* 进 committed bench/tasks。
+- **已知限制**：强基线把多数任务全过；教师=agent 同模型时几乎不可能自我超越，必须上更强教师。
 - **forge Do-Not**：① 别硬编码 codex 模型名（本机经 CLIProxyAPI 代理=gpt-5.4，`-m gpt-5`→502）；
   ② claude 401 是 rc=0+`is_error:true`，只能按字段判；③ api 地板优先用 `$DEEPSEEK_API_KEY`
   （config 里是 `ark_api_key`，未必对）；④ 自检别用"refuse genome→通过率降"（模型常无视，不可靠），
