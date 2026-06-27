@@ -10,6 +10,35 @@
 - 路径：crates `rust/crates/`，GUI `rust/gui/`，基准 `bench/`。
 - 工具链：无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 
+## ncx-forge 训练框架（分支 `feat/train`，已推 origin）— 当前活跃工作线
+目标：让强模型当"教师"迭代优化 agent 骨架（system_prompt + 工具描述），用 bench 通过率当
+fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API。完整设计见 `train/DESIGN.md`。
+
+- **隔离开发**：在独立 worktree `D:/agent_prac/ncx-train` 上做（主 worktree 有并行会话在
+  thrash + 一个 Codex agent 重置 cwd）。接手请 `git worktree add <dir> feat/train` 后在其中干，
+  **用绝对路径 / `git -C` / `--manifest-path`**，别依赖 cwd。
+- **M0a ✅（地基）**：
+  - P1 `NCX_GENOME` 注入（`f1af9ce`）：`ncx-core/src/genome.rs` 读 TOML 覆盖 system_prompt +
+    工具描述；覆盖在注册层应用（`schema_for`/catalog），空 genome **字节等价**。
+  - P2 失败轨迹采集（`train/evaluator.py`）：跑 ncx 注入 genome，从 `<ws>/.nanocodex/session.jsonl`
+    抽 agent 末条消息+工具调用，**剔除 grader 行**（check.py 不外泄）。
+- **M0b ✅（最小闭环）**：
+  - `ncx --dump-genome`（`90d0a20`）吐默认 genome → `train/genome.py` extract-current + 校验
+    (size cap 从基线取) + round-trip。
+  - `train/teacher.py` 可插拔 panel：**codex(GPT，模型从 `~/.codex/config.toml` 解析) + claude
+    (Opus，按 `is_error` 判) + api(DeepSeek 地板)**。npm shim 用 `shutil.which` 解析 `.CMD`。
+  - `train/forge.py`：`--self-check`（sentinel 注入门，确定性）/`--baseline`/`--train`（gen0→
+    每代教师提议→评测→**接受门:train升+holdout不退**→JSON lineage + wall-clock governor）。
+  - **live 验证**：codex(gpt-5.4) 与 api(deepseek) 都真实产出合法候选 genome（动 prompt/澄清
+    shell，**不动 apply_patch**）；forge --train 端到端跑通；接受门 monkeypatch 单测 3/3；P2 单测 5/5。
+- **已知限制**：强基线把 t1–t8 全过 → 真实 `--train` 常 gen0 "fully solved" 即停。要看教师真
+  抬升，需 **M1 更难任务集**。
+- **下一步 = M1**：train/val/test 切分 + TaskGen（自校验造难任务）+ 噪声感知接受准则。
+- **forge Do-Not**：① 别硬编码 codex 模型名（本机经 CLIProxyAPI 代理=gpt-5.4，`-m gpt-5`→502）；
+  ② claude 401 是 rc=0+`is_error:true`，只能按字段判；③ api 地板优先用 `$DEEPSEEK_API_KEY`
+  （config 里是 `ark_api_key`，未必对）；④ 自检别用"refuse genome→通过率降"（模型常无视，不可靠），
+  用 sentinel 注入。
+
 ## 当前状态（已完成，约 225 测试全绿）
 - 6 核心 crate + CLI(`ncx`) + Tauri GUI + **`ncx-mcp`**（MCP stdio 客户端，已接进 agent：McpTool + mcp.toml loader + 启动注册）
 - 工具：read_file·apply_patch·shell·update_plan·grep·glob·web_search·web_fetch·tool_search·remember·skill
