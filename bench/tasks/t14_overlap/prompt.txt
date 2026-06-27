@@ -1,0 +1,20 @@
+Create a file named `overlap.py` containing a function `find_overlapping(text: str, pattern: str) -> list`.
+The function must return a list of all starting indices (0‑based) of occurrences of `pattern` in `text`. Occurrences **may overlap**.
+
+**Requirements:**
+- `pattern` is a non‑empty string.
+- Return an empty list when no occurrence exists.
+- The indices in the returned list must be strictly increasing.
+- Handle any valid Unicode string (including emoji, combining characters, etc.). Python’s string indexing works on code points; your function must treat the strings as sequences of code points.
+- Do not use any external libraries; only standard Python.
+
+**Example (overlap):**
+`find_overlapping("ABABA", "ABA")` returns `[0, 2]`
+
+**Edge cases to handle correctly:**
+- Empty `text` (returns `[]`).
+- `pattern` longer than `text` (returns `[]`).
+- Overlapping matches (e.g., `text="aaaa", pattern="aa"` → `[0,1,2]`).
+- Unicode characters beyond ASCII (e.g., `text="😊😊", pattern="😊"` → `[0,1]`).
+
+Put the implementation in `overlap.py` and write nothing else.

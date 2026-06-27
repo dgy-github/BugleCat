@@ -1,0 +1,14 @@
+Create a file `solution.py` containing a function `rank_scores(scores)`.
+
+`scores` is a list of `(name, score)` tuples. Return a new list of dicts, one per entry, sorted by `score` descending (ties broken by `name` ascending), where each dict has keys `name`, `score`, and `rank` (1-based position after sorting).
+
+Example:
+    rank_scores([("bob", 30), ("amy", 30), ("cara", 50), ("dan", 10)])
+    # -> [
+    #   {"name": "cara", "score": 50, "rank": 1},
+    #   {"name": "amy",  "score": 30, "rank": 2},
+    #   {"name": "bob",  "score": 30, "rank": 3},
+    #   {"name": "dan",  "score": 10, "rank": 4},
+    # ]
+
+The caller may reuse the list it passes in, so `rank_scores` should leave the original `scores` list untouched.

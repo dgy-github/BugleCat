@@ -1,0 +1,34 @@
+Create a file named `lineparser.py` implementing a single-line CSV-style field parser.
+
+Define:
+
+1. A class `ParseError(ValueError)`.
+
+2. A function with this exact signature:
+
+       def parse_line(line: str, delimiter: str = ",", quote: str = '"') -> list[str]:
+
+It parses ONE already-stripped line (no trailing newline handling required) into a list of field strings, following these rules:
+
+Configuration validation (raise `ParseError` before parsing anything):
+- `delimiter` must be exactly one character, else raise `ParseError`.
+- `quote` must be exactly one character, else raise `ParseError`.
+- `delimiter` and `quote` must be different characters, else raise `ParseError`.
+
+Field splitting:
+- Fields are separated by `delimiter`.
+- An empty input string `""` returns `[]` (no fields at all).
+- A line consisting only of delimiters yields that many + 1 empty fields, e.g. `","` -> `["", ""]`, `",,"` -> `["", "", ""]`. A trailing delimiter produces a trailing empty field, e.g. `"a,"` -> `["a", ""]`.
+- Whitespace is significant and must NOT be trimmed: `" a , b "` -> `[" a ", " b "]`.
+
+Quoting:
+- A field MAY be wrapped in `quote` characters. A quote is only special when it appears at the very START of a field (i.e. immediately after a delimiter or at the start of the line). Inside a quoted field, the `delimiter` is treated as literal data: `'"a,b",c'` -> `["a,b", "c"]`.
+- Inside a quoted field, two consecutive `quote` characters are an escaped literal quote: `'"a""b"'` -> `['a"b']`, and `'""""'` -> `['"']`.
+- An empty quoted field is valid: `'""'` -> `[""]`.
+- After a quoted field's closing quote, the only valid next character is a `delimiter` (or end of line). Any other character raises `ParseError` (e.g. `'"a"b'` and `'"a" b'`).
+
+Errors (raise `ParseError`):
+- An unterminated quoted field (a quote opens but never closes), e.g. `'"abc'`, `'"a,b'`, `'"a""'`.
+- A `quote` character appearing in the middle of an unquoted field, e.g. `'a"b'`, `'ab"c"'`.
+
+All examples above must hold for the default delimiter/quote and for custom ones, e.g. `parse_line("'it''s';ok", delimiter=";", quote="'")` -> `["it's", "ok"]`.

@@ -1,0 +1,16 @@
+Create a file named `running_stats.py` defining a class `RunningStats` that maintains a multiset of real numbers (int/float) and answers order statistics queries with EXACT results. It must support insertion, removal, and queries efficiently.
+
+Required API:
+
+- `__init__(self)`: start empty.
+- `add(self, x)`: insert one occurrence of `x`. `x` must be an `int` or `float`. Reject `bool` and any non-real value by raising `TypeError` (note: in Python `bool` is a subclass of `int`, so `True`/`False` must be rejected). Maintain sorted order internally.
+- `remove(self, x)`: remove ONE occurrence of `x`. If `x` is not currently present, raise `KeyError(x)`.
+- `__len__(self)`: number of elements currently stored (counting duplicates).
+- `count(self, x)`: number of stored occurrences equal to `x` (0 if absent).
+- `total(self)`: exact running sum of all stored elements. On an empty structure return `0`.
+- `mean(self)`: arithmetic mean. Raise `ValueError` if empty.
+- `median(self)`: the exact median. For an odd number of elements `n`, return the middle element (the element at sorted index `n // 2`). For an even count, return the average of the two middle elements `(data[n//2 - 1] + data[n//2]) / 2`. Raise `ValueError` if empty.
+- `quantile(self, q)`: the value at quantile `q` for `0.0 <= q <= 1.0`, using linear interpolation between closest ranks. Define `pos = q * (n - 1)`, let `lo = floor(pos)` and `frac = pos - lo`; return `data[lo] + (data[lo + 1] - data[lo]) * frac`, clamping to the last element when `lo + 1 >= n`. For a single element, every quantile returns that element. Raise `ValueError` if `q` is outside `[0.0, 1.0]` or if the structure is empty.
+- `rank(self, x)`: the number of stored elements strictly less than `x` (i.e. the leftmost sorted insertion position of `x`). Works for values not present.
+
+All queries must reflect the current contents after any sequence of `add`/`remove`. `total()` must stay exact across mixed add/remove sequences. `quantile(0.5)` must agree with `median()` whenever both are defined.

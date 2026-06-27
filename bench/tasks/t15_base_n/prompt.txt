@@ -1,0 +1,30 @@
+Create a file named `basen.py` exposing two functions for converting between integers and their string representations in an arbitrary base.
+
+## `to_base(n: int, base: int) -> str`
+
+Return the representation of integer `n` in the given `base`.
+
+- `base` must be an int with `2 <= base <= 36`; otherwise raise `ValueError`.
+- Digits are `0-9` then `a-z` (lowercase) for digit values 10..35. So base 16 uses `0123456789abcdef`, base 36 uses `0..9` then `a..z`.
+- `n == 0` must return the single string `"0"` (never `""`).
+- Negative `n` must be prefixed with a single `"-"` (e.g. `to_base(-255, 16) == "-ff"`). Note `to_base(0, ...)` is `"0"` with no sign.
+- The result must have NO leading zeros (other than the lone `"0"` for zero itself) and NO `"+"` sign.
+- `n` must be an int (and not a bool); if `n` is not an int, raise `TypeError`. (In Python `bool` is a subclass of `int`; reject `True`/`False` with `TypeError`.)
+
+## `from_base(s: str, base: int) -> int`
+
+Parse string `s` as an integer written in the given `base` and return the int.
+
+- `base` must be an int with `2 <= base <= 36`; otherwise raise `ValueError`.
+- `s` must be a `str`; otherwise raise `TypeError`.
+- Parsing is case-insensitive: `"FF"`, `"ff"`, and `"Ff"` in base 16 all equal 255.
+- An optional leading `"+"` or `"-"` sign is allowed (exactly one sign char at most). A lone `"-"` or `"+"` with no digits is invalid.
+- Surrounding ASCII whitespace must be stripped before parsing (e.g. `"  ff  "` is valid). Internal whitespace is invalid.
+- Leading zeros are allowed and ignored in value (e.g. `"00ff"` base 16 == 255, `"-007"` base 8 == -7).
+- Empty string (or whitespace-only) is invalid.
+- Any character that is not a valid digit for the given base must raise `ValueError`. For example `"g"` is invalid in base 16, and `"2"` is invalid in base 2. Digit characters beyond the base's range (a valid digit char but value >= base) are also invalid.
+- All raised errors for malformed input or out-of-range digits must be `ValueError`; wrong-type inputs (`s` not a str, or `base` not an int) must be `TypeError`. Note: a `bool` base must raise `TypeError` (bool is not an accepted int here).
+
+## Round-trip guarantee
+
+For any int `n` and valid `base`, `from_base(to_base(n, base), base) == n` must hold exactly.
