@@ -16,7 +16,7 @@ use ncx_config::{
     load_config, write_nanocodex_config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
 };
-use ncx_core::{CheckpointMeta, CheckpointStore, RestoreReport};
+use ncx_core::{CheckpointMeta, CheckpointStore, RestoreReport, SessionIndex};
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -344,6 +344,111 @@ fn restore_view(report: RestoreReport) -> RestoreView {
     }
 }
 
+// ── Phase 1: git branches + diff + session history (no agent-thread bridge) ────
+
+#[derive(Serialize)]
+pub struct BranchInfo {
+    name: String,
+    current: bool,
+}
+
+#[derive(Serialize)]
+pub struct SessionRow {
+    session_id: String,
+    title: String,
+    snippet: String,
+    user_messages: usize,
+    assistant_messages: usize,
+    tool_calls: usize,
+    updated_at: String,
+    has_snapshot: bool,
+}
+
+/// Run a git command in the workspace; Ok(stdout) or Err(stderr).
+fn run_git(args: &[&str]) -> Result<String, String> {
+    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
+    let out = ProcessCommand::new("git")
+        .args(args)
+        .current_dir(&ws)
+        .output()
+        .map_err(|e| format!("failed to run git: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() {
+            format!("git {args:?} failed")
+        } else {
+            err
+        });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+#[tauri::command]
+fn git_branches() -> Result<Vec<BranchInfo>, String> {
+    let current = run_git(&["rev-parse", "--abbrev-ref", "HEAD"])?
+        .trim()
+        .to_string();
+    let listing = run_git(&["branch", "--format=%(refname:short)"])?;
+    Ok(listing
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|name| BranchInfo {
+            current: name == current,
+            name: name.to_string(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn git_create_branch(name: String) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("branch name is required".into());
+    }
+    run_git(&["checkout", "-b", name]).map(|_| ())
+}
+
+#[tauri::command]
+fn git_switch_branch(name: String) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("branch name is required".into());
+    }
+    run_git(&["checkout", name]).map(|_| ())
+}
+
+/// The working-tree diff vs HEAD (staged + unstaged) for the diff panel.
+#[tauri::command]
+fn git_diff() -> Result<String, String> {
+    let out = run_git(&["diff", "HEAD"])?;
+    Ok(if out.trim().is_empty() {
+        "(no changes in the working tree)".into()
+    } else {
+        out
+    })
+}
+
+#[tauri::command]
+fn list_sessions() -> Result<Vec<SessionRow>, String> {
+    let mut entries = SessionIndex::default().entries();
+    entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)); // newest first
+    Ok(entries
+        .into_iter()
+        .take(50)
+        .map(|s| SessionRow {
+            session_id: s.session_id,
+            title: s.title,
+            snippet: s.snippet,
+            user_messages: s.user_messages,
+            assistant_messages: s.assistant_messages,
+            tool_calls: s.tool_calls,
+            updated_at: s.updated_at,
+            has_snapshot: s.has_snapshot,
+        })
+        .collect())
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -368,7 +473,12 @@ pub fn run() {
             open_config_dir,
             get_checkpoints,
             create_checkpoint,
-            restore_checkpoint
+            restore_checkpoint,
+            git_branches,
+            git_create_branch,
+            git_switch_branch,
+            git_diff,
+            list_sessions
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");

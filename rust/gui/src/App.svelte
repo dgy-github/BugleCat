@@ -263,6 +263,83 @@
     }
     checkpointBusy = false;
   }
+
+  // ── Phase 1: git branches, diff, session history ──────────────────────────
+  type BranchInfo = { name: string; current: boolean };
+  type SessionRow = {
+    session_id: string;
+    title: string;
+    snippet: string;
+    user_messages: number;
+    assistant_messages: number;
+    tool_calls: number;
+    updated_at: string;
+    has_snapshot: boolean;
+  };
+  let branchOpen = $state(false);
+  let branches = $state<BranchInfo[]>([]);
+  let newBranch = $state("");
+  let branchBusy = $state(false);
+  let diffOpen = $state(false);
+  let diffText = $state("");
+  let historyOpen = $state(false);
+  let sessions = $state<SessionRow[]>([]);
+
+  async function loadBranches() {
+    branches = await invoke<BranchInfo[]>("git_branches");
+  }
+  async function openBranches() {
+    branchOpen = true;
+    branchBusy = true;
+    try {
+      await loadBranches();
+    } catch (e) {
+      messages.push({ role: "note", text: `Branches load failed: ${e}` });
+    }
+    branchBusy = false;
+  }
+  async function createBranch() {
+    if (!newBranch.trim()) return;
+    branchBusy = true;
+    try {
+      await invoke("git_create_branch", { name: newBranch });
+      messages.push({ role: "note", text: `Created and switched to branch ${newBranch}.` });
+      newBranch = "";
+      await loadBranches();
+    } catch (e) {
+      messages.push({ role: "note", text: `Create branch failed: ${e}` });
+    }
+    branchBusy = false;
+  }
+  async function switchBranch(name: string) {
+    if (branchBusy) return;
+    branchBusy = true;
+    try {
+      await invoke("git_switch_branch", { name });
+      messages.push({ role: "note", text: `Switched to branch ${name}.` });
+      await loadBranches();
+    } catch (e) {
+      messages.push({ role: "note", text: `Switch failed: ${e}` });
+    }
+    branchBusy = false;
+  }
+  async function openDiff() {
+    diffOpen = true;
+    diffText = "loading…";
+    try {
+      diffText = await invoke<string>("git_diff");
+    } catch (e) {
+      diffText = `diff failed: ${e}`;
+    }
+  }
+  async function openHistory() {
+    historyOpen = true;
+    try {
+      sessions = await invoke<SessionRow[]>("list_sessions");
+    } catch (e) {
+      messages.push({ role: "note", text: `History load failed: ${e}` });
+    }
+  }
 </script>
 
 <main>
@@ -270,6 +347,9 @@
     <span class="brand">nanocodex</span>
     <span class="meta">{header}</span>
     {#if busy}<span class="spinner" title="working…">●</span>{/if}
+    <button class="toolbtn" title="Branches" onclick={openBranches} aria-label="Branches">⎇</button>
+    <button class="toolbtn" title="Diff" onclick={openDiff} aria-label="Diff">±</button>
+    <button class="toolbtn" title="History" onclick={openHistory} aria-label="History">⌃</button>
     <button class="gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
     <button class="toolbtn" title="Checkpoints" onclick={openCheckpoints} aria-label="Checkpoints">CP</button>
   </header>
@@ -360,6 +440,80 @@
         </div>
         <div class="abtns">
           <button class="deny" onclick={() => (checkpointOpen = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if branchOpen}
+    <div class="overlay">
+      <div class="modal">
+        <h3>Git branches</h3>
+        <div class="checkpoint-create">
+          <input bind:value={newBranch} placeholder="new-branch-name" />
+          <button onclick={createBranch} disabled={branchBusy}>Create &amp; switch</button>
+          <button class="plain" onclick={loadBranches} disabled={branchBusy}>Refresh</button>
+        </div>
+        <div class="checkpoint-list">
+          {#if branches.length === 0}
+            <p class="emptyline">No branches.</p>
+          {/if}
+          {#each branches as b}
+            <div class="checkpoint-row">
+              <div class="checkpoint-main">
+                <strong>{b.current ? "● " : ""}{b.name}</strong>
+              </div>
+              <button class="restore" onclick={() => switchBranch(b.name)} disabled={branchBusy || b.current}>
+                {b.current ? "current" : "Switch"}
+              </button>
+            </div>
+          {/each}
+        </div>
+        <div class="abtns">
+          <button class="deny" onclick={() => (branchOpen = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if diffOpen}
+    <div class="overlay">
+      <div class="modal">
+        <h3>Working-tree diff</h3>
+        <pre style="max-height:60vh;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:12px;text-align:left;background:rgba(0,0,0,0.04);padding:8px;border-radius:6px">{diffText}</pre>
+        <div class="abtns">
+          <button class="plain" onclick={openDiff}>Refresh</button>
+          <button class="deny" onclick={() => (diffOpen = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if historyOpen}
+    <div class="overlay">
+      <div class="modal">
+        <h3>Session history</h3>
+        <div class="checkpoint-list">
+          {#if sessions.length === 0}
+            <p class="emptyline">No saved sessions.</p>
+          {/if}
+          {#each sessions as s}
+            <div class="checkpoint-row">
+              <div class="checkpoint-main">
+                <strong>{s.title || "(untitled)"}</strong>
+                <code>{s.snippet}</code>
+              </div>
+              <div class="checkpoint-meta">
+                <span>{s.updated_at}</span>
+                <span>{s.user_messages}u / {s.assistant_messages}a / {s.tool_calls}t</span>
+                {#if s.has_snapshot}<span>snapshot</span>{/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+        <div class="abtns">
+          <button class="plain" onclick={openHistory}>Refresh</button>
+          <button class="deny" onclick={() => (historyOpen = false)}>Close</button>
         </div>
       </div>
     </div>
