@@ -127,6 +127,15 @@ fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<Stri
     Ok(p.display().to_string())
 }
 
+/// Change the approval policy live (no session reset) + persist it.
+#[tauri::command]
+fn set_approval(policy: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::SetApproval(policy))
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
 fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -599,7 +608,8 @@ pub fn run() {
             get_workspace,
             resume_session,
             fork_session,
-            new_session
+            new_session,
+            set_approval
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");

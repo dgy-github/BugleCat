@@ -965,3 +965,36 @@ main.app { flex-direction: row; }
   gap: var(--sp-3);
 }
 .empty-mark { font-size: 2rem; color: var(--accent); opacity: 0.55; }
+
+/* ── Sidebar collapse + topbar toggle ────────────────────────────────────── */
+.sidebar.collapsed { display: none; }
+.collapse {
+  flex: 0 0 auto;
+  background: none;
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.28rem 0.45rem;
+}
+.collapse:hover { background: var(--paper); color: var(--ink); }
+
+/* ── Approval policy pill (composer) ─────────────────────────────────────── */
+.composer-meta { display: flex; align-items: center; gap: var(--sp-2); }
+.approval-pill {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-pill);
+  padding: 0.2rem 0.7rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.approval-pill:hover { filter: brightness(0.97); }
+.approval-pill.danger {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}

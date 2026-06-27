@@ -79,6 +79,9 @@
   let header = $state("connecting…");
   let workspace = $state("");
   let sessionTitle = $state("New session");
+  let sidebarOpen = $state(true);
+  let approvalPolicy = $state("on-request");
+  const APPROVALS = ["untrusted", "on-failure", "on-request", "never"];
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -88,8 +91,9 @@
   onMount(async () => {
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
-      const s = await invoke<{ model: string; sandbox: string }>("get_status");
+      const s = await invoke<{ model: string; sandbox: string; approval: string }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
+      approvalPolicy = s.approval;
     } catch (e) {
       header = "config error";
     }
@@ -394,6 +398,19 @@
       /* index may not exist yet */
     }
   }
+  async function cycleApproval() {
+    const i = APPROVALS.indexOf(approvalPolicy);
+    const next = APPROVALS[(i + 1) % APPROVALS.length];
+    approvalPolicy = next;
+    try {
+      await invoke("set_approval", { policy: next });
+    } catch (e) {
+      messages.push({ role: "note", text: `Set approval failed: ${e}` });
+    }
+  }
+  function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+  }
   async function newSession() {
     messages = [];
     sessionTitle = "New session";
@@ -482,7 +499,7 @@
 </script>
 
 <main class="app">
-  <aside class="sidebar">
+  <aside class="sidebar" class:collapsed={!sidebarOpen}>
     <div class="side-brand">nanocodex</div>
     <button class="new-session" onclick={newSession}>＋ New session</button>
 
@@ -520,6 +537,7 @@
 
   <section class="main">
     <header class="topbar">
+      <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label="Toggle sidebar">▣</button>
       <span class="title">{sessionTitle}</span>
       <span class="meta">{header}</span>
       {#if busy}<span class="spinner" title="working…">●</span>{/if}
@@ -554,6 +572,12 @@
     </div>
 
     <footer>
+      <div class="composer-meta">
+        <button class="approval-pill" class:danger={approvalPolicy === "never"} onclick={cycleApproval}
+          title="Approval policy — click to cycle (untrusted → on-failure → on-request → never)">
+          🛡 {approvalPolicy}
+        </button>
+      </div>
       {#if attached.length}
         <div class="attachments">
           {#each attached as p}

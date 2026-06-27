@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ncx_config::{load_config, Config, Overrides};
+use ncx_config::{load_config, write_nanocodex_config, Config, ConfigPaths, Overrides};
 use ncx_core::{
     discover_skills, expand_file_mentions, load_workspace_instructions, new_session_id,
     skills_index_block, AgentLoop, ApprovalHandler,
@@ -62,6 +62,8 @@ pub enum Command {
     /// Branch a saved session: reseed a NEW session from the snapshot, leaving
     /// the source untouched (explore an alternative continuation).
     Fork(String),
+    /// Change the approval policy live (no session reset) + persist it.
+    SetApproval(String),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -384,6 +386,13 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 }
                                 Err(e) => emit(&app, UiEvent::Error { message: e }),
                             }
+                        }
+                        Command::SetApproval(policy) => {
+                            // Live update — no session reset — and persist it.
+                            agent.tools.ctx.approval_policy = policy.clone();
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("approval_policy", policy.as_str());
+                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                         }
                     }
                 }
