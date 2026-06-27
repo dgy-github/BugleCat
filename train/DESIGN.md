@@ -318,7 +318,17 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
     非法候选跳过，3/3）。
   - 注：强基线把 t1–t8 全过 → 真实跑常在 gen0 "fully solved" 停；要看教师真改进，需 M1 的更难
     任务集（或从退化 genome 起训）。
-- **M1｜抗过拟合**：train/val/test 切分 + TaskGen（自校验）+ 保守接受准则。
+- **M1｜抗过拟合 ✅完成**：
+  - `splits.py`：任务级 train/val/test 切分（`splits.json` 真相源，确定性派生、加任务稳定）。
+    forge 在 train 评分、val 接受门、test 末尾打一次分。
+  - `taskgen.py`：教师以严格 JSON 造 Python 任务，**自校验**才入库 —— 参考解过 check（跑两次
+    防 flaky）+ 起始/seed 态**失败**（证明有真活干）；grader 不给 agent。入 `bench/tasks/gen_*`
+    （gitignore，审查后再 promote）。
+  - forge 噪声感知接受：每代**重评 incumbent**（新噪声抽样）+ 候选须超 `--accept-margin`（非 +0）；
+    test 集末尾打一次无偏分。
+  - 验证：6 taskgen + 3 forge + 5 evaluator 单测全过；**live**：api(deepseek) 造出一个含
+    Unicode 预/分解 + emoji ZWJ 的重叠子串难任务、自校验入库；一个 trivial "修 bug" 任务被
+    "seed already passes" 正确拒绝 —— 两条门都点火。
 - **M2｜搜索增强**：小种群 / Pareto（通过率×token）/ lineage 可视化。
 - **M3｜数据导出**：Trajectory Store 成型 + `export.py`，对接未来 GPU 训练。
 

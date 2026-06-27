@@ -31,9 +31,13 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
     每代教师提议→评测→**接受门:train升+holdout不退**→JSON lineage + wall-clock governor）。
   - **live 验证**：codex(gpt-5.4) 与 api(deepseek) 都真实产出合法候选 genome（动 prompt/澄清
     shell，**不动 apply_patch**）；forge --train 端到端跑通；接受门 monkeypatch 单测 3/3；P2 单测 5/5。
-- **已知限制**：强基线把 t1–t8 全过 → 真实 `--train` 常 gen0 "fully solved" 即停。要看教师真
-  抬升，需 **M1 更难任务集**。
-- **下一步 = M1**：train/val/test 切分 + TaskGen（自校验造难任务）+ 噪声感知接受准则。
+- **M1 ✅（抗过拟合，`4e36738`）**：`splits.py`(task 级 train/val/test) + `taskgen.py`(教师造题，
+  **自校验**：参考解过 check×2 + seed 态失败才入库，→ `bench/tasks/gen_*` gitignore) +
+  forge 噪声感知接受(每代重评 incumbent + `--accept-margin` + test 末尾打无偏分)。
+  live：api 造出 Unicode/ZWJ 重叠子串难任务并入库；trivial 任务被正确拒。6+3+5 单测全过。
+- **下一步 = M2**：小种群/Pareto(通过率×token)/lineage 可视化；或先用 taskgen 批量造题扩 corpus
+  再真跑一轮 `forge --train` 看教师能否在难任务上抬升。
+- **已知限制**：t1–t8 太易，强基线全过；要看教师真抬升须先用 taskgen 扩出更难的 train 集。
 - **forge Do-Not**：① 别硬编码 codex 模型名（本机经 CLIProxyAPI 代理=gpt-5.4，`-m gpt-5`→502）；
   ② claude 401 是 rc=0+`is_error:true`，只能按字段判；③ api 地板优先用 `$DEEPSEEK_API_KEY`
   （config 里是 `ark_api_key`，未必对）；④ 自检别用"refuse genome→通过率降"（模型常无视，不可靠），
