@@ -998,3 +998,47 @@ main.app { flex-direction: row; }
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
+
+/* ── Approval dropdown menu ───────────────────────────────────────────────── */
+.approval-wrap { position: relative; display: inline-block; }
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  background: none;
+  border: none;
+  z-index: 30;
+  cursor: default;
+}
+.approval-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 31;
+  min-width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-3);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.approval-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: var(--ink);
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.55rem;
+  font-weight: 500;
+}
+.approval-opt:hover { background: var(--paper-2); }
+.opt-check { flex: 0 0 1rem; color: var(--accent); font-weight: 700; }
+.opt-text { display: flex; flex-direction: column; min-width: 0; }
+.opt-name { font-size: var(--fs-sm); }
+.opt-id { font-size: var(--fs-xs); color: var(--ink-3); font-family: var(--font-mono); }

@@ -81,7 +81,13 @@
   let sessionTitle = $state("New session");
   let sidebarOpen = $state(true);
   let approvalPolicy = $state("on-request");
-  const APPROVALS = ["untrusted", "on-failure", "on-request", "never"];
+  let approvalMenuOpen = $state(false);
+  const APPROVAL_OPTS = [
+    { id: "untrusted", label: "Ask for everything", desc: "approve every command" },
+    { id: "on-failure", label: "Run, ask on failure", desc: "retry escalated only if sandbox fails" },
+    { id: "on-request", label: "Ask when needed", desc: "prompt only for escalations (default)" },
+    { id: "never", label: "Never escalate", desc: "stay in the sandbox; most restrictive" },
+  ];
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -398,12 +404,12 @@
       /* index may not exist yet */
     }
   }
-  async function cycleApproval() {
-    const i = APPROVALS.indexOf(approvalPolicy);
-    const next = APPROVALS[(i + 1) % APPROVALS.length];
-    approvalPolicy = next;
+  async function selectApproval(policy: string) {
+    approvalMenuOpen = false;
+    if (policy === approvalPolicy) return;
+    approvalPolicy = policy;
     try {
-      await invoke("set_approval", { policy: next });
+      await invoke("set_approval", { policy });
     } catch (e) {
       messages.push({ role: "note", text: `Set approval failed: ${e}` });
     }
@@ -573,10 +579,28 @@
 
     <footer>
       <div class="composer-meta">
-        <button class="approval-pill" class:danger={approvalPolicy === "never"} onclick={cycleApproval}
-          title="Approval policy — click to cycle (untrusted → on-failure → on-request → never)">
-          🛡 {approvalPolicy}
-        </button>
+        <div class="approval-wrap">
+          <button class="approval-pill" class:danger={approvalPolicy === "never"}
+            onclick={() => (approvalMenuOpen = !approvalMenuOpen)}
+            title="Approval policy">
+            🛡 {approvalPolicy} ▾
+          </button>
+          {#if approvalMenuOpen}
+            <button class="menu-backdrop" aria-label="Close" onclick={() => (approvalMenuOpen = false)}></button>
+            <div class="approval-menu" role="menu">
+              {#each APPROVAL_OPTS as opt}
+                <button class="approval-opt" role="menuitemradio" aria-checked={approvalPolicy === opt.id}
+                  onclick={() => selectApproval(opt.id)}>
+                  <span class="opt-check">{approvalPolicy === opt.id ? "✓" : ""}</span>
+                  <span class="opt-text">
+                    <span class="opt-name">{opt.label}</span>
+                    <span class="opt-id">{opt.id} — {opt.desc}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
       {#if attached.length}
         <div class="attachments">
