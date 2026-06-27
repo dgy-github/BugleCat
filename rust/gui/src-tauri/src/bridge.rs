@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
-    discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
+    discover_skills, expand_file_mentions, load_workspace_instructions, new_session_id,
     skills_index_block, AgentLoop, ApprovalHandler,
     ApprovalRequest, CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Provider, Session,
     SessionIndex, TaskBudget, ToolContext, ToolRegistry,
@@ -177,7 +177,9 @@ fn build_agent(
         .with_network_access(cfg.network_access);
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     let recall = memory.recall("", 8, 4000); // recency at session start (no task yet)
-    let instructions = load_project_instructions(&cfg.workspace, 16_000);
+    // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
+    // files (their handoff protocol would make a plain "hi" read HANDOFF.md etc.).
+    let instructions = load_workspace_instructions(&cfg.workspace, 16_000);
     let skills = discover_skills(&cfg.workspace);
     let skills_index = skills_index_block(&skills);
     let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index]);

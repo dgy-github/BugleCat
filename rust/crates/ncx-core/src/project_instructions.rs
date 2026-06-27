@@ -21,6 +21,17 @@ pub fn load_project_instructions(workspace: &Path, max_chars: usize) -> String {
     load_project_instructions_with_home(workspace, home_dir().as_deref(), max_chars)
 }
 
+/// Like [`load_project_instructions`] but WITHOUT the user's global
+/// `~/.codex` / `~/.claude` files — only the workspace's own AGENTS.md/CLAUDE.md.
+///
+/// The GUI uses this so an end-user chat is driven by the OPENED PROJECT's
+/// guidance, not the developer's personal Claude Code config (e.g. a handoff
+/// protocol that makes the agent read HANDOFF.md on every first message — the
+/// "why does 'hi' run a bunch of tools" surprise).
+pub fn load_workspace_instructions(workspace: &Path, max_chars: usize) -> String {
+    load_project_instructions_with_home(workspace, None, max_chars)
+}
+
 fn load_project_instructions_with_home(
     workspace: &Path,
     home: Option<&Path>,
