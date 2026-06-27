@@ -486,23 +486,22 @@
 
   <footer>
     {#if attached.length}
-      <div class="attachments" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+      <div class="attachments">
         {#each attached as p}
-          <span class="chip" title={p} style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:rgba(0,0,0,0.06);border-radius:10px;padding:2px 8px">
+          <span class="chip" title={p}>
             {isImage(p) ? "🖼" : "📄"} {baseName(p)}
-            <button class="chipx" onclick={() => removeAttachment(p)} aria-label="Remove" style="border:none;background:none;cursor:pointer;font-size:14px;line-height:1">×</button>
+            <button class="chipx" onclick={() => removeAttachment(p)} aria-label="Remove">×</button>
           </span>
         {/each}
       </div>
     {/if}
-    <div class="composer-row" style="display:flex;gap:8px;align-items:flex-end">
+    <div class="composer-row">
       <button class="toolbtn" title="Attach file/image" onclick={attachFiles} aria-label="Attach">📎</button>
       <textarea
         bind:value={input}
         onkeydown={onKey}
         placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline)"
         rows="2"
-        style="flex:1"
       ></textarea>
       <button onclick={send} disabled={busy || (input.trim() === "" && attached.length === 0)}>Send</button>
     </div>

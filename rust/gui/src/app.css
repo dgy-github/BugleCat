@@ -76,10 +76,41 @@ header {
 footer {
   flex: 0 0 auto;
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
   padding: 0.6rem 1rem;
   border-top: 1px solid #e6e3df;
   background: #fff;
+}
+.composer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+  width: 100%;
+}
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  background: #f0ede8;
+  color: #5a544c;
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+.chipx {
+  border: none;
+  background: none;
+  color: #5a544c;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
 }
 textarea {
   flex: 1 1 auto;
