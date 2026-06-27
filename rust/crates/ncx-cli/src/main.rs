@@ -223,6 +223,10 @@ async fn run(args: Args) -> i32 {
         let result = agent.run_turn(user_input, None).await;
         recorder.record(&agent.session);
         println!("{}", result.final_text);
+        // Emit a stable, parseable token-usage line on stderr so external tools
+        // (e.g. the ncx-forge evaluator's Pareto cost axis) can read real token
+        // cost rather than wall-clock. Always printed in one-shot mode.
+        emit_usage_line(&result.usage);
         return if result.stop_reason == "error" { 1 } else { 0 };
     }
 
@@ -924,6 +928,18 @@ impl SessionRecorder {
 
 fn session_log_path(workspace: &Path) -> PathBuf {
     workspace.join(".nanocodex").join("session.jsonl")
+}
+
+/// Print a stable, parseable token-usage line to stderr (one-shot mode).
+/// Format: `[ncx-usage] prompt_tokens=P completion_tokens=C total_tokens=T`.
+/// `total_tokens` is P+C (the provider does not report a total directly).
+fn emit_usage_line(usage: &std::collections::BTreeMap<String, i64>) {
+    let prompt = usage.get("prompt_tokens").copied().unwrap_or(0);
+    let completion = usage.get("completion_tokens").copied().unwrap_or(0);
+    eprintln!(
+        "[ncx-usage] prompt_tokens={prompt} completion_tokens={completion} total_tokens={}",
+        prompt + completion
+    );
 }
 
 fn render_history(entries: &[SessionSummary], limit: usize) -> String {

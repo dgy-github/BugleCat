@@ -338,7 +338,11 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
   - `viz.py`：lineage JSON → 自包含 HTML（Pareto 散点 SVG + 血缘表，front 高亮、champion 星标）。
   - 验证：3 population 单测（front 保 trade-off / 丢被支配 / champion=最高 pass / viz 渲染）+ viz；
     对抗复审（2 agent）判 pareto「CORRECT」、evolve「substantially correct，无高危」。
-  - 注：cost 用 mean_s（ncx 不吐 token）；parents 不逐代重评（noisy 时调高 repeats）。
+  - **M2+ 收尾（三项）**：① promote 5 个自校验难任务进 committed bench（t14–t18，seed 态均失败、
+    baseline 可解、无泄漏解）；② `evolve` 加 `reeval_parents`（默认开）—— 每代重评存活成员，
+    lucky 早抽不再钉死 front（4 population 单测）；③ **ncx 吐真 token**：一次性模式 stderr 打
+    `[ncx-usage] ... total_tokens=N`，evaluator 解析进 `mean_tokens`，**Pareto cost 优先用真
+    token、无则回退 mean_s**（live 验：cost=33515 tokens）。26 Python 单测全过。
 - **M3｜数据导出**：Trajectory Store 成型 + `export.py`，对接未来 GPU 训练。
 
 ## 12. 决策记录（评审已定 2026-06-26）

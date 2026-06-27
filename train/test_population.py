@@ -98,6 +98,43 @@ def test_empty_eval_is_worst_not_best():
     assert P.Objectives(0.3, 100.0).dominates(obj)
 
 
+def test_reeval_parents_rescores_surviving_members():
+    # With reeval on, gen>=2 re-scores surviving members under a fresh draw — so
+    # the same genome can get a DIFFERENT objective than its first (lucky) draw.
+    calls = {"n": 0}
+    seen_costs = {}
+
+    def drifting_eval(genome_path, tasks, repeats, timeout):
+        calls["n"] += 1
+        content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
+        r = ev.EvalResult(genome=str(genome_path))
+        # cost drifts upward on each successive eval of the SAME genome -> a re-eval
+        # produces a different objective than the first draw.
+        seen_costs[genome_path] = seen_costs.get(genome_path, 0) + 5.0
+        for t in tasks:
+            p = 0 if t == "t_a" else 1  # t_a always fails -> always has children
+            r.tasks[t] = ev.TaskResult(task=t, passes=p, runs=1, mean_s=seen_costs[genome_path],
+                                       failure_trajectory=("" if p else "fail"))
+        return r
+
+    panel = [FakeTeacher("strong", 'system_prompt = "STRONG disciplined prompt"')]
+
+    def run(reeval):
+        restore, _ = _install(drifting_eval, panel)
+        try:
+            calls["n"] = 0; seen_costs.clear()
+            forge.evolve(rounds=2, train_tasks=["t_a", "t_b"], holdout_tasks=["t_b"],
+                         repeats=1, timeout=10, budget_s=999, teachers="panel",
+                         stamp="P3", pop_cap=3, test_tasks=None, reeval_parents=reeval)
+            return calls["n"]
+        finally:
+            restore()
+
+    with_reeval = run(True)
+    without = run(False)
+    assert with_reeval > without, (with_reeval, without)  # re-eval adds eval passes
+
+
 def test_evolve_writes_viz_html():
     panel = [FakeTeacher("strong", 'system_prompt = "STRONG disciplined prompt"')]
     restore, tmp = _install(_mock_eval, panel)

@@ -263,8 +263,11 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
 
 
 def _objectives(ev_result) -> PA.Objectives:
-    """Map an EvalResult to (pass-rate ↑, cost ↓). Cost = mean per-task seconds
-    (a latency proxy for tokens, which ncx does not emit).
+    """Map an EvalResult to (pass-rate ↑, cost ↓).
+
+    Cost = mean total TOKENS per task when ncx reported usage (the real cost);
+    otherwise mean per-task SECONDS (a latency proxy). ncx prints a
+    `[ncx-usage]` line in one-shot mode, which the evaluator parses.
 
     An EMPTY eval (no tasks/runs) is mapped to the WORST objective (cost=+inf),
     never the best — otherwise a zero-task misconfiguration would be undominated
@@ -272,15 +275,19 @@ def _objectives(ev_result) -> PA.Objectives:
     if ev_result.total_runs == 0 or not ev_result.tasks:
         return PA.Objectives(passrate=0.0, cost=float("inf"))
     pr = ev_result.total_passes / ev_result.total_runs
-    times = [t.mean_s for t in ev_result.tasks.values()]
-    cost = round(sum(times) / len(times), 1)
+    tokens = ev_result.mean_tokens
+    if tokens > 0:
+        cost = tokens                     # real token cost
+    else:
+        times = [t.mean_s for t in ev_result.tasks.values()]
+        cost = round(sum(times) / len(times), 1)  # latency fallback
     return PA.Objectives(passrate=pr, cost=cost)
 
 
 def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
            repeats: int, timeout: int, budget_s: float, teachers: str, stamp: str,
            pop_cap: int = 4, test_tasks: list[str] | None = None,
-           from_genome: str | None = None) -> dict:
+           from_genome: str | None = None, reeval_parents: bool = True) -> dict:
     """Small-population, multi-objective (Pareto) search (M2).
 
     Maintains a population that is the Pareto front (pass-rate ↑ vs cost ↓),
@@ -290,10 +297,9 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     cheap-decent genome alongside a slow-strong one). Writes a lineage JSON for
     `viz.py`.
 
-    Known limitation: surviving parents keep their first-scored objectives (no
-    per-generation re-eval, unlike train()'s noise-aware re-eval), so with a
-    noisy agent set `repeats` high enough that a lucky early draw can't pin the
-    front. (A re-eval mode is a future addition.)
+    Noise-aware: with `reeval_parents` (default on), surviving members are
+    re-scored under a fresh draw each generation, so a lucky early evaluation
+    can't permanently pin the front (mirrors train()'s reeval_incumbent).
     """
     GENOMES_DIR.mkdir(exist_ok=True)
     RUNS_DIR.mkdir(exist_ok=True)
@@ -341,6 +347,14 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         if elapsed() > budget_s:
             print(f"[forge] budget ({budget_s}s) exhausted — stopping before gen {rnd}.")
             break
+        # Noise-aware (mirrors train()): re-score surviving members under a fresh
+        # draw so a lucky early evaluation can't permanently pin the front.
+        if reeval_parents and rnd > 1:
+            for m in population:
+                m["ev"] = ev.evaluate(str(m["path"]), train_tasks, repeats, timeout)
+                m["obj"] = _objectives(m["ev"])
+            print(f"[forge]   gen{rnd}: re-eval front "
+                  f"{[(m['id'], round(m['obj'].passrate, 2), m['obj'].cost) for m in population]}")
         children = []
         for parent in population:
             failures = parent["ev"].failing_trajectories(top_k=3)
@@ -483,7 +497,7 @@ def main() -> int:
         print(f"[forge] splits — train={train_tasks} val={holdout_tasks} test={test_tasks}")
         evolve(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
                a.budget_s, a.teacher, stamp, pop_cap=a.pop_cap, test_tasks=test_tasks,
-               from_genome=(a.from_genome or None))
+               from_genome=(a.from_genome or None), reeval_parents=not a.no_reeval)
         return 0
     print("nothing to do — pass --self-check | --baseline | --train | --population. See train/DESIGN.md")
     return 0

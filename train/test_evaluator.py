@@ -86,11 +86,18 @@ def test_timeout_failure_synthesizes_trajectory():
     ev.extract_trajectory = lambda ws: ""
     ev.bench.seed = lambda t, ws: None
     try:
-        ok, elapsed, traj = ev._run_task_once(task, None, timeout=1)
+        ok, elapsed, traj, tokens = ev._run_task_once(task, None, timeout=1)
         assert ok is False
         assert traj and "timed out" in traj.lower(), repr(traj)
+        assert tokens == 0  # no usage line on a timeout
     finally:
         (ev.subprocess.run, ev.bench.grade, ev.extract_trajectory, ev.bench.seed) = orig
+
+
+def test_parse_tokens_from_usage_line():
+    line = "some output\n[ncx-usage] prompt_tokens=3340 completion_tokens=16 total_tokens=3356\nbye"
+    assert ev._parse_tokens(line) == 3356
+    assert ev._parse_tokens("no usage here") == 0
 
 
 if __name__ == "__main__":

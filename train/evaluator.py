@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,8 @@ class TaskResult:
     passes: int
     runs: int
     mean_s: float
+    # Mean total tokens per run (0 if ncx did not report a [ncx-usage] line).
+    mean_tokens: float = 0.0
     # One redacted failure trajectory (from the first failing run), or "".
     failure_trajectory: str = ""
 
@@ -60,6 +63,13 @@ class EvalResult:
     @property
     def total_runs(self) -> int:
         return sum(t.runs for t in self.tasks.values())
+
+    @property
+    def mean_tokens(self) -> float:
+        """Mean total tokens per task (0 if ncx reported no usage). The Pareto
+        cost axis when real token usage is available."""
+        toks = [t.mean_tokens for t in self.tasks.values() if t.mean_tokens > 0]
+        return round(sum(toks) / len(toks), 1) if toks else 0.0
 
     @property
     def passrate(self) -> float:
@@ -129,8 +139,17 @@ def extract_trajectory(ws: Path) -> str:
     return _redact("\n\n".join(parts))
 
 
-def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[bool, float, str]:
-    """One (task, genome) attempt. Returns (passed, elapsed_s, trajectory_if_failed)."""
+_USAGE_RE = re.compile(r"\[ncx-usage\][^\n]*\btotal_tokens=(\d+)")
+
+
+def _parse_tokens(stderr: str) -> int:
+    """Pull total_tokens from ncx's `[ncx-usage]` stderr line (0 if absent)."""
+    m = _USAGE_RE.search(stderr or "")
+    return int(m.group(1)) if m else 0
+
+
+def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[bool, float, str, int]:
+    """One (task, genome) attempt. Returns (passed, elapsed_s, trajectory_if_failed, tokens)."""
     prompt = (task / "prompt.txt").read_text(encoding="utf-8")
     ws = Path(tempfile.mkdtemp(prefix=f"forge_{task.name}_"))
     try:
@@ -142,12 +161,14 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[b
             env.pop("NCX_GENOME", None)  # baseline: ensure no stray genome
         t0 = time.perf_counter()
         timed_out = False
+        tokens = 0
         try:
-            subprocess.run(
+            proc = subprocess.run(
                 bench.agent_cmd("nanocodex", prompt),
                 cwd=str(ws), env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout,
             )
+            tokens = _parse_tokens(proc.stderr)
         except subprocess.TimeoutExpired:
             timed_out = True
         elapsed = time.perf_counter() - t0
@@ -161,7 +182,7 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[b
             trajectory = (f"The agent did NOT finish within {timeout}s (timed out)."
                           if timed_out else
                           "The agent produced no usable session log and the task did not pass.")
-        return ok, round(elapsed, 1), ("" if ok else trajectory)
+        return ok, round(elapsed, 1), ("" if ok else trajectory), tokens
     finally:
         shutil.rmtree(ws, ignore_errors=True)
 
@@ -174,16 +195,19 @@ def evaluate(genome_path: str | None, task_names: list[str] | None,
         all_tasks = [t for t in all_tasks if t.name in task_names]
     res = EvalResult(genome=genome_path or "<baseline>")
     for task in all_tasks:
-        passes, times, traj = 0, [], ""
+        passes, times, toks, traj = 0, [], [], ""
         for _ in range(max(1, repeats)):
-            ok, elapsed, t = _run_task_once(task, genome_path, timeout)
+            ok, elapsed, t, tokens = _run_task_once(task, genome_path, timeout)
             passes += 1 if ok else 0
             times.append(elapsed)
+            if tokens > 0:
+                toks.append(tokens)
             if not ok and not traj:
                 traj = t
         res.tasks[task.name] = TaskResult(
             task=task.name, passes=passes, runs=max(1, repeats),
             mean_s=round(sum(times) / len(times), 1) if times else 0.0,
+            mean_tokens=round(sum(toks) / len(toks), 1) if toks else 0.0,
             failure_trajectory=traj,
         )
     return res
