@@ -1,7 +1,12 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
+
+  const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+  const isImage = (p: string) => IMAGE_EXTS.includes((p.split(".").pop() || "").toLowerCase());
+  const baseName = (p: string) => p.split(/[\\/]/).pop() || p;
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
@@ -68,6 +73,7 @@
 
   let messages = $state<Msg[]>([]);
   let input = $state("");
+  let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let busy = $state(false);
   let header = $state("connecting…");
   let scroller: HTMLDivElement;
@@ -126,15 +132,38 @@
     });
   });
 
+  async function attachFiles() {
+    try {
+      const picked = await open({ multiple: true });
+      if (!picked) return;
+      const paths = Array.isArray(picked) ? picked : [picked];
+      for (const p of paths) if (!attached.includes(p)) attached.push(p);
+    } catch (e) {
+      messages.push({ role: "note", text: `Attach failed: ${e}` });
+    }
+  }
+
+  function removeAttachment(p: string) {
+    attached = attached.filter((x) => x !== p);
+  }
+
   async function send() {
     const text = input.trim();
-    if (!text || busy) return;
-    messages.push({ role: "user", text });
+    if ((!text && attached.length === 0) || busy) return;
+    // Images route through the vision pipeline; other files become @mentions.
+    const images = attached.filter(isImage);
+    const files = attached.filter((p) => !isImage(p));
+    const mentions = files.map((p) => `@${p}`).join(" ");
+    const fullText = [text, mentions].filter(Boolean).join("\n");
+    const shown = attached.length ? `${text}${text ? "\n" : ""}📎 ${attached.map(baseName).join(", ")}` : text;
+    messages.push({ role: "user", text: shown });
     input = "";
+    const sentImages = images;
+    attached = [];
     busy = true;
     scrollDown();
     try {
-      await invoke("send_prompt", { text });
+      await invoke("send_prompt", { text: fullText, images: sentImages });
     } catch (e) {
       messages.push({ role: "note", text: `Failed to send: ${e}` });
       busy = false;
@@ -437,13 +466,27 @@
   </div>
 
   <footer>
-    <textarea
-      bind:value={input}
-      onkeydown={onKey}
-      placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline)"
-      rows="2"
-    ></textarea>
-    <button onclick={send} disabled={busy || input.trim() === ""}>Send</button>
+    {#if attached.length}
+      <div class="attachments" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+        {#each attached as p}
+          <span class="chip" title={p} style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:rgba(0,0,0,0.06);border-radius:10px;padding:2px 8px">
+            {isImage(p) ? "🖼" : "📄"} {baseName(p)}
+            <button class="chipx" onclick={() => removeAttachment(p)} aria-label="Remove" style="border:none;background:none;cursor:pointer;font-size:14px;line-height:1">×</button>
+          </span>
+        {/each}
+      </div>
+    {/if}
+    <div class="composer-row" style="display:flex;gap:8px;align-items:flex-end">
+      <button class="toolbtn" title="Attach file/image" onclick={attachFiles} aria-label="Attach">📎</button>
+      <textarea
+        bind:value={input}
+        onkeydown={onKey}
+        placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline)"
+        rows="2"
+        style="flex:1"
+      ></textarea>
+      <button onclick={send} disabled={busy || (input.trim() === "" && attached.length === 0)}>Send</button>
+    </div>
   </footer>
 
   {#if approval}

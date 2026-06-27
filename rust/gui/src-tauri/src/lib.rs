@@ -89,12 +89,22 @@ fn get_status() -> Result<Status, String> {
     })
 }
 
-/// Queue a user prompt for the agent thread. Replies arrive as `ncx://event`s.
+/// Queue a user prompt for the agent thread. `images` are absolute paths from
+/// the file picker (attached as base64 vision blocks); non-image files are
+/// passed by the UI as `@path` tokens inside `text`. Replies arrive as
+/// `ncx://event`s.
 #[tauri::command]
-fn send_prompt(text: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn send_prompt(
+    text: String,
+    images: Option<Vec<String>>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     state
         .tx
-        .send(Command::Prompt(text))
+        .send(Command::Prompt {
+            text,
+            images: images.unwrap_or_default(),
+        })
         .map_err(|_| "agent thread is not running".to_string())
 }
 
@@ -508,6 +518,7 @@ pub fn run() {
     let pending_for_worker = pending.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState { tx, pending })
         .setup(move |app| {
             // Hand the agent thread an AppHandle (to emit events), the receiver

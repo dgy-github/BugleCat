@@ -25,13 +25,13 @@ use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
     discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
     skills_index_block, AgentLoop, ApprovalHandler,
-    ApprovalRequest, CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Session,
+    ApprovalRequest, CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Provider, Session,
     SessionIndex, TaskBudget, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 
@@ -49,7 +49,10 @@ pub type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<bool>>>>;
 
 /// A request from the UI to the agent thread.
 pub enum Command {
-    Prompt(String),
+    /// A user turn. `images` are absolute paths attached via the file picker;
+    /// each becomes a base64 `image_url` block (vision routing). Non-image files
+    /// are passed by the UI as `@path` tokens inside `text` (expanded as mentions).
+    Prompt { text: String, images: Vec<String> },
     /// Rebuild the agent from the (just-saved) config — applies model / sandbox
     /// / key changes live. Starts a fresh session.
     Reload,
@@ -192,7 +195,8 @@ fn build_agent(
     let session = Session::with_log(system_prompt, Some(log_path.clone()));
     let agent = AgentLoop::new(Box::new(provider), tools, session)
         .with_task_budget(task_budget_from_config(&cfg))
-        .with_context_edit(context_edit_from_config(&cfg));
+        .with_context_edit(context_edit_from_config(&cfg))
+        .with_vision_provider(build_vision_provider(&cfg));
     Ok((
         agent,
         cfg.workspace.clone(),
@@ -270,10 +274,17 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
 
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
-                        Command::Prompt(text) => {
+                        Command::Prompt { text, images } => {
                             let expanded = expand_file_mentions(&text, &workspace);
                             save_auto_checkpoint(&workspace, &expanded);
-                            let result = agent.run_turn(json!(expanded), None).await;
+                            let user_input = match build_image_user_input(&expanded, &images) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    emit(&app, UiEvent::Error { message: e });
+                                    continue;
+                                }
+                            };
+                            let result = agent.run_turn(user_input, None).await;
                             let _ = session_index.record_turn(
                                 &session_id,
                                 &workspace,
@@ -322,4 +333,88 @@ fn clipped_label(text: &str, limit: usize) -> String {
             s.chars().take(limit.saturating_sub(3)).collect::<String>()
         )
     }
+}
+
+// ── vision attachments (ported from the CLI) ──────────────────────────────────
+
+/// Build a dedicated vision provider from `vl_*` config, or `None` when no VL
+/// model is set (image turns then stay on the main provider). Only `vl_model`
+/// is required; `vl_base_url`/`vl_api_key` fall back to the main ones.
+fn build_vision_provider(cfg: &Config) -> Option<Box<dyn Provider>> {
+    if cfg.vl_model.trim().is_empty() {
+        return None;
+    }
+    let base_url = if cfg.vl_base_url.trim().is_empty() {
+        &cfg.base_url
+    } else {
+        &cfg.vl_base_url
+    };
+    let api_key = if cfg.vl_api_key.trim().is_empty() {
+        cfg.api_key.clone()
+    } else {
+        cfg.vl_api_key.clone()
+    };
+    Some(Box::new(DeepSeekProvider::with_opts(
+        api_key,
+        base_url,
+        cfg.vl_model.clone(),
+        cfg.timeout_s as u64,
+        cfg.max_retries as u32,
+    )))
+}
+
+/// Build the user turn input. No images -> plain text; with image paths ->
+/// an OpenAI multimodal `content` array (text block + one base64 `image_url`
+/// block per file), which trips AgentLoop's image detection -> vision routing.
+fn build_image_user_input(text: &str, images: &[String]) -> Result<Value, String> {
+    if images.is_empty() {
+        return Ok(json!(text));
+    }
+    let mut content = vec![json!({"type": "text", "text": text})];
+    for path in images {
+        let p = std::path::Path::new(path);
+        let bytes = std::fs::read(p).map_err(|e| format!("cannot read image {path}: {e}"))?;
+        let url = format!("data:{};base64,{}", image_mime(p), base64_encode(&bytes));
+        content.push(json!({"type": "image_url", "image_url": {"url": url}}));
+    }
+    Ok(Value::Array(content))
+}
+
+fn image_mime(path: &std::path::Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    }
+}
+
+/// Standard base64 (RFC 4648, `=` padded). Hand-rolled to avoid a new crate dep.
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
