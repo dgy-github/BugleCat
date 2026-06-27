@@ -340,6 +340,61 @@
       messages.push({ role: "note", text: `History load failed: ${e}` });
     }
   }
+
+  // ── Hermes: project-memory self-evolution ─────────────────────────────────
+  type MemoryNote = { ts: number; tags: string[]; text: string };
+  let hermesOpen = $state(false);
+  let notes = $state<MemoryNote[]>([]);
+  let hermesBusy = $state(false);
+  let newNote = $state("");
+  let newNoteTags = $state("");
+
+  async function loadNotes() {
+    notes = await invoke<MemoryNote[]>("memory_list");
+  }
+  async function openHermes() {
+    hermesOpen = true;
+    hermesBusy = true;
+    try {
+      await loadNotes();
+    } catch (e) {
+      messages.push({ role: "note", text: `Hermes load failed: ${e}` });
+    }
+    hermesBusy = false;
+  }
+  async function consolidateMemory() {
+    hermesBusy = true;
+    try {
+      const removed = await invoke<number>("memory_consolidate");
+      messages.push({ role: "note", text: `Hermes: folded ${removed} near-duplicate note(s).` });
+      await loadNotes();
+    } catch (e) {
+      messages.push({ role: "note", text: `Hermes consolidate failed: ${e}` });
+    }
+    hermesBusy = false;
+  }
+  async function addNote() {
+    if (!newNote.trim()) return;
+    hermesBusy = true;
+    try {
+      const tags = newNoteTags.split(",").map((t) => t.trim()).filter(Boolean);
+      const saved = await invoke<boolean>("memory_add", { note: newNote, tags });
+      messages.push({ role: "note", text: saved ? "Hermes: note saved." : "Hermes: already known (not duplicated)." });
+      newNote = "";
+      newNoteTags = "";
+      await loadNotes();
+    } catch (e) {
+      messages.push({ role: "note", text: `Hermes add failed: ${e}` });
+    }
+    hermesBusy = false;
+  }
+  function fmtTs(ts: number): string {
+    try {
+      return new Date(ts * 1000).toLocaleString();
+    } catch {
+      return String(ts);
+    }
+  }
 </script>
 
 <main>
@@ -350,6 +405,7 @@
     <button class="toolbtn" title="Branches" onclick={openBranches} aria-label="Branches">⎇</button>
     <button class="toolbtn" title="Diff" onclick={openDiff} aria-label="Diff">±</button>
     <button class="toolbtn" title="History" onclick={openHistory} aria-label="History">⌃</button>
+    <button class="toolbtn" title="Hermes (self-evolution memory)" onclick={openHermes} aria-label="Hermes">🧠</button>
     <button class="gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
     <button class="toolbtn" title="Checkpoints" onclick={openCheckpoints} aria-label="Checkpoints">CP</button>
   </header>
@@ -514,6 +570,44 @@
         <div class="abtns">
           <button class="plain" onclick={openHistory}>Refresh</button>
           <button class="deny" onclick={() => (historyOpen = false)}>Close</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if hermesOpen}
+    <div class="overlay">
+      <div class="modal">
+        <h3>Hermes — self-evolution memory</h3>
+        <p class="emptyline">Verified learnings recalled into future sessions as leads. Trigger maintenance to fold near-duplicates.</p>
+        <div class="checkpoint-create">
+          <input bind:value={newNote} placeholder="Record a verified learning…" />
+          <input bind:value={newNoteTags} placeholder="tags (comma)" style="max-width:140px" />
+          <button onclick={addNote} disabled={hermesBusy}>Add</button>
+        </div>
+        <div class="checkpoint-create">
+          <button onclick={consolidateMemory} disabled={hermesBusy}>Evolve: fold duplicates</button>
+          <button class="plain" onclick={loadNotes} disabled={hermesBusy}>Refresh</button>
+          <span class="emptyline">{notes.length} note(s)</span>
+        </div>
+        <div class="checkpoint-list">
+          {#if notes.length === 0}
+            <p class="emptyline">No learnings yet.</p>
+          {/if}
+          {#each notes as n}
+            <div class="checkpoint-row">
+              <div class="checkpoint-main">
+                <strong>{n.text}</strong>
+                {#if n.tags.length}<code>{n.tags.join(", ")}</code>{/if}
+              </div>
+              <div class="checkpoint-meta">
+                <span>{fmtTs(n.ts)}</span>
+              </div>
+            </div>
+          {/each}
+        </div>
+        <div class="abtns">
+          <button class="deny" onclick={() => (hermesOpen = false)}>Close</button>
         </div>
       </div>
     </div>

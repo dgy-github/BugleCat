@@ -16,7 +16,7 @@ use ncx_config::{
     load_config, write_nanocodex_config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
 };
-use ncx_core::{CheckpointMeta, CheckpointStore, RestoreReport, SessionIndex};
+use ncx_core::{CheckpointMeta, CheckpointStore, MemoryStore, RestoreReport, SessionIndex};
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -449,6 +449,59 @@ fn list_sessions() -> Result<Vec<SessionRow>, String> {
         .collect())
 }
 
+// ── Hermes: project-memory self-evolution panel ───────────────────────────────
+
+#[derive(Serialize)]
+pub struct MemoryNote {
+    ts: u64,
+    tags: Vec<String>,
+    text: String,
+}
+
+/// The project memory store for the current workspace.
+fn memory_store() -> MemoryStore {
+    let ws = std::env::current_dir().unwrap_or_default();
+    MemoryStore::new(ws.join(".ncx").join("memory"))
+}
+
+/// List accumulated learnings (newest first).
+#[tauri::command]
+fn memory_list() -> Result<Vec<MemoryNote>, String> {
+    let mut entries = memory_store().entries();
+    entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+    Ok(entries
+        .into_iter()
+        .map(|e| MemoryNote {
+            ts: e.ts,
+            tags: e.tags,
+            text: e.text,
+        })
+        .collect())
+}
+
+/// Trigger self-evolution maintenance: fold near-duplicate notes (heuristic,
+/// local — no model). Returns how many entries were removed.
+#[tauri::command]
+fn memory_consolidate() -> Result<usize, String> {
+    memory_store().consolidate(0.85).map_err(|e| e.to_string())
+}
+
+/// Manually record a verified learning into project memory.
+#[tauri::command]
+fn memory_add(note: String, tags: Vec<String>) -> Result<bool, String> {
+    let note = note.trim();
+    if note.is_empty() {
+        return Err("note is required".into());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    memory_store()
+        .remember(note, &tags, now)
+        .map_err(|e| e.to_string())
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -478,7 +531,10 @@ pub fn run() {
             git_create_branch,
             git_switch_branch,
             git_diff,
-            list_sessions
+            list_sessions,
+            memory_list,
+            memory_consolidate,
+            memory_add
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
