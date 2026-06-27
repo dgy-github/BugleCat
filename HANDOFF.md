@@ -72,8 +72,13 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   ③ **ncx 一次性模式 stderr 吐 `[ncx-usage] total_tokens=N`**（唯一新增 Rust 改动，`main.rs`
   emit_usage_line）→ evaluator 解析进 `mean_tokens` → **Pareto cost 优先用真 token、无则回退 mean_s**
   （live：cost=33515 tokens）。26 Python 单测 + ncx-cli 全绿。
-- **下一步（仍可做）**：① 真训默认骨架 lift 需找真 gap/更弱 base agent；② TaskGen 批量扩 corpus
-  后跑大 `forge --population`；③ M3 数据导出（SFT/RL）。
+- **M3 + 弱base + 大种群 ✅（`3056b29`）**：① `train/export.py`——跑 genome×任务抓**完整轨迹**+
+  reward+tokens 写 SFT/RL JSONL（`--reward-pass-only`=SFT 集；schema ncx-forge-trajectory/v1），
+  live 验(reward=1/14 轮轨迹/真 token)；② `--base-model`（evaluator/forge 透传 `-m`）训**更弱 base**
+  （deepseek-chat 余量更大）；③ `forge --population --base-model deepseek-chat --pop-cap 4` 大种群跑
+  （结果见 train/runs/lineage_*.{json,html}）。28 Python 单测全绿。
+- **下一步（仍可做）**：① 有 GPU 时用 export 的 JSONL 做 SFT/RL；② 大规模造题扩 corpus；
+  ③ ncx 把 system 消息也 log（export 的 system_prompt 现取 genome base，非完整拼接）。
 - **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
   非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对
