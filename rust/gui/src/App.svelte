@@ -78,6 +78,7 @@
   let busy = $state(false);
   let header = $state("connecting…");
   let workspace = $state("");
+  let sessionTitle = $state("New session");
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -92,6 +93,7 @@
     } catch (e) {
       header = "config error";
     }
+    refreshSessions();
 
     await listen<UiEvent>("ncx://event", (ev) => {
       const p = ev.payload;
@@ -125,6 +127,7 @@
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
           busy = false;
+          refreshSessions();
           break;
         case "loaded":
           messages = p.messages.map((m) =>
@@ -384,17 +387,25 @@
       diffText = `diff failed: ${e}`;
     }
   }
-  async function openHistory() {
-    historyOpen = true;
+  async function refreshSessions() {
     try {
       sessions = await invoke<SessionRow[]>("list_sessions");
-    } catch (e) {
-      messages.push({ role: "note", text: `History load failed: ${e}` });
+    } catch {
+      /* index may not exist yet */
     }
   }
-  async function resumeSession(id: string) {
-    historyOpen = false;
+  async function newSession() {
+    messages = [];
+    sessionTitle = "New session";
+    try {
+      await invoke("new_session");
+    } catch (e) {
+      messages.push({ role: "note", text: `New session failed: ${e}` });
+    }
+  }
+  async function resumeSession(id: string, title = "") {
     busy = true;
+    sessionTitle = title || "Session";
     try {
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
@@ -402,9 +413,9 @@
       messages.push({ role: "note", text: `Resume failed: ${e}` });
     }
   }
-  async function forkSession(id: string) {
-    historyOpen = false;
+  async function forkSession(id: string, title = "") {
     busy = true;
+    sessionTitle = title ? `${title} (fork)` : "Fork";
     try {
       await invoke("fork_session", { sessionId: id });
       messages.push({ role: "note", text: "Forked a new branch from this session." });
@@ -470,72 +481,101 @@
   }
 </script>
 
-<main>
-  <header>
-    <span class="brand">nanocodex</span>
-    <span class="meta">{header}</span>
-    {#if workspace}
-      <button class="toolbtn" title={`Workspace: ${workspace}  (click to switch)`} onclick={chooseWorkspace} aria-label="Workspace" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📁 {baseName(workspace)}</button>
-    {:else}
-      <button class="toolbtn" title="Choose workspace" onclick={chooseWorkspace} aria-label="Workspace">📁</button>
-    {/if}
-    {#if busy}<span class="spinner" title="working…">●</span>{/if}
-    <button class="toolbtn" title="Branches" onclick={openBranches} aria-label="Branches">⎇</button>
-    <button class="toolbtn" title="Diff" onclick={openDiff} aria-label="Diff">±</button>
-    <button class="toolbtn" title="History" onclick={openHistory} aria-label="History">⌃</button>
-    <button class="toolbtn" title="Project memory" onclick={openHermes} aria-label="Memory">📒</button>
-    <button class="gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
-    <button class="toolbtn" title="Checkpoints" onclick={openCheckpoints} aria-label="Checkpoints">CP</button>
-  </header>
+<main class="app">
+  <aside class="sidebar">
+    <div class="side-brand">nanocodex</div>
+    <button class="new-session" onclick={newSession}>＋ New session</button>
 
-  <div class="scroll" bind:this={scroller}>
-    {#if messages.length === 0}
-      <p class="empty">Ask me to inspect or edit the workspace. Try “list the files” or
-        “create hello.txt with apply_patch”.</p>
-    {/if}
-    {#each messages as m}
-      {#if m.role === "user"}
-        <div class="msg user"><div class="bubble">{m.text}</div></div>
-      {:else if m.role === "assistant"}
-        <div class="msg assistant"><div class="bubble">{m.text}</div></div>
-      {:else if m.role === "note"}
-        <div class="msg note">{m.text}</div>
-      {:else if m.role === "tool"}
-        <div class="tool">
-          <span class="tname">⚙ {m.name}</span>
-          {#if m.args}<code class="targs">{m.args}</code>{/if}
-          {#if m.result !== undefined}
-            <pre class="tresult">{m.result}</pre>
-          {:else}
-            <span class="trunning">running…</span>
-          {/if}
+    <nav class="side-nav">
+      <button class="nav-item" onclick={openBranches}><span class="ni">⎇</span> Branches</button>
+      <button class="nav-item" onclick={openDiff}><span class="ni">±</span> Diff</button>
+      <button class="nav-item" onclick={openHermes}><span class="ni">📒</span> Memory</button>
+      <button class="nav-item" onclick={openCheckpoints}><span class="ni">◷</span> Checkpoints</button>
+    </nav>
+
+    <div class="side-recents">
+      <div class="side-h">Recents</div>
+      {#if sessions.length === 0}
+        <div class="side-empty">No sessions yet</div>
+      {/if}
+      {#each sessions as s}
+        <div class="recent-item">
+          <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
+            onclick={() => resumeSession(s.session_id, s.title)}>
+            <span class="recent-dot">●</span>{s.title || "(untitled)"}
+          </button>
+          <button class="recent-fork" title="Fork a branch from here" disabled={busy || !s.has_snapshot}
+            onclick={() => forkSession(s.session_id, s.title)}>⑂</button>
+        </div>
+      {/each}
+    </div>
+
+    <div class="side-foot">
+      <button class="foot-ws" title={`Workspace: ${workspace} (click to switch)`} onclick={chooseWorkspace}>
+        📁 {workspace ? baseName(workspace) : "Choose workspace"}
+      </button>
+      <button class="foot-gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
+    </div>
+  </aside>
+
+  <section class="main">
+    <header class="topbar">
+      <span class="title">{sessionTitle}</span>
+      <span class="meta">{header}</span>
+      {#if busy}<span class="spinner" title="working…">●</span>{/if}
+    </header>
+
+    <div class="scroll" bind:this={scroller}>
+      {#if messages.length === 0}
+        <div class="empty-wrap">
+          <div class="empty-mark">✦</div>
+          <p class="empty">Ask me to inspect or edit the workspace.<br />Try “list the files” or “create hello.txt with apply_patch”.</p>
         </div>
       {/if}
-    {/each}
-  </div>
-
-  <footer>
-    {#if attached.length}
-      <div class="attachments">
-        {#each attached as p}
-          <span class="chip" title={p}>
-            {isImage(p) ? "🖼" : "📄"} {baseName(p)}
-            <button class="chipx" onclick={() => removeAttachment(p)} aria-label="Remove">×</button>
-          </span>
-        {/each}
-      </div>
-    {/if}
-    <div class="composer-row">
-      <button class="toolbtn" title="Attach file/image" onclick={attachFiles} aria-label="Attach">📎</button>
-      <textarea
-        bind:value={input}
-        onkeydown={onKey}
-        placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline)"
-        rows="2"
-      ></textarea>
-      <button onclick={send} disabled={busy || (input.trim() === "" && attached.length === 0)}>Send</button>
+      {#each messages as m}
+        {#if m.role === "user"}
+          <div class="msg user"><div class="bubble">{m.text}</div></div>
+        {:else if m.role === "assistant"}
+          <div class="msg assistant"><div class="bubble">{m.text}</div></div>
+        {:else if m.role === "note"}
+          <div class="msg note">{m.text}</div>
+        {:else if m.role === "tool"}
+          <div class="tool">
+            <span class="tname">⚙ {m.name}</span>
+            {#if m.args}<code class="targs">{m.args}</code>{/if}
+            {#if m.result !== undefined}
+              <pre class="tresult">{m.result}</pre>
+            {:else}
+              <span class="trunning">running…</span>
+            {/if}
+          </div>
+        {/if}
+      {/each}
     </div>
-  </footer>
+
+    <footer>
+      {#if attached.length}
+        <div class="attachments">
+          {#each attached as p}
+            <span class="chip" title={p}>
+              {isImage(p) ? "🖼" : "📄"} {baseName(p)}
+              <button class="chipx" onclick={() => removeAttachment(p)} aria-label="Remove">×</button>
+            </span>
+          {/each}
+        </div>
+      {/if}
+      <div class="composer-row">
+        <button class="toolbtn attach" title="Attach file/image" onclick={attachFiles} aria-label="Attach">📎</button>
+        <textarea
+          bind:value={input}
+          onkeydown={onKey}
+          placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline)"
+          rows="2"
+        ></textarea>
+        <button onclick={send} disabled={busy || (input.trim() === "" && attached.length === 0)}>Send</button>
+      </div>
+    </footer>
+  </section>
 
   {#if approval}
     <div class="overlay">

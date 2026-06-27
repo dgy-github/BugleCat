@@ -127,6 +127,15 @@ fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<Stri
     Ok(p.display().to_string())
 }
 
+/// Start a fresh session (rebuild the agent from config — new empty context).
+#[tauri::command]
+fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::Reload)
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
 /// Continue a saved session (reseed the agent from its snapshot, same id).
 #[tauri::command]
 fn resume_session(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -589,7 +598,8 @@ pub fn run() {
             set_workspace,
             get_workspace,
             resume_session,
-            fork_session
+            fork_session,
+            new_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
