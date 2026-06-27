@@ -106,7 +106,8 @@ def baseline_report(tasks: list[str] | None, repeats: int, timeout: int) -> None
 def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
           repeats: int, timeout: int, budget_s: float, teachers: str,
           stamp: str, test_tasks: list[str] | None = None,
-          accept_margin: int = 1, reeval_incumbent: bool = True) -> dict:
+          accept_margin: int = 1, reeval_incumbent: bool = True,
+          from_genome: str | None = None) -> dict:
     """Single-champion hill-climb. Each round: every available teacher proposes a
     mutation of the current champion; candidates are evaluated on TRAIN; the best
     is promoted iff it beats the champion on TRAIN by `accept_margin` AND does not
@@ -133,9 +134,18 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
         return {"error": "no teacher"}
 
+    # `baseline` is ALWAYS the real default genome — it defines the validation
+    # caps and the legal tool set. The starting `champion` is normally the same,
+    # but `--from-genome` lets a run start from a DEGRADED scaffold to create
+    # real headroom (an honest capability test: can the optimizer recover it?).
     baseline = G.extract_current()
-    champion = baseline.copy()
-    champ_path = GENOMES_DIR / f"{stamp}_gen0_baseline.toml"
+    if from_genome:
+        champion = G.Genome.load(Path(from_genome))
+        print(f"[forge] starting from supplied genome {from_genome} "
+              f"(diff vs default: {G.diff(baseline, champion)})")
+    else:
+        champion = baseline.copy()
+    champ_path = GENOMES_DIR / f"{stamp}_gen0_start.toml"
     champion.save(champ_path)
     champ_train = ev.evaluate(str(champ_path), train_tasks, repeats, timeout)
     champ_hold = ev.evaluate(str(champ_path), holdout_tasks, repeats, timeout)
@@ -235,7 +245,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     # Final, unbiased number: score baseline vs champion ONCE on the frozen test
     # split (never used for acceptance). The only honest "did training help?".
     if test_tasks:
-        base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_baseline.toml"),
+        base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_start.toml"),
                                 test_tasks, repeats, timeout)
         champ_test = ev.evaluate(str(champ_final), test_tasks, repeats, timeout)
         print(f"[forge] FINAL on test {test_tasks}: baseline "
@@ -277,6 +287,9 @@ def main() -> int:
                     help="train passes a candidate must clear the incumbent by (noise band)")
     ap.add_argument("--no-reeval", action="store_true",
                     help="do NOT re-evaluate the incumbent each round (cheaper, noisier)")
+    ap.add_argument("--from-genome", default="",
+                    help="start the champion from this genome (e.g. a degraded scaffold) "
+                         "instead of the real default — a capability test for the optimizer")
     ap.add_argument("--no-gate", action="store_true",
                     help="skip the self-check gate before --train (NOT recommended)")
     a = ap.parse_args()
@@ -299,7 +312,8 @@ def main() -> int:
         print(f"[forge] splits — train={train_tasks} val={holdout_tasks} test={test_tasks}")
         train(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
               a.budget_s, a.teacher, stamp, test_tasks=test_tasks,
-              accept_margin=a.accept_margin, reeval_incumbent=not a.no_reeval)
+              accept_margin=a.accept_margin, reeval_incumbent=not a.no_reeval,
+              from_genome=(a.from_genome or None))
         return 0
     print("nothing to do — pass --self-check | --baseline | --train. See train/DESIGN.md")
     return 0
