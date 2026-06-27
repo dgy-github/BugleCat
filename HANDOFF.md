@@ -52,8 +52,19 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   **结论：即便上 gpt-5.4 强教师，也没抬升 deepseek agent 在这些算法任务上的通过率** ——
   因为这些 task 的失败是底层推理/效率所致、非 prompt 可修；强力印证 *model is the lever*。
   框架本身完全正确：强教师真engaged、提出高质量候选、噪声门顶住不伪造提升。
-- **要看到真 lift 需 prompt-可修的失败模式**（如 agent 用错 patch 格式/过早放弃/不先读文件），
-  而非纯算法正确性任务。下一步可造这类"骨架敏感"任务再测；或 M2 搜索增强。
+- **骨架敏感任务 + 逼出 lift（已做，capstone）**：workflow 造 8 个"prompt-可修习惯"任务
+  （exact ValueError 契约/无 stdout/输入不可变/精确公共 API/精确返回类型/最小编辑…），自校验
+  8/8 入库。但 **baseline 全过 16/16** —— 强 agent + nanocodex 默认骨架已经不踩这些坑，
+  说明**真实默认骨架的 harness 余量也很薄**（model 与默认 prompt 都已够好）。
+  于是做**诚实的优化器能力测试**：新增 `forge --train --from-genome <degraded.toml>` 从
+  人为劣化的骨架起训（system_prompt 诱发 print/原地改/加 helper）。结果（codex gpt-5.4 教师）：
+  **gen0 train 1/2 → R1 codex 重写 system_prompt(351→1345) → train 2/2 被接受**（margin≥1、
+  holdout 1/1 不退、test 无回归）。**结论：headroom 存在时，优化器能真产出经噪声门+holdout
+  验证的 lift**（`889078f`）；但默认骨架上余量薄 → 真实增益靠更强 model / prompt-可修的失败。
+- **下一步**：① M2 小种群/Pareto/lineage 可视化；② 把好的 gen_* promote 进 committed bench；
+  ③ 真要训出默认骨架的 lift，需找 nanocodex 默认骨架真有的 gap（或换更弱的 base agent 起训）。
+- **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
+  非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对
   "工程习惯门"有效。教师必须比 agent 强，且任务失败须 prompt-可修，才可能抬升。
 - **forge Do-Not**：① 别硬编码 codex 模型名（本机经 CLIProxyAPI 代理=gpt-5.4，`-m gpt-5`→502）；
