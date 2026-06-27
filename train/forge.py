@@ -23,6 +23,15 @@ import tempfile
 import time
 from pathlib import Path
 
+# Windows consoles / redirected stdout default to cp1252, which can't encode
+# chars like '->' arrows and crashes mid-run. Force UTF-8 so progress prints
+# never abort a long training run.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
 import genome as G  # noqa: E402
@@ -340,7 +349,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         return {"error": "no train tasks"}
     population = [seed_member]
     nodes = [_node(seed_member)]
-    print(f"[forge] gen0: pass {seed_member['obj'].passrate:.2f} cost {seed_member['obj'].cost}s "
+    print(f"[forge] gen0: pass {seed_member['obj'].passrate:.2f} cost {seed_member['obj'].cost} "
           f"(pop_cap={pop_cap}, teachers={[b.name for b in panel]})")
 
     gens_log = []
@@ -374,7 +383,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                 children.append(child)
                 nodes.append(_node(child))
                 print(f"[forge]   gen{rnd} {backend.name}: pass {child['obj'].passrate:.2f} "
-                      f"cost {child['obj'].cost}s  (parent {parent['id']})")
+                      f"cost {child['obj'].cost}  (parent {parent['id']})")
         combined = population + children
         population = PA.select_population(combined, pop_cap, key=lambda m: m["obj"])
         gens_log.append({"gen": rnd, "evaluated": [c["id"] for c in children],
@@ -398,7 +407,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         champ["genome"].save(champ_final)
         lineage["champion"] = {"id": champ["id"], "passrate": champ["obj"].passrate,
                                "cost": champ["obj"].cost}
-        print(f"[forge] champion = {champ['id']} (pass {champ['obj'].passrate:.2f}, cost {champ['obj'].cost}s)")
+        print(f"[forge] champion = {champ['id']} (pass {champ['obj'].passrate:.2f}, cost {champ['obj'].cost})")
         print(f"[forge] champion vs baseline:\n{G.diff(baseline, champ['genome'])}")
         if test_tasks:
             base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_start.toml"),
