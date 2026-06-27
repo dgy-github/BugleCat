@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
 import genome as G  # noqa: E402
+import pareto as PA  # noqa: E402
 import splits as S  # noqa: E402
 import teacher as T  # noqa: E402
 
@@ -261,6 +262,158 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     return lineage
 
 
+def _objectives(ev_result) -> PA.Objectives:
+    """Map an EvalResult to (pass-rate ↑, cost ↓). Cost = mean per-task seconds
+    (a latency proxy for tokens, which ncx does not emit).
+
+    An EMPTY eval (no tasks/runs) is mapped to the WORST objective (cost=+inf),
+    never the best — otherwise a zero-task misconfiguration would be undominated
+    and silently win the front (masking the misconfig as a green champion)."""
+    if ev_result.total_runs == 0 or not ev_result.tasks:
+        return PA.Objectives(passrate=0.0, cost=float("inf"))
+    pr = ev_result.total_passes / ev_result.total_runs
+    times = [t.mean_s for t in ev_result.tasks.values()]
+    cost = round(sum(times) / len(times), 1)
+    return PA.Objectives(passrate=pr, cost=cost)
+
+
+def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
+           repeats: int, timeout: int, budget_s: float, teachers: str, stamp: str,
+           pop_cap: int = 4, test_tasks: list[str] | None = None,
+           from_genome: str | None = None) -> dict:
+    """Small-population, multi-objective (Pareto) search (M2).
+
+    Maintains a population that is the Pareto front (pass-rate ↑ vs cost ↓),
+    capped to `pop_cap` by crowding distance. Each generation, every population
+    member is mutated by every available teacher; parents+children are reduced to
+    the next front. Unlike single-champion `train()`, this KEEPS trade-offs (a
+    cheap-decent genome alongside a slow-strong one). Writes a lineage JSON for
+    `viz.py`.
+
+    Known limitation: surviving parents keep their first-scored objectives (no
+    per-generation re-eval, unlike train()'s noise-aware re-eval), so with a
+    noisy agent set `repeats` high enough that a lucky early draw can't pin the
+    front. (A re-eval mode is a future addition.)
+    """
+    GENOMES_DIR.mkdir(exist_ok=True)
+    RUNS_DIR.mkdir(exist_ok=True)
+    t0 = time.perf_counter()
+
+    def elapsed() -> float:
+        return time.perf_counter() - t0
+
+    panel = [b for b in T.build_panel() if teachers == "panel" or b.name == teachers]
+    if not panel:
+        print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
+        return {"error": "no teacher"}
+
+    baseline = G.extract_current()
+    counter = {"n": 0}
+
+    def new_id(tag: str) -> str:
+        counter["n"] += 1
+        return f"g{counter['n']:02d}_{tag}"
+
+    def make_member(genome, gen, parent, teacher, tag):
+        gid = "gen0_start" if gen == 0 else new_id(tag)
+        path = GENOMES_DIR / f"{stamp}_{gid}.toml"
+        genome.save(path)
+        ev_r = ev.evaluate(str(path), train_tasks, repeats, timeout)
+        obj = _objectives(ev_r)
+        return {"id": gid, "genome": genome, "path": path, "ev": ev_r, "obj": obj,
+                "gen": gen, "parent": parent, "teacher": teacher}
+
+    start_genome = G.Genome.load(Path(from_genome)) if from_genome else baseline.copy()
+    if from_genome:
+        print(f"[forge] population start from {from_genome}")
+    seed_member = make_member(start_genome, 0, None, None, "start")
+    if seed_member["ev"].total_runs == 0:
+        print(f"[forge] train tasks {train_tasks} resolved to ZERO bench runs — "
+              f"check task names / splits.json. Aborting.")
+        return {"error": "no train tasks"}
+    population = [seed_member]
+    nodes = [_node(seed_member)]
+    print(f"[forge] gen0: pass {seed_member['obj'].passrate:.2f} cost {seed_member['obj'].cost}s "
+          f"(pop_cap={pop_cap}, teachers={[b.name for b in panel]})")
+
+    gens_log = []
+    for rnd in range(1, rounds + 1):
+        if elapsed() > budget_s:
+            print(f"[forge] budget ({budget_s}s) exhausted — stopping before gen {rnd}.")
+            break
+        children = []
+        for parent in population:
+            failures = parent["ev"].failing_trajectories(top_k=3)
+            if not failures:
+                continue  # nothing to learn from this parent this round
+            prompt = T.build_teacher_prompt(parent["genome"], failures)
+            for backend in panel:
+                if elapsed() > budget_s:
+                    break
+                cand, why = T.parse_candidate(backend.propose(prompt) or "", parent["genome"])
+                if not cand:
+                    continue
+                if G.validate(cand, baseline):
+                    continue
+                child = make_member(cand, rnd, parent["id"], backend.name, backend.name)
+                children.append(child)
+                nodes.append(_node(child))
+                print(f"[forge]   gen{rnd} {backend.name}: pass {child['obj'].passrate:.2f} "
+                      f"cost {child['obj'].cost}s  (parent {parent['id']})")
+        combined = population + children
+        population = PA.select_population(combined, pop_cap, key=lambda m: m["obj"])
+        gens_log.append({"gen": rnd, "evaluated": [c["id"] for c in children],
+                         "front": [m["id"] for m in population]})
+        print(f"[forge]   gen{rnd}: front = {[(m['id'], round(m['obj'].passrate,2), m['obj'].cost) for m in population]}")
+        if not children:
+            print("[forge] no new candidates produced — stopping.")
+            break
+
+    front_ids = {m["id"] for m in population}
+    champ = PA.best(population, key=lambda m: m["obj"])
+    for nd in nodes:
+        nd["on_front_final"] = nd["id"] in front_ids
+
+    lineage = {"stamp": stamp, "mode": "population", "pop_cap": pop_cap,
+               "train_tasks": train_tasks, "holdout_tasks": holdout_tasks,
+               "repeats": repeats, "nodes": nodes, "generations": gens_log}
+
+    if champ:
+        champ_final = GENOMES_DIR / f"{stamp}_champion.toml"
+        champ["genome"].save(champ_final)
+        lineage["champion"] = {"id": champ["id"], "passrate": champ["obj"].passrate,
+                               "cost": champ["obj"].cost}
+        print(f"[forge] champion = {champ['id']} (pass {champ['obj'].passrate:.2f}, cost {champ['obj'].cost}s)")
+        print(f"[forge] champion vs baseline:\n{G.diff(baseline, champ['genome'])}")
+        if test_tasks:
+            base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_start.toml"),
+                                    test_tasks, repeats, timeout)
+            champ_test = ev.evaluate(str(champ_final), test_tasks, repeats, timeout)
+            print(f"[forge] FINAL on test {test_tasks}: baseline {base_test.total_passes}/"
+                  f"{base_test.total_runs} → champion {champ_test.total_passes}/{champ_test.total_runs}")
+            lineage["test"] = {"tasks": test_tasks, "baseline": base_test.total_passes,
+                               "champion": champ_test.total_passes, "runs": base_test.total_runs}
+
+    lin_path = RUNS_DIR / f"lineage_{stamp}.json"
+    lin_path.write_text(json.dumps(lineage, indent=2), encoding="utf-8")
+    # Render the visualization next to the lineage.
+    try:
+        import viz
+        html_path = lin_path.with_suffix(".html")
+        html_path.write_text(viz.build_html(lineage), encoding="utf-8")
+        print(f"[forge] lineage -> {lin_path}\n[forge] viz     -> {html_path}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[forge] lineage -> {lin_path} (viz failed: {e})")
+    print(f"[forge] done in {elapsed():.0f}s.")
+    return lineage
+
+
+def _node(member: dict) -> dict:
+    return {"id": member["id"], "gen": member["gen"], "parent": member["parent"],
+            "teacher": member["teacher"], "passrate": round(member["obj"].passrate, 3),
+            "cost": member["obj"].cost}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="ncx-forge harness trainer (M0b).")
     ap.add_argument("--self-check", action="store_true",
@@ -268,7 +421,10 @@ def main() -> int:
     ap.add_argument("--baseline", action="store_true",
                     help="report the gen0 baseline pass-rate")
     ap.add_argument("--train", action="store_true",
-                    help="run the optimizer loop (self-check gates it)")
+                    help="single-champion hill-climb optimizer (self-check gates it)")
+    ap.add_argument("--population", action="store_true",
+                    help="multi-objective Pareto population search (M2; self-check gates it)")
+    ap.add_argument("--pop-cap", type=int, default=4, help="population size cap (--population)")
     ap.add_argument("--tasks", default="", help="comma-separated task names (for --baseline)")
     ap.add_argument("--train-tasks", default="",
                     help="override train split (comma-separated); default = splits.json train")
@@ -315,7 +471,21 @@ def main() -> int:
               accept_margin=a.accept_margin, reeval_incumbent=not a.no_reeval,
               from_genome=(a.from_genome or None))
         return 0
-    print("nothing to do — pass --self-check | --baseline | --train. See train/DESIGN.md")
+    if a.population:
+        if not a.no_gate and not self_check(a.timeout):
+            print("[forge] self-check failed — refusing to train (use --no-gate to override).")
+            return 1
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        sp = S.load_splits()
+        train_tasks = [t.strip() for t in a.train_tasks.split(",") if t.strip()] or sp["train"]
+        holdout_tasks = [t.strip() for t in a.holdout_tasks.split(",") if t.strip()] or sp["val"]
+        test_tasks = [t.strip() for t in a.test_tasks.split(",") if t.strip()] or sp["test"]
+        print(f"[forge] splits — train={train_tasks} val={holdout_tasks} test={test_tasks}")
+        evolve(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
+               a.budget_s, a.teacher, stamp, pop_cap=a.pop_cap, test_tasks=test_tasks,
+               from_genome=(a.from_genome or None))
+        return 0
+    print("nothing to do — pass --self-check | --baseline | --train | --population. See train/DESIGN.md")
     return 0
 
 

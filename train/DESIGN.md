@@ -329,7 +329,16 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
   - 验证：6 taskgen + 3 forge + 5 evaluator 单测全过；**live**：api(deepseek) 造出一个含
     Unicode 预/分解 + emoji ZWJ 的重叠子串难任务、自校验入库；一个 trivial "修 bug" 任务被
     "seed already passes" 正确拒绝 —— 两条门都点火。
-- **M2｜搜索增强**：小种群 / Pareto（通过率×token）/ lineage 可视化。
+- **M2｜搜索增强 ✅完成**：
+  - `pareto.py`：多目标 (pass-rate↑ vs cost↓，cost=均 mean_s 当 token 代理) —— dominance /
+    Pareto front / NSGA-II crowding-distance trim。纯函数，6 单测（含对抗复审 2万次随机 0 违例）。
+  - `forge.py --population`（`evolve()`）：小种群进化 —— 每代每个 front 成员被每个教师变异→
+    评测→parents+children 取 Pareto front→crowding 截到 `--pop-cap`。**保留 trade-off**（慢而强
+    + 快而可），不像单 champion 只留一个。空 eval→cost=inf（防零任务误配静默夺冠）。
+  - `viz.py`：lineage JSON → 自包含 HTML（Pareto 散点 SVG + 血缘表，front 高亮、champion 星标）。
+  - 验证：3 population 单测（front 保 trade-off / 丢被支配 / champion=最高 pass / viz 渲染）+ viz；
+    对抗复审（2 agent）判 pareto「CORRECT」、evolve「substantially correct，无高危」。
+  - 注：cost 用 mean_s（ncx 不吐 token）；parents 不逐代重评（noisy 时调高 repeats）。
 - **M3｜数据导出**：Trajectory Store 成型 + `export.py`，对接未来 GPU 训练。
 
 ## 12. 决策记录（评审已定 2026-06-26）
