@@ -30,8 +30,15 @@ required or the app loads the dev URL — see the blank-page gotcha).
   the model via the bridge).
 - **P3 ✅ DONE (`c1c0801`):** file/image upload — tauri-plugin-dialog picker;
   Command::Prompt { text, images }; images→vision multimodal, files→@mention.
-- **P2 (next):** session resume + fork (bridge Command::{Resume, Fork} seeded
-  from a SessionIndex snapshot; core Session::fork exists).
+- **P2 ✅ DONE (`df06b9e`):** session resume + fork. History panel Resume/⑂ Fork;
+  bridge Command::{Resume, Fork} reseed via Session::fork; `loaded` event replays
+  the transcript. (Drive needs a saved snapshot — send a turn first.)
+- **Hermes trigger (pending integration):** forge's optimizer loop (M0b) AND M1
+  (split/TaskGen/noise-aware accept) are ALREADY built on `feat/train`
+  (forge.py train(), teacher.py panel incl. codex, genome.py, splits.py,
+  taskgen.py) and run end-to-end. To wire the GUI "Hermes" button, feat/train +
+  feat/gui must first land on rust-capability; then a Tauri command shells
+  `python train/forge.py` and streams progress.
 - **P4:** orchestrate toggle + plan/usage panels (bridge + shared Arc<Mutex>
   snapshot of the plan/usage the !Send agent thread holds). Plus Hermes LLM-merge.
 
