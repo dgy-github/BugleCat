@@ -62,8 +62,12 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   **gen0 train 1/2 → R1 codex 重写 system_prompt(351→1345) → train 2/2 被接受**（margin≥1、
   holdout 1/1 不退、test 无回归）。**结论：headroom 存在时，优化器能真产出经噪声门+holdout
   验证的 lift**（`889078f`）；但默认骨架上余量薄 → 真实增益靠更强 model / prompt-可修的失败。
-- **下一步**：① M2 小种群/Pareto/lineage 可视化；② 把好的 gen_* promote 进 committed bench；
-  ③ 真要训出默认骨架的 lift，需找 nanocodex 默认骨架真有的 gap（或换更弱的 base agent 起训）。
+- **M2 ✅（搜索增强，`a6a47d2`）**：`pareto.py`（多目标 pass↑/cost↓ dominance+front+NSGA-II
+  crowding，6 单测）+ `forge.py --population/--pop-cap`（`evolve()` 小种群，保 trade-off，空 eval
+  →cost=inf 防误配夺冠）+ `viz.py`（lineage→自包含 HTML：Pareto 散点+血缘表）。3 population 单测；
+  对抗复审判 pareto CORRECT(2万随机 0 违例)、evolve substantially correct（其 1 medium 已修）。
+- **下一步**：① 把好的 gen_* promote 进 committed bench；② 真训默认骨架 lift 需找真 gap/更弱 base；
+  ③ evolve 可加 parents 逐代重评（noise-aware）；④ ncx 吐 token usage 则 Pareto cost 换真 token。
 - **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
   非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对
