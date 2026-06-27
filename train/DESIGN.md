@@ -121,24 +121,28 @@
             └─────────────┘
 ```
 
-1. **Evaluator** — 给定一个 genome，跑 `bench/run.py`（已支持 `--repeats`/`--tasks`/报告）
-   在指定任务集上，产出结构化结果：每任务 `k/N` 通过率、均 token、均时延、**失败任务的
-   最后一条 transcript**（给教师当信号）。≈90% 已就绪，只需让 run.py 接受 `NCX_GENOME`
-   并把失败轨迹写进 JSON 报告。
-2. **Teacher（变异算子）** — 强模型。输入：当前 genome + 失败轨迹（哪些任务挂了、
-   agent 当时怎么想/调了什么工具/错在哪）。输出：一份**改进后的 genome**（reflective
-   mutation：先诊断失败模式，再针对性改 prompt/策略）。一次只改少数字段，便于归因。
-3. **Optimizer（搜索循环）** — 维护 champion（或小种群），每代：选当前最差失败 → 教师变异
-   → Evaluator 在 train 集打分 → 若优于 champion，再上 val 集复核 → 接受/拒绝 → 记 lineage。
-   终止：预算耗尽 / 连续 K 代无提升（plateau）。
-4. **TaskGen（任务生成器）** — 另一个教师，按"难度/能力维度"生成新 bench 任务
+1. **Evaluator** ✅（`train/evaluator.py`，M0a P2）— 给定一个 genome，在指定任务集上跑 ncx
+   （注入 `NCX_GENOME`），产出结构化结果：每任务 `k/N` 通过率、均时延、**失败任务的
+   轨迹**（从 `session.jsonl` 抽 agent 末条消息+工具调用，剔除 grader 行）给教师当信号。
+2. **Teacher（变异算子）** ✅（`train/teacher.py`，M0b）— 可插拔强模型 panel（codex/claude/
+   api）。输入：当前 genome + 失败轨迹（不可信数据、定界）；输出：一份**改进后的 genome**
+   （reflective mutation：先诊断失败模式，再针对性改 prompt/工具描述）。一次只改少数字段。
+3. **Optimizer（搜索循环）** ✅（`train/forge.py --train`，M0b，单 champion）— 每代：取失败轨迹
+   → 各教师提议 → Evaluator 在 train 集打分 → 优于 champion 再上 holdout 复核 → 接受/拒绝
+   → 记 lineage。终止：预算（wall-clock governor）/ train 全过即停。**种群/plateau 扩库属 M2。**
+4. **TaskGen（任务生成器）** ⏳ M1 — 另一个教师，按"难度/能力维度"生成新 bench 任务
    （`prompt.txt` + 隐藏 `check.py` + 可选 seed）。**必须自校验**：参考解通过 check、
    且对"空实现/seed-buggy"失败，才入库（这条纪律在 stream E 已验证过）。
-5. **Trajectory Store** — 记录每次 `(genome_id, task, run_idx) → 完整消息/工具轨迹 +
-   pass/fail + token`。既是调试依据，也是**未来微调/RL 的数据集**（§10）。
-6. **Reporting** — champion 随代数的通过率曲线、genome diff 血缘、最终 held-out test 分数。
+5. **Trajectory Store** ⏳ M3（现为部分）— Evaluator 已能抽单次失败轨迹；持久化成
+   `(genome_id, task, run_idx) → 轨迹 + pass/fail + token` 的 **SFT/RL 数据集**留待 M3（§10）。
+6. **Reporting** ✅部分 — forge 已写 JSON lineage（每代候选/接受/真实模型 id）；通过率曲线
+   可视化属 M2。
 
 ## 4. 主循环（伪码）
+
+> ✅ **已在 `train/forge.py --train` 实现（M0b，单 champion 版）**：自检 gate → 建 panel →
+> gen0 baseline → 每代各教师提议→评测→接受门（train 升 + holdout 不退）→ JSON lineage，
+> 带 wall-clock governor。下面是规范参考；M1 补 train/val/test 切分 + TaskGen，M2 补种群/plateau。
 
 ```python
 champion = extract_current_genome()          # = 现有硬编码值，作为 gen0 基线
@@ -230,7 +234,7 @@ train/
 
 | 风险 | 对策 |
 |---|---|
-| **P1 未落地 → 静默空跑**（最高危） | genome 注入先行 + forge 自毁-genome 自检 gate（§2.1） |
+| **P1 未落地 → 静默空跑**（最高危） | ✅ genome 注入已落地 + forge **sentinel** 注入自检 gate（确定性，§2.1） |
 | **P2 缺失 → 教师瞎猜**（最高危） | 先从 session log 采集失败轨迹、屏蔽 grader 输出（§2.2） |
 | 注入攻击：不可信轨迹 → 教师 → 恶意 genome（含真实 shell 工具，workspace-write） | 轨迹当**数据**定界、剥 fence、硬截断；genome 与 incumbent diff、拒绝含 shell 元字符/URL/`curl\|sh` 的描述；语义门拒提及 grader 工件；**genome 仅改描述不改行为，沙箱仍管执行**——这是结构性保护 |
 | 打分噪声当成提升 | 每代重评 incumbent + 噪声带阈值 + held-out 接受 + 退化降级（§7） |
