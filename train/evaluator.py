@@ -141,6 +141,7 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[b
         else:
             env.pop("NCX_GENOME", None)  # baseline: ensure no stray genome
         t0 = time.perf_counter()
+        timed_out = False
         try:
             subprocess.run(
                 bench.agent_cmd("nanocodex", prompt),
@@ -148,11 +149,18 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int) -> tuple[b
                 encoding="utf-8", errors="replace", timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            pass
+            timed_out = True
         elapsed = time.perf_counter() - t0
         # Harvest the trajectory BEFORE grade() copies _check.py into the ws.
         trajectory = extract_trajectory(ws)
         ok, _ = bench.grade(task, ws)
+        if not ok and not trajectory:
+            # A failure with no captured trajectory (e.g. a timeout killed the
+            # agent before it logged, or it produced nothing) must STILL be a
+            # signal to the teacher — otherwise forge mistakes it for a pass.
+            trajectory = (f"The agent did NOT finish within {timeout}s (timed out)."
+                          if timed_out else
+                          "The agent produced no usable session log and the task did not pass.")
         return ok, round(elapsed, 1), ("" if ok else trajectory)
     finally:
         shutil.rmtree(ws, ignore_errors=True)

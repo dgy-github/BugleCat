@@ -160,8 +160,15 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                   f"holdout {champ_hold.total_passes}/{champ_hold.total_runs}")
         failures = champ_train.failing_trajectories(top_k=3)
         if not failures:
-            print("[forge] champion fully solves the train set — nothing to improve "
-                  "(grow the task set, M1). Stopping.")
+            if champ_train.total_passes >= champ_train.total_runs:
+                print("[forge] champion fully solves the train set — nothing to improve "
+                      "(grow/harden the task set). Stopping.")
+            else:
+                # Should not happen now that the evaluator synthesizes a trajectory
+                # for trajectory-less failures, but guard against a silent no-op.
+                print(f"[forge] train has failures ({champ_train.total_passes}/"
+                      f"{champ_train.total_runs}) but no usable trajectories to feed the "
+                      f"teacher — cannot propose. Stopping.")
             break
         prompt = T.build_teacher_prompt(champion, failures)
         round_log = {"round": rnd, "candidates": []}

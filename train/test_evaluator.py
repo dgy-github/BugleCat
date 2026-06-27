@@ -71,6 +71,28 @@ def test_extract_trajectory_missing_log_is_empty():
     assert ev.extract_trajectory(ws) == ""
 
 
+def test_timeout_failure_synthesizes_trajectory():
+    # A failure with no captured trajectory must still produce a signal, or forge
+    # mistakes the failing task for a pass (the live-run bug this guards against).
+    import subprocess
+    task = Path(tempfile.mkdtemp(prefix="p2_to_"))
+    (task / "prompt.txt").write_text("do something", encoding="utf-8")
+    orig = (ev.subprocess.run, ev.bench.grade, ev.extract_trajectory, ev.bench.seed)
+
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="ncx", timeout=1)
+    ev.subprocess.run = boom
+    ev.bench.grade = lambda t, ws: (False, "")
+    ev.extract_trajectory = lambda ws: ""
+    ev.bench.seed = lambda t, ws: None
+    try:
+        ok, elapsed, traj = ev._run_task_once(task, None, timeout=1)
+        assert ok is False
+        assert traj and "timed out" in traj.lower(), repr(traj)
+    finally:
+        (ev.subprocess.run, ev.bench.grade, ev.extract_trajectory, ev.bench.seed) = orig
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
