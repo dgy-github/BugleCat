@@ -66,8 +66,14 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   crowding，6 单测）+ `forge.py --population/--pop-cap`（`evolve()` 小种群，保 trade-off，空 eval
   →cost=inf 防误配夺冠）+ `viz.py`（lineage→自包含 HTML：Pareto 散点+血缘表）。3 population 单测；
   对抗复审判 pareto CORRECT(2万随机 0 违例)、evolve substantially correct（其 1 medium 已修）。
-- **下一步**：① 把好的 gen_* promote 进 committed bench；② 真训默认骨架 lift 需找真 gap/更弱 base；
-  ③ evolve 可加 parents 逐代重评（noise-aware）；④ ncx 吐 token usage 则 Pareto cost 换真 token。
+- **M2+ 收尾 ✅（`b88e023`+`8786cbb`）**：① promote 5 难任务进 committed bench（t14_overlap/
+  t15_base_n/t16_csv/t17_running_stats/t18_rank_purity，均验 seed 失败+无泄漏解+baseline 可解）；
+  ② `evolve` 加 `reeval_parents`（默认开，每代重评存活成员，防 lucky 早抽钉死 front）；
+  ③ **ncx 一次性模式 stderr 吐 `[ncx-usage] total_tokens=N`**（唯一新增 Rust 改动，`main.rs`
+  emit_usage_line）→ evaluator 解析进 `mean_tokens` → **Pareto cost 优先用真 token、无则回退 mean_s**
+  （live：cost=33515 tokens）。26 Python 单测 + ncx-cli 全绿。
+- **下一步（仍可做）**：① 真训默认骨架 lift 需找真 gap/更弱 base agent；② TaskGen 批量扩 corpus
+  后跑大 `forge --population`；③ M3 数据导出（SFT/RL）。
 - **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
   非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对
