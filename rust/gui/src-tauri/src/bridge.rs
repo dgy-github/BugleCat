@@ -67,6 +67,9 @@ pub enum Command {
     /// Change the sandbox mode live (no session reset) + persist it. Used by the
     /// "auto-execute" mode (danger-full-access).
     SetSandbox(String),
+    /// Switch the model: persist it and rebuild the agent reseeded with the
+    /// current transcript, so the conversation survives the swap.
+    SetModel(String),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -79,6 +82,7 @@ pub enum UiEvent {
         sandbox: String,
         workspace: String,
         session_id: String,
+        models: Vec<String>,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
     AssistantDelta { text: String },
@@ -148,6 +152,7 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
                 sandbox: cfg.sandbox_mode,
                 workspace: workspace.display().to_string(),
                 session_id: session_id.to_string(),
+                models: cfg.available_models,
             },
         );
     }
@@ -412,6 +417,27 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             m.insert("sandbox_mode", mode.as_str());
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                             emit_ready(&app, &workspace, &session_id);
+                        }
+                        Command::SetModel(model) => {
+                            // Persist the model, then rebuild reseeded with the current
+                            // transcript so the conversation survives the swap. We do NOT
+                            // emit Loaded — the UI keeps its richer transcript as-is.
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("model", model.as_str());
+                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
+                            let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
+                            match build_agent(approver.clone(), Some((session_id.clone(), msgs))) {
+                                Ok((a, ws, sid, lp, idx)) => {
+                                    agent = a;
+                                    workspace = ws;
+                                    session_id = sid;
+                                    log_path = lp;
+                                    session_index = idx;
+                                    agent.set_event_sink(make_sink(app.clone()));
+                                    emit_ready(&app, &workspace, &session_id);
+                                }
+                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                            }
                         }
                     }
                 }

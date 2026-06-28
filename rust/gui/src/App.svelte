@@ -10,7 +10,7 @@
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string }
+    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[] }
     | { kind: "assistant_delta"; text: string }
     | { kind: "assistant"; text: string }
     | { kind: "tool_start"; name: string; args: string }
@@ -113,6 +113,22 @@
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
   };
   let currentSessionId = $state("");
+  // Topbar model quick-switch
+  let currentModel = $state("");
+  let models = $state<string[]>([]);
+  let modelMenuOpen = $state(false);
+  async function selectModel(m: string) {
+    modelMenuOpen = false;
+    if (!m || m === currentModel) return;
+    const prev = currentModel;
+    currentModel = m; // optimistic; `ready` will confirm
+    try {
+      await invoke("set_model", { model: m });
+    } catch (e) {
+      currentModel = prev;
+      messages.push({ role: "note", text: `切换模型失败：${e}` });
+    }
+  }
   let approvalPolicy = $state("on-request");
   let approvalMenuOpen = $state(false);
   const APPROVAL_OPTS = [
@@ -141,6 +157,7 @@
       header = `${s.model} · ${s.sandbox}`;
       approvalPolicy = s.approval;
       sandboxMode = s.sandbox;
+      currentModel = s.model;
     } catch (e) {
       header = "配置错误";
     }
@@ -153,6 +170,8 @@
           header = `${p.model} · ${p.sandbox}`;
           workspace = p.workspace;
           sandboxMode = p.sandbox;
+          currentModel = p.model;
+          if (p.models?.length) models = p.models;
           // Learn the active session's real id so 最近会话 can mark/return to it.
           if (p.session_id) currentSessionId = p.session_id;
           refreshSessions();
@@ -730,7 +749,25 @@
     <header class="topbar">
       <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
       <span class="title">{sessionTitle}</span>
-      <span class="meta">{header}</span>
+      <div class="model-wrap">
+        <button class="model-pill" onclick={() => (modelMenuOpen = !modelMenuOpen)}
+          disabled={models.length === 0} title="切换模型">
+          {currentModel || header} ▾
+        </button>
+        {#if modelMenuOpen}
+          <button class="menu-backdrop" aria-label="关闭" onclick={() => (modelMenuOpen = false)}></button>
+          <div class="model-menu" role="menu">
+            {#each models as m}
+              <button class="model-opt" role="menuitemradio" aria-checked={m === currentModel}
+                onclick={() => selectModel(m)}>
+                <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
+                <span class="opt-name">{m}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      {#if sandboxMode}<span class="meta">{sandboxMode}</span>{/if}
       {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
       <span class="topbar-actions">
         <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">

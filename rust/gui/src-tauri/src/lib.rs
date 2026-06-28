@@ -145,6 +145,15 @@ fn set_sandbox(mode: String, state: tauri::State<'_, AppState>) -> Result<(), St
         .map_err(|_| "agent thread is not running".to_string())
 }
 
+/// Switch the active model (persists + rebuilds keeping the current transcript).
+#[tauri::command]
+fn set_model(model: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::SetModel(model))
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
 fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -769,7 +778,8 @@ pub fn run() {
             fork_session,
             new_session,
             set_approval,
-            set_sandbox
+            set_sandbox,
+            set_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
