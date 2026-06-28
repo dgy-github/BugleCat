@@ -43,3 +43,7 @@ Thumbs.db
 
 # bench-generated reports
 bench/reports/
+
+# nanocodex agent runtime state (session log, checkpoints, project memory)
+.nanocodex/
+.ncx/
