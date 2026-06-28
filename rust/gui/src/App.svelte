@@ -700,29 +700,6 @@
       新会话
     </button>
 
-    <nav class="side-nav">
-      <button class="nav-item" onclick={openFiles}>
-        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        文件
-      </button>
-      <button class="nav-item" onclick={openBranches}>
-        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M6 13a6 6 0 0 0 6-6h3.8"/></svg>
-        分支
-      </button>
-      <button class="nav-item" onclick={openDiff}>
-        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h7M8.5 4.5v7M5 17h7"/></svg>
-        改动
-      </button>
-      <button class="nav-item" onclick={openHermes}>
-        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 4v16"/></svg>
-        记忆
-      </button>
-      <button class="nav-item" onclick={openCheckpoints}>
-        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.2l2.8 1.7"/></svg>
-        检查点
-      </button>
-    </nav>
-
     <div class="side-recents">
       <div class="side-h">最近会话</div>
       {#if sessions.length === 0}

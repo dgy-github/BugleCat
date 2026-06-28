@@ -907,25 +907,8 @@ main.app { flex-direction: row; }
 }
 .new-session:hover { background: var(--paper); }
 
-.side-nav { display: flex; flex-direction: column; gap: 2px; margin-top: var(--sp-1); }
-.nav-item {
-  width: 100%;
-  text-align: left;
-  background: none;
-  color: var(--ink-2);
-  border: none;
-  border-radius: var(--r-sm);
-  padding: 0.42rem 0.55rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-}
 .ni { width: 16px; height: 16px; flex: 0 0 16px; }
 .new-session .ni { color: var(--accent); width: 17px; height: 17px; }
-.nav-item .ni { color: var(--ink-3); }
-.nav-item:hover .ni { color: var(--ink); }
-.nav-item:hover { background: var(--paper); color: var(--ink); }
 
 .side-recents {
   flex: 1 1 auto;
@@ -1246,8 +1229,7 @@ main.app { flex-direction: row; }
 .sidebar { font-size: var(--fs-sm); }
 .side-brand { font-size: var(--fs-md); }
 .new-session { padding: 0.45rem 0.6rem; font-size: var(--fs-sm); }
-.nav-item { padding: 0.34rem 0.55rem; font-size: var(--fs-sm); }
-.nav-item .ni, .new-session .ni { width: 15px; height: 15px; flex: 0 0 15px; }
+.new-session .ni { width: 15px; height: 15px; flex: 0 0 15px; }
 .recent-main { padding: 0.34rem 0.5rem; font-size: var(--fs-sm); }
 .side-h { font-size: 0.68rem; }
 
