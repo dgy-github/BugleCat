@@ -179,6 +179,19 @@ fn request_ready(state: tauri::State<'_, AppState>) -> Result<(), String> {
         .map_err(|_| "agent thread is not running".to_string())
 }
 
+/// Archive (or unarchive) a saved session; persisted in the session index.
+#[tauri::command]
+fn archive_session(
+    session_id: String,
+    archived: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::ArchiveSession(session_id, archived))
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
 fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -497,6 +510,7 @@ pub struct SessionRow {
     tool_calls: usize,
     updated_at: String,
     has_snapshot: bool,
+    archived: bool,
 }
 
 /// Run a git command in the workspace; Ok(stdout) or Err(stderr).
@@ -820,6 +834,7 @@ fn list_sessions() -> Result<Vec<SessionRow>, String> {
             tool_calls: s.tool_calls,
             updated_at: s.updated_at,
             has_snapshot: s.has_snapshot,
+            archived: s.archived,
         })
         .collect())
 }
@@ -924,6 +939,7 @@ pub fn run() {
             get_workspace,
             resume_session,
             fork_session,
+            archive_session,
             new_session,
             set_approval,
             set_sandbox,

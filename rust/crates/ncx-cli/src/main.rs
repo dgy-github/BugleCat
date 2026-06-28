@@ -1384,6 +1384,7 @@ mod tests {
             updated_at: "2026-06-01T10:00:00".into(),
             log_path: "/p/.nanocodex/session.jsonl".into(),
             has_snapshot: true,
+            archived: false,
         }];
         let out = render_history(&rows, 10);
         assert!(out.contains("sid"));

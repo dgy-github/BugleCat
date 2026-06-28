@@ -88,6 +88,8 @@ pub enum Command {
     /// permission mode). The frontend calls this once its listener is up, since
     /// the agent thread's initial emit can fire before that listener exists.
     RequestReady,
+    /// Archive / unarchive a saved session (persists in the session index).
+    ArchiveSession(String, bool),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -508,6 +510,9 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             }
                         }
                         Command::RequestReady => emit_ready(&app, &workspace, &session_id),
+                        Command::ArchiveSession(id, archived) => {
+                            session_index.set_archived(&id, archived);
+                        }
                     }
                 }
             });

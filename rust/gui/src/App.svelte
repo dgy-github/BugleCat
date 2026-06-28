@@ -658,6 +658,7 @@
     tool_calls: number;
     updated_at: string;
     has_snapshot: boolean;
+    archived: boolean;
   };
   let branchOpen = $state(false);
   let branches = $state<BranchInfo[]>([]);
@@ -670,14 +671,43 @@
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
   // Pin the active session to the top of 最近会话 so it's always findable.
-  const orderedSessions = $derived(
-    currentSessionId
-      ? [
-          ...sessions.filter((s) => s.session_id === currentSessionId),
-          ...sessions.filter((s) => s.session_id !== currentSessionId),
-        ]
-      : sessions,
-  );
+  let showArchived = $state(false);
+  // Pin the active session to the top; hide archived ones unless toggled (the
+  // active session always stays visible even if archived).
+  const orderedSessions = $derived.by(() => {
+    const visible = sessions.filter(
+      (s) => showArchived || !s.archived || s.session_id === currentSessionId,
+    );
+    if (!currentSessionId) return visible;
+    return [
+      ...visible.filter((s) => s.session_id === currentSessionId),
+      ...visible.filter((s) => s.session_id !== currentSessionId),
+    ];
+  });
+  const archivedCount = $derived(sessions.filter((s) => s.archived).length);
+
+  // 13-digit ms-epoch string → compact relative / date label.
+  function fmtWhen(ms: string): string {
+    const t = Number(ms);
+    if (!t) return "";
+    const diff = Date.now() - t;
+    if (diff < 60_000) return "刚刚";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+    const d = new Date(t);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getMonth() + 1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  async function archiveSession(id: string, archived: boolean) {
+    try {
+      await invoke("archive_session", { sessionId: id, archived });
+      const s = sessions.find((x) => x.session_id === id);
+      if (s) s.archived = archived; // optimistic
+      refreshSessions();
+    } catch (e) {
+      messages.push({ role: "note", text: `归档失败：${e}` });
+    }
+  }
 
   async function loadBranches() {
     branches = await invoke<BranchInfo[]>("git_branches");
@@ -937,18 +967,31 @@
     </button>
 
     <div class="side-recents">
-      <div class="side-h">最近会话</div>
+      <div class="side-h">
+        最近会话
+        {#if archivedCount}
+          <button class="side-h-toggle" onclick={() => (showArchived = !showArchived)}>
+            {showArchived ? "隐藏归档" : `已归档 ${archivedCount}`}
+          </button>
+        {/if}
+      </div>
       {#if sessions.length === 0}
         <div class="side-empty">暂无会话</div>
       {/if}
       {#each orderedSessions as s}
-        <div class="recent-item" class:active={s.session_id === currentSessionId}>
+        <div class="recent-item" class:active={s.session_id === currentSessionId} class:archived={s.archived}>
           <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
-            <span class="recent-dot">●</span>{s.title || "（未命名）"}
+            <span class="recent-dot">●</span>
+            <span class="recent-text">
+              <span class="recent-title">{s.title || "（未命名）"}</span>
+              <span class="recent-when">{fmtWhen(s.updated_at)}{s.archived ? " · 已归档" : ""}</span>
+            </span>
           </button>
-          <button class="recent-fork" title="从此处分叉新会话" disabled={busy || !s.has_snapshot}
-            onclick={() => forkSession(s.session_id, s.title)}>⑂</button>
+          <button class="recent-act" title="从此处分叉新会话" disabled={busy || !s.has_snapshot}
+            onclick={() => forkSession(s.session_id, s.title)} aria-label="分叉">⑂</button>
+          <button class="recent-act" title={s.archived ? "取消归档" : "归档此会话"}
+            onclick={() => archiveSession(s.session_id, !s.archived)} aria-label="归档">{s.archived ? "↩" : "🗄"}</button>
         </div>
       {/each}
     </div>

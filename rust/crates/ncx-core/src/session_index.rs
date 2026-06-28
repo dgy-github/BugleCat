@@ -33,6 +33,7 @@ pub struct SessionSummary {
     pub updated_at: String,
     pub log_path: String,
     pub has_snapshot: bool,
+    pub archived: bool,
 }
 
 impl SessionSummary {
@@ -50,6 +51,7 @@ impl SessionSummary {
             "updated_at": self.updated_at,
             "log_path": self.log_path,
             "has_snapshot": self.has_snapshot,
+            "archived": self.archived,
         })
     }
 
@@ -95,6 +97,7 @@ impl SessionSummary {
                 .get("has_snapshot")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            archived: value.get("archived").and_then(|v| v.as_bool()).unwrap_or(false),
         })
     }
 }
@@ -149,8 +152,9 @@ impl SessionIndex {
         log_path: &Path,
     ) -> SessionSummary {
         let prior_created = self.by_id.get(session_id).map(|s| s.created_at.clone());
+        let prior_archived = self.by_id.get(session_id).map(|s| s.archived).unwrap_or(false);
         let saved = self.save_snapshot(session_id, session);
-        let summary = summarize(
+        let mut summary = summarize(
             session_id,
             &workspace.display().to_string(),
             &session.full_messages(),
@@ -159,8 +163,21 @@ impl SessionIndex {
             prior_created.as_deref(),
             saved,
         );
+        summary.archived = prior_archived; // archiving survives new turns
         self.record(summary.clone());
         summary
+    }
+
+    /// Set a session's archived flag (persists). Returns false if unknown.
+    pub fn set_archived(&mut self, session_id: &str, archived: bool) -> bool {
+        match self.by_id.get_mut(session_id) {
+            Some(s) => {
+                s.archived = archived;
+                self.save();
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn snapshot_path(&self, session_id: &str) -> PathBuf {
@@ -309,6 +326,7 @@ pub fn summarize(
         updated_at: now,
         log_path: log_path.to_string(),
         has_snapshot,
+        archived: false,
     }
 }
 

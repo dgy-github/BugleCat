@@ -1109,16 +1109,40 @@ main.app { flex-direction: row; }
 .recent-dot { color: var(--ink-4); font-size: 0.5rem; flex: 0 0 auto; }
 .recent-main:hover { color: var(--ink); }
 .recent-main:disabled { color: var(--ink-4); cursor: default; }
-.recent-fork {
+.recent-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.recent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-when { font-size: 0.66rem; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-act {
   flex: 0 0 auto;
   background: none;
   color: var(--ink-3);
   border: none;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.95rem;
+  box-shadow: none;
+  min-height: auto;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.9rem;
+  opacity: 0;
 }
-.recent-fork:hover { color: var(--accent); }
-.recent-fork:disabled { color: var(--ink-4); cursor: default; }
+.recent-item:hover .recent-act { opacity: 1; }
+.recent-act:hover { color: var(--accent); }
+.recent-act:active { transform: none; }
+.recent-act:disabled { color: var(--ink-4); cursor: default; }
+.recent-item.archived .recent-main { opacity: 0.55; }
+.recent-item.archived .recent-act { opacity: 1; } /* keep unarchive reachable */
+.side-h { display: flex; align-items: center; justify-content: space-between; }
+.side-h-toggle {
+  background: none;
+  border: none;
+  box-shadow: none;
+  min-height: auto;
+  padding: 0 0.2rem;
+  font-size: 0.62rem;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.side-h-toggle:hover { color: var(--accent); }
 
 .side-foot {
   flex: 0 0 auto;
