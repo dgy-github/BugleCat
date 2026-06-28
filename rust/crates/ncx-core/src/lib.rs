@@ -36,7 +36,7 @@ pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
 pub use project_instructions::load_project_instructions;
-pub use session::{ContextEditPolicy, ContextEditStats, Session};
+pub use session::{estimate_tokens, ContextEditPolicy, ContextEditStats, Session};
 pub use session_index::{new_session_id, SessionIndex, SessionSummary};
 pub use skills::{discover_skills, skills_index_block, Skill};
 pub use slash::{parse_slash, split_loop_arg, SLASH_HELP};

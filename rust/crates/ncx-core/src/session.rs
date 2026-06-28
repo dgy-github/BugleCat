@@ -452,6 +452,44 @@ fn total_chars(system: &str, notes: &[String], messages: &[Value]) -> usize {
         + messages.iter().map(json_chars).sum::<usize>()
 }
 
+/// Cheap, deterministic context-size estimate (no tokenizer, no network).
+///
+/// Mirrors `nanocodex/agent/compaction.py::estimate_tokens`: ~2 chars per token
+/// over message text + tool-call name/arguments, plus a small per-message
+/// framing overhead. Used to show context-window occupancy in the UIs; it is an
+/// estimate, not the provider's billed prompt size.
+pub fn estimate_tokens(messages: &[Value]) -> i64 {
+    const CHARS_PER_TOKEN: usize = 2;
+    let mut total = 0usize;
+    for m in messages {
+        match m.get("content") {
+            Some(Value::String(s)) => total += s.chars().count(),
+            Some(Value::Array(blocks)) => {
+                for b in blocks {
+                    if let Some(t) = b.get("text").and_then(|v| v.as_str()) {
+                        total += t.chars().count();
+                    }
+                }
+            }
+            _ => {}
+        }
+        if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
+            for tc in calls {
+                if let Some(f) = tc.get("function") {
+                    if let Some(n) = f.get("name").and_then(|v| v.as_str()) {
+                        total += n.chars().count();
+                    }
+                    if let Some(a) = f.get("arguments").and_then(|v| v.as_str()) {
+                        total += a.chars().count();
+                    }
+                }
+            }
+        }
+        total += 8; // per-message role/framing overhead
+    }
+    (total / CHARS_PER_TOKEN) as i64
+}
+
 fn compress_tool_result(msg: &mut Value, max_chars: usize) -> bool {
     let Some(obj) = msg.as_object_mut() else {
         return false;
@@ -477,6 +515,35 @@ fn compress_tool_result(msg: &mut Value, max_chars: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn estimate_tokens_counts_text_and_tool_calls() {
+        // Empty -> zero.
+        assert_eq!(estimate_tokens(&[]), 0);
+
+        // A user string: (len + 8 overhead) / 2.
+        let msgs = vec![json!({"role": "user", "content": "hello"})]; // 5 + 8 = 13 -> 6
+        assert_eq!(estimate_tokens(&msgs), 6);
+
+        // Tool-call name + arguments count toward the estimate.
+        let with_call = vec![json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"function": {"name": "shell", "arguments": "{\"cmd\":\"ls\"}"}}]
+        })];
+        // content 0 + name 5 + args 12 + 8 = 25 -> 12
+        assert_eq!(estimate_tokens(&with_call), 12);
+
+        // Multimodal: only the text blocks count; image blocks are ignored.
+        let multimodal = vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+            ]
+        })]; // 4 + 8 = 12 -> 6
+        assert_eq!(estimate_tokens(&multimodal), 6);
+    }
 
     #[test]
     fn for_model_prepends_system() {

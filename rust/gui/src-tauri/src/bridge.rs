@@ -23,8 +23,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use ncx_config::{load_config, Config, Overrides};
 use ncx_core::{
-    discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
-    skills_index_block, AgentLoop, ApprovalHandler,
+    discover_skills, estimate_tokens, expand_file_mentions, load_project_instructions,
+    new_session_id, skills_index_block, AgentLoop, ApprovalHandler,
     ApprovalRequest, CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Session,
     SessionIndex, TaskBudget, ToolContext, ToolRegistry,
 };
@@ -53,6 +53,22 @@ pub enum Command {
     /// Rebuild the agent from the (just-saved) config — applies model / sandbox
     /// / key changes live. Starts a fresh session.
     Reload,
+}
+
+/// Token accounting for a finished turn, surfaced in the GUI status bar.
+///
+/// `*_tokens` are the provider-reported prompt/completion counts for this turn
+/// plus the running session total; `context_tokens` / `context_window` are an
+/// estimate of how full the model's context window currently is (see
+/// [`estimate_tokens`]). No price/USD figure: the Rust side has no price table.
+#[derive(Clone, Serialize)]
+pub struct UsageSnapshot {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub turn_tokens: i64,
+    pub session_tokens: i64,
+    pub context_tokens: i64,
+    pub context_window: i64,
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -84,6 +100,7 @@ pub enum UiEvent {
     Done {
         final_text: String,
         stop_reason: String,
+        usage: UsageSnapshot,
     },
     /// Fatal setup/turn error.
     Error { message: String },
@@ -154,7 +171,7 @@ impl ApprovalHandler for GuiApprover {
 /// Build the agent loop and its workspace from the resolved config.
 fn build_agent(
     approver: Rc<dyn ApprovalHandler>,
-) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
+) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex, i64), String> {
     let workspace = std::env::current_dir().ok();
     let overrides = Overrides {
         workspace,
@@ -199,6 +216,7 @@ fn build_agent(
         session_id,
         log_path,
         SessionIndex::default(),
+        cfg.context_window,
     ))
 }
 
@@ -257,16 +275,24 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     pending: pending.clone(),
                     counter: AtomicU64::new(1),
                 });
-                let (mut agent, mut workspace, mut session_id, mut log_path, mut session_index) =
-                    match build_agent(approver.clone()) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            emit(&app, UiEvent::Error { message: e });
-                            return;
-                        }
-                    };
+                let (
+                    mut agent,
+                    mut workspace,
+                    mut session_id,
+                    mut log_path,
+                    mut session_index,
+                    mut context_window,
+                ) = match build_agent(approver.clone()) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        emit(&app, UiEvent::Error { message: e });
+                        return;
+                    }
+                };
                 agent.set_event_sink(make_sink(app.clone()));
                 emit_ready(&app, &workspace);
+                // Running token total for the current session (reset on Reload).
+                let mut session_tokens: i64 = 0;
 
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
@@ -280,21 +306,38 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 &agent.session,
                                 &log_path,
                             );
+                            let prompt_tokens =
+                                result.usage.get("prompt_tokens").copied().unwrap_or(0);
+                            let completion_tokens =
+                                result.usage.get("completion_tokens").copied().unwrap_or(0);
+                            let turn_tokens = prompt_tokens + completion_tokens;
+                            session_tokens += turn_tokens;
+                            let context_tokens = estimate_tokens(&agent.session.for_model());
                             emit(
                                 &app,
                                 UiEvent::Done {
                                     final_text: result.final_text,
                                     stop_reason: result.stop_reason,
+                                    usage: UsageSnapshot {
+                                        prompt_tokens,
+                                        completion_tokens,
+                                        turn_tokens,
+                                        session_tokens,
+                                        context_tokens,
+                                        context_window,
+                                    },
                                 },
                             );
                         }
                         Command::Reload => match build_agent(approver.clone()) {
-                            Ok((a, ws, sid, lp, idx)) => {
+                            Ok((a, ws, sid, lp, idx, cw)) => {
                                 agent = a;
                                 workspace = ws;
                                 session_id = sid;
                                 log_path = lp;
                                 session_index = idx;
+                                context_window = cw;
+                                session_tokens = 0;
                                 agent.set_event_sink(make_sink(app.clone()));
                                 emit_ready(&app, &workspace);
                             }

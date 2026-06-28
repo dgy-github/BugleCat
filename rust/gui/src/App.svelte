@@ -3,6 +3,16 @@
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
 
+  // Token accounting for a finished turn (mirrors Rust `UsageSnapshot`).
+  type UsageSnapshot = {
+    prompt_tokens: number;
+    completion_tokens: number;
+    turn_tokens: number;
+    session_tokens: number;
+    context_tokens: number;
+    context_window: number;
+  };
+
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
     | { kind: "ready"; model: string; sandbox: string; workspace: string }
@@ -10,7 +20,7 @@
     | { kind: "tool_start"; name: string; args: string }
     | { kind: "tool_result"; name: string; result: string }
     | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
-    | { kind: "done"; final_text: string; stop_reason: string }
+    | { kind: "done"; final_text: string; stop_reason: string; usage: UsageSnapshot }
     | { kind: "error"; message: string };
 
   type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
@@ -70,10 +80,18 @@
   let input = $state("");
   let busy = $state(false);
   let header = $state("connecting…");
+  let usage = $state<UsageSnapshot | null>(null);
   let scroller: HTMLDivElement;
 
   function scrollDown() {
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+  }
+
+  // Format a token count like the CLI / old GUI: 666, 12.3k, 1.0M.
+  function fmtTok(n: number): string {
+    if (n < 1000) return String(n);
+    if (n < 1_000_000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+    return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
   }
 
   onMount(async () => {
@@ -111,7 +129,8 @@
         }
         case "done":
           // The completed reply already arrived as an `assistant` event; only a
-          // non-normal stop adds a note.
+          // non-normal stop adds a note. The turn always carries fresh usage.
+          usage = p.usage;
           if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
@@ -213,6 +232,8 @@
       await invoke("save_settings", { updates });
       settings = null;
       apiKeyInput = "";
+      // Saving reloads the agent (fresh session) — drop the stale token readout.
+      usage = null;
     } catch (e) {
       messages.push({ role: "note", text: `Save failed: ${e}` });
     }
@@ -299,6 +320,26 @@
       {/if}
     {/each}
   </div>
+
+  {#if usage}
+    <div class="status">
+      {#if usage.context_window > 0}
+        <span title="estimated context-window usage">
+          context: {fmtTok(usage.context_tokens)} / {fmtTok(usage.context_window)} ({Math.round(
+            (usage.context_tokens / usage.context_window) * 100,
+          )}%)
+        </span>
+      {:else}
+        <span title="estimated context size">context: {fmtTok(usage.context_tokens)} tok</span>
+      {/if}
+      <span class="sep">·</span>
+      <span title="cumulative tokens this session">session: {fmtTok(usage.session_tokens)} tok</span>
+      <span class="sep">·</span>
+      <span title="last turn (prompt up / completion down)">
+        last: ↑{fmtTok(usage.prompt_tokens)} ↓{fmtTok(usage.completion_tokens)}
+      </span>
+    </div>
+  {/if}
 
   <footer>
     <textarea

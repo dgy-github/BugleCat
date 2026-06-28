@@ -73,6 +73,21 @@ header {
   color: #2a2620;
 }
 
+.status {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+  padding: 0.3rem 1rem;
+  border-top: 1px solid #e6e3df;
+  background: #f7f5f1;
+  color: #7a736b;
+  font-size: 0.76rem;
+  font-family: ui-monospace, monospace;
+}
+.status .sep { color: #c9c3ba; }
+
 footer {
   flex: 0 0 auto;
   display: flex;
