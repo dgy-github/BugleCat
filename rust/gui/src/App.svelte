@@ -82,19 +82,20 @@
   let filesOpen = $state(false);
   let filesPath = $state("");
   let filesEntries = $state<DirEntry[]>([]);
-  let header = $state("connecting…");
+  let header = $state("连接中…");
   let workspace = $state("");
-  let sessionTitle = $state("New session");
+  let sessionTitle = $state("新会话");
   let sidebarOpen = $state(true);
   let currentSessionId = $state("");
   let approvalPolicy = $state("on-request");
   let approvalMenuOpen = $state(false);
   const APPROVAL_OPTS = [
-    { id: "untrusted", label: "Ask for everything", desc: "approve every command" },
-    { id: "on-failure", label: "Run, ask on failure", desc: "retry escalated only if sandbox fails" },
-    { id: "on-request", label: "Ask when needed", desc: "prompt only for escalations (default)" },
-    { id: "never", label: "Never escalate", desc: "stay in the sandbox; most restrictive" },
+    { id: "untrusted", label: "每条都询问", desc: "每个命令都要批准" },
+    { id: "on-failure", label: "失败再问", desc: "仅当沙箱失败时再询问升权" },
+    { id: "on-request", label: "按需询问", desc: "仅升权时询问（默认）" },
+    { id: "never", label: "从不升权", desc: "始终留在沙箱；最严格" },
   ];
+  const approvalLabel = (id: string) => APPROVAL_OPTS.find((o) => o.id === id)?.label ?? id;
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -108,7 +109,7 @@
       header = `${s.model} · ${s.sandbox}`;
       approvalPolicy = s.approval;
     } catch (e) {
-      header = "config error";
+      header = "配置错误";
     }
     refreshSessions();
 
@@ -156,7 +157,7 @@
           busy = false;
           break;
         case "error":
-          messages.push({ role: "note", text: `Error: ${p.message}` });
+          messages.push({ role: "note", text: `错误：${p.message}` });
           busy = false;
           break;
       }
@@ -171,7 +172,7 @@
       const paths = Array.isArray(picked) ? picked : [picked];
       for (const p of paths) if (!attached.includes(p)) attached.push(p);
     } catch (e) {
-      messages.push({ role: "note", text: `Attach failed: ${e}` });
+      messages.push({ role: "note", text: `添加失败：${e}` });
     }
   }
 
@@ -194,7 +195,7 @@
           const path = await invoke<string>("save_temp_image", { bytes: Array.from(buf), ext });
           if (!attached.includes(path)) attached.push(path);
         } catch (err) {
-          messages.push({ role: "note", text: `Paste image failed: ${err}` });
+          messages.push({ role: "note", text: `粘贴图片失败：${err}` });
         }
       }
     }
@@ -206,7 +207,7 @@
       filesEntries = await invoke<DirEntry[]>("list_dir", { rel });
       filesPath = rel;
     } catch (e) {
-      messages.push({ role: "note", text: `List dir failed: ${e}` });
+      messages.push({ role: "note", text: `读取目录失败：${e}` });
     }
   }
   async function openFiles() {
@@ -233,9 +234,9 @@
       if (!dir || Array.isArray(dir)) return;
       const set = await invoke<string>("set_workspace", { path: dir });
       workspace = set;
-      messages.push({ role: "note", text: `Workspace switched to ${set}. Agent reloaded.` });
+      messages.push({ role: "note", text: `已切换工作区到 ${set}，agent 已重载。` });
     } catch (e) {
-      messages.push({ role: "note", text: `Set workspace failed: ${e}` });
+      messages.push({ role: "note", text: `切换工作区失败：${e}` });
     }
   }
 
@@ -246,7 +247,7 @@
     try {
       await invoke("send_prompt", { text, images });
     } catch (e) {
-      messages.push({ role: "note", text: `Failed to send: ${e}` });
+      messages.push({ role: "note", text: `发送失败：${e}` });
       busy = false;
       dequeue();
     }
@@ -272,7 +273,7 @@
     if (busy) {
       // Queue up to 2 follow-up turns while the agent works.
       if (queued.length >= 2) {
-        messages.push({ role: "note", text: "Queue is full (2). Wait for the current turn." });
+        messages.push({ role: "note", text: "队列已满（2 条），请先等当前任务完成。" });
         return;
       }
       queued.push({ text: fullText, images: imgs, shown });
@@ -296,7 +297,7 @@
     try {
       await invoke("approve", { id, approved });
     } catch (e) {
-      messages.push({ role: "note", text: `Approval failed: ${e}` });
+      messages.push({ role: "note", text: `审批失败：${e}` });
     }
   }
 
@@ -310,7 +311,7 @@
       configLocation = loadedLocation;
       apiKeyInput = "";
     } catch (e) {
-      messages.push({ role: "note", text: `Settings load failed: ${e}` });
+      messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
   }
 
@@ -319,7 +320,7 @@
       await invoke("open_config_file");
       configLocation = await invoke<ConfigLocation>("get_config_location");
     } catch (e) {
-      messages.push({ role: "note", text: `Open config failed: ${e}` });
+      messages.push({ role: "note", text: `打开配置失败：${e}` });
     }
   }
 
@@ -328,7 +329,7 @@
       await invoke("open_config_dir");
       configLocation = await invoke<ConfigLocation>("get_config_location");
     } catch (e) {
-      messages.push({ role: "note", text: `Open config folder failed: ${e}` });
+      messages.push({ role: "note", text: `打开配置文件夹失败：${e}` });
     }
   }
 
@@ -369,7 +370,7 @@
     try {
       await loadCheckpoints();
     } catch (e) {
-      messages.push({ role: "note", text: `Checkpoint load failed: ${e}` });
+      messages.push({ role: "note", text: `检查点加载失败：${e}` });
     }
     checkpointBusy = false;
   }
@@ -380,26 +381,26 @@
       const cp = await invoke<Checkpoint>("create_checkpoint", { label: checkpointLabel });
       checkpointLabel = "";
       await loadCheckpoints();
-      messages.push({ role: "note", text: `Checkpoint saved: ${cp.id}` });
+      messages.push({ role: "note", text: `检查点已保存：${cp.id}` });
     } catch (e) {
-      messages.push({ role: "note", text: `Checkpoint failed: ${e}` });
+      messages.push({ role: "note", text: `检查点失败：${e}` });
     }
     checkpointBusy = false;
   }
 
   async function restoreCheckpoint(id: string) {
     if (busy || checkpointBusy) return;
-    if (!window.confirm(`Restore checkpoint ${id}?`)) return;
+    if (!window.confirm(`恢复检查点 ${id}？`)) return;
     checkpointBusy = true;
     try {
       const report = await invoke<RestoreReport>("restore_checkpoint", { id });
       await loadCheckpoints();
       messages.push({
         role: "note",
-        text: `Restored ${report.checkpoint_id}: ${report.restored_files} file(s), ${report.deleted_files} removed.`,
+        text: `已恢复 ${report.checkpoint_id}：${report.restored_files} 个文件，删除 ${report.deleted_files} 个。`,
       });
     } catch (e) {
-      messages.push({ role: "note", text: `Restore failed: ${e}` });
+      messages.push({ role: "note", text: `恢复失败：${e}` });
     }
     checkpointBusy = false;
   }
@@ -436,7 +437,7 @@
     try {
       await loadBranches();
     } catch (e) {
-      messages.push({ role: "note", text: `Branches load failed: ${e}` });
+      messages.push({ role: "note", text: `分支加载失败：${e}` });
     }
     branchBusy = false;
   }
@@ -445,11 +446,11 @@
     branchBusy = true;
     try {
       await invoke("git_create_branch", { name: newBranch });
-      messages.push({ role: "note", text: `Created and switched to branch ${newBranch}.` });
+      messages.push({ role: "note", text: `已新建并切换到分支 ${newBranch}。` });
       newBranch = "";
       await loadBranches();
     } catch (e) {
-      messages.push({ role: "note", text: `Create branch failed: ${e}` });
+      messages.push({ role: "note", text: `新建分支失败：${e}` });
     }
     branchBusy = false;
   }
@@ -458,10 +459,10 @@
     branchBusy = true;
     try {
       await invoke("git_switch_branch", { name });
-      messages.push({ role: "note", text: `Switched to branch ${name}.` });
+      messages.push({ role: "note", text: `已切换到分支 ${name}。` });
       await loadBranches();
     } catch (e) {
-      messages.push({ role: "note", text: `Switch failed: ${e}` });
+      messages.push({ role: "note", text: `切换失败：${e}` });
     }
     branchBusy = false;
   }
@@ -472,7 +473,7 @@
       diffFiles = await invoke<FileChange[]>("git_changes");
     } catch (e) {
       diffFiles = [];
-      messages.push({ role: "note", text: `Diff failed: ${e}` });
+      messages.push({ role: "note", text: `Diff 失败：${e}` });
     }
   }
   async function toggleFile(path: string) {
@@ -502,7 +503,7 @@
     try {
       await invoke("set_approval", { policy });
     } catch (e) {
-      messages.push({ role: "note", text: `Set approval failed: ${e}` });
+      messages.push({ role: "note", text: `设置审批失败：${e}` });
     }
   }
   function toggleSidebar() {
@@ -510,34 +511,34 @@
   }
   async function newSession() {
     messages = [];
-    sessionTitle = "New session";
+    sessionTitle = "新会话";
     currentSessionId = "";
     try {
       await invoke("new_session");
     } catch (e) {
-      messages.push({ role: "note", text: `New session failed: ${e}` });
+      messages.push({ role: "note", text: `新建会话失败：${e}` });
     }
   }
   async function resumeSession(id: string, title = "") {
     busy = true;
-    sessionTitle = title || "Session";
+    sessionTitle = title || "会话";
     currentSessionId = id;
     try {
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
       busy = false;
-      messages.push({ role: "note", text: `Resume failed: ${e}` });
+      messages.push({ role: "note", text: `继续会话失败：${e}` });
     }
   }
   async function forkSession(id: string, title = "") {
     busy = true;
-    sessionTitle = title ? `${title} (fork)` : "Fork";
+    sessionTitle = title ? `${title}（分叉）` : "分叉";
     try {
       await invoke("fork_session", { sessionId: id });
-      messages.push({ role: "note", text: "Forked a new branch from this session." });
+      messages.push({ role: "note", text: "已从该会话分叉出新会话。" });
     } catch (e) {
       busy = false;
-      messages.push({ role: "note", text: `Fork failed: ${e}` });
+      messages.push({ role: "note", text: `分叉失败：${e}` });
     }
   }
 
@@ -558,7 +559,7 @@
     try {
       await loadNotes();
     } catch (e) {
-      messages.push({ role: "note", text: `Memory load failed: ${e}` });
+      messages.push({ role: "note", text: `记忆加载失败：${e}` });
     }
     hermesBusy = false;
   }
@@ -566,10 +567,10 @@
     hermesBusy = true;
     try {
       const removed = await invoke<number>("memory_consolidate");
-      messages.push({ role: "note", text: `Memory: folded ${removed} near-duplicate note(s).` });
+      messages.push({ role: "note", text: `记忆：合并了 ${removed} 条近重复经验。` });
       await loadNotes();
     } catch (e) {
-      messages.push({ role: "note", text: `Memory consolidate failed: ${e}` });
+      messages.push({ role: "note", text: `记忆整理失败：${e}` });
     }
     hermesBusy = false;
   }
@@ -579,12 +580,12 @@
     try {
       const tags = newNoteTags.split(",").map((t) => t.trim()).filter(Boolean);
       const saved = await invoke<boolean>("memory_add", { note: newNote, tags });
-      messages.push({ role: "note", text: saved ? "Memory: note saved." : "Memory: already known (not duplicated)." });
+      messages.push({ role: "note", text: saved ? "记忆：已保存。" : "记忆：已存在（未重复）。" });
       newNote = "";
       newNoteTags = "";
       await loadNotes();
     } catch (e) {
-      messages.push({ role: "note", text: `Memory add failed: ${e}` });
+      messages.push({ role: "note", text: `记忆添加失败：${e}` });
     }
     hermesBusy = false;
   }
@@ -601,74 +602,74 @@
   <aside class="sidebar" class:collapsed={!sidebarOpen}>
     <div class="side-head">
       <span class="side-brand">nanocodex</span>
-      <button class="side-collapse" onclick={toggleSidebar} title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
+      <button class="side-collapse" onclick={toggleSidebar} title="收起侧边栏" aria-label="收起侧边栏">‹</button>
     </div>
     <button class="new-session" onclick={newSession}>
       <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      New session
+      新会话
     </button>
 
     <nav class="side-nav">
       <button class="nav-item" onclick={openFiles}>
         <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        Files
+        文件
       </button>
       <button class="nav-item" onclick={openBranches}>
         <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M6 13a6 6 0 0 0 6-6h3.8"/></svg>
-        Branches
+        分支
       </button>
       <button class="nav-item" onclick={openDiff}>
         <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h7M8.5 4.5v7M5 17h7"/></svg>
-        Diff
+        改动
       </button>
       <button class="nav-item" onclick={openHermes}>
         <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 4v16"/></svg>
-        Memory
+        记忆
       </button>
       <button class="nav-item" onclick={openCheckpoints}>
         <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.2l2.8 1.7"/></svg>
-        Checkpoints
+        检查点
       </button>
     </nav>
 
     <div class="side-recents">
-      <div class="side-h">Recents</div>
+      <div class="side-h">最近会话</div>
       {#if sessions.length === 0}
-        <div class="side-empty">No sessions yet</div>
+        <div class="side-empty">暂无会话</div>
       {/if}
       {#each sessions as s}
         <div class="recent-item" class:active={s.session_id === currentSessionId}>
           <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
-            <span class="recent-dot">●</span>{s.title || "(untitled)"}
+            <span class="recent-dot">●</span>{s.title || "（未命名）"}
           </button>
-          <button class="recent-fork" title="Fork a branch from here" disabled={busy || !s.has_snapshot}
+          <button class="recent-fork" title="从此处分叉新会话" disabled={busy || !s.has_snapshot}
             onclick={() => forkSession(s.session_id, s.title)}>⑂</button>
         </div>
       {/each}
     </div>
 
     <div class="side-foot">
-      <button class="foot-ws" title={`Workspace: ${workspace} (click to switch)`} onclick={chooseWorkspace}>
-        📁 {workspace ? baseName(workspace) : "Choose workspace"}
+      <button class="foot-ws" title={`工作区：${workspace}（点击切换）`} onclick={chooseWorkspace}>
+        📁 {workspace ? baseName(workspace) : "选择工作区"}
       </button>
-      <button class="foot-gear" title="Settings" onclick={openSettings} aria-label="Settings">⚙</button>
+      <button class="foot-gear" title="设置" onclick={openSettings} aria-label="设置">⚙</button>
     </div>
   </aside>
 
   <section class="main">
     <header class="topbar">
-      <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label="Toggle sidebar">▣</button>
+      <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
       <span class="title">{sessionTitle}</span>
       <span class="meta">{header}</span>
-      {#if busy}<span class="spinner" title="working…">●</span>{/if}
+      {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
     </header>
 
     <div class="scroll" bind:this={scroller}>
       {#if messages.length === 0}
         <div class="empty-wrap">
           <div class="empty-mark">✦</div>
-          <p class="empty">Ask me to inspect or edit the workspace.<br />Try “list the files” or “create hello.txt with apply_patch”.</p>
+          <p class="empty">让我检查或修改你的工作区。<br />试试「列出文件」或「用 apply_patch 创建 hello.txt」。</p>
         </div>
       {/if}
       {#each messages as m}
@@ -685,7 +686,7 @@
             {#if m.result !== undefined}
               <pre class="tresult">{m.result}</pre>
             {:else}
-              <span class="trunning">running…</span>
+              <span class="trunning">运行中…</span>
             {/if}
           </div>
         {/if}
@@ -697,8 +698,8 @@
         <div class="approval-wrap">
           <button class="approval-pill" class:danger={approvalPolicy === "never"}
             onclick={() => (approvalMenuOpen = !approvalMenuOpen)}
-            title="Approval policy">
-            🛡 {approvalPolicy} ▾
+            title="审批策略">
+            🛡 {approvalLabel(approvalPolicy)} ▾
           </button>
           {#if approvalMenuOpen}
             <button class="menu-backdrop" aria-label="Close" onclick={() => (approvalMenuOpen = false)}></button>
@@ -738,16 +739,16 @@
         </div>
       {/if}
       <div class="composer-row">
-        <button class="toolbtn attach" title="Attach file/image" onclick={attachFiles} aria-label="Attach">📎</button>
+        <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">📎</button>
         <textarea
           bind:value={input}
           onkeydown={onKey}
           onpaste={handlePaste}
-          placeholder="Message nanocodex…  (Enter to send, Shift+Enter for newline; Ctrl+V to paste an image)"
+          placeholder="给 nanocodex 发消息…（Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"
           rows="2"
         ></textarea>
         <button onclick={send} disabled={(input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
-          {busy ? "Queue" : "Send"}
+          {busy ? "排队" : "发送"}
         </button>
       </div>
     </footer>
@@ -756,16 +757,16 @@
   {#if approval}
     <div class="overlay">
       <div class="modal">
-        <h3>Approval needed</h3>
+        <h3>需要审批</h3>
         <p class="areason">{approval.reason}</p>
-        <div class="afield"><span>action</span><code>{approval.command}</code></div>
-        <div class="afield"><span>cwd</span><code>{approval.cwd}</code></div>
+        <div class="afield"><span>操作</span><code>{approval.command}</code></div>
+        <div class="afield"><span>目录</span><code>{approval.cwd}</code></div>
         {#if approval.details}
           <pre class="adetails">{approval.details}</pre>
         {/if}
         <div class="abtns">
-          <button class="deny" onclick={() => decide(false)}>Deny</button>
-          <button class="ok" onclick={() => decide(true)}>Approve</button>
+          <button class="deny" onclick={() => decide(false)}>拒绝</button>
+          <button class="ok" onclick={() => decide(true)}>批准</button>
         </div>
       </div>
     </div>
@@ -774,35 +775,35 @@
   {#if checkpointOpen}
     <div class="overlay">
       <div class="modal">
-        <h3>Checkpoints</h3>
+        <h3>检查点</h3>
         <div class="checkpoint-create">
-          <input bind:value={checkpointLabel} placeholder="Label" />
-          <button onclick={saveCheckpoint} disabled={checkpointBusy}>Save</button>
-          <button class="plain" onclick={loadCheckpoints} disabled={checkpointBusy}>Refresh</button>
+          <input bind:value={checkpointLabel} placeholder="标签" />
+          <button onclick={saveCheckpoint} disabled={checkpointBusy}>保存</button>
+          <button class="plain" onclick={loadCheckpoints} disabled={checkpointBusy}>刷新</button>
         </div>
         <div class="checkpoint-list">
           {#if checkpoints.length === 0}
-            <p class="emptyline">No checkpoints.</p>
+            <p class="emptyline">暂无检查点。</p>
           {/if}
           {#each checkpoints as cp}
             <div class="checkpoint-row">
               <div class="checkpoint-main">
-                <strong>{cp.label || "(unlabeled)"}</strong>
+                <strong>{cp.label || "（无标签）"}</strong>
                 <code>{cp.id}</code>
               </div>
               <div class="checkpoint-meta">
                 <span>{cp.created_at}</span>
-                <span>{cp.files} files</span>
-                <span>{cp.skipped} skipped</span>
+                <span>{cp.files} 个文件</span>
+                <span>跳过 {cp.skipped}</span>
               </div>
               <button class="restore" onclick={() => restoreCheckpoint(cp.id)} disabled={busy || checkpointBusy}>
-                Restore
+                恢复
               </button>
             </div>
           {/each}
         </div>
         <div class="abtns">
-          <button class="deny" onclick={() => (checkpointOpen = false)}>Close</button>
+          <button class="deny" onclick={() => (checkpointOpen = false)}>关闭</button>
         </div>
       </div>
     </div>
@@ -811,15 +812,15 @@
   {#if branchOpen}
     <div class="overlay">
       <div class="modal">
-        <h3>Git branches</h3>
+        <h3>Git 分支</h3>
         <div class="checkpoint-create">
-          <input bind:value={newBranch} placeholder="new-branch-name" />
-          <button onclick={createBranch} disabled={branchBusy}>Create &amp; switch</button>
-          <button class="plain" onclick={loadBranches} disabled={branchBusy}>Refresh</button>
+          <input bind:value={newBranch} placeholder="新分支名" />
+          <button onclick={createBranch} disabled={branchBusy}>新建并切换</button>
+          <button class="plain" onclick={loadBranches} disabled={branchBusy}>刷新</button>
         </div>
         <div class="checkpoint-list">
           {#if branches.length === 0}
-            <p class="emptyline">No branches.</p>
+            <p class="emptyline">暂无分支。</p>
           {/if}
           {#each branches as b}
             <div class="checkpoint-row">
@@ -827,13 +828,13 @@
                 <strong>{b.current ? "● " : ""}{b.name}</strong>
               </div>
               <button class="restore" onclick={() => switchBranch(b.name)} disabled={branchBusy || b.current}>
-                {b.current ? "current" : "Switch"}
+                {b.current ? "当前" : "切换"}
               </button>
             </div>
           {/each}
         </div>
         <div class="abtns">
-          <button class="deny" onclick={() => (branchOpen = false)}>Close</button>
+          <button class="deny" onclick={() => (branchOpen = false)}>关闭</button>
         </div>
       </div>
     </div>
@@ -842,17 +843,17 @@
   {#if filesOpen}
     <div class="overlay">
       <div class="modal modal-wide">
-        <h3>Files <span class="wt-sub">— workspace</span></h3>
+        <h3>文件 <span class="wt-sub">— 工作区</span></h3>
         <div class="fx-bar">
-          <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ Up</button>
+          <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ 上级</button>
           <code class="fx-path">/{filesPath}</code>
         </div>
         <div class="wt-list">
           {#if filesEntries.length === 0}
-            <p class="emptyline">(empty)</p>
+            <p class="emptyline">（空）</p>
           {/if}
           {#each filesEntries as e}
-            <button class="fx-row" onclick={() => pickFile(e)} title={e.is_dir ? "Open folder" : "Insert @mention"}>
+            <button class="fx-row" onclick={() => pickFile(e)} title={e.is_dir ? "打开文件夹" : "插入 @引用"}>
               <span class="fx-ic">{e.is_dir ? "📁" : "📄"}</span>
               <span class="fx-name">{e.name}</span>
               {#if e.is_dir}<span class="fx-go">›</span>{/if}
@@ -860,7 +861,7 @@
           {/each}
         </div>
         <div class="abtns">
-          <button class="deny" onclick={() => (filesOpen = false)}>Close</button>
+          <button class="deny" onclick={() => (filesOpen = false)}>关闭</button>
         </div>
       </div>
     </div>
@@ -869,10 +870,10 @@
   {#if diffOpen}
     <div class="overlay">
       <div class="modal modal-wide">
-        <h3>Working tree <span class="wt-sub">— {diffFiles.length} changed file{diffFiles.length === 1 ? "" : "s"}</span></h3>
+        <h3>工作区改动 <span class="wt-sub">— {diffFiles.length} 个文件</span></h3>
         <div class="wt-list">
           {#if diffFiles.length === 0}
-            <p class="emptyline">No changes in the working tree.</p>
+            <p class="emptyline">工作区没有改动。</p>
           {/if}
           {#each diffFiles as f}
             <div class="wt-file">
@@ -892,8 +893,8 @@
           {/each}
         </div>
         <div class="abtns">
-          <button class="plain" onclick={openDiff}>Refresh</button>
-          <button class="deny" onclick={() => (diffOpen = false)}>Close</button>
+          <button class="plain" onclick={openDiff}>刷新</button>
+          <button class="deny" onclick={() => (diffOpen = false)}>关闭</button>
         </div>
       </div>
     </div>
@@ -902,32 +903,32 @@
   {#if historyOpen}
     <div class="overlay">
       <div class="modal">
-        <h3>Session history</h3>
+        <h3>会话历史</h3>
         <div class="checkpoint-list">
           {#if sessions.length === 0}
-            <p class="emptyline">No saved sessions.</p>
+            <p class="emptyline">暂无保存的会话。</p>
           {/if}
           {#each sessions as s}
             <div class="checkpoint-row">
               <div class="checkpoint-main">
-                <strong>{s.title || "(untitled)"}</strong>
+                <strong>{s.title || "（未命名）"}</strong>
                 <code>{s.snippet}</code>
               </div>
               <div class="session-actions">
-                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={busy || !s.has_snapshot} title="Continue this session">Resume</button>
-                <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="Branch a new conversation from here">⑂ Fork</button>
+                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={busy || !s.has_snapshot} title="继续此会话">继续</button>
+                <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="从此处分叉新会话">⑂ 分叉</button>
               </div>
               <div class="checkpoint-meta">
                 <span>{s.updated_at}</span>
-                <span>{s.user_messages}u / {s.assistant_messages}a / {s.tool_calls}t</span>
-                {#if !s.has_snapshot}<span>(no snapshot)</span>{/if}
+                <span>{s.user_messages} 问 · {s.assistant_messages} 答 · {s.tool_calls} 工具</span>
+                {#if !s.has_snapshot}<span>（无快照）</span>{/if}
               </div>
             </div>
           {/each}
         </div>
         <div class="abtns">
-          <button class="plain" onclick={openHistory}>Refresh</button>
-          <button class="deny" onclick={() => (historyOpen = false)}>Close</button>
+          <button class="plain" onclick={refreshSessions}>刷新</button>
+          <button class="deny" onclick={() => (historyOpen = false)}>关闭</button>
         </div>
       </div>
     </div>
@@ -936,21 +937,21 @@
   {#if hermesOpen}
     <div class="overlay">
       <div class="modal">
-        <h3>Project memory</h3>
-        <p class="emptyline">Verified learnings recalled into future sessions as leads. (Harness self-evolution / "Hermes" is a separate feature — see forge.)</p>
+        <h3>项目记忆</h3>
+        <p class="emptyline">已验证的经验，会作为线索在未来会话中被回忆。（骨架自进化 / Hermes 是另一个功能，见 forge。）</p>
         <div class="checkpoint-create">
-          <input bind:value={newNote} placeholder="Record a verified learning…" />
-          <input bind:value={newNoteTags} placeholder="tags (comma)" style="max-width:140px" />
-          <button onclick={addNote} disabled={hermesBusy}>Add</button>
+          <input bind:value={newNote} placeholder="记录一条已验证的经验…" />
+          <input bind:value={newNoteTags} placeholder="标签（逗号分隔）" style="max-width:140px" />
+          <button onclick={addNote} disabled={hermesBusy}>添加</button>
         </div>
         <div class="checkpoint-create">
-          <button onclick={consolidateMemory} disabled={hermesBusy}>Tidy: fold duplicates</button>
-          <button class="plain" onclick={loadNotes} disabled={hermesBusy}>Refresh</button>
-          <span class="emptyline">{notes.length} note(s)</span>
+          <button onclick={consolidateMemory} disabled={hermesBusy}>整理：合并重复</button>
+          <button class="plain" onclick={loadNotes} disabled={hermesBusy}>刷新</button>
+          <span class="emptyline">{notes.length} 条</span>
         </div>
         <div class="checkpoint-list">
           {#if notes.length === 0}
-            <p class="emptyline">No learnings yet.</p>
+            <p class="emptyline">暂无经验。</p>
           {/if}
           {#each notes as n}
             <div class="checkpoint-row">
@@ -965,7 +966,7 @@
           {/each}
         </div>
         <div class="abtns">
-          <button class="deny" onclick={() => (hermesOpen = false)}>Close</button>
+          <button class="deny" onclick={() => (hermesOpen = false)}>关闭</button>
         </div>
       </div>
     </div>
@@ -974,59 +975,59 @@
   {#if settings}
     <div class="overlay">
       <div class="modal">
-        <h3>Settings</h3>
+        <h3>设置</h3>
         {#if configLocation}
           <div class="config-entry">
-            <span>Config</span>
+            <span>配置</span>
             <code title={configLocation.config_path}>{configLocation.config_path}</code>
-            <button class="plain" onclick={openConfigFile}>Open file</button>
-            <button class="plain" onclick={openConfigDir}>Open folder</button>
+            <button class="plain" onclick={openConfigFile}>打开文件</button>
+            <button class="plain" onclick={openConfigDir}>打开文件夹</button>
           </div>
         {/if}
         <label>
-          <span>Model</span>
+          <span>模型</span>
           <select bind:value={settings.model}>
             {#each settings.available_models as m}<option value={m}>{m}</option>{/each}
           </select>
         </label>
         <label>
-          <span>Sandbox</span>
+          <span>沙箱</span>
           <select bind:value={settings.sandbox_mode}>
             {#each settings.sandbox_modes as s}<option value={s}>{s}</option>{/each}
           </select>
         </label>
         <label>
-          <span>Approval</span>
+          <span>审批</span>
           <select bind:value={settings.approval_policy}>
             {#each settings.approval_policies as a}<option value={a}>{a}</option>{/each}
           </select>
         </label>
         <label>
-          <span>Reasoning</span>
+          <span>推理强度</span>
           <input bind:value={settings.reasoning_effort} placeholder="auto | low | medium | high | max | off" />
         </label>
         <label>
-          <span>Model calls</span>
+          <span>模型调用上限</span>
           <input type="number" min="1" bind:value={settings.max_iterations} />
         </label>
         <label>
-          <span>Tool calls</span>
+          <span>工具调用上限</span>
           <input type="number" min="0" bind:value={settings.max_tool_calls} />
         </label>
         <label class="check">
-          <span>Context edit</span>
+          <span>上下文裁剪</span>
           <input type="checkbox" bind:checked={settings.context_edit_enabled} />
         </label>
         <label>
-          <span>Context chars</span>
+          <span>上下文字符上限</span>
           <input type="number" min="1" bind:value={settings.context_edit_max_chars} />
         </label>
         <label>
-          <span>Recent messages</span>
+          <span>保留最近消息数</span>
           <input type="number" min="1" bind:value={settings.context_edit_keep_recent_messages} />
         </label>
         <label>
-          <span>Tool result chars</span>
+          <span>工具结果字符上限</span>
           <input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} />
         </label>
         <label>
@@ -1034,17 +1035,17 @@
           <input bind:value={settings.base_url} />
         </label>
         <label>
-          <span>API key</span>
+          <span>API 密钥</span>
           <input
             type="password"
             bind:value={apiKeyInput}
-            placeholder={settings.has_api_key ? `keep current (${settings.api_key_masked})` : "set an API key"}
+            placeholder={settings.has_api_key ? `保持当前（${settings.api_key_masked}）` : "设置 API 密钥"}
           />
         </label>
         <div class="abtns">
-          <button class="deny" onclick={() => (settings = null)}>Cancel</button>
+          <button class="deny" onclick={() => (settings = null)}>取消</button>
           <button class="ok" onclick={saveSettings} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? "保存中…" : "保存"}
           </button>
         </div>
       </div>
