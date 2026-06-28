@@ -86,6 +86,7 @@
   let workspace = $state("");
   let sessionTitle = $state("New session");
   let sidebarOpen = $state(true);
+  let currentSessionId = $state("");
   let approvalPolicy = $state("on-request");
   let approvalMenuOpen = $state(false);
   const APPROVAL_OPTS = [
@@ -510,6 +511,7 @@
   async function newSession() {
     messages = [];
     sessionTitle = "New session";
+    currentSessionId = "";
     try {
       await invoke("new_session");
     } catch (e) {
@@ -519,6 +521,7 @@
   async function resumeSession(id: string, title = "") {
     busy = true;
     sessionTitle = title || "Session";
+    currentSessionId = id;
     try {
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
@@ -596,15 +599,36 @@
 
 <main class="app">
   <aside class="sidebar" class:collapsed={!sidebarOpen}>
-    <div class="side-brand">nanocodex</div>
-    <button class="new-session" onclick={newSession}>＋ New session</button>
+    <div class="side-head">
+      <span class="side-brand">nanocodex</span>
+      <button class="side-collapse" onclick={toggleSidebar} title="Collapse sidebar" aria-label="Collapse sidebar">‹</button>
+    </div>
+    <button class="new-session" onclick={newSession}>
+      <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New session
+    </button>
 
     <nav class="side-nav">
-      <button class="nav-item" onclick={openFiles}><span class="ni">🗂</span> Files</button>
-      <button class="nav-item" onclick={openBranches}><span class="ni">⎇</span> Branches</button>
-      <button class="nav-item" onclick={openDiff}><span class="ni">±</span> Diff</button>
-      <button class="nav-item" onclick={openHermes}><span class="ni">📒</span> Memory</button>
-      <button class="nav-item" onclick={openCheckpoints}><span class="ni">◷</span> Checkpoints</button>
+      <button class="nav-item" onclick={openFiles}>
+        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        Files
+      </button>
+      <button class="nav-item" onclick={openBranches}>
+        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M6 13a6 6 0 0 0 6-6h3.8"/></svg>
+        Branches
+      </button>
+      <button class="nav-item" onclick={openDiff}>
+        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h7M8.5 4.5v7M5 17h7"/></svg>
+        Diff
+      </button>
+      <button class="nav-item" onclick={openHermes}>
+        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 4v16"/></svg>
+        Memory
+      </button>
+      <button class="nav-item" onclick={openCheckpoints}>
+        <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.2l2.8 1.7"/></svg>
+        Checkpoints
+      </button>
     </nav>
 
     <div class="side-recents">
@@ -613,7 +637,7 @@
         <div class="side-empty">No sessions yet</div>
       {/if}
       {#each sessions as s}
-        <div class="recent-item">
+        <div class="recent-item" class:active={s.session_id === currentSessionId}>
           <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
             <span class="recent-dot">●</span>{s.title || "(untitled)"}

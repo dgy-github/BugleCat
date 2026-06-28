@@ -825,14 +825,33 @@ main.app { flex-direction: row; }
   border-right: 1px solid var(--line);
   min-height: 0;
 }
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-1) var(--sp-1) var(--sp-2) var(--sp-2);
+}
 .side-brand {
   font-weight: 650;
   font-size: var(--fs-lg);
   letter-spacing: -0.012em;
-  padding: var(--sp-1) var(--sp-2) var(--sp-2);
 }
+.side-collapse {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--ink-3);
+  border-radius: var(--r-sm);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.1rem 0.45rem;
+}
+.side-collapse:hover { background: var(--paper); color: var(--ink); border-color: var(--line); }
+.ns-plus { color: var(--accent); font-weight: 700; }
 .new-session {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   text-align: left;
   background: var(--surface);
   color: var(--ink);
@@ -858,7 +877,10 @@ main.app { flex-direction: row; }
   align-items: center;
   gap: 0.55rem;
 }
-.nav-item .ni { width: 1.1rem; text-align: center; color: var(--ink-3); }
+.ni { width: 16px; height: 16px; flex: 0 0 16px; }
+.new-session .ni { color: var(--accent); width: 17px; height: 17px; }
+.nav-item .ni { color: var(--ink-3); }
+.nav-item:hover .ni { color: var(--ink); }
 .nav-item:hover { background: var(--paper); color: var(--ink); }
 
 .side-recents {
@@ -1138,3 +1160,7 @@ main.app { flex-direction: row; }
 .fx-ic { flex: 0 0 1.1rem; }
 .fx-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-go { flex: 0 0 auto; color: var(--ink-3); }
+
+.recent-item.active { background: var(--accent-soft); }
+.recent-item.active .recent-main { color: var(--ink); font-weight: 600; }
+.recent-item.active .recent-dot { color: var(--accent); }
