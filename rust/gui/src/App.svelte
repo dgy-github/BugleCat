@@ -105,6 +105,110 @@
     const lines = lineCount(s);
     return lines > 1 ? `${lines} 行 · 点击展开` : `${s.length} 字 · 点击展开`;
   };
+  // Per-line class for unified-diff coloring.
+  const diffLineClass = (ln: string) => {
+    if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("diff ") || ln.startsWith("index ")) return "dl-meta";
+    if (ln.startsWith("@@")) return "dl-hunk";
+    if (ln.startsWith("+")) return "dl-add";
+    if (ln.startsWith("-")) return "dl-del";
+    return "";
+  };
+  // ── Minimal, safe Markdown renderer (escape-first; only emits known tags) ──
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Inline spans on already-escaped text: code, bold, italic, http(s) links.
+  function inlineMd(s: string): string {
+    s = s.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    s = s.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
+    );
+    return s;
+  }
+  function renderMarkdown(src: string): string {
+    const lines = (src || "").replace(/\r\n/g, "\n").split("\n");
+    const out: string[] = [];
+    let i = 0;
+    let ul = false, ol = false;
+    const closeLists = () => {
+      if (ul) { out.push("</ul>"); ul = false; }
+      if (ol) { out.push("</ol>"); ol = false; }
+    };
+    const rowCells = (r: string) =>
+      r.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+    while (i < lines.length) {
+      const line = lines[i];
+      const fence = line.match(/^```(\w*)\s*$/);
+      if (fence) {
+        closeLists();
+        const buf: string[] = [];
+        i++;
+        while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+        i++;
+        out.push(`<pre class="md-code"><code>${esc(buf.join("\n"))}</code></pre>`);
+        continue;
+      }
+      if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+        closeLists();
+        const headers = rowCells(line);
+        i += 2;
+        const rows: string[][] = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(rowCells(lines[i])); i++; }
+        let t = '<table class="md-table"><thead><tr>';
+        t += headers.map((h) => `<th>${inlineMd(esc(h))}</th>`).join("");
+        t += "</tr></thead><tbody>";
+        for (const r of rows) t += "<tr>" + r.map((c) => `<td>${inlineMd(esc(c))}</td>`).join("") + "</tr>";
+        out.push(t + "</tbody></table>");
+        continue;
+      }
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) { closeLists(); const l = h[1].length; out.push(`<h${l} class="md-h">${inlineMd(esc(h[2]))}</h${l}>`); i++; continue; }
+      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) { closeLists(); out.push("<hr/>"); i++; continue; }
+      if (/^\s*>\s?/.test(line)) { closeLists(); out.push(`<blockquote>${inlineMd(esc(line.replace(/^\s*>\s?/, "")))}</blockquote>`); i++; continue; }
+      const um = line.match(/^\s*[-*+]\s+(.*)$/);
+      if (um) { if (ol) { out.push("</ol>"); ol = false; } if (!ul) { out.push("<ul>"); ul = true; } out.push(`<li>${inlineMd(esc(um[1]))}</li>`); i++; continue; }
+      const om = line.match(/^\s*\d+\.\s+(.*)$/);
+      if (om) { if (ul) { out.push("</ul>"); ul = false; } if (!ol) { out.push("<ol>"); ol = true; } out.push(`<li>${inlineMd(esc(om[1]))}</li>`); i++; continue; }
+      if (line.trim() === "") { closeLists(); i++; continue; }
+      closeLists();
+      out.push(`<p>${inlineMd(esc(line))}</p>`);
+      i++;
+    }
+    closeLists();
+    return out.join("\n");
+  }
+
+  // Branch / checkpoint expand-to-detail.
+  type Commit = { hash: string; subject: string; when: string };
+  let branchCommits = $state<Record<string, Commit[]>>({});
+  async function toggleBranchDetail(name: string) {
+    if (name in branchCommits) {
+      const { [name]: _drop, ...rest } = branchCommits;
+      branchCommits = rest;
+      return;
+    }
+    try {
+      branchCommits = { ...branchCommits, [name]: await invoke<Commit[]>("git_log", { name, limit: 10 }) };
+    } catch (e) {
+      branchCommits = { ...branchCommits, [name]: [{ hash: "", subject: `加载失败：${e}`, when: "" }] };
+    }
+  }
+  let checkpointFiles = $state<Record<string, string[]>>({});
+  async function toggleCheckpointDetail(id: string) {
+    if (id in checkpointFiles) {
+      const { [id]: _drop, ...rest } = checkpointFiles;
+      checkpointFiles = rest;
+      return;
+    }
+    try {
+      checkpointFiles = { ...checkpointFiles, [id]: await invoke<string[]>("checkpoint_files", { id }) };
+    } catch (e) {
+      checkpointFiles = { ...checkpointFiles, [id]: [`加载失败：${e}`] };
+    }
+  }
   function toggleTool(m: Msg) {
     if (m.role === "tool" && m.result !== undefined) m.collapsed = !m.collapsed;
   }
@@ -807,7 +911,7 @@
         {#if m.role === "user"}
           <div class="msg user"><div class="bubble">{m.text}</div></div>
         {:else if m.role === "assistant"}
-          <div class="msg assistant"><div class="bubble">{m.text}</div></div>
+          <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool"}
@@ -938,7 +1042,10 @@
           {#each checkpoints as cp}
             <div class="checkpoint-row">
               <div class="checkpoint-main">
-                <strong>{cp.label || "（无标签）"}</strong>
+                <button class="link-row" onclick={() => toggleCheckpointDetail(cp.id)} title="查看快照文件">
+                  <span class="wt-caret">{cp.id in checkpointFiles ? "▾" : "▸"}</span>
+                  <strong>{cp.label || "（无标签）"}</strong>
+                </button>
                 <code>{cp.id}</code>
               </div>
               <div class="checkpoint-meta">
@@ -949,6 +1056,16 @@
               <button class="restore" onclick={() => restoreCheckpoint(cp.id)} disabled={busy || checkpointBusy}>
                 恢复
               </button>
+              {#if cp.id in checkpointFiles}
+                <div class="detail-list">
+                  {#if checkpointFiles[cp.id].length === 0}
+                    <div class="detail-row">（无文件）</div>
+                  {/if}
+                  {#each checkpointFiles[cp.id] as fp}
+                    <div class="detail-row"><code class="dl-path">{fp}</code></div>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -972,11 +1089,28 @@
           {#each branches as b}
             <div class="checkpoint-row">
               <div class="checkpoint-main">
-                <strong>{b.current ? "● " : ""}{b.name}</strong>
+                <button class="link-row" onclick={() => toggleBranchDetail(b.name)} title="查看最近提交">
+                  <span class="wt-caret">{b.name in branchCommits ? "▾" : "▸"}</span>
+                  <strong>{b.current ? "● " : ""}{b.name}</strong>
+                </button>
               </div>
               <button class="restore" onclick={() => switchBranch(b.name)} disabled={branchBusy || b.current}>
                 {b.current ? "当前" : "切换"}
               </button>
+              {#if b.name in branchCommits}
+                <div class="detail-list">
+                  {#if branchCommits[b.name].length === 0}
+                    <div class="detail-row">（无提交）</div>
+                  {/if}
+                  {#each branchCommits[b.name] as c}
+                    <div class="detail-row">
+                      {#if c.hash}<code class="dl-hash">{c.hash}</code>{/if}
+                      <span class="dl-subj">{c.subject}</span>
+                      {#if c.when}<span class="dl-when">{c.when}</span>{/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -1037,7 +1171,7 @@
                 </span>
               </button>
               {#if f.path in diffOpenFiles}
-                <pre class="wt-diff">{diffOpenFiles[f.path]}</pre>
+                <pre class="wt-diff">{#each diffOpenFiles[f.path].split("\n") as ln}<span class="dl {diffLineClass(ln)}">{ln === "" ? " " : ln}</span>{/each}</pre>
               {/if}
             </div>
           {/each}

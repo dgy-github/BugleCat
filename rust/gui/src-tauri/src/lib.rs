@@ -396,6 +396,20 @@ fn get_checkpoints() -> Result<Vec<CheckpointView>, String> {
         .collect())
 }
 
+/// The files captured by a checkpoint (for the checkpoint detail expander).
+#[tauri::command]
+fn checkpoint_files(id: String) -> Result<Vec<String>, String> {
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    CheckpointStore::new(&cfg.workspace)
+        .get(&id)
+        .map(|m| m.files)
+        .ok_or_else(|| format!("no checkpoint with id {id}"))
+}
+
 #[tauri::command]
 fn create_checkpoint(label: String) -> Result<CheckpointView, String> {
     let cfg = load_config(Overrides {
@@ -519,6 +533,36 @@ fn git_switch_branch(name: String) -> Result<(), String> {
         return Err("branch name is required".into());
     }
     run_git(&["checkout", name]).map(|_| ())
+}
+
+#[derive(Serialize)]
+pub struct CommitInfo {
+    hash: String,
+    subject: String,
+    when: String,
+}
+
+/// Recent commits on a branch (for the branch detail expander).
+#[tauri::command]
+fn git_log(name: String, limit: u32) -> Result<Vec<CommitInfo>, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("branch name is required".into());
+    }
+    let n = format!("-{}", limit.clamp(1, 50));
+    // %h <US> subject <US> relative-date  (0x1f field separator).
+    let out = run_git(&["log", &n, "--pretty=format:%h\u{1f}%s\u{1f}%cr", name])?;
+    Ok(out
+        .lines()
+        .filter_map(|line| {
+            let p: Vec<&str> = line.split('\u{1f}').collect();
+            (p.len() == 3).then(|| CommitInfo {
+                hash: p[0].to_string(),
+                subject: p[1].to_string(),
+                when: p[2].to_string(),
+            })
+        })
+        .collect())
 }
 
 /// The working-tree diff vs HEAD (staged + unstaged) for the diff panel.
@@ -793,9 +837,11 @@ pub fn run() {
             open_config_file,
             open_config_dir,
             get_checkpoints,
+            checkpoint_files,
             create_checkpoint,
             restore_checkpoint,
             git_branches,
+            git_log,
             git_create_branch,
             git_switch_branch,
             git_diff,
