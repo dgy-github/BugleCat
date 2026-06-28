@@ -86,6 +86,10 @@
   let workspace = $state("");
   let sessionTitle = $state("新会话");
   let sidebarOpen = $state(true);
+  let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
+  const PANEL_TITLES: Record<string, string> = {
+    files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
+  };
   let currentSessionId = $state("");
   let approvalPolicy = $state("on-request");
   let approvalMenuOpen = $state(false);
@@ -211,7 +215,8 @@
     }
   }
   async function openFiles() {
-    filesOpen = true;
+    if (rightPanel === "files") { rightPanel = ""; return; }
+    rightPanel = "files";
     await loadDir("");
   }
   function filesUp() {
@@ -365,7 +370,8 @@
   }
 
   async function openCheckpoints() {
-    checkpointOpen = true;
+    if (rightPanel === "checkpoints") { rightPanel = ""; return; }
+    rightPanel = "checkpoints";
     checkpointBusy = true;
     try {
       await loadCheckpoints();
@@ -432,7 +438,8 @@
     branches = await invoke<BranchInfo[]>("git_branches");
   }
   async function openBranches() {
-    branchOpen = true;
+    if (rightPanel === "branches") { rightPanel = ""; return; }
+    rightPanel = "branches";
     branchBusy = true;
     try {
       await loadBranches();
@@ -467,7 +474,8 @@
     branchBusy = false;
   }
   async function openDiff() {
-    diffOpen = true;
+    if (rightPanel === "diff") { rightPanel = ""; return; }
+    rightPanel = "diff";
     diffOpenFiles = {};
     try {
       diffFiles = await invoke<FileChange[]>("git_changes");
@@ -487,6 +495,17 @@
       diffOpenFiles = { ...diffOpenFiles, [path]: d };
     } catch (e) {
       diffOpenFiles = { ...diffOpenFiles, [path]: `diff failed: ${e}` };
+    }
+  }
+  async function reloadPanel() {
+    try {
+      if (rightPanel === "files") await loadDir(filesPath);
+      else if (rightPanel === "branches") await loadBranches();
+      else if (rightPanel === "diff") { diffOpenFiles = {}; diffFiles = await invoke<FileChange[]>("git_changes"); }
+      else if (rightPanel === "memory") await loadNotes();
+      else if (rightPanel === "checkpoints") await loadCheckpoints();
+    } catch (e) {
+      messages.push({ role: "note", text: `刷新失败：${e}` });
     }
   }
   async function refreshSessions() {
@@ -554,7 +573,8 @@
     notes = await invoke<MemoryNote[]>("memory_list");
   }
   async function openHermes() {
-    hermesOpen = true;
+    if (rightPanel === "memory") { rightPanel = ""; return; }
+    rightPanel = "memory";
     hermesBusy = true;
     try {
       await loadNotes();
@@ -657,6 +677,7 @@
     </div>
   </aside>
 
+  <div class="workarea">
   <section class="main">
     <header class="topbar">
       <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
@@ -772,10 +793,10 @@
     </div>
   {/if}
 
-  {#if checkpointOpen}
-    <div class="overlay">
-      <div class="modal">
-        <h3>检查点</h3>
+  {#if rightPanel === "checkpoints"}
+    <aside class="rightpanel">
+      <div class="rp-head"><span class="rp-title">检查点</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
+      <div class="rp-body">
         <div class="checkpoint-create">
           <input bind:value={checkpointLabel} placeholder="标签" />
           <button onclick={saveCheckpoint} disabled={checkpointBusy}>保存</button>
@@ -802,17 +823,14 @@
             </div>
           {/each}
         </div>
-        <div class="abtns">
-          <button class="deny" onclick={() => (checkpointOpen = false)}>关闭</button>
-        </div>
       </div>
-    </div>
+    </aside>
   {/if}
 
-  {#if branchOpen}
-    <div class="overlay">
-      <div class="modal">
-        <h3>Git 分支</h3>
+  {#if rightPanel === "branches"}
+    <aside class="rightpanel">
+      <div class="rp-head"><span class="rp-title">Git 分支</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
+      <div class="rp-body">
         <div class="checkpoint-create">
           <input bind:value={newBranch} placeholder="新分支名" />
           <button onclick={createBranch} disabled={branchBusy}>新建并切换</button>
@@ -833,17 +851,14 @@
             </div>
           {/each}
         </div>
-        <div class="abtns">
-          <button class="deny" onclick={() => (branchOpen = false)}>关闭</button>
-        </div>
       </div>
-    </div>
+    </aside>
   {/if}
 
-  {#if filesOpen}
-    <div class="overlay">
-      <div class="modal modal-wide">
-        <h3>文件 <span class="wt-sub">— 工作区</span></h3>
+  {#if rightPanel === "files"}
+    <aside class="rightpanel">
+      <div class="rp-head"><span class="rp-title">文件</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
+      <div class="rp-body">
         <div class="fx-bar">
           <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ 上级</button>
           <code class="fx-path">/{filesPath}</code>
@@ -860,17 +875,14 @@
             </button>
           {/each}
         </div>
-        <div class="abtns">
-          <button class="deny" onclick={() => (filesOpen = false)}>关闭</button>
-        </div>
       </div>
-    </div>
+    </aside>
   {/if}
 
-  {#if diffOpen}
-    <div class="overlay">
-      <div class="modal modal-wide">
-        <h3>工作区改动 <span class="wt-sub">— {diffFiles.length} 个文件</span></h3>
+  {#if rightPanel === "diff"}
+    <aside class="rightpanel">
+      <div class="rp-head"><span class="rp-title">工作区改动</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
+      <div class="rp-body">
         <div class="wt-list">
           {#if diffFiles.length === 0}
             <p class="emptyline">工作区没有改动。</p>
@@ -892,12 +904,8 @@
             </div>
           {/each}
         </div>
-        <div class="abtns">
-          <button class="plain" onclick={openDiff}>刷新</button>
-          <button class="deny" onclick={() => (diffOpen = false)}>关闭</button>
-        </div>
       </div>
-    </div>
+    </aside>
   {/if}
 
   {#if historyOpen}
@@ -934,10 +942,10 @@
     </div>
   {/if}
 
-  {#if hermesOpen}
-    <div class="overlay">
-      <div class="modal">
-        <h3>项目记忆</h3>
+  {#if rightPanel === "memory"}
+    <aside class="rightpanel">
+      <div class="rp-head"><span class="rp-title">项目记忆</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
+      <div class="rp-body">
         <p class="emptyline">已验证的经验，会作为线索在未来会话中被回忆。（骨架自进化 / Hermes 是另一个功能，见 forge。）</p>
         <div class="checkpoint-create">
           <input bind:value={newNote} placeholder="记录一条已验证的经验…" />
@@ -965,11 +973,8 @@
             </div>
           {/each}
         </div>
-        <div class="abtns">
-          <button class="deny" onclick={() => (hermesOpen = false)}>关闭</button>
-        </div>
       </div>
-    </div>
+    </aside>
   {/if}
 
   {#if settings}
@@ -1051,4 +1056,5 @@
       </div>
     </div>
   {/if}
+  </div>
 </main>

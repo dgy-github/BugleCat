@@ -1164,3 +1164,36 @@ main.app { flex-direction: row; }
 .recent-item.active { background: var(--accent-soft); }
 .recent-item.active .recent-main { color: var(--ink); font-weight: 600; }
 .recent-item.active .recent-dot { color: var(--accent); }
+
+/* ── Right-docked panel (workarea = chat | panel) ─────────────────────────── */
+.workarea { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: row; }
+.rightpanel {
+  flex: 0 0 420px;
+  width: 420px;
+  min-width: 0;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  min-height: 0;
+}
+.rp-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.rp-title { font-weight: 600; font-size: var(--fs-md); color: var(--ink); }
+.rp-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.rp-refresh { padding: 0.25rem 0.6rem; font-size: var(--fs-xs); }
+.rp-close {
+  background: none; border: none; color: var(--ink-3);
+  font-size: 1.2rem; line-height: 1; cursor: pointer;
+  padding: 0 0.35rem; border-radius: var(--r-sm);
+}
+.rp-close:hover { background: var(--paper-2); color: var(--ink); }
+.rp-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-3) var(--sp-4); }
