@@ -1295,5 +1295,3 @@ main.app { flex-direction: row; }
 .tbtn .ni { width: 16px; height: 16px; }
 .tbtn:hover { background: var(--paper-2); color: var(--ink); border-color: var(--line); }
 .tbtn.on { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-line); }
-.tbtn-text { font-size: var(--fs-xs); font-weight: 600; padding: 0.28rem 0.55rem; line-height: 1.1; }
-.tb-div { flex: 0 0 1px; align-self: stretch; margin: 0.2rem 0.3rem; background: var(--line); }

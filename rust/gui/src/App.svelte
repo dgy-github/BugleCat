@@ -105,13 +105,8 @@
     const lines = lineCount(s);
     return lines > 1 ? `${lines} 行 · 点击展开` : `${s.length} 字 · 点击展开`;
   };
-  let toolsCollapsed = $state(false); // tracks the global toggle's last action
   function toggleTool(m: Msg) {
     if (m.role === "tool" && m.result !== undefined) m.collapsed = !m.collapsed;
-  }
-  function collapseAll(v: boolean) {
-    toolsCollapsed = v;
-    for (const m of messages) if (m.role === "tool" && m.result !== undefined) m.collapsed = v;
   }
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
@@ -192,7 +187,7 @@
           const last = messages.find(
             (m) => m.role === "tool" && m.name === p.name && m.result === undefined,
           ) as Extract<Msg, { role: "tool" }> | undefined;
-          const collapsed = toolsCollapsed || isLong(p.result);
+          const collapsed = isLong(p.result);
           if (last) { last.result = p.result; last.collapsed = collapsed; }
           else messages.push({ role: "tool", name: p.name, result: p.result, collapsed });
           break;
@@ -761,10 +756,6 @@
       <span class="meta">{header}</span>
       {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
       <span class="topbar-actions">
-        <button class="tbtn tbtn-text" onclick={() => collapseAll(!toolsCollapsed)}
-          aria-pressed={toolsCollapsed}
-          title="折叠 / 展开所有工具输出">{toolsCollapsed ? "展开输出" : "折叠输出"}</button>
-        <span class="tb-div" aria-hidden="true"></span>
         <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">
           <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         </button>
