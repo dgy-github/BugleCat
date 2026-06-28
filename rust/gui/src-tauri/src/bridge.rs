@@ -79,7 +79,9 @@ pub enum UiEvent {
         sandbox: String,
         workspace: String,
     },
-    /// Assistant produced visible text.
+    /// A streamed chunk of assistant text (append to the in-progress bubble).
+    AssistantDelta { text: String },
+    /// Assistant's final visible text (finalize the streamed bubble).
     Assistant { text: String },
     /// A tool is about to run.
     ToolStart { name: String, args: String },
@@ -123,6 +125,7 @@ fn emit(app: &AppHandle, ev: UiEvent) {
 fn make_sink(app: AppHandle) -> Box<dyn FnMut(LoopEvent)> {
     Box::new(move |ev: LoopEvent| {
         let ui = match ev {
+            LoopEvent::AssistantDelta(text) => UiEvent::AssistantDelta { text },
             LoopEvent::AssistantText(text) => UiEvent::Assistant { text },
             LoopEvent::ToolStart { name, args } => UiEvent::ToolStart { name, args },
             LoopEvent::ToolResult { name, result } => UiEvent::ToolResult { name, result },

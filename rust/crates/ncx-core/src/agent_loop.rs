@@ -31,6 +31,23 @@ pub trait Provider {
         tools: &[Value],
         reasoning_effort: Option<&str>,
     ) -> ModelResponse;
+
+    /// Streaming completion: `on_content` is called with each text delta as it
+    /// arrives. Default falls back to [`Provider::chat`] and emits the whole
+    /// content as one delta, so non-streaming providers (mocks, etc.) still work.
+    async fn chat_streaming(
+        &self,
+        messages: &[Value],
+        tools: &[Value],
+        reasoning_effort: Option<&str>,
+        on_content: &mut dyn FnMut(String),
+    ) -> ModelResponse {
+        let resp = self.chat(messages, tools, reasoning_effort).await;
+        if resp.finish_reason != "error" && !resp.content.is_empty() {
+            on_content(resp.content.clone());
+        }
+        resp
+    }
 }
 
 /// Adapt the real HTTP provider to the loop's trait, mapping errors to an
@@ -48,6 +65,35 @@ impl Provider for DeepSeekProvider {
     ) -> ModelResponse {
         let tools_opt = if tools.is_empty() { None } else { Some(tools) };
         match DeepSeekProvider::chat(self, messages, tools_opt, None, None, reasoning_effort).await
+        {
+            Ok(resp) => resp,
+            Err(e) => ModelResponse {
+                content: e.to_string(),
+                finish_reason: "error".to_string(),
+                ..Default::default()
+            },
+        }
+    }
+
+    async fn chat_streaming(
+        &self,
+        messages: &[Value],
+        tools: &[Value],
+        reasoning_effort: Option<&str>,
+        on_content: &mut dyn FnMut(String),
+    ) -> ModelResponse {
+        let tools_opt = if tools.is_empty() { None } else { Some(tools) };
+        match DeepSeekProvider::chat_stream(
+            self,
+            messages,
+            tools_opt,
+            None,
+            None,
+            reasoning_effort,
+            |c: &str| on_content(c.to_string()),
+            |_r| {},
+        )
+        .await
         {
             Ok(resp) => resp,
             Err(e) => ModelResponse {
@@ -89,7 +135,11 @@ impl Default for TaskBudget {
 /// The GUI bridge forwards these to the frontend; the CLI ignores them.
 #[derive(Debug, Clone)]
 pub enum LoopEvent {
-    /// The assistant produced visible text this step (non-streaming: whole message).
+    /// A streamed chunk of assistant text (token delta). The UI appends it to the
+    /// in-progress assistant bubble.
+    AssistantDelta(String),
+    /// The assistant's final visible text for this step. The UI finalizes the
+    /// streamed bubble with this authoritative text (or creates one if no deltas).
     AssistantText(String),
     /// A tool is about to run.
     ToolStart { name: String, args: String },
@@ -186,14 +236,20 @@ impl AgentLoop {
         &self,
         schemas: &[Value],
         system_notes: &[String],
+        sink: &mut Option<EventSink>,
     ) -> (ModelResponse, ContextEditStats) {
         let edited = self
             .session
             .for_model_edited(system_notes, &self.context_edit);
         let effort = self.reasoning_effort.as_deref();
+        // Stream the assistant text live: each delta becomes an AssistantDelta the
+        // UI appends. `sink` is a local (threaded from run_turn), not borrowed
+        // from self, so this does not conflict with the &self provider borrow.
         let response = self
             .active_provider()
-            .chat(&edited.messages, schemas, effort)
+            .chat_streaming(&edited.messages, schemas, effort, &mut |delta: String| {
+                emit(sink, LoopEvent::AssistantDelta(delta));
+            })
             .await;
         (response, edited.stats)
     }
@@ -300,7 +356,7 @@ impl AgentLoop {
             let schemas = self.tools.schemas_for_query(&tool_query);
             let mut notes = vec![self.budget_note(iteration + 1, tools_used.len())];
             notes.extend(prompt_hook_notes.clone());
-            let (response, edit_stats) = self.call_model(&schemas, &notes).await;
+            let (response, edit_stats) = self.call_model(&schemas, &notes, sink).await;
             add_usage(&mut turn_usage, &response.usage);
             if trace_on() {
                 eprintln!(

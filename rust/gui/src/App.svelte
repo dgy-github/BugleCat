@@ -11,6 +11,7 @@
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
     | { kind: "ready"; model: string; sandbox: string; workspace: string }
+    | { kind: "assistant_delta"; text: string }
     | { kind: "assistant"; text: string }
     | { kind: "tool_start"; name: string; args: string }
     | { kind: "tool_result"; name: string; result: string }
@@ -89,6 +90,7 @@
   let sandboxMode = $state("");
   let tokIn = $state(0);
   let tokOut = $state(0);
+  let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
@@ -136,10 +138,26 @@
           workspace = p.workspace;
           sandboxMode = p.sandbox;
           break;
+        case "assistant_delta":
+          if (streamingIdx === null) {
+            messages.push({ role: "assistant", text: p.text });
+            streamingIdx = messages.length - 1;
+          } else {
+            const m = messages[streamingIdx];
+            if (m && m.role === "assistant") m.text += p.text;
+          }
+          break;
         case "assistant":
-          messages.push({ role: "assistant", text: p.text });
+          if (streamingIdx !== null) {
+            const m = messages[streamingIdx];
+            if (m && m.role === "assistant") m.text = p.text;
+            streamingIdx = null;
+          } else {
+            messages.push({ role: "assistant", text: p.text });
+          }
           break;
         case "tool_start":
+          streamingIdx = null; // close any in-progress stream before the tool
           messages.push({ role: "tool", name: p.name, args: p.args });
           break;
         case "approval":
@@ -165,6 +183,7 @@
             tokIn += u.prompt_tokens || 0;
             tokOut += u.completion_tokens || 0;
           }
+          streamingIdx = null;
           busy = false;
           refreshSessions();
           dequeue();
@@ -175,9 +194,11 @@
               ? { role: m.role, text: m.text }
               : { role: "note", text: m.text },
           );
+          streamingIdx = null;
           busy = false;
           break;
         case "error":
+          streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
           busy = false;
           break;
@@ -741,7 +762,7 @@
           </div>
         {/if}
       {/each}
-      {#if busy}
+      {#if busy && streamingIdx === null}
         <div class="thinking"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span> 思考中…</div>
       {/if}
     </div>
