@@ -14,6 +14,7 @@
 //!   thread) resolves that one-shot via the shared [`PendingMap`]. This is the
 //!   request/response round-trip that crosses the thread boundary mid-turn.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -26,8 +27,8 @@ use ncx_config::{
 };
 use ncx_core::{
     discover_skills, expand_file_mentions, load_workspace_instructions, new_session_id,
-    skills_index_block, AgentLoop, ApprovalHandler,
-    ApprovalRequest, CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Provider, Session,
+    skills_index_block, AgentLoop, ApprovalDecision, ApprovalHandler, ApprovalRequest,
+    CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Provider, Session, SessionGrants,
     SessionIndex, TaskBudget, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
@@ -54,7 +55,7 @@ pub const EVENT: &str = "ncx://event";
 /// Pending approval requests, keyed by id. Shared between the agent thread
 /// (inserts a one-shot sender when asking) and the `approve` command (takes it
 /// to answer). `Send + Sync` so it can live in Tauri state.
-pub type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<bool>>>>;
+pub type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<ApprovalDecision>>>>;
 
 /// A request from the UI to the agent thread.
 pub enum Command {
@@ -182,7 +183,7 @@ struct GuiApprover {
 
 #[async_trait(?Send)]
 impl ApprovalHandler for GuiApprover {
-    async fn request(&self, req: ApprovalRequest) -> bool {
+    async fn request(&self, req: ApprovalRequest) -> ApprovalDecision {
         let id = self.counter.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
@@ -197,7 +198,7 @@ impl ApprovalHandler for GuiApprover {
             },
         );
         // Window closed / channel dropped -> treat as denied (fail safe).
-        rx.await.unwrap_or(false)
+        rx.await.unwrap_or(ApprovalDecision::Deny)
     }
 }
 
@@ -208,6 +209,7 @@ impl ApprovalHandler for GuiApprover {
 fn build_agent(
     approver: Rc<dyn ApprovalHandler>,
     seed: Option<(String, Vec<Value>)>,
+    grants: Rc<RefCell<SessionGrants>>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
     let workspace = std::env::current_dir().ok();
     let overrides = Overrides {
@@ -248,6 +250,7 @@ fn build_agent(
         .with_approval_policy(approval_policy)
         .with_require_edit_approval(require_edit)
         .with_plan_mode(plan)
+        .with_session_grants(grants)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
@@ -334,8 +337,11 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     pending: pending.clone(),
                     counter: AtomicU64::new(1),
                 });
+                // Session "always allow" grants — fresh per session, kept across
+                // model / permission-mode rebuilds, replaced on new/resume/fork.
+                let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
                 let (mut agent, mut workspace, mut session_id, mut log_path, mut session_index) =
-                    match build_agent(approver.clone(), None) {
+                    match build_agent(approver.clone(), None, grants.clone()) {
                         Ok(v) => v,
                         Err(e) => {
                             emit(&app, UiEvent::Error { message: e });
@@ -374,18 +380,21 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 },
                             );
                         }
-                        Command::Reload => match build_agent(approver.clone(), None) {
-                            Ok((a, ws, sid, lp, idx)) => {
-                                agent = a;
-                                workspace = ws;
-                                session_id = sid;
-                                log_path = lp;
-                                session_index = idx;
-                                agent.set_event_sink(make_sink(app.clone()));
-                                emit_ready(&app, &workspace, &session_id);
+                        Command::Reload => {
+                            grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            match build_agent(approver.clone(), None, grants.clone()) {
+                                Ok((a, ws, sid, lp, idx)) => {
+                                    agent = a;
+                                    workspace = ws;
+                                    session_id = sid;
+                                    log_path = lp;
+                                    session_index = idx;
+                                    agent.set_event_sink(make_sink(app.clone()));
+                                    emit_ready(&app, &workspace, &session_id);
+                                }
+                                Err(e) => emit(&app, UiEvent::Error { message: e }),
                             }
-                            Err(e) => emit(&app, UiEvent::Error { message: e }),
-                        },
+                        }
                         Command::Resume(id) | Command::Fork(id)
                             if session_index.load_snapshot(&id).is_none() =>
                         {
@@ -399,7 +408,8 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Resume(id) => {
                             let msgs = session_index.load_snapshot(&id).unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
-                            match build_agent(approver.clone(), Some((id, msgs))) {
+                            grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            match build_agent(approver.clone(), Some((id, msgs)), grants.clone()) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -416,7 +426,8 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Fork(id) => {
                             let msgs = session_index.load_snapshot(&id).unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
-                            match build_agent(approver.clone(), Some((new_session_id(), msgs))) {
+                            grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            match build_agent(approver.clone(), Some((new_session_id(), msgs)), grants.clone()) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -453,7 +464,8 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             m.insert("model", model.as_str());
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                             let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
-                            match build_agent(approver.clone(), Some((session_id.clone(), msgs))) {
+                            // Same session → keep the "always allow" grants.
+                            match build_agent(approver.clone(), Some((session_id.clone(), msgs)), grants.clone()) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -477,7 +489,8 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             m.insert("approval_policy", approval);
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                             let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
-                            match build_agent(approver.clone(), Some((session_id.clone(), msgs))) {
+                            // Same session → keep the "always allow" grants.
+                            match build_agent(approver.clone(), Some((session_id.clone(), msgs)), grants.clone()) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;

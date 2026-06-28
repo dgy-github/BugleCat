@@ -382,12 +382,12 @@
     }
   }
 
-  async function decide(approved: boolean) {
+  async function decide(decision: "deny" | "once" | "always") {
     if (!approval) return;
     const id = approval.id;
     approval = null;
     try {
-      await invoke("approve", { id, approved });
+      await invoke("approve", { id, decision });
     } catch (e) {
       messages.push({ role: "note", text: `审批失败：${e}` });
     }
@@ -891,8 +891,9 @@
           <pre class="adetails">{approval.details}</pre>
         {/if}
         <div class="abtns">
-          <button class="deny" onclick={() => decide(false)}>拒绝</button>
-          <button class="ok" onclick={() => decide(true)}>批准</button>
+          <button class="deny" onclick={() => decide("deny")}>拒绝</button>
+          <button class="plain" onclick={() => decide("always")} title="本次会话始终允许（命令 / 编辑）">始终允许</button>
+          <button class="ok" onclick={() => decide("once")}>批准</button>
         </div>
       </div>
     </div>

@@ -365,12 +365,18 @@ fn open_with(program: &str, path: &Path, label: &str) -> Result<(), String> {
 }
 
 /// Answer a pending approval request (raised by an `approval` event).
+/// `decision` is "deny" | "once" | "always" (always = remember this session).
 #[tauri::command]
-fn approve(id: u64, approved: bool, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn approve(id: u64, decision: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let dec = match decision.as_str() {
+        "always" => ncx_core::ApprovalDecision::Always,
+        "once" | "approve" | "yes" | "true" => ncx_core::ApprovalDecision::Once,
+        _ => ncx_core::ApprovalDecision::Deny,
+    };
     let sender = state.pending.lock().unwrap().remove(&id);
     match sender {
         Some(tx) => tx
-            .send(approved)
+            .send(dec)
             .map_err(|_| "approval already resolved".to_string()),
         None => Err(format!("no pending approval with id {id}")),
     }
