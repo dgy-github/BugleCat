@@ -645,6 +645,15 @@
   let diffOpenFiles = $state<Record<string, string>>({}); // path -> loaded diff text
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
+  // Pin the active session to the top of 最近会话 so it's always findable.
+  const orderedSessions = $derived(
+    currentSessionId
+      ? [
+          ...sessions.filter((s) => s.session_id === currentSessionId),
+          ...sessions.filter((s) => s.session_id !== currentSessionId),
+        ]
+      : sessions,
+  );
 
   async function loadBranches() {
     branches = await invoke<BranchInfo[]>("git_branches");
@@ -836,7 +845,7 @@
       {#if sessions.length === 0}
         <div class="side-empty">暂无会话</div>
       {/if}
-      {#each sessions as s}
+      {#each orderedSessions as s}
         <div class="recent-item" class:active={s.session_id === currentSessionId}>
           <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
