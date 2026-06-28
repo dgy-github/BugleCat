@@ -187,6 +187,7 @@
           break;
         case "assistant_delta":
           if (streamingIdx === null) {
+            if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
             messages.push({ role: "assistant", text: p.text });
             streamingIdx = messages.length - 1;
           } else {
@@ -197,14 +198,24 @@
         case "assistant":
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
-            if (m && m.role === "assistant") m.text = p.text;
+            if (m && m.role === "assistant") {
+              // Tool-only turn (no narration) → drop the empty bubble instead of
+              // leaving a blank box; a run of these is what made the "striped" rows.
+              if (p.text.trim() === "") messages.splice(streamingIdx, 1);
+              else m.text = p.text;
+            }
             streamingIdx = null;
-          } else {
+          } else if (p.text.trim() !== "") {
             messages.push({ role: "assistant", text: p.text });
           }
           break;
         case "tool_start":
-          streamingIdx = null; // close any in-progress stream before the tool
+          // A streamed bubble that turned out empty (tool-only turn) leaves no box.
+          if (streamingIdx !== null) {
+            const m = messages[streamingIdx];
+            if (m && m.role === "assistant" && m.text.trim() === "") messages.splice(streamingIdx, 1);
+          }
+          streamingIdx = null;
           messages.push({ role: "tool", name: p.name, args: p.args });
           break;
         case "approval":
@@ -237,11 +248,13 @@
           dequeue();
           break;
         case "loaded":
-          messages = p.messages.map((m) =>
-            m.role === "user" || m.role === "assistant"
-              ? { role: m.role, text: m.text }
-              : { role: "note", text: m.text },
-          );
+          messages = p.messages
+            .filter((m) => m.text.trim() !== "") // drop empty tool-only assistant turns
+            .map((m) =>
+              m.role === "user" || m.role === "assistant"
+                ? { role: m.role, text: m.text }
+                : { role: "note", text: m.text },
+            );
           streamingIdx = null;
           busy = false;
           refreshSessions(); // keep the session you just left visible in 最近会话
