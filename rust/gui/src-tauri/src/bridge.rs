@@ -64,6 +64,9 @@ pub enum Command {
     Fork(String),
     /// Change the approval policy live (no session reset) + persist it.
     SetApproval(String),
+    /// Change the sandbox mode live (no session reset) + persist it. Used by the
+    /// "auto-execute" mode (danger-full-access).
+    SetSandbox(String),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -95,6 +98,7 @@ pub enum UiEvent {
     Done {
         final_text: String,
         stop_reason: String,
+        usage: Value,
     },
     /// A session was resumed/forked — the UI should replace its transcript with
     /// these restored messages.
@@ -328,6 +332,8 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 UiEvent::Done {
                                     final_text: result.final_text,
                                     stop_reason: result.stop_reason,
+                                    usage: serde_json::to_value(&result.usage)
+                                        .unwrap_or(Value::Null),
                                 },
                             );
                         }
@@ -393,6 +399,14 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             let mut m = std::collections::HashMap::new();
                             m.insert("approval_policy", policy.as_str());
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
+                        }
+                        Command::SetSandbox(mode) => {
+                            // Live update the sandbox (auto-execute = danger-full-access).
+                            agent.tools.ctx.policy = SandboxPolicy::new(&mode, &workspace);
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("sandbox_mode", mode.as_str());
+                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
+                            emit_ready(&app, &workspace);
                         }
                     }
                 }

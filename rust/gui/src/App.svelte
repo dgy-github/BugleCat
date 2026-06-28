@@ -15,7 +15,7 @@
     | { kind: "tool_start"; name: string; args: string }
     | { kind: "tool_result"; name: string; result: string }
     | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
-    | { kind: "done"; final_text: string; stop_reason: string }
+    | { kind: "done"; final_text: string; stop_reason: string; usage: Record<string, number> }
     | { kind: "loaded"; messages: { role: string; text: string }[] }
     | { kind: "error"; message: string };
 
@@ -86,6 +86,10 @@
   let workspace = $state("");
   let sessionTitle = $state("新会话");
   let sidebarOpen = $state(true);
+  let sandboxMode = $state("");
+  let tokIn = $state(0);
+  let tokOut = $state(0);
+  const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
@@ -98,8 +102,14 @@
     { id: "on-failure", label: "失败再问", desc: "仅当沙箱失败时再询问升权" },
     { id: "on-request", label: "按需询问", desc: "仅升权时询问（默认）" },
     { id: "never", label: "从不升权", desc: "始终留在沙箱；最严格" },
+    { id: "__auto", label: "自动执行（全权）", desc: "危险：所有命令直接执行，不询问" },
   ];
-  const approvalLabel = (id: string) => APPROVAL_OPTS.find((o) => o.id === id)?.label ?? id;
+  const AUTO_SANDBOX = "danger-full-access";
+  const isAuto = () => sandboxMode === AUTO_SANDBOX;
+  const optActive = (id: string) =>
+    id === "__auto" ? isAuto() : approvalPolicy === id && !isAuto();
+  const modeLabel = () =>
+    isAuto() ? "自动执行" : (APPROVAL_OPTS.find((o) => o.id === approvalPolicy)?.label ?? approvalPolicy);
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -112,6 +122,7 @@
       const s = await invoke<{ model: string; sandbox: string; approval: string }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
       approvalPolicy = s.approval;
+      sandboxMode = s.sandbox;
     } catch (e) {
       header = "配置错误";
     }
@@ -123,6 +134,7 @@
         case "ready":
           header = `${p.model} · ${p.sandbox}`;
           workspace = p.workspace;
+          sandboxMode = p.sandbox;
           break;
         case "assistant":
           messages.push({ role: "assistant", text: p.text });
@@ -147,6 +159,11 @@
           // non-normal stop adds a note.
           if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
+          }
+          {
+            const u = p.usage || {};
+            tokIn += u.prompt_tokens || 0;
+            tokOut += u.completion_tokens || 0;
           }
           busy = false;
           refreshSessions();
@@ -517,12 +534,24 @@
   }
   async function selectApproval(policy: string) {
     approvalMenuOpen = false;
-    if (policy === approvalPolicy) return;
-    approvalPolicy = policy;
     try {
-      await invoke("set_approval", { policy });
+      if (policy === "__auto") {
+        if (isAuto()) return;
+        sandboxMode = AUTO_SANDBOX;
+        await invoke("set_sandbox", { mode: AUTO_SANDBOX });
+        return;
+      }
+      // Leaving auto mode: restore a writable sandbox.
+      if (isAuto()) {
+        sandboxMode = "workspace-write";
+        await invoke("set_sandbox", { mode: "workspace-write" });
+      }
+      if (policy !== approvalPolicy) {
+        approvalPolicy = policy;
+        await invoke("set_approval", { policy });
+      }
     } catch (e) {
-      messages.push({ role: "note", text: `设置审批失败：${e}` });
+      messages.push({ role: "note", text: `设置权限失败：${e}` });
     }
   }
   function toggleSidebar() {
@@ -712,32 +741,38 @@
           </div>
         {/if}
       {/each}
+      {#if busy}
+        <div class="thinking"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span> 思考中…</div>
+      {/if}
     </div>
 
     <footer>
       <div class="composer-meta">
         <div class="approval-wrap">
-          <button class="approval-pill" class:danger={approvalPolicy === "never"}
+          <button class="approval-pill" class:danger={isAuto() || approvalPolicy === "never"}
             onclick={() => (approvalMenuOpen = !approvalMenuOpen)}
-            title="审批策略">
-            🛡 {approvalLabel(approvalPolicy)} ▾
+            title="权限模式">
+            🛡 {modeLabel()} ▾
           </button>
           {#if approvalMenuOpen}
-            <button class="menu-backdrop" aria-label="Close" onclick={() => (approvalMenuOpen = false)}></button>
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (approvalMenuOpen = false)}></button>
             <div class="approval-menu" role="menu">
               {#each APPROVAL_OPTS as opt}
-                <button class="approval-opt" role="menuitemradio" aria-checked={approvalPolicy === opt.id}
+                <button class="approval-opt" role="menuitemradio" aria-checked={optActive(opt.id)}
                   onclick={() => selectApproval(opt.id)}>
-                  <span class="opt-check">{approvalPolicy === opt.id ? "✓" : ""}</span>
+                  <span class="opt-check">{optActive(opt.id) ? "✓" : ""}</span>
                   <span class="opt-text">
                     <span class="opt-name">{opt.label}</span>
-                    <span class="opt-id">{opt.id} — {opt.desc}</span>
+                    <span class="opt-id">{opt.desc}</span>
                   </span>
                 </button>
               {/each}
             </div>
           {/if}
         </div>
+        {#if tokIn || tokOut}
+          <span class="usage" title="本会话累计 token（输入 / 输出）">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}</span>
+        {/if}
       </div>
       {#if queued.length}
         <div class="attachments">

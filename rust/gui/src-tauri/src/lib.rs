@@ -136,6 +136,15 @@ fn set_approval(policy: String, state: tauri::State<'_, AppState>) -> Result<(),
         .map_err(|_| "agent thread is not running".to_string())
 }
 
+/// Change the sandbox mode live (auto-execute = danger-full-access) + persist.
+#[tauri::command]
+fn set_sandbox(mode: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::SetSandbox(mode))
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
 fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -759,7 +768,8 @@ pub fn run() {
             resume_session,
             fork_session,
             new_session,
-            set_approval
+            set_approval,
+            set_sandbox
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");

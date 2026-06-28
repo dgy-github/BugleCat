@@ -1197,3 +1197,41 @@ main.app { flex-direction: row; }
 }
 .rp-close:hover { background: var(--paper-2); color: var(--ink); }
 .rp-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-3) var(--sp-4); }
+
+/* ── Smaller, tighter sidebar (ref: Claude Code) ──────────────────────────── */
+.sidebar { font-size: var(--fs-sm); }
+.side-brand { font-size: var(--fs-md); }
+.new-session { padding: 0.45rem 0.6rem; font-size: var(--fs-sm); }
+.nav-item { padding: 0.34rem 0.55rem; font-size: var(--fs-sm); }
+.nav-item .ni, .new-session .ni { width: 15px; height: 15px; flex: 0 0 15px; }
+.recent-main { padding: 0.34rem 0.5rem; font-size: var(--fs-sm); }
+.side-h { font-size: 0.68rem; }
+
+/* ── Composer usage readout ───────────────────────────────────────────────── */
+.usage {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+/* ── Thinking indicator ───────────────────────────────────────────────────── */
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  padding: 0.3rem 0.2rem;
+}
+.tdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.4;
+  animation: tpulse 1.1s ease-in-out infinite;
+}
+.tdot:nth-child(2) { animation-delay: 0.18s; }
+.tdot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes tpulse { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
