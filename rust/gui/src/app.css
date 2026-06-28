@@ -475,6 +475,56 @@ footer {
   gap: var(--sp-2);
 }
 
+/* ── Slash-command palette (type / in the composer) ───────────────────────── */
+.slash-menu {
+  max-height: 18rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--sh-2);
+  padding: 4px;
+}
+.slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: var(--ink);
+  border: none;
+  box-shadow: none;
+  min-height: auto;
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.slash-item.on { background: var(--accent-soft); }
+.slash-item:active { transform: none; }
+.slash-cmd {
+  flex: 0 0 5.5rem;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-xs);
+  color: var(--accent-deep);
+}
+.slash-label { flex: 0 0 auto; font-size: var(--fs-sm); font-weight: 600; }
+.slash-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
 textarea {
   flex: 1 1 auto;
   resize: none;

@@ -742,6 +742,52 @@ fn read_workspace_file(rel: String) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "二进制文件，无法预览".to_string())
 }
 
+/// Open an http(s) URL in the default browser (e.g. the /feedback command).
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("only http(s) URLs are allowed".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        ProcessCommand::new("explorer.exe")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        ProcessCommand::new("open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        ProcessCommand::new("xdg-open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
+#[derive(Serialize)]
+pub struct McpRow {
+    name: String,
+    command: String,
+}
+
+/// Configured MCP servers (from ~/.nanocodex/mcp.toml) for the /mcp command.
+#[tauri::command]
+fn list_mcp() -> Result<Vec<McpRow>, String> {
+    Ok(ncx_config::load_mcp_servers()
+        .into_iter()
+        .map(|s| {
+            let command = if s.args.is_empty() {
+                s.command
+            } else {
+                format!("{} {}", s.command, s.args.join(" "))
+            };
+            McpRow { name: s.name, command }
+        })
+        .collect())
+}
+
 /// Write pasted/clipboard image bytes to a temp file and return its path, so it
 /// can be attached through the normal image pipeline.
 #[tauri::command]
@@ -867,6 +913,8 @@ pub fn run() {
             git_file_diff,
             list_dir,
             read_workspace_file,
+            open_url,
+            list_mcp,
             save_temp_image,
             list_sessions,
             memory_list,

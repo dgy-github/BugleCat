@@ -515,6 +515,13 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    // Slash-command palette navigation takes precedence while it's open.
+    if (showSlash && slashMatches.length) {
+      if (e.key === "ArrowDown") { e.preventDefault(); slashIdx = (slashIdx + 1) % slashMatches.length; return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); slashIdx = (slashIdx - 1 + slashMatches.length) % slashMatches.length; return; }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runSlash(slashMatches[Math.min(slashIdx, slashMatches.length - 1)]); return; }
+      if (e.key === "Escape") { e.preventDefault(); input = ""; return; }
+    }
     // Enter sends; Shift+Enter inserts a newline.
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -844,6 +851,78 @@
       return String(ts);
     }
   }
+
+  // ── Slash command palette (type `/` in the composer) ──────────────────────
+  let slashIdx = $state(0);
+  const showSlash = $derived(input.startsWith("/") && !input.includes("\n"));
+  const slashFilter = $derived(showSlash ? input.slice(1).trim().toLowerCase() : "");
+  function forkCurrent() {
+    if (currentSessionId) forkSession(currentSessionId, sessionTitle);
+    else messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" });
+  }
+  function cmdUsage() {
+    const c = priceIn || priceOut ? ` · ≈¥${fmtCost(cost)}` : "";
+    messages.push({ role: "note", text: `本会话用量：输入 ${tokIn} / 输出 ${tokOut} tokens${c}` });
+  }
+  async function cmdMcp() {
+    try {
+      const rows = await invoke<{ name: string; command: string }[]>("list_mcp");
+      messages.push({
+        role: "note",
+        text: rows.length
+          ? `MCP 服务器（${rows.length}）：\n` + rows.map((r) => `· ${r.name} — ${r.command}`).join("\n")
+          : "未配置 MCP 服务器（~/.nanocodex/mcp.toml）。",
+      });
+    } catch (e) {
+      messages.push({ role: "note", text: `读取 MCP 失败：${e}` });
+    }
+  }
+  function cmdFeedback() {
+    invoke("open_url", { url: "https://github.com/dgy-github/nanocodex/issues" }).catch((e) =>
+      messages.push({ role: "note", text: `打开反馈页失败：${e}` }),
+    );
+  }
+  function cmdUltrareview() {
+    input = "请用最严格的标准复查刚才的改动 / 结论：逐条列出潜在 bug、边界情况、错误假设与遗漏，并给出具体修正。";
+  }
+  function cmdBtw() {
+    input = "补充说明：";
+  }
+  function cmdSoon(name: string) {
+    messages.push({ role: "note", text: `「${name}」规划中（需要专门的后台支持），下一步实现。` });
+  }
+  function cmdRename() {
+    messages.push({ role: "note", text: "会话重命名规划中（需要后端写入会话索引），下一步实现。" });
+  }
+  type SlashCmd = { id: string; label: string; desc: string; run: () => void };
+  const SLASH_COMMANDS: SlashCmd[] = [
+    { id: "new", label: "新建会话", desc: "开始一个空会话", run: () => newSession() },
+    { id: "fork", label: "分叉会话", desc: "从当前会话分叉一个新会话", run: () => forkCurrent() },
+    { id: "rename", label: "重命名会话", desc: "给当前会话改名（规划中）", run: () => cmdRename() },
+    { id: "model", label: "切换模型", desc: "打开模型选择", run: () => (modelMenuOpen = true) },
+    { id: "config", label: "设置", desc: "打开设置面板", run: () => openSettings() },
+    { id: "usage", label: "用量", desc: "显示本会话 token / 费用", run: () => cmdUsage() },
+    { id: "rewind", label: "检查点", desc: "查看 / 恢复检查点", run: () => openCheckpoints() },
+    { id: "files", label: "文件", desc: "浏览 / 预览工作区文件", run: () => openFiles() },
+    { id: "diff", label: "改动", desc: "查看工作区 diff", run: () => openDiff() },
+    { id: "branches", label: "分支", desc: "Git 分支", run: () => openBranches() },
+    { id: "memory", label: "记忆", desc: "项目记忆", run: () => openHermes() },
+    { id: "mcp", label: "MCP", desc: "列出已配置的 MCP 服务器", run: () => cmdMcp() },
+    { id: "feedback", label: "反馈", desc: "打开 GitHub Issues", run: () => cmdFeedback() },
+    { id: "ultrareview", label: "严格复查", desc: "用更严格标准复查（填入模板）", run: () => cmdUltrareview() },
+    { id: "btw", label: "补充说明", desc: "插入一条旁注（填入模板）", run: () => cmdBtw() },
+    { id: "schedule", label: "定时任务", desc: "定时运行（规划中）", run: () => cmdSoon("定时任务") },
+    { id: "workflows", label: "多-agent 编排", desc: "orchestrator 编排（规划中）", run: () => cmdSoon("多-agent 编排") },
+  ];
+  const slashMatches = $derived(
+    showSlash
+      ? SLASH_COMMANDS.filter((c) => c.id.includes(slashFilter) || c.label.toLowerCase().includes(slashFilter))
+      : [],
+  );
+  function runSlash(c: SlashCmd) {
+    input = "";
+    c.run();
+  }
 </script>
 
 <main class="app">
@@ -1017,13 +1096,26 @@
           {/each}
         </div>
       {/if}
+      {#if showSlash && slashMatches.length}
+        <div class="slash-menu" role="listbox" aria-label="命令">
+          {#each slashMatches as c, i}
+            <button class="slash-item" class:on={i === slashIdx} role="option" aria-selected={i === slashIdx}
+              onmouseenter={() => (slashIdx = i)} onclick={() => runSlash(c)}>
+              <span class="slash-cmd">/{c.id}</span>
+              <span class="slash-label">{c.label}</span>
+              <span class="slash-desc">{c.desc}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
       <div class="composer-row">
         <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">📎</button>
         <textarea
           bind:value={input}
           onkeydown={onKey}
+          oninput={() => { if (input.startsWith("/")) slashIdx = 0; }}
           onpaste={handlePaste}
-          placeholder="给 nanocodex 发消息…（Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"
+          placeholder="给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"
           rows="2"
         ></textarea>
         <button onclick={send} disabled={(input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
