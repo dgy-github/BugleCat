@@ -19,6 +19,9 @@ OPTIONS:
     -p, --profile <NAME>    Config profile from ~/.nanocodex/config.toml.
     -s, --sandbox <MODE>    read-only | workspace-write | danger-full-access.
     -a, --approval <POLICY> untrusted | on-failure | on-request | never.
+        --permission-mode <MODE>
+                            plan | default | accept-edits | bypass (Claude-Code
+                            style; when set, overrides --sandbox / --approval).
         --max-iterations <N>
                             Max model calls for one task (default: config/60).
         --max-tool-calls <N>
@@ -51,6 +54,9 @@ pub struct Args {
     pub profile: Option<String>,
     pub sandbox: Option<String>,
     pub approval: Option<String>,
+    /// Claude-Code permission mode (plan/default/accept-edits/bypass). When set,
+    /// derives sandbox + approval + edit/plan gating, overriding --sandbox/--approval.
+    pub permission_mode: Option<String>,
     pub max_iterations: Option<i64>,
     pub max_tool_calls: Option<i64>,
     pub context_edit_max_chars: Option<i64>,
@@ -102,6 +108,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-p" | "--profile" => args.profile = Some(take_value(argv, &mut i, a)?),
             "-s" | "--sandbox" => args.sandbox = Some(take_value(argv, &mut i, a)?),
             "-a" | "--approval" => args.approval = Some(take_value(argv, &mut i, a)?),
+            "--permission-mode" => args.permission_mode = Some(take_value(argv, &mut i, a)?),
             "--max-iterations" => args.max_iterations = Some(take_i64(argv, &mut i, a)?),
             "--max-tool-calls" => args.max_tool_calls = Some(take_i64(argv, &mut i, a)?),
             "--context-edit-max-chars" => {

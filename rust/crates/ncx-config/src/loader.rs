@@ -11,7 +11,8 @@ use toml::map::Map as TomlMap;
 use toml::Value;
 
 use crate::config::{
-    Config, ConfigError, HookConfig, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_MODELS,
+    derive_permission_mode, Config, ConfigError, HookConfig, DEFAULT_BASE_URL, DEFAULT_MODEL,
+    DEFAULT_MODELS, VALID_PERMISSION_MODES,
 };
 
 type Table = TomlMap<String, Value>;
@@ -153,6 +154,7 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "fast_model",
         "sandbox_mode",
         "approval_policy",
+        "permission_mode",
         "reasoning_effort",
         "vl_base_url",
         "vl_api_key",
@@ -169,6 +171,8 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "context_edit_max_chars",
         "context_edit_keep_recent_messages",
         "context_edit_max_tool_result_chars",
+        "price_in",
+        "price_out",
     ] {
         if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);
@@ -232,6 +236,10 @@ fn profile_values(selected: &Table) -> BTreeMap<String, String> {
 
 fn as_int(s: Option<&str>, default: i64) -> i64 {
     s.and_then(|v| v.parse::<i64>().ok()).unwrap_or(default)
+}
+
+fn as_float(s: Option<&str>, default: f64) -> f64 {
+    s.and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(default)
 }
 
 fn as_bool(s: Option<&str>, default: bool) -> bool {
@@ -463,6 +471,7 @@ pub(crate) fn load_config_impl(
         ),
         ("sandbox_mode", &["NANOCODEX_SANDBOX"]),
         ("approval_policy", &["NANOCODEX_APPROVAL"]),
+        ("permission_mode", &["NANOCODEX_PERMISSION_MODE"]),
         ("context_token_budget", &["NANOCODEX_CONTEXT_BUDGET"]),
         ("context_window", &["NANOCODEX_CONTEXT_WINDOW"]),
         ("context_edit_enabled", &["NANOCODEX_CONTEXT_EDIT_ENABLED"]),
@@ -548,6 +557,13 @@ pub(crate) fn load_config_impl(
         .cloned()
         .unwrap_or_else(|| "workspace-write".into());
     let network_access = sandbox_mode == "danger-full-access";
+    // permission_mode: use the stored value if valid, else migrate from the
+    // legacy sandbox_mode so pre-existing configs keep their behavior.
+    let permission_mode = merged
+        .get("permission_mode")
+        .filter(|m| VALID_PERMISSION_MODES.contains(&m.as_str()))
+        .cloned()
+        .unwrap_or_else(|| derive_permission_mode(&sandbox_mode).to_string());
 
     let workspace_base = overrides
         .workspace
@@ -567,6 +583,7 @@ pub(crate) fn load_config_impl(
             .get("approval_policy")
             .cloned()
             .unwrap_or_else(|| "on-request".into()),
+        permission_mode,
         reasoning_effort: merged
             .get("reasoning_effort")
             .cloned()
@@ -613,6 +630,8 @@ pub(crate) fn load_config_impl(
             merged.get("available_models").map(|s| s.as_str()),
             &active_model,
         ),
+        price_in: as_float(merged.get("price_in").map(|s| s.as_str()), 0.0),
+        price_out: as_float(merged.get("price_out").map(|s| s.as_str()), 0.0),
         hooks: parse_hooks(&nano_raw),
         mcp_servers: vec![],
     };

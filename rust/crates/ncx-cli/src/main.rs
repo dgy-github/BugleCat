@@ -16,8 +16,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use ncx_config::{
-    load_config, load_mcp_servers, write_nanocodex_config, Config, ConfigPaths, Overrides,
-    WRITABLE_KEYS,
+    load_config, load_mcp_servers, permission_mode_to_knobs, write_nanocodex_config, Config,
+    ConfigPaths, Overrides, VALID_PERMISSION_MODES, WRITABLE_KEYS,
 };
 use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
@@ -38,6 +38,12 @@ use runner::{LiveRunner, LiveSummarizer};
 const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use the provided tools \
     (read_file, apply_patch, update_plan) to inspect and edit the workspace. Prefer apply_patch \
     for edits. Keep responses concise.";
+
+/// Injected into the system prompt under `--permission-mode plan`.
+const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run state-changing \
+    commands — apply_patch is disabled and write/escalating shell commands are blocked. \
+    Investigate (read files, run read-only commands) and produce a concrete plan for the user \
+    to approve; make no changes.";
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -108,6 +114,14 @@ async fn run(args: Args) -> i32 {
         eprintln!("ncx: {e}");
         return 1;
     }
+    if let Some(pm) = args.permission_mode.as_deref() {
+        if !VALID_PERMISSION_MODES.contains(&pm) {
+            eprintln!(
+                "ncx: invalid --permission-mode {pm:?}; expected one of {VALID_PERMISSION_MODES:?}"
+            );
+            return 1;
+        }
+    }
 
     // Maintenance: LLM-fold near-duplicate memory notes, then exit.
     if args.memory_merge {
@@ -132,8 +146,18 @@ async fn run(args: Args) -> i32 {
         cfg.timeout_s as u64,
         cfg.max_retries as u32,
     );
-    let policy = SandboxPolicy::new(cfg.sandbox_mode.clone(), &cfg.workspace)
-        .with_network_access(cfg.network_access);
+    // --permission-mode (when given) is the single source of gating, overriding
+    // --sandbox/--approval; otherwise keep the classic sandbox+approval behavior.
+    let (sandbox_mode, approval_policy, require_edit, plan_mode) =
+        match args.permission_mode.as_deref() {
+            Some(pm) => {
+                let (s, a, r, p) = permission_mode_to_knobs(pm);
+                (s.to_string(), a.to_string(), r, p)
+            }
+            None => (cfg.sandbox_mode.clone(), cfg.approval_policy.clone(), false, false),
+        };
+    let network = sandbox_mode == "danger-full-access";
+    let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
     // Project memory: recalled into the system prompt as leads; the `remember`
     // tool lets the agent append verified notes (it gets smarter on THIS repo).
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
@@ -158,9 +182,19 @@ async fn run(args: Args) -> i32 {
         );
     }
     let base_prompt = genome.base_system_prompt(SYSTEM_PROMPT).to_string();
-    let system_prompt = compose_system_prompt(&base_prompt, &[instructions, recall, skills_index]);
+    // Plan-mode steering note (feat/gui permission model): appended to the
+    // composed prompt so the agent knows it is in read-only/plan mode.
+    let plan_note = if plan_mode {
+        PLAN_MODE_NOTE.to_string()
+    } else {
+        String::new()
+    };
+    let system_prompt =
+        compose_system_prompt(&base_prompt, &[instructions, recall, skills_index, plan_note]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
-        .with_approval_policy(cfg.approval_policy.clone())
+        .with_approval_policy(approval_policy)
+        .with_require_edit_approval(require_edit)
+        .with_plan_mode(plan_mode)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
@@ -1730,6 +1764,7 @@ mod tests {
             updated_at: "2026-06-01T10:00:00".into(),
             log_path: "/p/.nanocodex/session.jsonl".into(),
             has_snapshot: true,
+            archived: false,
         }];
         let out = render_history(&rows, 10);
         assert!(out.contains("sid"));

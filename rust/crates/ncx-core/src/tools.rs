@@ -39,6 +39,33 @@ pub struct ToolCatalogEntry {
     pub read_only: bool,
 }
 
+/// A user's answer to an approval prompt. `Always` additionally remembers the
+/// grant for the rest of the session (a command, or "all edits").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalDecision {
+    Deny,
+    Once,
+    Always,
+}
+
+impl ApprovalDecision {
+    /// True when the action may proceed (`Once` or `Always`).
+    pub fn approved(self) -> bool {
+        !matches!(self, ApprovalDecision::Deny)
+    }
+}
+
+/// Session-scoped "always allow" grants. Shared (`Rc<RefCell<…>>`) so it survives
+/// agent rebuilds within one session (model / permission-mode switches) but is
+/// dropped when a new/forked/resumed session starts.
+#[derive(Debug, Default, Clone)]
+pub struct SessionGrants {
+    /// Shell commands the user chose to always allow this session (exact match).
+    pub commands: HashSet<String>,
+    /// True once the user chose to always allow edits this session.
+    pub allow_edits: bool,
+}
+
 /// Asks the user to approve an escalated action (e.g. a patch writing outside
 /// the sandbox). The GUI implements this with a modal round-trip; the CLI with
 /// a yes/no prompt; tests with a canned answer. `?Send` to match the loop.
@@ -47,7 +74,7 @@ pub struct ToolCatalogEntry {
 /// (which is the pure policy classifier, not a prompt).
 #[async_trait(?Send)]
 pub trait ApprovalHandler {
-    async fn request(&self, req: ApprovalRequest) -> bool;
+    async fn request(&self, req: ApprovalRequest) -> ApprovalDecision;
 }
 
 /// Everything a tool needs, shared (cheaply cloned) across tools.
@@ -58,6 +85,14 @@ pub struct ToolContext {
     /// Approval policy name (`on-request` etc.) — drives the `shell` tool's
     /// auto-approve / ask / deny decision via [`ncx_sandbox::Approver`].
     pub approval_policy: String,
+    /// When true (CC "default" mode), every `apply_patch` write — even inside the
+    /// workspace — prompts the approver. False = in-workspace edits apply silently.
+    pub require_edit_approval: bool,
+    /// When true (CC "plan" mode), `apply_patch` refuses all edits: investigate
+    /// and propose a plan, change nothing.
+    pub plan_mode: bool,
+    /// Session-scoped "always allow" grants (shell commands / all edits).
+    pub session_grants: Rc<RefCell<SessionGrants>>,
     /// Default command timeout (seconds) for the `shell` tool.
     pub timeout_s: u64,
     /// Shared mutable plan state for `update_plan` / the CLI to read.
@@ -90,6 +125,9 @@ impl ToolContext {
             workspace,
             policy,
             approval_policy: "on-request".to_string(),
+            require_edit_approval: false,
+            plan_mode: false,
+            session_grants: Rc::new(RefCell::new(SessionGrants::default())),
             timeout_s: 120,
             plan: Rc::new(RefCell::new(Vec::new())),
             approver: None,
@@ -126,6 +164,25 @@ impl ToolContext {
     /// Set the approval policy the `shell` tool uses to gate commands.
     pub fn with_approval_policy(mut self, policy: impl Into<String>) -> Self {
         self.approval_policy = policy.into();
+        self
+    }
+
+    /// Require approval for every `apply_patch` write (CC "default" mode).
+    pub fn with_require_edit_approval(mut self, on: bool) -> Self {
+        self.require_edit_approval = on;
+        self
+    }
+
+    /// Refuse all `apply_patch` edits (CC "plan" mode).
+    pub fn with_plan_mode(mut self, on: bool) -> Self {
+        self.plan_mode = on;
+        self
+    }
+
+    /// Share a session-grants store across agent rebuilds (so "always allow"
+    /// survives model / permission-mode switches within one session).
+    pub fn with_session_grants(mut self, grants: Rc<RefCell<SessionGrants>>) -> Self {
+        self.session_grants = grants;
         self
     }
 
@@ -574,6 +631,13 @@ impl Tool for ApplyPatchTool {
             return "Error: 'patch' is required and must be a string.".into();
         };
 
+        // Plan mode (CC): edits are disabled — investigate and propose, change nothing.
+        if ctx.plan_mode {
+            return "plan mode: edits are disabled — propose a plan for the user to approve; \
+                    no files were changed."
+                .into();
+        }
+
         // Parse up front to find any target outside the writable sandbox. Those
         // require approval (mirrors how Codex/the Python tool escalates). A parse
         // error is reported directly without involving the approval layer.
@@ -603,30 +667,54 @@ impl Tool for ApplyPatchTool {
             }
         }
 
+        // Prompt when the patch escapes the sandbox OR when the mode requires
+        // approval for every edit (CC "default") — unless the user already chose
+        // "always allow edits" this session. A single prompt covers the patch.
+        let edits_granted = ctx.session_grants.borrow().allow_edits;
+        let needs_prompt = !escaping.is_empty() || (ctx.require_edit_approval && !edits_granted);
         let mut approved: HashSet<PathBuf> = HashSet::new();
-        if !escaping.is_empty() {
+        if needs_prompt {
             if let Some(approver) = &ctx.approver {
-                let rels = escaping
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let ok = approver
+                let (command, reason, escalated) = if escaping.is_empty() {
+                    (
+                        "apply_patch".to_string(),
+                        "Approve this edit before it is applied.".to_string(),
+                        false,
+                    )
+                } else {
+                    let rels = escaping
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    (
+                        format!("apply_patch writing outside the sandbox: {rels}"),
+                        "The patch modifies files outside the writable roots.".to_string(),
+                        true,
+                    )
+                };
+                let decision = approver
                     .request(ApprovalRequest {
-                        command: format!("apply_patch writing outside the sandbox: {rels}"),
-                        reason: "The patch modifies files outside the writable roots.".into(),
+                        command,
+                        reason,
                         cwd: ctx.workspace.display().to_string(),
-                        escalated: true,
+                        escalated,
                         details: patch.to_string(),
                     })
                     .await;
-                if !ok {
+                if !decision.approved() {
                     return "Error: patch not approved by the user.".into();
+                }
+                // "Always" on an in-workspace edit prompt = stop asking for edits
+                // this session (escaping writes are never blanket-granted).
+                if decision == ApprovalDecision::Always && escaping.is_empty() {
+                    ctx.session_grants.borrow_mut().allow_edits = true;
                 }
                 approved = escaping.into_iter().collect();
             }
-            // No approver: fall through — can_write rejects and apply_patch errors
-            // with the out-of-sandbox message (the prior behavior).
+            // No approver: fall through — can_write rejects out-of-sandbox targets
+            // (prior behavior); in-workspace edits proceed (the CLI never sets
+            // require_edit_approval, so this only affects approver-less callers).
         }
 
         let policy = ctx.policy.clone();
@@ -660,8 +748,20 @@ mod tests {
     struct Answer(bool);
     #[async_trait(?Send)]
     impl ApprovalHandler for Answer {
-        async fn request(&self, _req: ApprovalRequest) -> bool {
-            self.0
+        async fn request(&self, _req: ApprovalRequest) -> ApprovalDecision {
+            if self.0 {
+                ApprovalDecision::Once
+            } else {
+                ApprovalDecision::Deny
+            }
+        }
+    }
+
+    struct AlwaysAnswer;
+    #[async_trait(?Send)]
+    impl ApprovalHandler for AlwaysAnswer {
+        async fn request(&self, _req: ApprovalRequest) -> ApprovalDecision {
+            ApprovalDecision::Always
         }
     }
 
@@ -707,6 +807,66 @@ mod tests {
             .await;
         assert!(out.contains("Patch applied successfully"), "{out}");
         assert_eq!(std::fs::read_to_string(ws.join("ok.txt")).unwrap(), "hi\n");
+    }
+
+    #[tokio::test]
+    async fn plan_mode_refuses_edits() {
+        let ws = tmp_ws("planmode");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(true))) // even with an approver saying yes…
+            .with_plan_mode(true);
+        let patch = "*** Begin Patch\n*** Add File: nope.txt\n+x\n*** End Patch";
+        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": patch })).await;
+        assert!(out.contains("plan mode"), "{out}");
+        assert!(!ws.join("nope.txt").exists(), "no file should be written");
+    }
+
+    #[tokio::test]
+    async fn require_edit_approval_prompts_in_workspace() {
+        let ws = tmp_ws("editapprove");
+        let patch = "*** Begin Patch\n*** Add File: gated.txt\n+hi\n*** End Patch";
+        // Denied → not applied, even though the path is inside the workspace.
+        let denied = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(false)))
+            .with_require_edit_approval(true);
+        let out = ApplyPatchTool
+            .execute(&denied, &json!({ "patch": patch }))
+            .await;
+        assert!(out.contains("not approved"), "{out}");
+        assert!(!ws.join("gated.txt").exists(), "denied edit must not write");
+
+        // Approved → applied.
+        let ok = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(true)))
+            .with_require_edit_approval(true);
+        let out2 = ApplyPatchTool.execute(&ok, &json!({ "patch": patch })).await;
+        assert!(out2.contains("Patch applied successfully"), "{out2}");
+        assert_eq!(std::fs::read_to_string(ws.join("gated.txt")).unwrap(), "hi\n");
+    }
+
+    #[tokio::test]
+    async fn always_allow_edits_skips_later_prompts() {
+        let ws = tmp_ws("alwaysedit");
+        let grants = Rc::new(RefCell::new(SessionGrants::default()));
+        // First edit: user picks "Always" → applied + grant remembered.
+        let ctx1 = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(AlwaysAnswer))
+            .with_require_edit_approval(true)
+            .with_session_grants(grants.clone());
+        let p1 = "*** Begin Patch\n*** Add File: a.txt\n+1\n*** End Patch";
+        let o1 = ApplyPatchTool.execute(&ctx1, &json!({ "patch": p1 })).await;
+        assert!(o1.contains("Patch applied successfully"), "{o1}");
+        assert!(grants.borrow().allow_edits, "edit grant remembered");
+        // Second edit shares the grants but has a DENY approver — the session grant
+        // means it is never consulted, so the edit still applies.
+        let ctx2 = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(false)))
+            .with_require_edit_approval(true)
+            .with_session_grants(grants.clone());
+        let p2 = "*** Begin Patch\n*** Add File: b.txt\n+2\n*** End Patch";
+        let o2 = ApplyPatchTool.execute(&ctx2, &json!({ "patch": p2 })).await;
+        assert!(o2.contains("Patch applied successfully"), "{o2}");
+        assert!(ws.join("b.txt").exists(), "second edit applied without prompt");
     }
 
     #[tokio::test]
@@ -1054,7 +1214,14 @@ impl Tool for ShellTool {
             .unwrap_or("");
 
         let needs_esc = ShellTool::needs_escalation(ctx, command, &workdir);
-        let decision = Approver::new(&ctx.approval_policy).classify(command, needs_esc);
+        // Session "always allow": a command the user blessed this session skips
+        // the approval prompt entirely.
+        let pre_allowed = ctx.session_grants.borrow().commands.contains(command);
+        let decision = if pre_allowed {
+            Decision::AutoApprove
+        } else {
+            Approver::new(&ctx.approval_policy).classify(command, needs_esc)
+        };
 
         match decision {
             Decision::AutoDeny => {
@@ -1070,7 +1237,7 @@ impl Tool for ShellTool {
                     } else {
                         justification.to_string()
                     };
-                    let ok = h
+                    let ans = h
                         .request(ApprovalRequest {
                             command: command.to_string(),
                             reason,
@@ -1079,8 +1246,14 @@ impl Tool for ShellTool {
                             details: String::new(),
                         })
                         .await;
-                    if !ok {
+                    if !ans.approved() {
                         return "Error: command not approved by the user.".into();
+                    }
+                    if ans == ApprovalDecision::Always {
+                        ctx.session_grants
+                            .borrow_mut()
+                            .commands
+                            .insert(command.to_string());
                     }
                 }
                 None => {
@@ -1097,7 +1270,7 @@ impl Tool for ShellTool {
         // on-failure: if the sandboxed run failed (not a timeout), offer to retry.
         if !result.ok() && ctx.approval_policy == ON_FAILURE && !result.timed_out {
             if let Some(h) = &ctx.approver {
-                let ok = h
+                let ans = h
                     .request(ApprovalRequest {
                         command: command.to_string(),
                         reason: format!(
@@ -1111,7 +1284,7 @@ impl Tool for ShellTool {
                         details: String::new(),
                     })
                     .await;
-                if ok {
+                if ans.approved() {
                     result = exec.run(command, &workdir, timeout).await;
                 }
             }

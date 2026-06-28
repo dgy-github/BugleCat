@@ -129,9 +129,11 @@ impl PolicyExecutor {
         }
         #[cfg(windows)]
         {
-            // Don't let the child outlive a kill: needed so Job assignment works
-            // before any grandchildren spawn. (CREATE_SUSPENDED is overkill here;
-            // assigning right after spawn is sufficient in practice.)
+            // Run the cmd.exe child without a console window so GUI-launched
+            // commands don't flash a black box (CREATE_NO_WINDOW). tokio ORs this
+            // with CREATE_UNICODE_ENVIRONMENT; Job containment still applies.
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
         let mut child = match cmd.spawn() {

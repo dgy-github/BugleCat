@@ -12,6 +12,31 @@ pub const VALID_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "dang
 pub const VALID_APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
 pub const VALID_HOOK_EVENTS: &[&str] = &["pre_tool", "post_tool", "user_prompt", "stop"];
 
+/// Claude-Code-style permission modes (the GUI's single permission selector).
+pub const VALID_PERMISSION_MODES: &[&str] = &["plan", "default", "accept-edits", "bypass"];
+
+/// Map a CC permission mode to the underlying knobs:
+/// `(sandbox_mode, approval_policy, require_edit_approval, plan_mode)`.
+/// Unknown modes fall back to the gentle `accept-edits` behavior.
+pub fn permission_mode_to_knobs(mode: &str) -> (&'static str, &'static str, bool, bool) {
+    match mode {
+        "plan" => ("read-only", "never", false, true),
+        "default" => ("workspace-write", "untrusted", true, false),
+        "bypass" => ("danger-full-access", "never", false, false),
+        _ => ("workspace-write", "untrusted", false, false), // accept-edits
+    }
+}
+
+/// Derive a permission mode from the legacy `sandbox_mode` knob — migration for
+/// configs written before `permission_mode` existed (keeps prior behavior).
+pub fn derive_permission_mode(sandbox_mode: &str) -> &'static str {
+    match sandbox_mode {
+        "danger-full-access" => "bypass",
+        "read-only" => "plan",
+        _ => "accept-edits",
+    }
+}
+
 /// An MCP server to connect on startup, loaded from `~/.nanocodex/mcp.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServerConfig {
@@ -46,6 +71,9 @@ pub struct Config {
     pub fast_model: String,
     pub sandbox_mode: String,
     pub approval_policy: String,
+    /// CC-style permission mode (plan / default / accept-edits / bypass). The GUI's
+    /// single selector; maps to sandbox_mode + approval_policy + edit/plan gating.
+    pub permission_mode: String,
     pub reasoning_effort: String,
     /// Vision endpoint for image-bearing turns (empty = same vendor as main model).
     pub vl_base_url: String,
@@ -72,6 +100,10 @@ pub struct Config {
     pub context_edit_keep_recent_messages: i64,
     pub context_edit_max_tool_result_chars: i64,
     pub available_models: Vec<String>,
+    /// Cost estimate rates: price per 1,000,000 tokens (input / output), in the
+    /// user's currency. 0 = unknown (the GUI then shows only token counts).
+    pub price_in: f64,
+    pub price_out: f64,
     pub hooks: Vec<HookConfig>,
     /// MCP servers loaded from `~/.nanocodex/mcp.toml`.
     pub mcp_servers: Vec<McpServerConfig>,
@@ -86,6 +118,7 @@ impl Default for Config {
             fast_model: String::new(),
             sandbox_mode: "workspace-write".to_string(),
             approval_policy: "on-request".to_string(),
+            permission_mode: "accept-edits".to_string(),
             reasoning_effort: "auto".to_string(),
             vl_base_url: String::new(),
             vl_api_key: String::new(),
@@ -107,6 +140,8 @@ impl Default for Config {
             context_edit_keep_recent_messages: 30,
             context_edit_max_tool_result_chars: 4_000,
             available_models: DEFAULT_MODELS.iter().map(|s| s.to_string()).collect(),
+            price_in: 0.0,
+            price_out: 0.0,
             hooks: vec![],
             mcp_servers: vec![],
         }
@@ -133,6 +168,12 @@ impl Config {
             return Err(ConfigError(format!(
                 "Invalid approval_policy {:?}; expected one of {:?}.",
                 self.approval_policy, VALID_APPROVAL_POLICIES
+            )));
+        }
+        if !VALID_PERMISSION_MODES.contains(&self.permission_mode.as_str()) {
+            return Err(ConfigError(format!(
+                "Invalid permission_mode {:?}; expected one of {:?}.",
+                self.permission_mode, VALID_PERMISSION_MODES
             )));
         }
         for (idx, hook) in self.hooks.iter().enumerate() {
@@ -175,6 +216,7 @@ impl Config {
         m.insert("model", self.model.clone());
         m.insert("sandbox_mode", self.sandbox_mode.clone());
         m.insert("approval_policy", self.approval_policy.clone());
+        m.insert("permission_mode", self.permission_mode.clone());
         m.insert("reasoning_effort", self.reasoning_effort.clone());
         m.insert("vl_base_url", self.vl_base_url.clone());
         m.insert("vl_api_key", mask(&self.vl_api_key));
@@ -217,3 +259,51 @@ impl std::fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_mode_maps_to_knobs() {
+        assert_eq!(
+            permission_mode_to_knobs("plan"),
+            ("read-only", "never", false, true)
+        );
+        assert_eq!(
+            permission_mode_to_knobs("default"),
+            ("workspace-write", "untrusted", true, false)
+        );
+        assert_eq!(
+            permission_mode_to_knobs("accept-edits"),
+            ("workspace-write", "untrusted", false, false)
+        );
+        assert_eq!(
+            permission_mode_to_knobs("bypass"),
+            ("danger-full-access", "never", false, false)
+        );
+        // Unknown modes fall back to accept-edits behavior.
+        assert_eq!(
+            permission_mode_to_knobs("nonsense"),
+            ("workspace-write", "untrusted", false, false)
+        );
+    }
+
+    #[test]
+    fn derive_permission_mode_migrates_legacy_sandbox() {
+        assert_eq!(derive_permission_mode("danger-full-access"), "bypass");
+        assert_eq!(derive_permission_mode("read-only"), "plan");
+        assert_eq!(derive_permission_mode("workspace-write"), "accept-edits");
+    }
+
+    #[test]
+    fn default_permission_mode_is_valid() {
+        assert!(VALID_PERMISSION_MODES.contains(&Config::default().permission_mode.as_str()));
+        Config {
+            api_key: "k".into(),
+            ..Config::default()
+        }
+        .validate()
+        .expect("default permission_mode validates");
+    }
+}
