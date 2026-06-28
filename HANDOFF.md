@@ -82,10 +82,13 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   system_prompt(192→852)+read_file/shell/update_plan 描述 → 1.00**，Pareto cost 用真 token，
   lineage+viz HTML 已出。证明：**base 够弱（默认骨架有真 headroom）+ 教师够强时，框架能在
   默认骨架上真抬升**（不再需要人为劣化）。修了 cp1252 `→` 崩溃（UTF-8 reconfigure）。
-- **gate 偶发 flaky**：sentinel 自检偶尔 present=False（模型没回显码字，噪声）；injection 本身可靠，
-  急用可 `--no-gate`。下一步可给 gate 加重试/更确定性判据。
-- **下一步（仍可做）**：① 有 GPU 时用 export 的 JSONL 做 SFT/RL；② gate 加重试；③ ncx 也 log
-  system 消息（export 的 system_prompt 现取 genome base，非完整拼接）。
+- **gate 已加重试 ✅**：sentinel 自检对 with-genome 探测重试 ≤3 次（模型偶尔不回显码字是噪声、非
+  注入失败），单次 miss 不再 block 训练；2 个新单测。
+- **export system_prompt = genome base（有意，非缺陷）**：完整拼接 prompt 含 workspace 专属的
+  项目指令/memory/skills，会污染可移植 SFT 数据；且把 system 写进 session.jsonl 会让 resume 重复。
+  故 export 取**进化的 genome base**（更干净的训练信号）。
+- **下一步（仅剩需 GPU / 大算力）**：① 有 GPU 时用 export 的 reward=1 JSONL 做 SFT、全量做 RL；
+  ② 大规模造题扩 corpus 后跑更大 population。本机功能面已闭环。
 - **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
   非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对

@@ -110,6 +110,35 @@ def test_invalid_candidate_is_skipped():
         restore()
 
 
+def test_self_check_retries_past_model_noise():
+    # The agent fails to echo the sentinel twice (noise), succeeds on the 3rd —
+    # the gate must retry and PASS, not block the run on a single miss.
+    calls = {"g": 0}
+
+    def fake_ask(genome_path, prompt, timeout):
+        if genome_path:                       # the with-genome probe
+            calls["g"] += 1
+            return forge.SENTINEL if calls["g"] >= 3 else "sorry, no codeword"
+        return "plain reply"                  # baseline: sentinel absent
+    orig = forge._ask
+    forge._ask = fake_ask
+    try:
+        assert forge.self_check(timeout=1, attempts=3) is True
+        assert calls["g"] == 3, calls
+    finally:
+        forge._ask = orig
+
+
+def test_self_check_fails_if_never_injects():
+    force = lambda gp, p, t: "never has it"  # noqa: E731
+    orig = forge._ask
+    forge._ask = force
+    try:
+        assert forge.self_check(timeout=1, attempts=2) is False
+    finally:
+        forge._ask = orig
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
