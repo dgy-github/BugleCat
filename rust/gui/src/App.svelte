@@ -305,11 +305,13 @@
     }
   }
 
-  // File explorer over the workspace.
+  // File explorer over the workspace (with inline content preview).
+  let filePreview = $state<{ path: string; content: string } | null>(null);
   async function loadDir(rel: string) {
     try {
       filesEntries = await invoke<DirEntry[]>("list_dir", { rel });
       filesPath = rel;
+      filePreview = null;
     } catch (e) {
       messages.push({ role: "note", text: `读取目录失败：${e}` });
     }
@@ -320,17 +322,25 @@
     await loadDir("");
   }
   function filesUp() {
+    if (filePreview) { filePreview = null; return; } // back from preview → listing
     if (!filesPath) return;
     const parent = filesPath.includes("/") ? filesPath.slice(0, filesPath.lastIndexOf("/")) : "";
     loadDir(parent);
   }
-  function pickFile(entry: DirEntry) {
+  async function pickFile(entry: DirEntry) {
     if (entry.is_dir) {
       loadDir(entry.path);
-    } else {
-      input = input ? `${input} @${entry.path}` : `@${entry.path}`;
-      filesOpen = false;
+      return;
     }
+    try {
+      const content = await invoke<string>("read_workspace_file", { rel: entry.path });
+      filePreview = { path: entry.path, content };
+    } catch (e) {
+      filePreview = { path: entry.path, content: `（无法预览：${e}）` };
+    }
+  }
+  function insertMention(path: string) {
+    input = input ? `${input} @${path}` : `@${path}`;
   }
 
   async function chooseWorkspace() {
@@ -978,22 +988,31 @@
     <aside class="rightpanel">
       <div class="rp-head"><span class="rp-title">文件</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
       <div class="rp-body">
-        <div class="fx-bar">
-          <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ 上级</button>
-          <code class="fx-path">/{filesPath}</code>
-        </div>
-        <div class="wt-list">
-          {#if filesEntries.length === 0}
-            <p class="emptyline">（空）</p>
-          {/if}
-          {#each filesEntries as e}
-            <button class="fx-row" onclick={() => pickFile(e)} title={e.is_dir ? "打开文件夹" : "插入 @引用"}>
-              <span class="fx-ic">{e.is_dir ? "📁" : "📄"}</span>
-              <span class="fx-name">{e.name}</span>
-              {#if e.is_dir}<span class="fx-go">›</span>{/if}
-            </button>
-          {/each}
-        </div>
+        {#if filePreview}
+          <div class="fx-bar">
+            <button class="plain" onclick={() => (filePreview = null)}>‹ 返回</button>
+            <code class="fx-path" title={filePreview.path}>{filePreview.path}</code>
+            <button class="plain" onclick={() => { if (filePreview) insertMention(filePreview.path); }} title="把 @引用 插入输入框">＋@引用</button>
+          </div>
+          <pre class="fx-preview">{filePreview.content}</pre>
+        {:else}
+          <div class="fx-bar">
+            <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ 上级</button>
+            <code class="fx-path">/{filesPath}</code>
+          </div>
+          <div class="wt-list">
+            {#if filesEntries.length === 0}
+              <p class="emptyline">（空）</p>
+            {/if}
+            {#each filesEntries as e}
+              <button class="fx-row" onclick={() => pickFile(e)} title={e.is_dir ? "打开文件夹" : "预览文件"}>
+                <span class="fx-ic">{e.is_dir ? "📁" : "📄"}</span>
+                <span class="fx-name">{e.name}</span>
+                <span class="fx-go">›</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
     </aside>
   {/if}

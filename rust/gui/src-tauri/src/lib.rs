@@ -662,6 +662,24 @@ fn list_dir(rel: String) -> Result<Vec<DirEntry>, String> {
     Ok(out)
 }
 
+/// Read a workspace file's text for the file-preview panel. Mirrors `list_dir`'s
+/// containment; capped; refuses non-UTF-8 (binary) files.
+#[tauri::command]
+fn read_workspace_file(rel: String) -> Result<String, String> {
+    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
+    let wsc = ws.canonicalize().unwrap_or(ws);
+    let target = wsc.join(&rel).canonicalize().map_err(|e| e.to_string())?;
+    if !target.starts_with(&wsc) {
+        return Err("path is outside the workspace".into());
+    }
+    let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
+    if meta.len() > 400_000 {
+        return Err(format!("文件太大，无法预览（{} KB）", meta.len() / 1024));
+    }
+    let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
+    String::from_utf8(bytes).map_err(|_| "二进制文件，无法预览".to_string())
+}
+
 /// Write pasted/clipboard image bytes to a temp file and return its path, so it
 /// can be attached through the normal image pipeline.
 #[tauri::command]
@@ -784,6 +802,7 @@ pub fn run() {
             git_changes,
             git_file_diff,
             list_dir,
+            read_workspace_file,
             save_temp_image,
             list_sessions,
             memory_list,

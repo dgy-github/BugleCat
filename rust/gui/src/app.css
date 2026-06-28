@@ -1201,6 +1201,22 @@ main.app { flex-direction: row; }
 .fx-ic { flex: 0 0 1.1rem; }
 .fx-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fx-go { flex: 0 0 auto; color: var(--ink-3); }
+.fx-preview {
+  margin: var(--sp-2) 0 0;
+  max-height: calc(100vh - 9rem);
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+}
 
 .recent-item.active { background: var(--accent-soft); }
 .recent-item.active .recent-main { color: var(--ink); font-weight: 600; }
