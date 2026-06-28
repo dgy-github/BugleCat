@@ -84,6 +84,10 @@ pub enum Command {
     /// persist it (+ derived sandbox/approval) and rebuild reseeded so the new
     /// gating + plan nudge take effect without losing the conversation.
     SetPermissionMode(String),
+    /// Re-emit the `ready` snapshot (model / sandbox / session id / models /
+    /// permission mode). The frontend calls this once its listener is up, since
+    /// the agent thread's initial emit can fire before that listener exists.
+    RequestReady,
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -503,6 +507,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 Err(e) => emit(&app, UiEvent::Error { message: e }),
                             }
                         }
+                        Command::RequestReady => emit_ready(&app, &workspace, &session_id),
                     }
                 }
             });

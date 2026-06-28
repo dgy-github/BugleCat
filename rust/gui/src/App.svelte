@@ -371,6 +371,10 @@
       }
       scrollDown();
     });
+    // The agent thread's initial `ready` can fire before this listener exists
+    // (Tauri events aren't buffered), so the active session id would be missed.
+    // Now that we're listening, ask the backend to re-emit it.
+    invoke("request_ready").catch(() => {});
   });
 
   async function attachFiles() {

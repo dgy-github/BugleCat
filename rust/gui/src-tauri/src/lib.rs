@@ -165,6 +165,16 @@ fn set_permission_mode(mode: String, state: tauri::State<'_, AppState>) -> Resul
         .map_err(|_| "agent thread is not running".to_string())
 }
 
+/// Ask the agent thread to re-emit its `ready` snapshot (called by the UI once
+/// its event listener is up, so the initial emit isn't missed).
+#[tauri::command]
+fn request_ready(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::RequestReady)
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
 fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
@@ -862,7 +872,8 @@ pub fn run() {
             set_approval,
             set_sandbox,
             set_model,
-            set_permission_mode
+            set_permission_mode,
+            request_ready
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
