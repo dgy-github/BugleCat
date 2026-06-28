@@ -348,6 +348,12 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
   messages / final / reward / tokens / model / genome_id）。`--reward-pass-only` 出 SFT 模仿集；
   system_prompt 取 genome base（ncx 不 log 系统消息）。3 单测；live 验（reward=1, tokens, 完整 14 轮轨迹）。
   → 未来有 GPU：reward=1 轨迹做 SFT、全量做 RL(GRPO/PPO，reward=bench 通过)，进化出的 prompt 当系统提示初值。
+- **权重训练脚手架 ✅（`train/finetune.py`，可在 GPU 机直接跑）**：SFT 路径——export 的 reward=1
+  轨迹→chat 序列([system_prompt]+user/assistant/tool 回合，保留 tool_calls)→trl SFTTrainer（trl/torch
+  懒加载，数据转换在本机可跑+5 单测）。RL 路径——`bench_reward(task, ws)` 复用 bench grader 当 0/1
+  奖励；**诚实说明**：agent 是多轮工具循环、非单段生成，vanilla GRPO 不直接适配，需 GPU 侧 agentic
+  rollout collector（model↔tools 回合→回合末 reward）；`rl_design()` 写明契约。`--mode prep` 本机
+  即可预览数据集 + 打印 GPU 运行命令。
 - **更弱 base 跑真 lift**：`forge --population --base-model <weak>`（evaluator/forge 加 model 透传，
   `-m` 注入 ncx）。弱 base（如 deepseek-chat）默认骨架余量更大 → 强教师(codex)更可能抬升。
 

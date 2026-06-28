@@ -87,8 +87,13 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
 - **export system_prompt = genome base（有意，非缺陷）**：完整拼接 prompt 含 workspace 专属的
   项目指令/memory/skills，会污染可移植 SFT 数据；且把 system 写进 session.jsonl 会让 resume 重复。
   故 export 取**进化的 genome base**（更干净的训练信号）。
-- **下一步（仅剩需 GPU / 大算力）**：① 有 GPU 时用 export 的 reward=1 JSONL 做 SFT、全量做 RL；
-  ② 大规模造题扩 corpus 后跑更大 population。本机功能面已闭环。
+- **权重训练脚手架 ✅（`train/finetune.py`）**：`--mode sft`（export reward=1 → chat → trl
+  SFTTrainer，trl/torch 懒加载）+ `bench_reward()` RL 奖励 + `rl_design()`（诚实：agentic RL 需
+  GPU 侧 rollout collector，非 vanilla GRPO）。数据转换在本机可跑+5 单测；`--mode prep` 预览+打印
+  GPU 运行命令。**真正训练只差一台 GPU**：`pip install trl transformers torch peft datasets` →
+  `python train/finetune.py --mode sft --data <export.jsonl> --model <hf-model>`。
+- **下一步（仅剩需 GPU / 大算力）**：① GPU 上跑 finetune.py 做 SFT；② 写 agentic-RL rollout
+  collector 接 GRPO；③ 大规模造题扩 corpus + 更大 population。本机功能面 100% 闭环。
 - **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
   非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对
