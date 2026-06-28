@@ -4,12 +4,28 @@
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 
 ## 元信息
-- 最后更新：2026-06-26
+- 最后更新：2026-06-28
 - 分支：**`rust-capability`**（基于 rust-rewrite，已推 `origin`）。Python 树 `nanocodex/*.py` 不动。
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
 - 路径：crates `rust/crates/`，GUI `rust/gui/`，基准 `bench/`。
 - 工具链：无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 - ✅ **`feat/train` 已并入 rust-capability**（merge `a26793b`）：ncx-forge 训练框架全部回灌 —— `genome.rs` 读 `NCX_GENOME` 覆盖 prompt/工具描述、`--dump-genome`/`--from-genome` CLI、`train/` 纯 Python 框架。详见下节 + `train/DESIGN.md`。
+
+## 最近改动（2026-06-28，已测，提交在 rust-capability）
+- **REPL slash 扩展**（`ncx-cli/src/main.rs` + `ncx-core/src/slash.rs`）：`/export`（会话→Markdown，
+  动态代码围栏防破格、**显式路径拒覆盖/拒目录**、图片只存 `[image]`）、`/review`·`/security-review`·
+  `/verify`（注入 prompt 跑一轮，agent 自己 git diff/跑测试）、`/docx`·`/pdf`·`/pptx`·`/xlsx`（注入 prompt
+  经 shell 调后端：python-docx / pdfplumber·pypdf·reportlab / python-pptx / openpyxl / pandoc，未装先给
+  `pip install` 并征询）、别名 `/update-config`→`/config`、`/usage-credits`→`/usage`。裸命令=内置，
+  `/project:<name>`/`/user:<name>` 仍走 `.nanocodex|.claude/commands/*.md` 自定义文件。13-agent 对抗评审
+  通过（仅 /export 路径防护一处已修）。**文档命令是"prompt+后端"路线，没在 Rust 内置二进制解析器**。
+- **GUI token 用量条**（`ncx-core/src/session.rs::estimate_tokens` 移植自 Python `compaction.py` +
+  `gui/src-tauri/src/bridge.rs` 新 `UsageSnapshot` 经 `Done` 事件 + `gui/src/App.svelte` 底部状态栏）：
+  显示 `context: 用量/窗口 (%) · session tok · last ↑prompt ↓completion`。**仅 token + 上下文 %，无 USD**
+  （Rust 侧无计价表；要 USD 需移植 `pricing.py`）。Reload/保存设置归零。根因：旧 bridge 拿到 `TurnResult.usage`
+  却在构造 `Done` 时丢弃，前端也无 UI——老 Python GUI 有整套、Rust 重写没移植，现补 token+context 部分。
+  **实物渲染需 `cd rust/gui && npm run tauri dev` 发一条消息看底部条**（单测/编译/vite build 已过，未跑活 app）。
+- 测试：全 rust 工作区 **266 绿**；GUI 后端 `cargo check` + 前端 `vite build` 均过。
 
 ## ncx-forge 训练框架（分支 `feat/train`，已推 origin）— 当前活跃工作线
 目标：让强模型当"教师"迭代优化 agent 骨架（system_prompt + 工具描述），用 bench 通过率当
