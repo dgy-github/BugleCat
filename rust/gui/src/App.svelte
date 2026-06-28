@@ -35,6 +35,8 @@
     context_edit_max_chars: number;
     context_edit_keep_recent_messages: number;
     context_edit_max_tool_result_chars: number;
+    price_in: number;
+    price_out: number;
     api_key_masked: string;
     has_api_key: boolean;
     available_models: string[];
@@ -90,8 +92,13 @@
   let sandboxMode = $state("");
   let tokIn = $state(0);
   let tokOut = $state(0);
+  // Per-1M-token prices (from config); 0 = unknown → cost is hidden.
+  let priceIn = $state(0);
+  let priceOut = $state(0);
+  const cost = $derived((tokIn / 1e6) * priceIn + (tokOut / 1e6) * priceOut);
   let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+  const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 
   // ── Collapsible tool output ───────────────────────────────────────────────
   // Large results auto-collapse so a single dump can't bury the conversation.
@@ -265,11 +272,13 @@
   onMount(async () => {
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
-      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string }>("get_status");
+      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; price_in: number; price_out: number }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
       sandboxMode = s.sandbox;
       currentModel = s.model;
       if (s.permission_mode) permissionMode = s.permission_mode;
+      priceIn = s.price_in || 0;
+      priceOut = s.price_out || 0;
     } catch (e) {
       header = "配置错误";
     }
@@ -569,10 +578,14 @@
       context_edit_max_chars: String(settings.context_edit_max_chars),
       context_edit_keep_recent_messages: String(settings.context_edit_keep_recent_messages),
       context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),
+      price_in: String(settings.price_in),
+      price_out: String(settings.price_out),
     };
     if (apiKeyInput.trim()) updates.api_key = apiKeyInput.trim();
     try {
       await invoke("save_settings", { updates });
+      priceIn = Number(settings.price_in) || 0; // reflect new rate immediately
+      priceOut = Number(settings.price_out) || 0;
       settings = null;
       apiKeyInput = "";
     } catch (e) {
@@ -981,7 +994,7 @@
           {/if}
         </div>
         {#if tokIn || tokOut}
-          <span class="usage" title="本会话累计 token（输入 / 输出）">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}</span>
+          <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈¥"}{fmtCost(cost)}{/if}</span>
         {/if}
       </div>
       {#if queued.length}
@@ -1308,6 +1321,14 @@
         <label>
           <span>工具结果字符上限</span>
           <input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} />
+        </label>
+        <label>
+          <span>输入单价 ¥/百万</span>
+          <input type="number" min="0" step="0.01" bind:value={settings.price_in} placeholder="0 = 不计费" />
+        </label>
+        <label>
+          <span>输出单价 ¥/百万</span>
+          <input type="number" min="0" step="0.01" bind:value={settings.price_out} placeholder="0 = 不计费" />
         </label>
         <label>
           <span>Base URL</span>

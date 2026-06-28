@@ -35,6 +35,8 @@ pub struct Status {
     max_tool_calls: i64,
     context_edit_enabled: bool,
     context_edit_max_chars: i64,
+    price_in: f64,
+    price_out: f64,
 }
 
 /// Tauri managed state: the channel into the agent thread + pending approvals.
@@ -88,6 +90,8 @@ fn get_status() -> Result<Status, String> {
         max_tool_calls: cfg.max_tool_calls,
         context_edit_enabled: cfg.context_edit_enabled,
         context_edit_max_chars: cfg.context_edit_max_chars,
+        price_in: cfg.price_in,
+        price_out: cfg.price_out,
     })
 }
 
@@ -237,6 +241,8 @@ pub struct Settings {
     context_edit_max_chars: i64,
     context_edit_keep_recent_messages: i64,
     context_edit_max_tool_result_chars: i64,
+    price_in: f64,
+    price_out: f64,
     api_key_masked: String,
     has_api_key: bool,
     available_models: Vec<String>,
@@ -266,6 +272,8 @@ fn get_settings() -> Result<Settings, String> {
         context_edit_max_chars: cfg.context_edit_max_chars,
         context_edit_keep_recent_messages: cfg.context_edit_keep_recent_messages,
         context_edit_max_tool_result_chars: cfg.context_edit_max_tool_result_chars,
+        price_in: cfg.price_in,
+        price_out: cfg.price_out,
         api_key_masked: masked,
         has_api_key: !cfg.api_key.is_empty(),
         available_models: cfg.available_models.clone(),

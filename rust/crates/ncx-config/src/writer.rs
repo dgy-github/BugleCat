@@ -26,6 +26,8 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "context_edit_max_chars",
     "context_edit_keep_recent_messages",
     "context_edit_max_tool_result_chars",
+    "price_in",
+    "price_out",
 ];
 
 /// Escape a string for a TOML basic (double-quoted) string value.

@@ -154,6 +154,7 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "fast_model",
         "sandbox_mode",
         "approval_policy",
+        "permission_mode",
         "reasoning_effort",
         "vl_base_url",
         "vl_api_key",
@@ -170,6 +171,8 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "context_edit_max_chars",
         "context_edit_keep_recent_messages",
         "context_edit_max_tool_result_chars",
+        "price_in",
+        "price_out",
     ] {
         if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);
@@ -233,6 +236,10 @@ fn profile_values(selected: &Table) -> BTreeMap<String, String> {
 
 fn as_int(s: Option<&str>, default: i64) -> i64 {
     s.and_then(|v| v.parse::<i64>().ok()).unwrap_or(default)
+}
+
+fn as_float(s: Option<&str>, default: f64) -> f64 {
+    s.and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(default)
 }
 
 fn as_bool(s: Option<&str>, default: bool) -> bool {
@@ -623,6 +630,8 @@ pub(crate) fn load_config_impl(
             merged.get("available_models").map(|s| s.as_str()),
             &active_model,
         ),
+        price_in: as_float(merged.get("price_in").map(|s| s.as_str()), 0.0),
+        price_out: as_float(merged.get("price_out").map(|s| s.as_str()), 0.0),
         hooks: parse_hooks(&nano_raw),
         mcp_servers: vec![],
     };
