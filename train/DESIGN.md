@@ -354,6 +354,12 @@ forge 负责拼 prompt、解析 genome、选择、记 lineage —— 后端只�
   奖励；**诚实说明**：agent 是多轮工具循环、非单段生成，vanilla GRPO 不直接适配，需 GPU 侧 agentic
   rollout collector（model↔tools 回合→回合末 reward）；`rl_design()` 写明契约。`--mode prep` 本机
   即可预览数据集 + 打印 GPU 运行命令。
+- **agentic-RL rollout collector ✅（`train/rollout.py`）**：把"agent 是多轮工具循环"落成 episode 收集器：
+  `collect_rollout`（policy chat_fn + tool_exec 注入的 model↔tools 循环，回合末 `bench_reward` 给 0/1）、
+  `ncx_episode`（**复用 ncx 真实 loop/tools/sandbox**——把 ncx 指向 vLLM 服务的 policy，读 session.jsonl
+  当轨迹，推荐生产路径）、`grpo_advantages`（组内归一 (r-mean)/(std+eps)）、`collect_group`（N episode→
+  优势）。纯逻辑本机可跑+5 单测（优势数学、工具循环、组采样）；`run_grpo` 的 token 级 `policy_update`
+  是 GPU/torch 部分（懒加载，契约写明）。`finetune.py --mode grpo` 指到它。
 - **更弱 base 跑真 lift**：`forge --population --base-model <weak>`（evaluator/forge 加 model 透传，
   `-m` 注入 ncx）。弱 base（如 deepseek-chat）默认骨架余量更大 → 强教师(codex)更可能抬升。
 

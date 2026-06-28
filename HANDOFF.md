@@ -92,8 +92,14 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
   GPU 侧 rollout collector，非 vanilla GRPO）。数据转换在本机可跑+5 单测；`--mode prep` 预览+打印
   GPU 运行命令。**真正训练只差一台 GPU**：`pip install trl transformers torch peft datasets` →
   `python train/finetune.py --mode sft --data <export.jsonl> --model <hf-model>`。
-- **下一步（仅剩需 GPU / 大算力）**：① GPU 上跑 finetune.py 做 SFT；② 写 agentic-RL rollout
-  collector 接 GRPO；③ 大规模造题扩 corpus + 更大 population。本机功能面 100% 闭环。
+- **agentic-RL rollout collector ✅（`train/rollout.py`，分支 `feat/train-rl`）**：`collect_rollout`
+  (注入 policy chat_fn + tool_exec 的 model↔tools episode，回合末 `bench_reward` 0/1) +
+  `ncx_episode`(复用 ncx 真 loop，指向 vLLM-served policy，读 session.jsonl，**推荐生产路径**) +
+  `grpo_advantages`(组内归一) + `collect_group`(N episode→优势)。纯逻辑本机可跑+5 单测；
+  `run_grpo` 的 token 级 `policy_update` 是 GPU/torch 部分(懒加载+契约)。`finetune.py --mode grpo` 指到它。
+- **下一步（仅剩需 GPU / 大算力）**：① 在 GPU 上把 `rollout.run_grpo` 的 `policy_update` 接上
+  (vLLM 服 policy + ncx_episode 收 rollout + trl/自写 PG step)；② 跑 finetune.py SFT；③ 扩 corpus。
+  **本机功能面 100% 闭环**（含 SFT 数据/脚手架 + RL rollout 收集器 + 验证奖励，只差 GPU 跑权重更新）。
 - **diff() 小瑕疵**：champion 的 tool_desc 显示 "→0 chars" 是因 genome 未指定该键（=用默认），
   非真清空；注入对缺失键正确回落默认。diff 显示未区分"缺失"与"清空"，纯展示问题。
 - **已知限制**：强基线 + 算法任务 = harness 余量薄；harness 优化对"模型能力门"无效，只对

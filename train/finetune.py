@@ -157,8 +157,14 @@ def main() -> int:
             raise SystemExit("--mode sft needs --model and --data")
         run_sft(paths, a.model, a.out, reward_pass_only=not a.all_rewards)
         return 0
-    print("grpo: agentic RL — see rl_design(); needs a GPU-side rollout collector.")
+    # The agentic rollout collector rl_design() called for now exists:
+    import rollout as R
+    print("grpo: agentic RL. The rollout collector is train/rollout.py.")
     print(rl_design())
+    print("\nReady pieces: rollout.collect_group() (episodes + GRPO advantages), "
+          "rollout.bench_reward (terminal reward), rollout.ncx_episode (reuse ncx's "
+          "loop via a vLLM-served policy). Wire rollout.run_grpo's policy_update on a GPU.")
+    print("advantage demo:", [round(a, 2) for a in R.grpo_advantages([1.0, 1.0, 0.0, 0.0])])
     return 0
 
 
