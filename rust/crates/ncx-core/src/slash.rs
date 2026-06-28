@@ -23,8 +23,16 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
         "Alias for /usage (raw token usage; no price table).",
     ),
     (
+        "/usage-credits",
+        "Alias for /usage (token usage; no credit/billing API).",
+    ),
+    (
         "/config",
         "Show the config path, or persist a setting: /config key=value.",
+    ),
+    (
+        "/update-config",
+        "Alias for /config: show config or persist a setting (key=value).",
     ),
     (
         "/model",
@@ -36,8 +44,40 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
     ),
     ("/diff", "Show the working-tree git diff."),
     ("/plan", "Show the current step plan."),
+    (
+        "/review",
+        "Review the working-tree changes for bugs and quality: /review [scope].",
+    ),
+    (
+        "/security-review",
+        "Security review of the working-tree changes: /security-review [scope].",
+    ),
+    (
+        "/verify",
+        "Build/test the recent change and report pass/fail: /verify [what].",
+    ),
     ("/skills", "List available agent skills (name + when to use)."),
     ("/history", "Show recent saved sessions."),
+    (
+        "/export",
+        "Export the conversation to a Markdown file: /export [path].",
+    ),
+    (
+        "/docx",
+        "Read/edit/create a Word .docx via a document backend: /docx [file].",
+    ),
+    (
+        "/pdf",
+        "Read/extract or create a PDF via a document backend: /pdf [file].",
+    ),
+    (
+        "/pptx",
+        "Read/build a PowerPoint .pptx via a document backend: /pptx [file].",
+    ),
+    (
+        "/xlsx",
+        "Read/edit/create a spreadsheet via a document backend: /xlsx [file].",
+    ),
     ("/checkpoint", "Create a workspace checkpoint."),
     ("/checkpoints", "List recent workspace checkpoints."),
     (
@@ -182,13 +222,23 @@ mod tests {
         for c in [
             "/help",
             "/config",
+            "/update-config",
             "/usage",
             "/cost",
+            "/usage-credits",
             "/model",
             "/approvals",
             "/diff",
+            "/review",
+            "/security-review",
+            "/verify",
             "/skills",
             "/history",
+            "/export",
+            "/docx",
+            "/pdf",
+            "/pptx",
+            "/xlsx",
             "/checkpoint",
             "/checkpoints",
             "/restore",
