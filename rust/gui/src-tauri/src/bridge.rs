@@ -78,6 +78,7 @@ pub enum UiEvent {
         model: String,
         sandbox: String,
         workspace: String,
+        session_id: String,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
     AssistantDelta { text: String },
@@ -134,8 +135,8 @@ fn make_sink(app: AppHandle) -> Box<dyn FnMut(LoopEvent)> {
     })
 }
 
-/// Tell the UI which model / sandbox / workspace is now active.
-fn emit_ready(app: &AppHandle, workspace: &std::path::Path) {
+/// Tell the UI which model / sandbox / workspace / session is now active.
+fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
     if let Ok(cfg) = load_config(Overrides {
         workspace: Some(workspace.to_path_buf()),
         ..Default::default()
@@ -146,6 +147,7 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path) {
                 model: cfg.model,
                 sandbox: cfg.sandbox_mode,
                 workspace: workspace.display().to_string(),
+                session_id: session_id.to_string(),
             },
         );
     }
@@ -309,7 +311,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         }
                     };
                 agent.set_event_sink(make_sink(app.clone()));
-                emit_ready(&app, &workspace);
+                emit_ready(&app, &workspace, &session_id);
 
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
@@ -348,7 +350,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                 log_path = lp;
                                 session_index = idx;
                                 agent.set_event_sink(make_sink(app.clone()));
-                                emit_ready(&app, &workspace);
+                                emit_ready(&app, &workspace, &session_id);
                             }
                             Err(e) => emit(&app, UiEvent::Error { message: e }),
                         },
@@ -374,7 +376,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                     session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit(&app, UiEvent::Loaded { messages: ui });
-                                    emit_ready(&app, &workspace);
+                                    emit_ready(&app, &workspace, &session_id);
                                 }
                                 Err(e) => emit(&app, UiEvent::Error { message: e }),
                             }
@@ -391,7 +393,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                     session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit(&app, UiEvent::Loaded { messages: ui });
-                                    emit_ready(&app, &workspace);
+                                    emit_ready(&app, &workspace, &session_id);
                                 }
                                 Err(e) => emit(&app, UiEvent::Error { message: e }),
                             }
@@ -409,7 +411,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             let mut m = std::collections::HashMap::new();
                             m.insert("sandbox_mode", mode.as_str());
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            emit_ready(&app, &workspace);
+                            emit_ready(&app, &workspace, &session_id);
                         }
                     }
                 }

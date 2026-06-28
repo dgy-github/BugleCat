@@ -10,7 +10,7 @@
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string }
+    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string }
     | { kind: "assistant_delta"; text: string }
     | { kind: "assistant"; text: string }
     | { kind: "tool_start"; name: string; args: string }
@@ -158,6 +158,9 @@
           header = `${p.model} · ${p.sandbox}`;
           workspace = p.workspace;
           sandboxMode = p.sandbox;
+          // Learn the active session's real id so 最近会话 can mark/return to it.
+          if (p.session_id) currentSessionId = p.session_id;
+          refreshSessions();
           break;
         case "assistant_delta":
           if (streamingIdx === null) {
@@ -218,6 +221,7 @@
           );
           streamingIdx = null;
           busy = false;
+          refreshSessions(); // keep the session you just left visible in 最近会话
           break;
         case "error":
           streamingIdx = null;
