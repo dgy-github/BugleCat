@@ -10,7 +10,7 @@
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[] }
+    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string }
     | { kind: "assistant_delta"; text: string }
     | { kind: "assistant"; text: string }
     | { kind: "tool_start"; name: string; args: string }
@@ -129,21 +129,29 @@
       messages.push({ role: "note", text: `切换模型失败：${e}` });
     }
   }
-  let approvalPolicy = $state("on-request");
-  let approvalMenuOpen = $state(false);
-  const APPROVAL_OPTS = [
-    { id: "untrusted", label: "每条都询问", desc: "每个命令都要批准" },
-    { id: "on-failure", label: "失败再问", desc: "仅当沙箱失败时再询问升权" },
-    { id: "on-request", label: "按需询问", desc: "仅升权时询问（默认）" },
-    { id: "never", label: "从不升权", desc: "始终留在沙箱；最严格" },
-    { id: "__auto", label: "自动执行（全权）", desc: "危险：所有命令直接执行，不询问" },
+  // Claude-Code-style permission modes (single composer selector).
+  let permissionMode = $state("accept-edits");
+  let modeMenuOpen = $state(false);
+  const PERMISSION_MODES = [
+    { id: "plan", label: "规划模式", desc: "只读，不改文件" },
+    { id: "default", label: "默认", desc: "改文件前询问" },
+    { id: "accept-edits", label: "自动接受编辑", desc: "编辑直接应用，命令询问" },
+    { id: "bypass", label: "全权放行", desc: "危险：所有操作不询问" },
   ];
-  const AUTO_SANDBOX = "danger-full-access";
-  const isAuto = () => sandboxMode === AUTO_SANDBOX;
-  const optActive = (id: string) =>
-    id === "__auto" ? isAuto() : approvalPolicy === id && !isAuto();
-  const modeLabel = () =>
-    isAuto() ? "自动执行" : (APPROVAL_OPTS.find((o) => o.id === approvalPolicy)?.label ?? approvalPolicy);
+  const modeLabel = (id: string) => PERMISSION_MODES.find((o) => o.id === id)?.label ?? id;
+  const modeIcon = (id: string) => (id === "plan" ? "📋" : id === "bypass" ? "⚠️" : "🛡");
+  async function selectMode(id: string) {
+    modeMenuOpen = false;
+    if (id === permissionMode) return;
+    const prev = permissionMode;
+    permissionMode = id; // optimistic; `ready` confirms
+    try {
+      await invoke("set_permission_mode", { mode: id });
+    } catch (e) {
+      permissionMode = prev;
+      messages.push({ role: "note", text: `切换权限模式失败：${e}` });
+    }
+  }
   let scroller: HTMLDivElement;
 
   function scrollDown() {
@@ -153,11 +161,11 @@
   onMount(async () => {
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
-      const s = await invoke<{ model: string; sandbox: string; approval: string }>("get_status");
+      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
-      approvalPolicy = s.approval;
       sandboxMode = s.sandbox;
       currentModel = s.model;
+      if (s.permission_mode) permissionMode = s.permission_mode;
     } catch (e) {
       header = "配置错误";
     }
@@ -172,6 +180,7 @@
           sandboxMode = p.sandbox;
           currentModel = p.model;
           if (p.models?.length) models = p.models;
+          if (p.permission_mode) permissionMode = p.permission_mode;
           // Learn the active session's real id so 最近会话 can mark/return to it.
           if (p.session_id) currentSessionId = p.session_id;
           refreshSessions();
@@ -422,8 +431,6 @@
     const updates: Record<string, string> = {
       model: settings.model,
       base_url: settings.base_url,
-      sandbox_mode: settings.sandbox_mode,
-      approval_policy: settings.approval_policy,
       reasoning_effort: settings.reasoning_effort,
       max_iterations: String(settings.max_iterations),
       max_tool_calls: String(settings.max_tool_calls),
@@ -591,28 +598,6 @@
       sessions = await invoke<SessionRow[]>("list_sessions");
     } catch {
       /* index may not exist yet */
-    }
-  }
-  async function selectApproval(policy: string) {
-    approvalMenuOpen = false;
-    try {
-      if (policy === "__auto") {
-        if (isAuto()) return;
-        sandboxMode = AUTO_SANDBOX;
-        await invoke("set_sandbox", { mode: AUTO_SANDBOX });
-        return;
-      }
-      // Leaving auto mode: restore a writable sandbox.
-      if (isAuto()) {
-        sandboxMode = "workspace-write";
-        await invoke("set_sandbox", { mode: "workspace-write" });
-      }
-      if (policy !== approvalPolicy) {
-        approvalPolicy = policy;
-        await invoke("set_approval", { policy });
-      }
-    } catch (e) {
-      messages.push({ role: "note", text: `设置权限失败：${e}` });
     }
   }
   function toggleSidebar() {
@@ -834,20 +819,20 @@
     <footer>
       <div class="composer-meta">
         <div class="approval-wrap">
-          <button class="approval-pill" class:danger={isAuto() || approvalPolicy === "never"}
-            onclick={() => (approvalMenuOpen = !approvalMenuOpen)}
-            title="权限模式">
-            🛡 {modeLabel()} ▾
+          <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
+            onclick={() => (modeMenuOpen = !modeMenuOpen)}
+            title="权限模式（Claude Code 四态）">
+            {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
           </button>
-          {#if approvalMenuOpen}
-            <button class="menu-backdrop" aria-label="关闭" onclick={() => (approvalMenuOpen = false)}></button>
+          {#if modeMenuOpen}
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
             <div class="approval-menu" role="menu">
-              {#each APPROVAL_OPTS as opt}
-                <button class="approval-opt" role="menuitemradio" aria-checked={optActive(opt.id)}
-                  onclick={() => selectApproval(opt.id)}>
-                  <span class="opt-check">{optActive(opt.id) ? "✓" : ""}</span>
+              {#each PERMISSION_MODES as opt}
+                <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === opt.id}
+                  onclick={() => selectMode(opt.id)}>
+                  <span class="opt-check">{permissionMode === opt.id ? "✓" : ""}</span>
                   <span class="opt-text">
-                    <span class="opt-name">{opt.label}</span>
+                    <span class="opt-name">{modeIcon(opt.id)} {opt.label}</span>
                     <span class="opt-id">{opt.desc}</span>
                   </span>
                 </button>
@@ -1115,18 +1100,7 @@
             {#each settings.available_models as m}<option value={m}>{m}</option>{/each}
           </select>
         </label>
-        <label>
-          <span>沙箱</span>
-          <select bind:value={settings.sandbox_mode}>
-            {#each settings.sandbox_modes as s}<option value={s}>{s}</option>{/each}
-          </select>
-        </label>
-        <label>
-          <span>审批</span>
-          <select bind:value={settings.approval_policy}>
-            {#each settings.approval_policies as a}<option value={a}>{a}</option>{/each}
-          </select>
-        </label>
+        <p class="settings-note">权限（沙箱 / 审批）由顶部输入框旁的「权限模式」控制：规划 / 默认 / 自动接受编辑 / 全权放行。</p>
         <label>
           <span>推理强度</span>
           <input bind:value={settings.reasoning_effort} placeholder="auto | low | medium | high | max | off" />

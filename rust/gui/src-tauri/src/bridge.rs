@@ -21,7 +21,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ncx_config::{load_config, write_nanocodex_config, Config, ConfigPaths, Overrides};
+use ncx_config::{
+    load_config, permission_mode_to_knobs, write_nanocodex_config, Config, ConfigPaths, Overrides,
+};
 use ncx_core::{
     discover_skills, expand_file_mentions, load_workspace_instructions, new_session_id,
     skills_index_block, AgentLoop, ApprovalHandler,
@@ -38,6 +40,13 @@ use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use the provided tools \
     (read_file, apply_patch, update_plan) to inspect and edit the workspace. Prefer apply_patch \
     for edits. Keep responses concise.";
+
+/// Injected into the system prompt when the active permission mode is `plan`.
+const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run state-changing \
+    commands — the apply_patch tool is disabled and will refuse edits, and write/escalating shell \
+    commands are blocked. Investigate (read files, run read-only commands) and produce a clear, \
+    concrete plan for the user to review and approve. Present the plan as your final message; make \
+    no changes.";
 
 /// The Tauri event name every UI update is delivered on.
 pub const EVENT: &str = "ncx://event";
@@ -70,6 +79,10 @@ pub enum Command {
     /// Switch the model: persist it and rebuild the agent reseeded with the
     /// current transcript, so the conversation survives the swap.
     SetModel(String),
+    /// Switch the CC permission mode (plan / default / accept-edits / bypass):
+    /// persist it (+ derived sandbox/approval) and rebuild reseeded so the new
+    /// gating + plan nudge take effect without losing the conversation.
+    SetPermissionMode(String),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -83,6 +96,7 @@ pub enum UiEvent {
         workspace: String,
         session_id: String,
         models: Vec<String>,
+        permission_mode: String,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
     AssistantDelta { text: String },
@@ -153,6 +167,7 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
                 workspace: workspace.display().to_string(),
                 session_id: session_id.to_string(),
                 models: cfg.available_models,
+                permission_mode: cfg.permission_mode,
             },
         );
     }
@@ -209,8 +224,12 @@ fn build_agent(
         cfg.timeout_s as u64,
         cfg.max_retries as u32,
     );
-    let policy = SandboxPolicy::new(cfg.sandbox_mode.clone(), &cfg.workspace)
-        .with_network_access(cfg.network_access);
+    // The CC permission mode is the single source of truth for gating: it derives
+    // the sandbox, approval policy, per-edit approval, and plan flag.
+    let (sandbox_mode, approval_policy, require_edit, plan) =
+        permission_mode_to_knobs(&cfg.permission_mode);
+    let network = sandbox_mode == "danger-full-access";
+    let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     let recall = memory.recall("", 8, 4000); // recency at session start (no task yet)
     // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
@@ -218,9 +237,17 @@ fn build_agent(
     let instructions = load_workspace_instructions(&cfg.workspace, 16_000);
     let skills = discover_skills(&cfg.workspace);
     let skills_index = skills_index_block(&skills);
-    let system_prompt = compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index]);
+    let plan_note = if plan {
+        PLAN_MODE_NOTE.to_string()
+    } else {
+        String::new()
+    };
+    let system_prompt =
+        compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index, plan_note]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
-        .with_approval_policy(cfg.approval_policy.clone())
+        .with_approval_policy(approval_policy)
+        .with_require_edit_approval(require_edit)
+        .with_plan_mode(plan)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
@@ -424,6 +451,30 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             // emit Loaded — the UI keeps its richer transcript as-is.
                             let mut m = std::collections::HashMap::new();
                             m.insert("model", model.as_str());
+                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
+                            let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
+                            match build_agent(approver.clone(), Some((session_id.clone(), msgs))) {
+                                Ok((a, ws, sid, lp, idx)) => {
+                                    agent = a;
+                                    workspace = ws;
+                                    session_id = sid;
+                                    log_path = lp;
+                                    session_index = idx;
+                                    agent.set_event_sink(make_sink(app.clone()));
+                                    emit_ready(&app, &workspace, &session_id);
+                                }
+                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                            }
+                        }
+                        Command::SetPermissionMode(mode) => {
+                            // Persist the mode (+ derived sandbox/approval for consistency),
+                            // then rebuild reseeded so the new gating + plan nudge apply
+                            // without losing the conversation.
+                            let (sandbox, approval, _re, _plan) = permission_mode_to_knobs(&mode);
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("permission_mode", mode.as_str());
+                            m.insert("sandbox_mode", sandbox);
+                            m.insert("approval_policy", approval);
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                             let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
                             match build_agent(approver.clone(), Some((session_id.clone(), msgs))) {

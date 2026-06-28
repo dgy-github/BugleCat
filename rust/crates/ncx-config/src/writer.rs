@@ -14,6 +14,7 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "model",
     "sandbox_mode",
     "approval_policy",
+    "permission_mode",
     "reasoning_effort",
     "vl_base_url",
     "vl_api_key",

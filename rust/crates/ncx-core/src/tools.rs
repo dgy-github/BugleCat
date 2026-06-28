@@ -57,6 +57,12 @@ pub struct ToolContext {
     /// Approval policy name (`on-request` etc.) — drives the `shell` tool's
     /// auto-approve / ask / deny decision via [`ncx_sandbox::Approver`].
     pub approval_policy: String,
+    /// When true (CC "default" mode), every `apply_patch` write — even inside the
+    /// workspace — prompts the approver. False = in-workspace edits apply silently.
+    pub require_edit_approval: bool,
+    /// When true (CC "plan" mode), `apply_patch` refuses all edits: investigate
+    /// and propose a plan, change nothing.
+    pub plan_mode: bool,
     /// Default command timeout (seconds) for the `shell` tool.
     pub timeout_s: u64,
     /// Shared mutable plan state for `update_plan` / the CLI to read.
@@ -86,6 +92,8 @@ impl ToolContext {
             workspace,
             policy,
             approval_policy: "on-request".to_string(),
+            require_edit_approval: false,
+            plan_mode: false,
             timeout_s: 120,
             plan: Rc::new(RefCell::new(Vec::new())),
             approver: None,
@@ -121,6 +129,18 @@ impl ToolContext {
     /// Set the approval policy the `shell` tool uses to gate commands.
     pub fn with_approval_policy(mut self, policy: impl Into<String>) -> Self {
         self.approval_policy = policy.into();
+        self
+    }
+
+    /// Require approval for every `apply_patch` write (CC "default" mode).
+    pub fn with_require_edit_approval(mut self, on: bool) -> Self {
+        self.require_edit_approval = on;
+        self
+    }
+
+    /// Refuse all `apply_patch` edits (CC "plan" mode).
+    pub fn with_plan_mode(mut self, on: bool) -> Self {
+        self.plan_mode = on;
         self
     }
 
@@ -541,6 +561,13 @@ impl Tool for ApplyPatchTool {
             return "Error: 'patch' is required and must be a string.".into();
         };
 
+        // Plan mode (CC): edits are disabled — investigate and propose, change nothing.
+        if ctx.plan_mode {
+            return "plan mode: edits are disabled — propose a plan for the user to approve; \
+                    no files were changed."
+                .into();
+        }
+
         // Parse up front to find any target outside the writable sandbox. Those
         // require approval (mirrors how Codex/the Python tool escalates). A parse
         // error is reported directly without involving the approval layer.
@@ -570,20 +597,36 @@ impl Tool for ApplyPatchTool {
             }
         }
 
+        // Prompt when the patch escapes the sandbox OR when the mode requires
+        // approval for every edit (CC "default"). A single prompt covers the patch.
+        let needs_prompt = !escaping.is_empty() || ctx.require_edit_approval;
         let mut approved: HashSet<PathBuf> = HashSet::new();
-        if !escaping.is_empty() {
+        if needs_prompt {
             if let Some(approver) = &ctx.approver {
-                let rels = escaping
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let (command, reason, escalated) = if escaping.is_empty() {
+                    (
+                        "apply_patch".to_string(),
+                        "Approve this edit before it is applied.".to_string(),
+                        false,
+                    )
+                } else {
+                    let rels = escaping
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    (
+                        format!("apply_patch writing outside the sandbox: {rels}"),
+                        "The patch modifies files outside the writable roots.".to_string(),
+                        true,
+                    )
+                };
                 let ok = approver
                     .request(ApprovalRequest {
-                        command: format!("apply_patch writing outside the sandbox: {rels}"),
-                        reason: "The patch modifies files outside the writable roots.".into(),
+                        command,
+                        reason,
                         cwd: ctx.workspace.display().to_string(),
-                        escalated: true,
+                        escalated,
                         details: patch.to_string(),
                     })
                     .await;
@@ -592,8 +635,9 @@ impl Tool for ApplyPatchTool {
                 }
                 approved = escaping.into_iter().collect();
             }
-            // No approver: fall through — can_write rejects and apply_patch errors
-            // with the out-of-sandbox message (the prior behavior).
+            // No approver: fall through — can_write rejects out-of-sandbox targets
+            // (prior behavior); in-workspace edits proceed (the CLI never sets
+            // require_edit_approval, so this only affects approver-less callers).
         }
 
         let policy = ctx.policy.clone();
@@ -674,6 +718,41 @@ mod tests {
             .await;
         assert!(out.contains("Patch applied successfully"), "{out}");
         assert_eq!(std::fs::read_to_string(ws.join("ok.txt")).unwrap(), "hi\n");
+    }
+
+    #[tokio::test]
+    async fn plan_mode_refuses_edits() {
+        let ws = tmp_ws("planmode");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(true))) // even with an approver saying yes…
+            .with_plan_mode(true);
+        let patch = "*** Begin Patch\n*** Add File: nope.txt\n+x\n*** End Patch";
+        let out = ApplyPatchTool.execute(&ctx, &json!({ "patch": patch })).await;
+        assert!(out.contains("plan mode"), "{out}");
+        assert!(!ws.join("nope.txt").exists(), "no file should be written");
+    }
+
+    #[tokio::test]
+    async fn require_edit_approval_prompts_in_workspace() {
+        let ws = tmp_ws("editapprove");
+        let patch = "*** Begin Patch\n*** Add File: gated.txt\n+hi\n*** End Patch";
+        // Denied → not applied, even though the path is inside the workspace.
+        let denied = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(false)))
+            .with_require_edit_approval(true);
+        let out = ApplyPatchTool
+            .execute(&denied, &json!({ "patch": patch }))
+            .await;
+        assert!(out.contains("not approved"), "{out}");
+        assert!(!ws.join("gated.txt").exists(), "denied edit must not write");
+
+        // Approved → applied.
+        let ok = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(true)))
+            .with_require_edit_approval(true);
+        let out2 = ApplyPatchTool.execute(&ok, &json!({ "patch": patch })).await;
+        assert!(out2.contains("Patch applied successfully"), "{out2}");
+        assert_eq!(std::fs::read_to_string(ws.join("gated.txt")).unwrap(), "hi\n");
     }
 
     #[tokio::test]

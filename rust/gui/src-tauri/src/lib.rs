@@ -27,6 +27,7 @@ pub struct Status {
     model: String,
     sandbox: String,
     approval: String,
+    permission_mode: String,
     workspace: String,
     /// Masked (`****1234`) — never the real key.
     api_key: String,
@@ -80,6 +81,7 @@ fn get_status() -> Result<Status, String> {
         model: cfg.model.clone(),
         sandbox: cfg.sandbox_mode.clone(),
         approval: cfg.approval_policy.clone(),
+        permission_mode: cfg.permission_mode.clone(),
         workspace: cfg.workspace.display().to_string(),
         api_key: red.get("api_key").cloned().unwrap_or_default(),
         max_iterations: cfg.max_iterations,
@@ -151,6 +153,15 @@ fn set_model(model: String, state: tauri::State<'_, AppState>) -> Result<(), Str
     state
         .tx
         .send(Command::SetModel(model))
+        .map_err(|_| "agent thread is not running".to_string())
+}
+
+/// Switch the CC permission mode (plan / default / accept-edits / bypass).
+#[tauri::command]
+fn set_permission_mode(mode: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state
+        .tx
+        .send(Command::SetPermissionMode(mode))
         .map_err(|_| "agent thread is not running".to_string())
 }
 
@@ -779,7 +790,8 @@ pub fn run() {
             new_session,
             set_approval,
             set_sandbox,
-            set_model
+            set_model,
+            set_permission_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");

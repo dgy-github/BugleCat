@@ -11,7 +11,8 @@ use toml::map::Map as TomlMap;
 use toml::Value;
 
 use crate::config::{
-    Config, ConfigError, HookConfig, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_MODELS,
+    derive_permission_mode, Config, ConfigError, HookConfig, DEFAULT_BASE_URL, DEFAULT_MODEL,
+    DEFAULT_MODELS, VALID_PERMISSION_MODES,
 };
 
 type Table = TomlMap<String, Value>;
@@ -463,6 +464,7 @@ pub(crate) fn load_config_impl(
         ),
         ("sandbox_mode", &["NANOCODEX_SANDBOX"]),
         ("approval_policy", &["NANOCODEX_APPROVAL"]),
+        ("permission_mode", &["NANOCODEX_PERMISSION_MODE"]),
         ("context_token_budget", &["NANOCODEX_CONTEXT_BUDGET"]),
         ("context_window", &["NANOCODEX_CONTEXT_WINDOW"]),
         ("context_edit_enabled", &["NANOCODEX_CONTEXT_EDIT_ENABLED"]),
@@ -548,6 +550,13 @@ pub(crate) fn load_config_impl(
         .cloned()
         .unwrap_or_else(|| "workspace-write".into());
     let network_access = sandbox_mode == "danger-full-access";
+    // permission_mode: use the stored value if valid, else migrate from the
+    // legacy sandbox_mode so pre-existing configs keep their behavior.
+    let permission_mode = merged
+        .get("permission_mode")
+        .filter(|m| VALID_PERMISSION_MODES.contains(&m.as_str()))
+        .cloned()
+        .unwrap_or_else(|| derive_permission_mode(&sandbox_mode).to_string());
 
     let workspace_base = overrides
         .workspace
@@ -567,6 +576,7 @@ pub(crate) fn load_config_impl(
             .get("approval_policy")
             .cloned()
             .unwrap_or_else(|| "on-request".into()),
+        permission_mode,
         reasoning_effort: merged
             .get("reasoning_effort")
             .cloned()

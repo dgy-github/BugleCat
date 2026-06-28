@@ -1047,6 +1047,20 @@ main.app { flex-direction: row; }
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
+.approval-pill.plan {
+  background: color-mix(in srgb, var(--ink-3) 12%, transparent);
+  color: var(--ink-2);
+  border-color: color-mix(in srgb, var(--ink-3) 30%, transparent);
+}
+.settings-note {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
 
 /* ── Approval dropdown menu ───────────────────────────────────────────────── */
 .approval-wrap { position: relative; display: inline-block; }

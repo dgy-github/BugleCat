@@ -18,7 +18,8 @@ pub mod loader;
 pub mod writer;
 
 pub use config::{
-    Config, ConfigError, HookConfig, McpServerConfig, VALID_APPROVAL_POLICIES, VALID_HOOK_EVENTS,
+    derive_permission_mode, permission_mode_to_knobs, Config, ConfigError, HookConfig,
+    McpServerConfig, VALID_APPROVAL_POLICIES, VALID_HOOK_EVENTS, VALID_PERMISSION_MODES,
     VALID_SANDBOX_MODES,
 };
 pub use loader::{
