@@ -71,7 +71,7 @@
 
   type Msg =
     | { role: "user" | "assistant" | "note"; text: string }
-    | { role: "tool"; name: string; args?: string; result?: string };
+    | { role: "tool"; name: string; args?: string; result?: string; collapsed?: boolean };
 
   let messages = $state<Msg[]>([]);
   let input = $state("");
@@ -92,6 +92,27 @@
   let tokOut = $state(0);
   let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+
+  // ── Collapsible tool output ───────────────────────────────────────────────
+  // Large results auto-collapse so a single dump can't bury the conversation.
+  const COLLAPSE_LINES = 12;
+  const COLLAPSE_CHARS = 800;
+  const isLong = (s: string) =>
+    !!s && (s.length > COLLAPSE_CHARS || s.split("\n").length > COLLAPSE_LINES);
+  const lineCount = (s: string = "") => (s ? s.split("\n").length : 0);
+  // Multi-line → "N 行"; single long line → "N 字" so a char-triggered collapse isn't mislabeled.
+  const collapsedHint = (s: string = "") => {
+    const lines = lineCount(s);
+    return lines > 1 ? `${lines} 行 · 点击展开` : `${s.length} 字 · 点击展开`;
+  };
+  let toolsCollapsed = $state(false); // tracks the global toggle's last action
+  function toggleTool(m: Msg) {
+    if (m.role === "tool" && m.result !== undefined) m.collapsed = !m.collapsed;
+  }
+  function collapseAll(v: boolean) {
+    toolsCollapsed = v;
+    for (const m of messages) if (m.role === "tool" && m.result !== undefined) m.collapsed = v;
+  }
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
@@ -165,11 +186,12 @@
           break;
         case "tool_result": {
           // Attach the result to the most recent unfinished tool entry.
-          const last = [...messages].reverse().find(
+          const last = messages.find(
             (m) => m.role === "tool" && m.name === p.name && m.result === undefined,
           ) as Extract<Msg, { role: "tool" }> | undefined;
-          if (last) last.result = p.result;
-          else messages.push({ role: "tool", name: p.name, result: p.result });
+          const collapsed = toolsCollapsed || isLong(p.result);
+          if (last) { last.result = p.result; last.collapsed = collapsed; }
+          else messages.push({ role: "tool", name: p.name, result: p.result, collapsed });
           break;
         }
         case "done":
@@ -735,6 +757,10 @@
       <span class="meta">{header}</span>
       {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
       <span class="topbar-actions">
+        <button class="tbtn tbtn-text" onclick={() => collapseAll(!toolsCollapsed)}
+          aria-pressed={toolsCollapsed}
+          title="折叠 / 展开所有工具输出">{toolsCollapsed ? "展开输出" : "折叠输出"}</button>
+        <span class="tb-div" aria-hidden="true"></span>
         <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">
           <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         </button>
@@ -768,13 +794,25 @@
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool"}
-          <div class="tool">
-            <span class="tname">⚙ {m.name}</span>
-            {#if m.args}<code class="targs">{m.args}</code>{/if}
-            {#if m.result !== undefined}
+          <div class="tool" class:collapsed={m.collapsed}>
+            <button
+              class="tool-head"
+              onclick={() => toggleTool(m)}
+              disabled={m.result === undefined}
+              aria-expanded={m.result !== undefined && !m.collapsed}
+              title={m.result === undefined ? "运行中…" : m.collapsed ? "展开" : "折叠"}
+            >
+              <span class="tcaret" aria-hidden="true">{m.result === undefined ? "•" : m.collapsed ? "▸" : "▾"}</span>
+              <span class="tname">⚙ {m.name}</span>
+              {#if m.args}<code class="targs">{m.args}</code>{/if}
+              {#if m.result === undefined}
+                <span class="trunning">运行中…</span>
+              {:else if m.collapsed}
+                <span class="tcollapsed-hint">{collapsedHint(m.result)}</span>
+              {/if}
+            </button>
+            {#if m.result !== undefined && !m.collapsed}
               <pre class="tresult">{m.result}</pre>
-            {:else}
-              <span class="trunning">运行中…</span>
             {/if}
           </div>
         {/if}

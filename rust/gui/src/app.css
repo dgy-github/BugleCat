@@ -268,29 +268,75 @@ header {
   background: var(--paper-2);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  padding: 0.5rem 0.7rem;
   box-shadow: var(--sh-1);
+  overflow: hidden;
+}
+/* Clickable header row — fully neutralizes the global accent button. */
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  min-height: auto;
+  text-align: left;
+  background: none;
+  color: var(--ink);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: normal;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.tool-head:hover:not(:disabled) { background: var(--paper-3); box-shadow: none; }
+.tool-head:active { transform: none; }
+.tool-head:disabled { cursor: default; }
+.tool-head:focus-visible { outline: none; box-shadow: var(--ring) inset; }
+.tcaret {
+  flex: 0 0 0.9rem;
+  text-align: center;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
 }
 .tname {
+  flex: 0 0 auto;
   font-weight: 650;
   color: var(--ink-2);
   letter-spacing: -0.005em;
 }
 .targs {
-  margin-left: var(--sp-2);
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--ink-3);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .trunning {
-  margin-left: var(--sp-2);
+  flex: 0 0 auto;
+  margin-left: auto;
   color: var(--warn);
   font-style: italic;
   animation: pulse 1.1s ease-in-out infinite;
 }
+.tcollapsed-hint {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: var(--sp-2);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
 .tresult {
-  margin: 0.5rem 0 0;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
   max-height: 14rem;
   overflow: auto;
   white-space: pre-wrap;
@@ -300,8 +346,6 @@ header {
   line-height: 1.5;
   color: var(--ink);
   background: var(--paper-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
   padding: 0.55rem 0.65rem;
 }
 .tresult::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -1251,3 +1295,5 @@ main.app { flex-direction: row; }
 .tbtn .ni { width: 16px; height: 16px; }
 .tbtn:hover { background: var(--paper-2); color: var(--ink); border-color: var(--line); }
 .tbtn.on { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-line); }
+.tbtn-text { font-size: var(--fs-xs); font-weight: 600; padding: 0.28rem 0.55rem; line-height: 1.1; }
+.tb-div { flex: 0 0 1px; align-self: stretch; margin: 0.2rem 0.3rem; background: var(--line); }
