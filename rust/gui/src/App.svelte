@@ -825,6 +825,20 @@
       messages.push({ role: "note", text: `分叉失败：${e}` });
     }
   }
+  async function openSessionLog(id: string) {
+    try {
+      await invoke("open_session_log", { sessionId: id });
+    } catch (e) {
+      messages.push({ role: "note", text: `打开会话日志失败：${e}` });
+    }
+  }
+  async function openSessionSnapshot(id: string) {
+    try {
+      await invoke("open_session_snapshot", { sessionId: id });
+    } catch (e) {
+      messages.push({ role: "note", text: `打开会话快照失败：${e}` });
+    }
+  }
 
   // ── Hermes: project-memory self-evolution ─────────────────────────────────
   type MemoryNote = { ts: number; tags: string[]; text: string };
@@ -873,6 +887,13 @@
       messages.push({ role: "note", text: `记忆添加失败：${e}` });
     }
     hermesBusy = false;
+  }
+  async function openMemoryFile() {
+    try {
+      await invoke("open_memory_file");
+    } catch (e) {
+      messages.push({ role: "note", text: `打开记忆文件失败：${e}` });
+    }
   }
   function fmtTs(ts: number): string {
     try {
@@ -990,6 +1011,8 @@
           </button>
           <button class="recent-act" title="从此处分叉新会话" disabled={busy || !s.has_snapshot}
             onclick={() => forkSession(s.session_id, s.title)} aria-label="分叉">⑂</button>
+          <button class="recent-act" title="打开会话日志 (JSONL)" disabled={busy}
+            onclick={() => openSessionLog(s.session_id)} aria-label="打开日志">📄</button>
           <button class="recent-act" title={s.archived ? "取消归档" : "归档此会话"}
             onclick={() => archiveSession(s.session_id, !s.archived)} aria-label="归档">{s.archived ? "↩" : "🗄"}</button>
         </div>
@@ -1358,6 +1381,8 @@
               <div class="session-actions">
                 <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={busy || !s.has_snapshot} title="继续此会话">继续</button>
                 <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="从此处分叉新会话">⑂ 分叉</button>
+                <button class="plain" onclick={() => openSessionLog(s.session_id)} title="打开会话日志 (JSONL)">日志</button>
+                <button class="plain" onclick={() => openSessionSnapshot(s.session_id)} disabled={!s.has_snapshot} title="打开会话快照">快照</button>
               </div>
               <div class="checkpoint-meta">
                 <span>{s.updated_at}</span>
@@ -1388,6 +1413,7 @@
         <div class="checkpoint-create">
           <button onclick={consolidateMemory} disabled={hermesBusy}>整理：合并重复</button>
           <button class="plain" onclick={loadNotes} disabled={hermesBusy}>刷新</button>
+          <button class="plain" onclick={openMemoryFile} title="在编辑器中打开 .ncx/memory/LEARNINGS.md">打开文件</button>
           <span class="emptyline">{notes.length} 条</span>
         </div>
         <div class="checkpoint-list">

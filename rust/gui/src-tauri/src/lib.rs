@@ -892,6 +892,62 @@ fn memory_add(note: String, tags: Vec<String>) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Path to the project memory markdown file (`.ncx/memory/LEARNINGS.md`).
+fn memory_file_path() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join(".ncx")
+        .join("memory")
+        .join("LEARNINGS.md")
+}
+
+/// Open the project memory file in the OS editor (creating it if missing).
+#[tauri::command]
+fn open_memory_file() -> Result<(), String> {
+    let path = memory_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if !path.exists() {
+        std::fs::write(&path, "# Project memory (nanocodex)\n\n").map_err(|e| e.to_string())?;
+    }
+    open_file(&path)
+}
+
+/// Open a saved session's raw JSONL log in the OS editor.
+#[tauri::command]
+fn open_session_log(session_id: String) -> Result<(), String> {
+    let index = SessionIndex::default();
+    let summary = index
+        .get(&session_id)
+        .ok_or_else(|| format!("unknown session: {session_id}"))?;
+    if summary.log_path.trim().is_empty() {
+        return Err("session has no log path".into());
+    }
+    let path = PathBuf::from(&summary.log_path);
+    if !path.exists() {
+        return Err(format!("session log does not exist: {}", path.display()));
+    }
+    open_file(&path)
+}
+
+/// Open a saved session's frozen snapshot in the OS editor.
+#[tauri::command]
+fn open_session_snapshot(session_id: String) -> Result<(), String> {
+    let index = SessionIndex::default();
+    let summary = index
+        .get(&session_id)
+        .ok_or_else(|| format!("unknown session: {session_id}"))?;
+    if !summary.has_snapshot {
+        return Err("session has no snapshot".into());
+    }
+    let path = index.snapshot_path(&session_id);
+    if !path.exists() {
+        return Err(format!("session snapshot does not exist: {}", path.display()));
+    }
+    open_file(&path)
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -932,9 +988,12 @@ pub fn run() {
             list_mcp,
             save_temp_image,
             list_sessions,
+            open_session_log,
+            open_session_snapshot,
             memory_list,
             memory_consolidate,
             memory_add,
+            open_memory_file,
             set_workspace,
             get_workspace,
             resume_session,
