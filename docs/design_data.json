@@ -1,0 +1,713 @@
+[
+ {
+  "subsystem": "harness",
+  "one_liner": "A single-threaded, `?Send` agent turn loop (`AgentLoop`) that alternates call-model / run-tools — batching consecutive read-only tool calls concurrently, serializing writes, enforcing a model/tool-call budget, polling a cancel closure, routing image turns to a separate vision provider, and re-selecting the per-turn tool schema view from `tool_search` hints + lexical scoring.",
+  "how_it_works": "`AgentLoop::run_turn` takes the event sink out of `&mut self` (to dodge a borrow conflict between the sink closure and `&mut self`), runs `run_turn_inner`, then applies the Stop hook and restores the sink. Inner: it sets `use_vision_this_turn` if a vision provider exists AND the user content carries an `image_url` block (`has_image_block`), fires the `user_prompt` hook (which can short-circuit the whole turn with stop_reason `blocked`), appends the user message, then iterates `for iteration in 0..max_model_calls` where `max_model_calls = max_iterations.min(task_budget.max_model_calls.max(1))`. Each iteration: checks the cancel closure; rebuilds the tool schema list via `schemas_for_query(tool_query)` (so `tool_search` hits surface next turn); prepends a synthetic system `budget_note` plus any prompt-hook output; calls `call_model`, which first builds a non-destructive context-edited message view (`Session::for_model_edited`) then dispatches to `active_provider()` (vision or main). On `finish_reason==\"error\"` it returns an error TurnResult; on no tool calls it records the assistant text and returns `completed`; otherwise it persists the assistant message with OpenAI-shaped `tool_calls` and walks `response.tool_calls` by index. For each position it re-checks cancel and remaining tool budget, then decides `parallel_run`: true only when the current AND next call are both `read_only` per the registry — it then greedily gathers the maximal run of consecutive read-only calls (capped by remaining budget) and runs them via `join_all` over `execute_cancellable`; otherwise it runs the single (write/unknown) call serially. Results are appended in original order with `add_tool_result(id, name, result)`. Falling out of the model-call loop yields stop_reason `task_budget`. The `ToolRegistry::execute` dispatches by name (unknown name → an error string fed back to the model), running pre/post hooks around the tool.",
+  "design_rationale": "The defining constraint is `#[async_trait(?Send)]` on the `Provider`, `Tool`, and `ApprovalHandler` traits: the whole agent is built to run on a Tokio current-thread runtime so it can hold non-`Send` state — `Rc<RefCell<…>>` shared context (the plan, tool catalog, tool hints), boxed `FnMut` mock/closure providers in tests, and the GUI's `FnMut` event sink — without the `Send + Sync + 'static` tax that a multi-threaded runtime forces (which would push everything to `Arc<Mutex<…>>` and atomic refcounts). The work is I/O-bound (one in-flight model call, then a short burst of tool I/O), so multi-threading buys nothing; the read-only batch concurrency is achieved with `join_all` of futures on one thread, not OS threads, so `Send` is never needed. Read-only-only batching is the safety rationale: pure-read tools have no ordering dependency and can race freely, but a write (or unknown) tool must stay serial and in declared order so file edits and their surrounding reads observe a deterministic sequence (verified by `write_between_reads_stays_serial_and_ordered`). The dual budget (model calls vs tool calls) plus a self-describing `budget_note` injected as a system message lets the model self-pace and guarantees termination even if it loops; backfilling synthetic tool results on cancel/budget keeps the message history API-valid (every assistant tool_call must have a matching tool reply or the next request 400s). Dynamic per-turn schema selection (cap `DEFAULT_VISIBLE_TOOL_LIMIT=9`, always-visible core set + `tool_search` hints + lexical matches) keeps the prompt small and the function list focused as the tool set grows, rejecting the alternative of dumping every schema every turn.",
+  "key_mechanisms": [
+   {
+    "name": "!Send / current-thread design",
+    "detail": "`#[async_trait(?Send)]` on `Provider`/`Tool`/`ApprovalHandler` means returned futures need not be `Send`. This lets `Box<dyn Provider>`, the `EventSink = Box<dyn FnMut(LoopEvent)>`, and `Rc<RefCell<…>>` shared state live across awaits on a single-thread runtime. Rationale: I/O-bound workload + cheap `Rc` sharing; rejected `Arc<Mutex>`/`Send` bounds as unnecessary overhead."
+   },
+   {
+    "name": "call-model → run-tools iteration",
+    "detail": "`run_turn_inner` loops up to `max_model_calls`. Each pass: `call_model` (schemas + budget/hook system notes) → if `!response.has_tool_calls()` return `completed`; else persist assistant `tool_calls` and execute them, append results, loop. Falling off the end returns `task_budget`."
+   },
+   {
+    "name": "tool-call parse + dispatch",
+    "detail": "The provider crate parses raw JSON into `ToolCall{id,name,arguments}` (invalid/non-object arguments collapse to `{}`, per types.rs). The loop re-serializes them to OpenAI `function` shape for history, then dispatches by name through `ToolRegistry::execute`; an unknown name returns `Error: unknown tool '<name>'.` back to the model rather than crashing."
+   },
+   {
+    "name": "concurrent read-only batching",
+    "detail": "`parallel_run` triggers only when `is_read_only(calls[idx])` AND `is_read_only(calls[idx+1])`. It greedily collects the maximal run of consecutive read-only calls (bounded by `remaining_tools`), runs them with `futures_util::future::join_all` over `execute_cancellable`, and zips results back in order. A non-read-only or trailing single call runs serially. Proven by `read_only_calls_run_concurrently` (4×300ms reads finish <800ms)."
+   },
+   {
+    "name": "task budget (dual cap)",
+    "detail": "`TaskBudget{max_model_calls:60, max_tool_calls:120}` (defaults). `max_model_calls` caps the outer loop; before each tool/batch, `remaining_tools = max_tool_calls.saturating_sub(tools_used.len())` — 0 → `budget_result` (stop_reason `task_budget`, backfill unanswered). A `budget_note` system message reports live usage so the model paces itself."
+   },
+   {
+    "name": "cancellation",
+    "detail": "`run_turn` takes an `Option<&dyn Fn()->bool>`. Checked at loop top, before each tool/batch, and after each tool. `execute_cancellable` `tokio::select!`s the tool future (biased) against a 100ms poll; if cancel flips mid-run it returns `[interrupted...]` and drops (cancels) the tool future. `stop_interrupts_a_hanging_tool` proves a `pending()` tool is abandoned."
+   },
+   {
+    "name": "vision routing",
+    "detail": "`use_vision_this_turn = vision_provider.is_some() && has_image_block(user_input)`. `active_provider()` returns the vision provider for that turn only; absent a vision provider, image turns stay on the main provider. `has_image_block` scans the content array for a block whose `type == \"image_url\"`."
+   },
+   {
+    "name": "dynamic per-turn schema selection",
+    "detail": "Each iteration calls `schemas_for_query(tool_query)`. If `tools.len() <= 9` all schemas are sent; otherwise the view = `ALWAYS_VISIBLE_TOOLS` (read_file, apply_patch, update_plan, shell, tool_search, skill) + names in `ctx.tool_hints` (set by the last `tool_search`) + top lexical matches via `catalog_score`, capped at the limit. `tool_search` populates `tool_hints` so a discovered tool's schema appears next turn."
+   },
+   {
+    "name": "non-destructive context editing",
+    "detail": "`call_model` runs `Session::for_model_edited(notes, policy)` which builds a send-time view: compresses old (`tool`) results beyond `keep_recent_messages` to `max_tool_result_chars`, and drops the oldest prefix (re-aligned to a user boundary) when over `max_chars` — without mutating `session.messages`. Trace prints original/edited chars + compressed/dropped counts."
+   }
+  ],
+  "flow_steps": [
+   "run_turn: take event_sink out of &mut self (avoid borrow conflict), call run_turn_inner, then apply_stop_hook, then restore the sink.",
+   "Compute use_vision_this_turn = vision provider present AND user content has an image_url block; extract tool_query text from the user input.",
+   "Fire the user_prompt hook; if blocked, record assistant note and return stop_reason=blocked (no model call). Otherwise stash any hook output as a system note and append the user message.",
+   "Compute max_model_calls = max_iterations.min(max_model_calls.max(1)); enter the model-call loop.",
+   "Top of loop: if cancel() → backfill + return cancelled. Build schemas via schemas_for_query(tool_query); prepend budget_note + prompt-hook notes.",
+   "call_model: build context-edited message view (for_model_edited), pick active_provider() (vision vs main), await chat(); accumulate token usage.",
+   "If finish_reason==error → return error. If no tool_calls → record assistant text, emit AssistantText, return completed.",
+   "Persist the assistant message carrying tool_calls (OpenAI function shape, incl. reasoning_content).",
+   "Walk tool_calls by index: re-check cancel; if remaining tool budget==0 → backfill + return task_budget.",
+   "If current+next calls are both read_only → gather the consecutive read-only run (≤ remaining budget), emit ToolStart for each, join_all execute_cancellable, then append results in order; else run one tool serially (covers writes/unknown).",
+   "execute_cancellable: select! the tool future against a 100ms cancel poll; on cancel return an [interrupted] string and drop the future.",
+   "After each tool/batch re-check cancel (a tool may have hung); on cancel backfill unanswered calls and return cancelled.",
+   "Loop continues until model answers without tools, an error, cancel, a budget cap, or max_model_calls is exhausted (→ task_budget message)."
+  ],
+  "interview_talking_points": [
+   "Why `?Send` is the load-bearing decision: the agent is I/O-bound and runs on a current-thread Tokio runtime, so it can share state with `Rc<RefCell>` and hold `FnMut`/mock providers across awaits — no `Send+Sync+'static`, no `Arc<Mutex>`. Concurrency where it matters (parallel reads) is single-thread `join_all`, not OS threads.",
+   "Read-only batching is correctness-driven, not just speed: only a run of *consecutive* read-only calls is parallelized; any write or unknown tool forces serial, in-order execution so edits and the reads around them are deterministic. The batch is also clipped to the remaining tool budget.",
+   "Two independent budgets (model calls and tool calls) guarantee termination and are surfaced to the model as a live system `budget_note`, turning a hard limit into self-pacing guidance; exhaustion backfills synthetic tool replies so history stays API-valid.",
+   "Cancellation is cooperative and two-layered: a `Fn()->bool` polled at loop/tool boundaries, plus `execute_cancellable`'s 100ms `select!` that can abandon a hanging tool mid-run by dropping its future (test uses `future::pending`).",
+   "Dynamic per-turn tool schema selection (cap 9, always-visible core + `tool_search` hints + lexical scoring) keeps the function list small as tools grow; `tool_search` writes into `ctx.tool_hints` so a discovered tool becomes visible next turn — a feedback loop between a tool's side effect and the next prompt.",
+   "Vision routing is per-turn and opt-in: only when a separate vision provider is configured AND the turn carries an `image_url` block, keeping a cheaper text model as the default.",
+   "Robustness of message history: unknown tool names return an error string (not a panic), context editing is a non-destructive send-time view, and cancel/budget paths backfill dangling tool_calls so the OpenAI invariant (every tool_call has a tool reply) is never violated."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Cancellation granularity is 100ms (the `execute_cancellable` poll); a tool that returns faster than the first poll cannot be interrupted, and there's no hard wall-clock timeout in the loop itself (per-tool timeouts live in the `shell` tool, not the harness).",
+   "Read-only batching keys entirely on the registry's `read_only()` flag; a tool mis-declared read-only (one that actually mutates) would be raced and reordered. Trust boundary is the tool author.",
+   "`with_max_iterations` overwrites `task_budget.max_model_calls`, and `with_task_budget` overwrites `max_iterations`; the two setters clobber each other depending on call order — the effective cap is always `max_iterations.min(max_model_calls.max(1))`, so a mismatched pair can silently lower the cap.",
+   "The tool-call budget is checked *before* each call/batch, so a parallel read-only batch is sized to fit the remaining budget but the loop never partially runs a batch beyond it — fine, but it means a single over-budget assistant turn truncates remaining calls and backfills them as 'task budget exhausted'.",
+   "Vision routing is all-or-nothing per turn: a turn with an image sends the *entire* edited history to the vision provider, not just the image; there's no per-message model split.",
+   "Tool-call argument parsing is delegated to the provider crate — invalid/non-object JSON collapses to `{}` there, so a malformed arguments blob silently becomes empty rather than erroring at dispatch.",
+   "Schema selection lexical scoring (`catalog_score`) is a simple substring/word match (name exact=100, name-contains=50, hay-contains=20); a capability described in synonyms the query doesn't share won't surface unless `tool_search` is called explicitly."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:22 (trait Provider, #[async_trait(?Send)])",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:71 (TaskBudget, defaults 60/120)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:173 (active_provider — vision routing)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:185 (call_model — context-edited view + provider dispatch)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:203 (execute_cancellable — 100ms select! cancel poll)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:225 (run_turn — sink take/restore + stop hook)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:284 (max_model_calls cap composition)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:300 (schemas_for_query per turn)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:379 (tool-call walk: budget check, parallel_run gather, serial else)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:573 (has_image_block)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:1093 (read_only_calls_run_concurrently test), 1149 (write_between_reads_stays_serial test), 1179 (stop_interrupts_a_hanging_tool test)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:25 (DEFAULT_VISIBLE_TOOL_LIMIT=9 + ALWAYS_VISIBLE_TOOLS)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:279 (schemas_for_query / schemas_limited_for_query selection)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:327 (ToolRegistry::execute — dispatch by name + pre/post hooks, unknown→error)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:396 (ToolSearchTool::execute — writes ctx.tool_hints)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:167 (for_model_edited non-destructive view), 263 (backfill_unanswered_tool_calls)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-provider/src/types.rs:9 (ToolCall, arguments→{} on invalid), 39 (has_tool_calls)"
+  ]
+ },
+ {
+  "subsystem": "context-compression (context editing / session history shaping) in ncx-core's Session — D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs",
+  "one_liner": "A two-mode context editor: every model call gets a non-destructive, budget-shaped \"provider view\" (truncate old tool results, then drop the oldest message prefix past a char budget), while an opt-in /compact bakes that same transform into the live history and rewrites the JSONL log.",
+  "how_it_works": "Session stores the full conversation as Vec<serde_json::Value> in OpenAI chat shape (`messages`), with the system prompt held separately in `system`. ContextEditPolicy carries four knobs: `enabled`, `max_chars` (default 120_000), `keep_recent_messages` (default 30), `max_tool_result_chars` (default 4_000). The core algorithm lives in `edited_body(system_notes, policy)`: it clones `self.messages` into `body`, records `original_chars` via `total_chars` (chars of system + notes + every message serialized to JSON), then if `policy.enabled` runs two passes. Pass 1 (tool-result shrink): compute `recent_cutoff = body.len() - keep_recent_messages` (saturating), and for every message at index `i < recent_cutoff` whose role is \"tool\", call `compress_tool_result`, which truncates the `content` string to the first `max_tool_result_chars` chars and appends a marker `\\n[context edited: omitted the rest of prior {name} result; original_chars=N]`, returning true so `stats.compressed_tool_results` increments. Pass 2 (prefix drop): only if `total_chars(...) > max_chars` AND `body.len() > keep_recent_messages`, set `start = body.len() - keep_recent_messages`, then advance `start` to the first \"user\" message at/after that cutoff (`position(role==user)`), then skip any leading \"tool\" messages, and if `0 < start < body.len()` set `dropped_messages = start` and keep only `body[start..]`. `for_model_edited` then prepends the system message and any non-empty `system_notes` as extra system messages, appends the edited body, and reports `edited_chars`. `for_model` is just `for_model_edited(&[], policy{enabled:false})`. `compact` reuses `edited_body` with `enabled` forced true and, only if something actually changed (compressed or dropped > 0), overwrites `self.messages` and calls `rewrite_log` to truncate-and-rewrite the JSONL file. The send-time view is wired in agent_loop.rs `call_model`, which calls `for_model_edited(system_notes, &self.context_edit)` before every provider `chat`; the destructive `/compact` path is the CLI's `compact_session_text` calling `agent.session.compact`.",
+  "design_rationale": "The central design choice is non-destructive send-time editing: `for_model_edited` builds a temporary trimmed view and leaves `self.messages` (the canonical log) untouched, so the full transcript is always preserved for `--resume` and the JSONL log even though the model only ever sees a budget-bounded slice. The test `context_edit_compresses_old_tool_results_without_mutating_session` asserts exactly this (session keeps the 200-char original). The two passes are deliberately ordered cheap-then-expensive: tool-result truncation runs first because verbose tool outputs (shell dumps, file reads) are the dominant, lowest-value bulk in a coding agent's history, so shrinking them often gets back under budget without losing any conversational turns; only if that is insufficient does it resort to dropping whole messages. The prefix-drop is conservative: it always keeps `keep_recent_messages`, and rather than cutting at an arbitrary index it advances the cut to a \"user\" boundary and skips leading orphan \"tool\" messages — this preserves the OpenAI invariant that the history starts cleanly and that no \"tool\" message is left without its preceding assistant tool_call (a malformed prefix would be rejected by the API). `compact` is opt-in and only mutates/rewrites when work was actually done (the `compress > 0 || dropped > 0` guard), so a no-op compact under budget leaves the log byte-identical (test `compact_noops_when_under_budget`). Char-counting (`json_chars` on serialized JSON, counting Unicode scalars via `.chars().count()`) is a deliberately cheap proxy for token budget — it avoids a tokenizer dependency, trading exactness for a fast, provider-agnostic heuristic. Truncation uses `.chars().take(n)` rather than byte slicing to avoid panicking on a multi-byte UTF-8 boundary.",
+  "key_mechanisms": [
+   {
+    "name": "ContextEditPolicy",
+    "detail": "Four-field config (enabled, max_chars=120k, keep_recent_messages=30, max_tool_result_chars=4k). Defaults in both session.rs Default impl and ncx-config; CLI builds it via context_edit_from_config with positive_usize fallbacks, so a non-positive config value silently falls back to the default."
+   },
+   {
+    "name": "edited_body (the algorithm)",
+    "detail": "Two-pass, char-budget-driven. Pass 1 compresses tool results older than the recent window; pass 2 drops the oldest prefix only when total_chars > max_chars and there are more than keep_recent_messages. Returns (body, ContextEditStats)."
+   },
+   {
+    "name": "compress_tool_result",
+    "detail": "In-place mutation of a 'tool' message: if content chars > max_chars, replace content with head(max_chars) + a '[context edited: ... original_chars=N]' marker so the model knows truncation happened. Returns bool to drive the compressed_tool_results counter."
+   },
+   {
+    "name": "for_model_edited (non-destructive view)",
+    "detail": "Prepends system + non-empty system_notes (each as its own system message), then the edited body. Used on every turn via AgentLoop::call_model. Leaves self.messages intact."
+   },
+   {
+    "name": "compact (destructive materialization)",
+    "detail": "Forces enabled=true, runs edited_body, and only if it changed anything overwrites self.messages and rewrite_log()s the JSONL — so /compact and subsequent --resume see the compacted history, not just a temporary view."
+   },
+   {
+    "name": "prefix-drop boundary safety",
+    "detail": "start begins at len-keep_recent, advances to the first 'user' message, then skips leading 'tool' messages, guarding against an orphaned tool reply at the head of the trimmed history (OpenAI shape invariant)."
+   },
+   {
+    "name": "ContextEditStats",
+    "detail": "original_chars / edited_chars / compressed_tool_results / dropped_messages — surfaced to the user by /compact as 'chars X -> Y; compressed_tool_results=..; dropped_messages=..'."
+   },
+   {
+    "name": "resume / log integrity",
+    "detail": "Log is append-only JSONL with _ts stamps and inline base64 images redacted (redact_image_data). resume() reads the log, drops system rows, and sanitize_restored_messages backfills synthetic '[interrupted...]' tool replies for any dangling tool_call so resumed history is API-valid."
+   }
+  ],
+  "flow_steps": [
+   "AgentLoop::call_model is invoked for a turn and calls session.for_model_edited(system_notes, &self.context_edit).",
+   "edited_body clones self.messages into body and records original_chars = total_chars(system, notes, messages).",
+   "If policy.enabled: Pass 1 computes recent_cutoff = len - keep_recent_messages and for each older 'tool' message calls compress_tool_result (truncate to max_tool_result_chars + edit marker), counting compressed_tool_results.",
+   "Still in Pass 2: if total_chars(after compression) > max_chars AND len > keep_recent_messages, compute start = len - keep_recent_messages.",
+   "Advance start to the first 'user' message at/after the cutoff, then skip any leading 'tool' messages to keep the prefix API-valid.",
+   "If 0 < start < len, set dropped_messages = start and slice body = body[start..].",
+   "Set edited_chars and return (body, stats).",
+   "for_model_edited prepends the system message + each non-empty system_note as system messages, appends body, recomputes edited_chars over the serialized output, and returns ContextMessages.",
+   "call_model sends edited.messages to the provider's chat(); self.messages is never mutated by this path.",
+   "Separately, on /compact the CLI calls session.compact(policy): same edited_body with enabled forced true; if anything changed, self.messages is overwritten and rewrite_log truncates+rewrites the JSONL so resume sees the compacted history."
+  ],
+  "interview_talking_points": [
+   "The headline distinction: send-time view (for_model_edited, every turn, non-destructive) vs. materialized compaction (compact, opt-in via /compact, rewrites the log). The full transcript is the source of truth; the model sees a budget-bounded projection of it.",
+   "Cheap-before-expensive ordering: shrink verbose tool results first (the bulk in a coding agent), drop whole messages only if still over budget. This minimizes conversational loss.",
+   "Why char counts not tokens: json_chars/total_chars use serialized-JSON Unicode-scalar counts as a tokenizer-free, provider-agnostic budget proxy — exactness traded for speed and zero dependencies.",
+   "API-shape invariants drive the drop logic: keep_recent floor, cut at a 'user' boundary, skip leading orphan 'tool' messages so the trimmed history never starts with a tool reply lacking its assistant tool_call.",
+   "Truncation marker (original_chars=N) tells the model the content was edited rather than silently lying about a short result; UTF-8-safe via .chars().take().",
+   "compact's change-guard (compress>0 || dropped>0) makes a no-op compact a true no-op — log stays byte-identical, verified by a test.",
+   "Adjacent integrity machinery: backfill_unanswered_tool_calls and sanitize_restored_messages synthesize placeholder tool replies for dangling tool_calls so interrupted/resumed sessions remain valid; log redacts inline base64 images."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Char-count budget is a proxy for tokens — it can over- or under-estimate real token usage depending on language/JSON overhead; there is no tokenizer in the loop.",
+   "Compression only applies to 'tool' messages whose content is a plain string; multimodal/array tool content or large assistant/user messages are never shrunk by compress_tool_result (only droppable via prefix-cut).",
+   "If the recent window (keep_recent_messages) itself exceeds max_chars, the prefix-drop guard body.len() > keep_recent_messages can leave the view over budget — the policy never trims within the kept tail, so the budget is soft, not hard.",
+   "Pass 2 recomputes total_chars only against post-compression body; the check uses self.system + notes too, so a large system prompt counts against the budget but is never dropped.",
+   "compact rewrites the whole JSONL via truncate+write; on resume the original verbose tool outputs are gone for good (the non-destructive view did not have this consequence). The marker text is the only record of what was cut.",
+   "positive_usize fallback means a config of 0 (e.g. someone trying to disable keep-recent) silently reverts to the default 30/4000 rather than behaving as 0.",
+   "Counting edited_chars by re-serializing every message on each turn is O(total history size) work per model call — fine at these scales but it is not incremental."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:16 (ContextEditPolicy struct + Default at :24)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:167 (for_model_edited — non-destructive provider view)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:192 (compact — destructive materialization + rewrite_log)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:203 (edited_body — the two-pass algorithm)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:455 (compress_tool_result — tool-result truncation + edit marker)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:443 (json_chars) and :449 (total_chars — char-budget proxy)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:375 (sanitize_restored_messages) and :263 (backfill_unanswered_tool_calls — resume integrity)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:299 (append_log) / :321 (rewrite_log) / :414 (redact_image_data)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:185 (call_model wires for_model_edited into every turn)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:969 (compact_session_text — /compact handler) and :1176 (context_edit_from_config)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-config/src/config.rs:72 (config knobs + defaults at :107)"
+  ]
+ },
+ {
+  "subsystem": "tools",
+  "one_liner": "A single-threaded tool subsystem where every agent capability implements one `?Send` async `Tool` trait, lives in a `ToolRegistry` over a cheaply-cloned `ToolContext`, and is exposed to the model through a dynamically-pruned, lexically-scored schema view with genome-overridable descriptions and pre/post hook wrapping.",
+  "how_it_works": "Each capability is a unit struct implementing `trait Tool` (`tools.rs:159`), which the model sees as one OpenAI function tool: `name()`, `description()`, `parameters()` (JSON Schema), a defaulted `read_only()` returning false, and `async fn execute(&self, ctx: &ToolContext, args: &Value) -> String`. The trait is `#[async_trait(?Send)]` because the whole REPL runs on a current-thread runtime, so shared mutable state (the plan, the tool catalog/hints) uses `Rc<RefCell<…>>` rather than `Arc<Mutex<…>>`. `ToolContext` (`tools.rs:55`) is a `Clone` bag of everything a tool needs — workspace, `SandboxPolicy`, approval policy string, timeout, the shared plan, an optional `Rc<dyn ApprovalHandler>`, optional `MemoryStore`, search backend config, the `tool_catalog`, `tool_hints`, hooks, skills, and the `Genome` — built up via `with_*` builder methods. `ToolRegistry::new` (`tools.rs:194`) registers the core set (read_file, apply_patch, update_plan, shell, grep, glob, web_search, web_fetch, tool_search) and conditionally `remember` (only if `ctx.memory.is_some()`) and `skill` (only if skills were discovered) — capability-gating so the model never sees a tool that can't function. On `register` (`tools.rs:229`) the registry computes the effective description via `genome.describe(name, tool.description())` and pushes a `ToolCatalogEntry{name, description, read_only}`; that catalog is what `tool_search` scores, so search sees the same text the model sees. Schema exposure is dynamic: `schemas_limited_for_query` (`tools.rs:283`) returns every tool's schema if the count is ≤ `DEFAULT_VISIBLE_TOOL_LIMIT` (9), otherwise it always includes `ALWAYS_VISIBLE_TOOLS` (read_file, apply_patch, update_plan, shell, tool_search, skill), adds any names recorded in `tool_hints` (set last turn by `tool_search`), then fills the remaining budget with the best lexical matches of the user's query (`catalog_score`), and renders each via `schema_for` (which re-applies the genome override). `execute` (`tools.rs:327`) wraps the call: it runs pre_tool hooks (a block short-circuits with an error string), runs the tool, runs post_tool hooks, and appends any hook stdout under a `[hook output]` banner. The loop (`agent_loop.rs:300,392`) calls `schemas_for_query(user_prompt)` each iteration and uses `is_read_only` to batch consecutive read-only calls for concurrent execution.",
+  "design_rationale": "The `?Send` trait + `Rc<RefCell>` choice is forced by the current-thread runtime: a `Send` bound would demand `Arc<Mutex>` everywhere and buy nothing, since there is no thread to send to. Dynamic schema exposure exists because exposing every tool every turn wastes prompt tokens and degrades model tool-selection as the registry grows (MCP tools, skills, search); the constant `ALWAYS_VISIBLE_TOOLS` guarantees the irreplaceable core (you can always read, patch, plan, run shell, search for more tools, and load a skill) stays present, and `tool_search` provides the escape hatch — its results become `tool_hints` that surface the matched schemas next turn. The genome description-override path is deliberately a pure text-substitution surface: the training harness (ncx-forge) can evolve descriptions and the base prompt but never tool *behavior*, because the sandbox still governs execution — this keeps a candidate genome from injecting new capability and makes a failed load a guaranteed no-op (empty Genome → byte-identical schemas, asserted by a test). `schema_for` is a registry method distinct from the trait's `to_schema()` so the model-facing schema can carry the override while the trait keeps returning its unmodified default. The `read_only()` default of false is fail-safe: an unclassified tool is treated as a side-effecting write, never auto-batched concurrently. Conditional registration of `remember`/`skill` avoids advertising dead capabilities. The apply_patch description is verbatim load-bearing: trimming it makes the model emit git/unified-diff syntax the V4A parser rejects, looping the turn.",
+  "key_mechanisms": [
+   {
+    "name": "Tool trait (?Send async)",
+    "detail": "tools.rs:158-182. name/description/parameters/read_only(default false)/execute returning a String result; to_schema() builds the OpenAI function-tool JSON. ?Send because the REPL is single-threaded current-thread runtime."
+   },
+   {
+    "name": "ToolContext as a cloneable capability bag",
+    "detail": "tools.rs:54-155. Holds policy, approver(Option<Rc<dyn ApprovalHandler>>), plan(Rc<RefCell<Vec<Value>>>), tool_catalog, tool_hints, hooks, skills, genome, memory, search config; builder with_* methods. Cheap Rc clones, no locks."
+   },
+   {
+    "name": "Conditional registration / capability gating",
+    "detail": "tools.rs:194-218. Core nine always registered; RememberTool only if ctx.memory.is_some(); SkillTool only if !ctx.skills.is_empty(). Test skill_tool_registered_only_when_skills_present asserts this."
+   },
+   {
+    "name": "DEFAULT_VISIBLE_TOOL_LIMIT + ALWAYS_VISIBLE_TOOLS",
+    "detail": "tools.rs:25-33. Limit 9. If registry size <= limit, expose all; else force the 6 core names (read_file, apply_patch, update_plan, shell, tool_search, skill) plus hints plus top lexical matches up to the limit."
+   },
+   {
+    "name": "tool_search lexical scoring",
+    "detail": "tools.rs:432-466. tool_words lowercases, splits on non-alnum (keeping '_'), drops <2-char and dup words. catalog_score: exact name match +100, name-substring +50, name-or-description substring +20; sorted desc, ties broken by name. ToolSearchTool writes matches into tool_hints for next-turn exposure."
+   },
+   {
+    "name": "Genome description override (schema_for)",
+    "detail": "tools.rs:251-261 + genome.rs:94. register() bakes genome.describe() into the catalog; schema_for() re-applies it to the model-facing schema while Tool::to_schema() stays default. Empty genome = byte-identical (tested)."
+   },
+   {
+    "name": "Hook wrapping in execute()",
+    "detail": "tools.rs:327-366. run_matching_hooks(PreTool) — blocked => error string, no execution; run tool; run_matching_hooks(PostTool); concatenate non-empty notes under '\\n\\n[hook output]\\n'."
+   },
+   {
+    "name": "read-only classification feeding concurrent batching",
+    "detail": "tools.rs:166-168,267-269; agent_loop.rs:392-405. read_only() is per-tool; is_read_only(name) lets the loop gather a run of consecutive read-only calls and execute them in parallel; writes stay serial."
+   },
+   {
+    "name": "apply_patch sandbox-escape escalation",
+    "detail": "tools.rs:572-645. parse_patch up front; any target failing policy.can_write is collected; with an approver, one ApprovalRequest(escalated=true) gates them and approved paths are added to the can_write closure; without an approver the write just fails with the out-of-sandbox message."
+   }
+  ],
+  "flow_steps": [
+   "Loop iteration computes tool_query = user prompt text (agent_loop.rs:248) and calls tools.schemas_for_query(tool_query) (agent_loop.rs:300).",
+   "schemas_for_query -> schemas_limited_for_query(query, 9). If tools.len() <= 9, return schema_for() of every tool (genome-applied) and stop.",
+   "Otherwise seed `selected` with ALWAYS_VISIBLE_TOOLS that exist, then add every name in ctx.tool_hints that exists.",
+   "Score the remaining catalog entries with catalog_score against tool_words(query); sort desc (name tiebreak); add names until `selected` reaches the limit, gated by score>0 (or query empty).",
+   "Return schema_for() for exactly the selected tools — this is the `tools` field sent to the model.",
+   "Model returns tool calls; loop batches consecutive is_read_only calls to run concurrently, runs writes serially (agent_loop.rs:392).",
+   "registry.execute(name,args): run PreTool hooks; if blocked, return error string without executing.",
+   "tool.execute(&ctx,&args) runs the capability (e.g. apply_patch parses, detects sandbox-escaping targets, escalates to the approver, then applies).",
+   "Run PostTool hooks; append any non-empty pre+post hook notes under a [hook output] banner; return the result string.",
+   "If the call was tool_search, ctx.tool_hints is rewritten with the matched names so those schemas become visible on the next iteration."
+  ],
+  "interview_talking_points": [
+   "Why ?Send + Rc<RefCell> instead of Arc<Mutex>: the runtime is current-thread, so Send buys nothing and locks would be pure overhead — the constraint (single REPL thread) drives the type choice.",
+   "Dynamic schema exposure as a token-budget + tool-selection-accuracy optimization: ALWAYS_VISIBLE_TOOLS guarantees the irreplaceable core, tool_search + tool_hints is the discovery escape hatch, lexical scoring picks task-relevant extras under DEFAULT_VISIBLE_TOOL_LIMIT=9.",
+   "The two-tier description path: register() bakes the genome override into the catalog (so tool_search scores the same text the model reads) while schema_for() re-applies it to the model-facing schema and Tool::to_schema() deliberately stays default — separation of model surface vs trait default.",
+   "Genome as a pure text-substitution surface: training can evolve descriptions and the base prompt but never behavior; the sandbox still governs execution, and an empty/failed genome is a guaranteed byte-identical no-op (asserted by tests) — that no-op guarantee is what makes a training run trustworthy.",
+   "read_only() default = false is fail-safe: unclassified tools are treated as writes and never auto-run concurrently; the loop only parallelizes runs of consecutive read-only calls.",
+   "Capability gating: remember and skill are registered only when their backing resource exists, so the model never sees a tool it cannot use.",
+   "Hook wrapping turns the registry into the deterministic policy choke point: pre_tool can hard-block a call, post_tool output is fed back to the model — all tools get this uniformly via ToolRegistry::execute.",
+   "apply_patch's verbatim description is load-bearing prompt engineering: trimming it makes the model fall back to git/unified-diff syntax the V4A parser rejects, causing the turn to loop — documented directly in the source comment."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Lexical (substring) scoring only — no stemming/embeddings; catalog_score on 'installer' won't match 'install', and tool_words drops <2-char tokens, so single-letter queries match nothing.",
+   "tool_hints is global mutable state cleared on every tool_search call (tools.rs:413-414); a search overwrites the previous hints, so only the most recent search's matches stay visible next turn.",
+   "When query is non-empty, extra tools need score>0 to be included; if every non-core tool scores 0 the model sees only ALWAYS_VISIBLE_TOOLS + hints even with budget to spare (the `score > 0 || q.is_empty()` gate at tools.rs:314).",
+   "schema_for re-runs genome.describe and tool.parameters() on every iteration for every selected tool — recomputation, not caching (fine at this scale, single-threaded).",
+   "read_only classification here is per-Tool (trait), separate from MCP tools which classify by name heuristic (is_read_only_name in mcp_tool.rs) and from shell's runtime looks_read_only command heuristic — three different read-only notions coexist.",
+   "apply_patch without an approver silently downgrades to a plain policy rejection rather than prompting; the escalation only engages when ctx.approver is Some.",
+   "ALWAYS_VISIBLE_TOOLS is a hardcoded &[&str] of names; a renamed/forgotten core tool would silently drop from the guaranteed set (contains_key guard means a missing name is just skipped, no error)."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:25 (DEFAULT_VISIBLE_TOOL_LIMIT / ALWAYS_VISIBLE_TOOLS)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:48 (ApprovalHandler ?Send trait)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:55 (ToolContext + builders)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:159 (Tool trait, read_only default, to_schema)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:194 (ToolRegistry::new conditional registration)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:229 (register: genome-baked catalog entry)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:251 (schema_for genome override)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:283 (schemas_limited_for_query selection)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:327 (execute: pre/post hook wrapping)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:396 (ToolSearchTool.execute writes tool_hints)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:432 (tool_words) / :446 (catalog_score)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:537 (apply_patch load-bearing description) / :572 (escape escalation)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/genome.rs:94 (Genome::describe)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:300 (schemas_for_query per-iter) / :392 (read-only batching)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:161 (Approver::classify) — shell decision used by ShellTool",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-tools/src/detect.rs:53 (looks_read_only) — shell escalation heuristic"
+  ]
+ },
+ {
+  "subsystem": "sandbox-approval (crate `ncx-sandbox`: `policy.rs` + `approval.rs`, re-exported from `lib.rs`)",
+  "one_liner": "Two orthogonal, pure-decision layers — SandboxPolicy (what's physically allowed: reads/writes/network) and Approver (what to do when an action exceeds the sandbox: AutoApprove/Ask/AutoDeny under four approval policies) — with all enforcement and prompting deliberately pushed to consumer crates.",
+  "how_it_works": "`SandboxPolicy` (policy.rs) holds a `mode` string (one of `read-only`/`workspace-write`/`danger-full-access`), a normalized `workspace` PathBuf, extra `writable_roots`, `network_access`, and an opt-in `allow_temp_write` flag. `can_read` unconditionally returns `true` for all three modes (secret-file protection is left to the tool layer). `can_write` short-circuits: `true` for danger-full-access, `false` for read-only; otherwise it makes the target absolute against the workspace, lexically normalizes it, and returns true iff it `starts_with` any directory in `writable_dirs()` (workspace + writable_roots + system temp only if `allow_temp_write`). Path comparison is purely lexical via `normalize` (drops `.`, pops on `..`, never touches the filesystem) so a decision never depends on a path existing. The `Approver` (approval.rs) is a thin wrapper over a `policy` string; its `classify(command, needs_escalation)` returns a `Decision` enum: `never` -> AutoDeny if escalation needed else AutoApprove; `on-request` -> Ask if escalation needed else AutoApprove; `on-failure` -> always AutoApprove (run sandboxed first, ask only after a failure, handled upstream); `untrusted` -> AutoApprove only if `is_trusted(command)` AND no escalation, else Ask. `is_trusted` first rejects any `dangerous_patterns` regex match (rm -rf, dd, mkfs, fork bombs, etc.), then checks the first token (path-stripped, `.exe`-stripped) against `TRUSTED_COMMANDS`, and for `git` further rejects write subcommands in `GIT_WRITE_SUBCMDS`. `step_decision(base, is_write, require_step_approval)` layers per-step confirmation on top: it upgrades an AutoApprove write to Ask when the user disabled auto-approve, but never softens AutoDeny and never downgrades an existing Ask. Crucially, the `needs_escalation` input and the read-only shell heuristic (`looks_read_only`) are NOT in this crate — the consumer `ncx-core` (tools.rs `ShellTool::needs_escalation`) computes escalation from the policy, and `ncx-tools` (detect.rs) owns the conservative read-only classifier.",
+  "design_rationale": "The central design decision is separating two orthogonal axes (lib.rs docs say so explicitly): the sandbox answers \"is this physically allowed?\" and the approver answers \"what do we do when it isn't?\". This mirrors Codex and lets the same policy work under different trust levels without entangling enforcement with prompting. Both layers are intentionally PURE decision functions — no I/O, no UI — because the actual yes/no prompt is an upper-layer concern (CLI=text prompt, GUI=modal round-trip, tests=canned answer), and enforcement (actually applying a patch / spawning a process) lives in the executor/tools crates. Path comparison is lexical rather than canonicalizing/symlink-resolving so that `can_write` is total and deterministic on non-existent paths (you must gate a file you're about to CREATE) — the doc-comment notes this matches the Python side's `Path.resolve(strict=False)`. `allow_temp_write` defaults to false (\"tightened default\") to close a hole where the workspace itself lives under the system temp dir but a sibling temp file should still be denied. `untrusted`'s allowlist is conservative/read-only-ish and the dangerous-pattern check runs FIRST so a trusted leading token (bare `rm`, or `git clean`) can't smuggle a destructive command past the gate. `step_decision` is monotone toward safety (only ever upgrades approval, never relaxes) so adding per-step confirmation can never make the system less safe.",
+  "key_mechanisms": [
+   {
+    "name": "Two orthogonal axes (lib.rs)",
+    "detail": "SandboxPolicy = physical permission (can_read/can_write/network); Approver = escalation decision. Both pure; enforcement and prompting live elsewhere (executor/tools crates, CLI/GUI). This split is the whole architecture."
+   },
+   {
+    "name": "can_write short-circuit + lexical starts_with (policy.rs:86-100)",
+    "detail": "danger-full-access -> true; read-only -> false; workspace-write -> normalize(make_absolute(workspace, path)) then any writable_dir.starts_with. Component-wise starts_with covers target==root and ancestor, and won't false-match a string prefix like /a/bc under /a/b."
+   },
+   {
+    "name": "writable_dirs composition (policy.rs:70-77)",
+    "detail": "Always workspace, plus writable_roots, plus system temp ONLY when allow_temp_write is opted in. The opt-in temp default is the deliberately tightened behavior tested by workspace_write_denies_system_temp_by_default."
+   },
+   {
+    "name": "can_read always true (policy.rs:81-83)",
+    "detail": "All three modes permit reads; secret-file protection is explicitly a tool-layer concern, not the sandbox's job. Keeps the policy minimal."
+   },
+   {
+    "name": "Decision enum + classify per-policy (approval.rs:24-32, 161-188)",
+    "detail": "AutoApprove/Ask/AutoDeny. never=deny-on-escalation, on-request=ask-on-escalation (default), on-failure=always-approve (retry-after-failure handled upstream), untrusted=allowlist-gated. Unknown policy falls through to Ask (safe default)."
+   },
+   {
+    "name": "is_trusted allowlist with dangerous-patterns-first (approval.rs:91-142)",
+    "detail": "Regex dangerous_patterns() checked before the allowlist so destructive commands fail even with a trusted leading token. First token is path- and .exe-normalized (C:\\\\tools\\\\git.exe -> git). git is special-cased: first non-flag subcommand checked against GIT_WRITE_SUBCMDS."
+   },
+   {
+    "name": "step_decision monotone upgrade (approval.rs:54-62)",
+    "detail": "When require_step_approval is on, an AutoApprove WRITE (WRITE_TOOLS = shell, apply_patch) becomes Ask. AutoDeny is never softened; existing Ask is preserved. Pure layering on top of the escalation decision."
+   },
+   {
+    "name": "Escalation computed by the consumer, not this crate (ncx-core tools.rs:988-998)",
+    "detail": "ShellTool::needs_escalation: danger-full-access never escalates; read-only escalates anything not looks_read_only; workspace-write escalates only if the workdir itself isn't can_write. classify is then called with that boolean (tools.rs:1056-1057)."
+   },
+   {
+    "name": "Read-only shell classifier lives in ncx-tools, not here (detect.rs)",
+    "detail": "looks_read_only: rejects redirects/command-substitution metachars, splits on chain operators, requires EVERY segment to start with a READ_ONLY_PREFIX. Conservative-on-doubt. Distinct from approval.rs's untrusted TRUSTED_COMMANDS allowlist."
+   }
+  ],
+  "flow_steps": [
+   "Caller builds a SandboxPolicy::new(mode, workspace) and optionally chains with_writable_roots / with_allow_temp_write / with_network_access.",
+   "For a shell command, the consumer (ncx-core ShellTool::needs_escalation) decides escalation: danger -> false; read-only -> !looks_read_only(command) (ncx-tools detect.rs); workspace-write -> !policy.can_write(workdir).",
+   "An Approver::new(approval_policy).classify(command, needs_escalation) returns a Decision.",
+   "For untrusted, classify runs is_trusted: dangerous_patterns regexes first (any match -> not trusted), then first-token normalization + TRUSTED_COMMANDS membership, then git-write-subcommand rejection.",
+   "If per-step confirmation is enabled, step_decision(base, is_write, require_step_approval) upgrades an AutoApprove write to Ask (AutoDeny untouched).",
+   "AutoApprove -> run sandboxed; Ask -> upper layer prompts the human via an ApprovalRequest (command/reason/cwd/escalated/details); AutoDeny -> refuse and report.",
+   "For apply_patch (ncx-core tools.rs:577-630): parse the patch, collect every target that fails policy.can_write into an 'escaping' set; if non-empty and an approver exists, send one escalated ApprovalRequest carrying the full patch as details; on approval those paths are added to a can_write closure, otherwise apply_patch errors with the out-of-sandbox message.",
+   "apply_patch (ncx-tools patch.rs:347) stages all hunks in memory and gates every touched path (and any move_to dest) through the can_write closure before writing anything to disk — atomic all-or-nothing."
+  ],
+  "interview_talking_points": [
+   "Why two layers? SandboxPolicy answers 'physically allowed?' and Approver answers 'what to do when not?' — orthogonal, both pure, enforcement/prompting pushed out. This is the headline design and is stated verbatim in lib.rs.",
+   "Why lexical path normalization instead of canonicalize? Because can_write must work on files that don't exist yet (you gate a create), so it can't depend on the filesystem; it mirrors Python's Path.resolve(strict=False). Trade-off: it does NOT follow symlinks, so symlink-escape is a known limitation pushed to enforcement.",
+   "Component-wise starts_with vs string prefix: explained in the code comment — /a/bc is correctly NOT inside /a/b. A naive string-prefix check would be a real escape bug.",
+   "allow_temp_write default false: subtle hole — workspace may live under the system temp dir, but a sibling temp file must still be denied unless explicitly opted in. There's a dedicated test for exactly this.",
+   "Four approval policies map cleanly: never (deny escalation), on-request (ask, the default), on-failure (run-then-ask-upstream), untrusted (allowlist gate). Unknown policy -> Ask, a safe fallthrough.",
+   "Defense ordering in is_trusted: dangerous patterns are checked BEFORE the allowlist, so a trusted leading token (bare rm, git clean) can't bypass — tested by dangerous_pattern_blocks_trusted_leading_token and untrusted_blocks_dangerous_even_if_leading_token_trusted.",
+   "step_decision is monotone: it only ever increases approval friction (AutoApprove write -> Ask), never decreases it, and never touches AutoDeny — so per-step confirmation can't reduce safety.",
+   "Two DIFFERENT read-only classifiers exist and shouldn't be conflated: approval.rs's TRUSTED_COMMANDS (for the untrusted policy) and ncx-tools detect.rs's looks_read_only (for read-only-mode escalation). Both are conservative allowlists but serve different gates.",
+   "needs_escalation is NOT in this crate — it's computed by the consumer from the policy. The sandbox crate stays a pure library of decisions; this is what makes it testable and reusable across CLI/GUI/tests.",
+   "apply_patch escalation UX: the ApprovalRequest.details field carries the FULL diff so the human reviews the actual change, not just file names — a deliberate trust-but-show-evidence choice."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Lexical-only normalization means symlinks are NOT resolved — a symlink inside the workspace pointing outside would pass can_write. The crate doc frames enforcement as the executor's job, so symlink-escape mitigation is out of scope here.",
+   "can_read always returns true in every mode — there is NO read sandboxing at this layer; reading secrets is only prevented (if at all) at the tool layer. Easy to over-assume the sandbox protects reads.",
+   "TRUSTED_COMMANDS includes `python`/`python3`/`node` for the untrusted policy, which can execute arbitrary code; note detect.rs explicitly does the opposite (excludes python -c / node -e). The two lists embody different threat assumptions and can surprise.",
+   "is_trusted's first-token git-subcommand parsing splits on whitespace; an unquoted executable path containing spaces would split on the space (same as Python shlex behavior) — only space-free path prefixes normalize correctly, as the test comment notes.",
+   "on-failure always returns AutoApprove from classify — the 'ask to retry unsandboxed after a sandboxed failure' behavior is entirely upstream; reading classify alone makes on-failure look like it never prompts.",
+   "step_decision keys off is_write/WRITE_TOOLS (shell, apply_patch) supplied by the caller; the sandbox crate doesn't itself know which tool is running, so correct per-step gating depends on the consumer passing the right is_write flag.",
+   "network_access is a plain field the policy never enforces; even danger-full-access leaves network_access=false unless a caller (load_config) flips it (tested by danger_full_access_allows_everything)."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/lib.rs",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs:86-100 (can_write short-circuit + lexical starts_with)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs:70-77 (writable_dirs incl. opt-in temp)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs:132-146 (normalize, lexical)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:161-188 (classify per-policy)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:91-142 (dangerous_patterns + is_trusted + GIT_WRITE_SUBCMDS)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:54-62 (step_decision)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:988-998 (ShellTool::needs_escalation, consumer)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:577-630 (apply_patch escalation + ApprovalRequest with full-diff details)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-tools/src/detect.rs (looks_read_only, separate read-only classifier)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-tools/src/patch.rs:347-404 (apply_patch gates every path through can_write, staged in memory)"
+  ]
+ },
+ {
+  "subsystem": "orchestrator (ncx-core/src/orchestrator.rs)",
+  "one_liner": "A tiered, recursive node-graph that scales effort to task risk — classify(fast) routes to single-run / plan→best-of-N-workers→verify / recursive decompose — spending a cheap+strong model pair's cost savings on structure (parallel attempts, closed verify-retry loops, divide-and-conquer) to raise completion rate.",
+  "how_it_works": "`Orchestrator::handle` calls `handle_at(task, 0)`, the recursive core (boxed as `LocalBoxFuture` because an `async fn` that recurses into itself would be infinitely sized, and `?Send`/current-thread is preserved). It first runs `classify` — a tool-less `reason(Tier::Fast, CLASSIFY_SYS, ...)` whose text is parsed by `parse_complexity` (substring match on high/simple/medium; anything unclear defaults to Medium, the safe middle). Simple tasks take a single `run(Tier::Fast, WORKER_SYS, ...)` with no plan/verify. Medium runs `pipeline` = `plan(Tier::Main)` then `run_attempts` with `self.cfg.workers` (default 2) fast parallel workers verified on Fast. High, if `depth < cfg.max_depth`, takes `decompose_and_recurse`; otherwise (depth budget spent, or max_depth=0) falls back to `run_attempts` with `high_workers` (default 3) verified on Main. `run_attempts` is the closed loop: it launches N workers via `join_all` of `run_worker(i, n, ...)` futures (each fed the plan plus the prior round's verifier feedback by `build_worker_task`), runs one `reason(verify_tier, VERIFY_SYS, ...)` over all results, and `verdict_passed` passes unless the text contains 'FAIL' (fail-loud). On pass OR when `rounds > max_verify_retries` it parses `BEST:<n>` via `parse_best_worker` (1-based→0-based, clamped), calls `promote_worker(best)`, and `synthesize` returns the best result (annotated '[unverified after retries]' if it never passed); otherwise the verdict text becomes feedback and it loops. `decompose_and_recurse` plans (Main), runs `reason(Tier::Main, DECOMPOSE_SYS, ...)`, `parse_subtasks` (prefers 'SUBTASK:' lines, falls back to numbered/bulleted lists); <2 subtasks is atomic → best-of-N fallback reusing the plan; otherwise it truncates to `max_subtasks` (default 6), runs each subtask SEQUENTIALLY through `handle_at(st, depth+1)` (so each subtask's promoted winner is visible to the next), AND-combines all `verify_passed`, then does one final Main-tier verify over the joined sub-results.",
+  "design_rationale": "The module docstring states the explicit premise: \"The bottleneck for capability is the model, not the harness,\" so the orchestrator buys reliability with structure rather than a smarter model — it spends a cheap-model's cost savings on parallel attempts, verification, and decomposition. It deliberately accepts a hard ceiling: plan+verify run on Main, so it \"cannot exceed the main model's reasoning ceiling\" — the gains are completion-rate on simple/medium and divide-and-conquer reach on high. Effort is matched to risk so cheap tasks stay cheap (Simple skips plan/verify entirely; Medium verifies on Fast not Main). The `AgentRunner` trait abstracts every model call so the module is provider-agnostic and unit-testable with a scripted `MockRunner` (no network). The separate `reason()` method exists specifically so the live runner attaches NO tools to classify/plan/decompose/verify nodes — preventing a capable model from starting to *implement* the task during what should be a judgment/planning step (confirmed in runner.rs: `run_in(..., with_tools=false)` builds `ToolRegistry::empty`). Best-of-N over a cheap model is chosen as a cheaper variance-reduction lever than one expensive run. The closed verify→retry loop with feedback is bounded by `max_verify_retries` to cap cost; verdict parsing is intentionally lenient (substring FAIL, lenient SUBTASK/list parsing, clamped BEST) because LLM output format is unreliable and a usable result shouldn't be lost to a formatting miss. `max_subtasks` guards against a model that over-splits (each subtask is its own full pipeline). Recursion depth is capped (`max_depth`, default 1) so high subtasks that re-classify as high don't decompose forever.",
+  "key_mechanisms": [
+   {
+    "name": "AgentRunner trait (?Send, async_trait)",
+    "detail": "4 methods — run/reason/run_worker/promote_worker — abstract all model calls so the node graph is provider-agnostic and testable. reason/run_worker/promote_worker have defaults (delegate to run / ignore isolation / no-op) so simple mock or read-only runners need only implement run. ?Send keeps it current-thread."
+   },
+   {
+    "name": "Tool-less reasoning nodes (reason())",
+    "detail": "classify/plan/decompose/verify go through reason(), which the LiveRunner overrides to build ToolRegistry::empty(ctx) (with_tools=false). A capable model literally has no tools to call during a judgment step, so it can't begin executing the task while classifying or verifying."
+   },
+   {
+    "name": "Best-of-N parallel workers + verifier selection",
+    "detail": "run_attempts spawns N independent worker futures via futures_util::join_all; each is an isolated attempt so parallel execution can't corrupt shared state. VERIFY_SYS asks for PASS/FAIL plus a 'BEST:<n>' line; parse_best_worker turns that into a 0-based index, and only that winner is promoted."
+   },
+   {
+    "name": "Closed verify→retry loop",
+    "detail": "On FAIL and within max_verify_retries, the full verdict text is carried into the next round as `feedback` via build_worker_task ('The previous attempt was rejected. Address this feedback:'). verdict_passed is fail-loud: passes unless the verdict contains 'FAIL'."
+   },
+   {
+    "name": "Recursive decomposition with sequential promotion",
+    "detail": "High tasks with ≥2 subtasks recurse via handle_at(st, depth+1) SEQUENTIALLY; each subtask promotes its own verifier-chosen winner to the real workspace before the next runs, so subtasks build on committed work without parallel-write collisions. Depth is bounded by max_depth, count by max_subtasks."
+   },
+   {
+    "name": "Workspace isolation + promotion (LiveRunner)",
+    "detail": "run_worker copies the workspace to a per-worker temp scratch dir via copy_tree; promote_worker copies the winner's scratch back onto the real workspace then deletes all scratch copies. copy_tree failure falls back to running in the real workspace (no isolation). Recursion is therefore live-safe."
+   },
+   {
+    "name": "Lenient parsing throughout",
+    "detail": "parse_complexity (substring, default Medium), parse_subtasks (SUBTASK: prefix then numbered/bulleted fallback via strip_list_marker), parse_best_worker (clamped, defaults to 0) — all tolerate unreliable LLM formatting so a usable result isn't lost."
+   },
+   {
+    "name": "Tier mapping (LiveRunner.model_for)",
+    "detail": "Tier::Main → cfg.model (pro); Tier::Fast → cfg.fast_model (flash) with fallback to cfg.model when fast_model is empty. Each node builds a fresh DeepSeekProvider + Session + tool registry (one-shot turn)."
+   }
+  ],
+  "flow_steps": [
+   "handle(task) → handle_at(task, depth=0), boxed as LocalBoxFuture for self-recursion.",
+   "classify: reason(Fast, CLASSIFY_SYS) → parse_complexity → Simple | Medium | High (unclear→Medium).",
+   "Simple: single run(Fast, WORKER_SYS); verify_passed=true, verify_rounds=0, no plan.",
+   "Medium: pipeline = reason(Main, PLAN_SYS) then run_attempts(verify_tier=Fast, n=cfg.workers=2).",
+   "High & depth<max_depth: decompose_and_recurse; else (depth exhausted / max_depth=0): run_attempts(verify_tier=Main, n=high_workers=3).",
+   "run_attempts loop: spawn N workers via join_all(run_worker(i,n)), each fed plan + prior feedback (build_worker_task).",
+   "verify: reason(verify_tier, VERIFY_SYS, build_verify_task) → verdict_passed (true unless 'FAIL').",
+   "If pass OR rounds>max_verify_retries: parse_best_worker(BEST:<n>), promote_worker(best), synthesize → OrchestratorOutcome; else feedback=verdict and loop.",
+   "decompose_and_recurse: plan(Main) → reason(Main, DECOMPOSE_SYS) → parse_subtasks.",
+   "<2 subtasks → atomic best-of-N fallback on Main reusing the plan; >max_subtasks → truncate.",
+   "For each subtask sequentially: handle_at(st, depth+1); AND all verify_passed; collect '[subtask]...' result; each promotes its own winner first.",
+   "Final: one reason(Main, VERIFY_SYS) over joined sub-results; verify_passed = all_passed && verdict_passed; synthesize_subtasks → OrchestratorOutcome."
+  ],
+  "interview_talking_points": [
+   "Core thesis (from the module doc): the model, not the harness, is the capability bottleneck, so the orchestrator trades a cheap model's cost savings for structure (parallelism, verification, decomposition) to raise reliability — and openly admits it cannot exceed the Main model's reasoning ceiling since plan+verify run there.",
+   "Effort scales to risk: Simple skips plan AND verify (one fast run); Medium verifies on Fast; High verifies on Main and gets more attempts (high_workers=3 vs workers=2). This is a cost/reliability dial encoded in OrchestratorConfig.",
+   "Why a separate reason() method instead of just run(): tool-less nodes. Without it, a capable model handed the classify prompt plus tools might just start editing files. LiveRunner enforces this with ToolRegistry::empty — a clean separation of 'judge/plan' from 'execute'.",
+   "Best-of-N + verifier-picks-BEST is variance reduction over a cheap model: cheaper than one expensive run, and the verifier both gates (PASS/FAIL) and selects (BEST:<n>); only the winner's isolated workspace is promoted.",
+   "The closed verify→retry loop feeds the verifier's complaint back into the next workers' prompt (bounded by max_verify_retries) — a self-correction loop, not blind resampling.",
+   "Recursion safety is the subtle part: subtasks run SEQUENTIALLY, each promoting its winner to the real workspace before the next, so they build on committed work; parallel workers within one attempt are isolated in temp copies (copy_tree) to avoid write collisions. The boxed LocalBoxFuture is required because an async fn can't recurse without indirection.",
+   "Defensive LLM-output parsing everywhere: parse_complexity defaults unclear→Medium, verdict_passed is fail-loud, parse_subtasks falls back from SUBTASK: to numbered/bulleted lists, parse_best_worker clamps and defaults to 0 — the design assumes the model will sometimes ignore the format.",
+   "Testability: the whole graph is unit-tested with a scripted MockRunner (no network), asserting exact (tier, stage) call counts — e.g. medium = 1 main plan + 2 fast workers + 1 fast verify; the caps (max_depth, max_subtasks) each have a dedicated test."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Hard ceiling acknowledged in the doc: plan and verify run on Main, so the orchestrator cannot out-reason the Main model — it only improves completion-rate/reliability and decomposition reach, not raw capability.",
+   "Cost can multiply fast: a high task can fan out to (subtasks × per-subtask pipeline × workers × retry-rounds) model calls, plus extra plan/decompose/verify reasoning calls. max_subtasks and max_depth exist precisely to bound this.",
+   "verdict_passed uses a naive substring check — any verifier reply containing the literal 'FAIL' (even 'no FAILures') is treated as a failure; conversely a malformed verify that omits FAIL passes. Robustness was traded for simplicity.",
+   "parse_complexity checks 'high' before 'simple'/'medium' via substring; a verbose classifier reply mentioning multiple words could misroute, and any unrecognized reply silently becomes Medium.",
+   "Workspace isolation depends on copy_tree of the whole tree per worker per round — potentially expensive for large repos; on copy failure it silently falls back to the REAL workspace, which reintroduces the parallel-write collision it was meant to prevent.",
+   "Decomposed-path verification only does ONE final Main verify over joined sub-results (verify_rounds hardcoded to 1, no retry loop at that level) and best_worker is forced to 0 — the per-subtask self-correction happens only inside each recursive handle_at, not at the join.",
+   "Default max_depth=1 means subtasks that themselves classify as High do not decompose again (they run best-of-N) — intentional per the depth-cap test, but limits true deep recursion."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:53-78 (AgentRunner trait: run/reason/run_worker/promote_worker + defaults)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:81-99 (node system prompts: CLASSIFY/PLAN/DECOMPOSE/WORKER/VERIFY_SYS)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:101-129 (OrchestratorConfig + Default: workers=2, high_workers=3, max_verify_retries=1, max_depth=1, max_subtasks=6)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:165-198 (handle_at recursive core, LocalBoxFuture/boxed_local, Simple/Medium/High routing)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:207-275 (pipeline + run_attempts closed best-of-N/verify/retry loop, promote_worker, synthesize)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:282-352 (decompose_and_recurse: atomic fallback, max_subtasks truncate, sequential handle_at per subtask, final join verify)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:364-502 (parsers: parse_complexity, verdict_passed, parse_subtasks/strip_list_marker, parse_best_worker, build_* + synthesize helpers)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:506-822 (MockRunner + tests asserting (tier,stage) call counts for every path)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/runner.rs:48-152 (LiveRunner: model_for tier mapping, run_in with_tools flag → ToolRegistry::empty for reason, run_worker copy_tree isolation, promote_worker sync-back+cleanup)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:239-248 (run_orchestrated wiring: LiveRunner + Orchestrator::new + OrchestratorConfig::default + handle)"
+  ]
+ },
+ {
+  "subsystem": "memory",
+  "one_liner": "A tiny markdown-backed \"self-evolution\" store (.ncx/memory/LEARNINGS.md) that lets the agent accumulate verified project notes and recall the most relevant ones into the system prompt as leads (not facts), using a lightweight lexical-semantic ranker plus heuristic and LLM-backed near-duplicate consolidation.",
+  "how_it_works": "`MemoryStore` (memory.rs) wraps a single path `.ncx/memory/LEARNINGS.md` and persists `MemoryEntry { ts: u64, tags: Vec<String>, text: String }` records. Each entry is serialized as a parseable HTML-comment header `<!-- ts:<n> tags:<a,b> -->` followed by the note body; `parse_entries`/`write_all` round-trip this so the file stays human-readable and hand-editable. `remember(text, tags, now)` trims the text, normalizes it (whitespace-collapsed + lowercased via `normalize`), and skips the write if any existing entry normalizes identically (exact-text dedup returns `Ok(false)`); otherwise it appends, sorts by ts ascending, and drops the oldest beyond `MAX_ENTRIES = 200`. `recall(query, max_entries, max_chars)` scores every entry with `semantic_score` and returns a capped bullet block prefixed by `RECALL_HEADER` which explicitly tells the model to treat the notes as leads to verify, not facts. Scoring is a hybrid lexical-semantic sum: query keywords (lowercased, len>=3, deduped by `keywords`, then widened through a hardcoded domain synonym map in `semantic_aliases` via `expanded_keywords`) score +8 if they match a tag, +4 if they appear in the entry text/tags haystack; adjacent-word `phrases` (bigrams) add +6 on substring hit; and a Jaccard overlap of the two word sets adds up to +20 (`jaccard * 20`). Recency is packed into the low 6 digits (`overlap * 1_000_000 + ts.min(999_999)`) so higher ts wins ties, then entries are emitted until either `max_entries` or `max_chars` is hit. `consolidate(threshold)` is a cheap heuristic dedup run at session start: it sorts newest-first, single-link clusters by `jaccard(word_set) >= threshold`, keeps the newest representative of each cluster, re-caps, and is idempotent. `summarize_consolidate(summarizer, threshold)` does the same greedy clustering but for any multi-entry cluster asks the injected `Summarizer` trait (the fast-model `LiveSummarizer` in the CLI) to fold the notes into one concise note, keeping the cluster's newest ts and the union of its tags; if the LLM returns `None`/empty it falls back to keeping the newest entry, matching the heuristic.",
+  "design_rationale": "The core stance (memory.rs module doc) is that memory is NOT \"raised IQ\" but accumulated, verified experience recalled as leads — hence the deliberately untrusting `RECALL_HEADER` wording and the `remember` tool description insisting only CONFIRMED facts be stored, keeping the store trustworthy. Plain markdown with a comment-header format was chosen over a database/embedding index so the store is human-readable, hand-editable, git-diffable, and dependency-free — consistent with the project's \"tiny, no heavyweight deps\" philosophy; the cost is that retrieval is lexical, not vector-semantic. To recover some semantic reach without an embedding model, the author bolts on a small hand-curated synonym map (`semantic_aliases`, e.g. desktop/native/window -> gui,tauri) and phrase/Jaccard signals — a pragmatic middle ground that the test `recall_uses_semantic_aliases_and_tags` locks in (querying \"native installer release package\" surfaces a Tauri/bundle note). Recency is folded into the integer score via bit-packing rather than a second sort key, giving a stable deterministic single comparator. `now` is passed in by the caller rather than read from the clock inside the store so writes are deterministic and unit-testable. The `Summarizer` trait is `#[async_trait(?Send)]` and dependency-injected so the core crate stays provider-agnostic and single-threaded-friendly (the whole agent is `!Send`/`Rc`-based), with the real LLM call living in the CLI's `LiveSummarizer` (fast model) and tests using a `FixedMerger` mock. Two consolidation paths exist because the heuristic is free and safe to run every startup, while the LLM merge is better-quality but costs a call — so `consolidate` runs unconditionally at session start (runner.rs / main.rs use 0.85) and `summarize_consolidate` is an explicit opt-in subcommand. The hard 200-entry cap plus char-budgeted recall (e.g. 6 entries/3000 chars in the runner) exist because recalled notes are prepended to the system prompt, so unbounded growth would blow the context window.",
+  "key_mechanisms": [
+   {
+    "name": "Markdown comment-header store format",
+    "detail": "Each entry is `<!-- ts:<epoch> tags:<csv> -->` + body, written by `write_all` and read by `parse_entries`; file is `.ncx/memory/LEARNINGS.md`. Chosen for human-readability/git-diffability over a DB or vector index (zero deps, but only lexical retrieval)."
+   },
+   {
+    "name": "Exact-text dedup on remember",
+    "detail": "`remember` compares `normalize(text)` (whitespace-collapsed, lowercased) against existing entries; identical-after-normalization returns Ok(false). Test `dedup_skips_identical` confirms '  SAME   fact ' dedups against 'same fact'."
+   },
+   {
+    "name": "MAX_ENTRIES cap (200), oldest-dropped",
+    "detail": "After append, entries are sorted by ts ascending and `drain(0..drop)` removes the front (oldest). `cap_drops_oldest` verifies len==200 and all kept ts>=5. Prevents unbounded prompt growth."
+   },
+   {
+    "name": "Hybrid lexical-semantic recall score",
+    "detail": "`semantic_score`: tag match +8, text substring +4 per (alias-expanded) keyword, bigram phrase substring +6, plus Jaccard(query,entry word sets)*20. `expanded_keywords` widens via `semantic_aliases` hardcoded synonym map."
+   },
+   {
+    "name": "Recency bit-packing tie-break",
+    "detail": "`s = overlap * 1_000_000 + (e.ts.min(999_999))` then descending sort — a single integer comparator where overlap dominates and recency breaks ties without a secondary sort key."
+   },
+   {
+    "name": "Leads-not-facts framing",
+    "detail": "RECALL_HEADER literally instructs 'treat as leads, verify before acting'; the `remember` tool description (tools.rs) restricts writes to CONFIRMED notes only. Recall block is appended to the system prompt by `compose_system_prompt`."
+   },
+   {
+    "name": "Heuristic consolidate (Jaccard single-link)",
+    "detail": "Newest-first greedy clustering; an entry is a dup if `jaccard(word_set) >= threshold` against any kept representative. Keeps newest of each cluster, re-caps, idempotent (re-run removes 0). Run at every session start at 0.85."
+   },
+   {
+    "name": "LLM summarize_consolidate with fallback",
+    "detail": "Same clustering; for clusters of >1 calls injected `Summarizer::merge` to fold into one note (newest ts + union of tags); on None/empty falls back to keeping newest. `LiveSummarizer` uses the fast model with a 'merge into ONE concise note, <=2 sentences' prompt."
+   },
+   {
+    "name": "Injected Summarizer trait",
+    "detail": "`#[async_trait(?Send)] trait Summarizer { async fn merge(&self,&[String]) -> Option<String> }` keeps ncx-core provider-agnostic; CLI provides `LiveSummarizer` (DeepSeekProvider, fast_model), tests use `FixedMerger`."
+   }
+  ],
+  "flow_steps": [
+   "WRITE: model calls `remember` tool (tools.rs RememberTool) with a confirmed note + optional tags; the tool reads SystemTime as `now` and calls `MemoryStore::remember`.",
+   "remember trims/normalizes text, returns Ok(false) on empty or exact-normalized duplicate, else pushes a MemoryEntry, sorts by ts, caps to MAX_ENTRIES (drop oldest), and `write_all` re-serializes the whole markdown file.",
+   "SESSION START: CLI/GUI construct `MemoryStore::new(workspace/.ncx/memory)` and call `consolidate(0.85)` (idempotent heuristic near-dup merge) to tidy the store cheaply.",
+   "RECALL: caller invokes `recall(query, max_entries, max_chars)` — runner uses (6,3000), CLI uses (8,4000), GUI uses (\"\",8,4000) for pure-recency at session start with no task yet.",
+   "recall computes expanded_keywords (with synonym aliases), the query word_set, and bigram phrases, then `semantic_score`s each entry (tags +8 / text +4 / phrase +6 / jaccard*20).",
+   "Scores are bit-packed with recency, sorted descending, and emitted as `- <note>` bullets under RECALL_HEADER until max_entries or max_chars is reached (empty string if nothing scores/stored).",
+   "INJECT: `compose_system_prompt` appends the recall block (alongside project instructions and skills index) to the system prompt, so notes ride along as leads for the turn.",
+   "OPTIONAL DEEP CONSOLIDATION: `summarize-memory` subcommand builds a `LiveSummarizer` (fast model) and calls `summarize_consolidate(&summarizer, 0.85)`, clustering near-dups and LLM-merging each multi-note cluster into one (newest ts + union tags), falling back to newest on merge failure."
+  ],
+  "interview_talking_points": [
+   "Framing matters: this is explicitly 'accumulated verified experience recalled as leads,' not a knowledge base treated as ground truth — enforced both at write time (remember tool: CONFIRMED only) and read time (RECALL_HEADER: 'treat as leads, verify before acting').",
+   "Deliberately dependency-free: a single hand-editable markdown file with comment headers instead of SQLite/embeddings — fits the 'tiny' philosophy and is git-diffable, at the cost of lexical-only retrieval.",
+   "How they fake semantic recall without embeddings: a hand-curated `semantic_aliases` synonym map + bigram phrases + Jaccard word-set overlap, combined into one additive `semantic_score`.",
+   "The single-integer scoring comparator: `overlap * 1_000_000 + ts.min(999_999)` packs relevance and recency so one descending sort gives relevance-primary, recency-tiebreak ordering deterministically.",
+   "Testability through injected `now`: the store never reads the clock itself, so dedup/cap/recall tests are fully deterministic; the caller (RememberTool) supplies SystemTime.",
+   "Two-tier consolidation as a cost/quality tradeoff: free heuristic Jaccard dedup runs every session start (idempotent), while the LLM merge is an explicit, paid opt-in that produces nicer fused notes.",
+   "Provider-agnostic core via the `?Send` `Summarizer` trait — ncx-core never imports a model client; the CLI's `LiveSummarizer` wires the fast model in, tests use a mock. Mirrors the project's `!Send`/Rc single-threaded design.",
+   "Bounded context safety: 200-entry hard cap + char-budgeted recall block, because recall is prepended to the system prompt every turn."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Dedup on remember is EXACT-text only (after normalize); near-duplicates with different wording slip through until a `consolidate`/`summarize_consolidate` pass — dedup and consolidation are intentionally two different similarity bars.",
+   "`semantic_aliases` is a tiny hardcoded, domain-specific map (gui/tauri/build/rust/etc.); recall semantics won't generalize beyond this project's vocabulary and must be hand-extended.",
+   "Recency packing caps ts contribution at 999_999 (`ts.min(999_999)`), and any score difference of >=1 in overlap (x1_000_000) dominates ts entirely — so recency only ever breaks exact relevance ties, never overrides relevance.",
+   "`word_set`/`keywords` drop tokens shorter than 3 chars, so short but meaningful tokens (e.g. 'go', 'ci', 'os') never contribute to Jaccard or keyword matching.",
+   "Whole-file rewrite on every successful remember/consolidate (`write_all` serializes all entries) — fine at the 200-cap scale but O(n) per write, not append-only despite the 'append-only-ish' comment.",
+   "`recall` scoring substring-matches keywords against the haystack with `hay.contains(w)`, so it can match inside larger words (substring, not word-boundary) — a possible source of spurious +4 hits.",
+   "`consolidate` returning removed-count and only writing when removed>0 makes it cheap/idempotent, but it silently keeps the NEWEST of a near-dup cluster, which may discard a better-worded older note in favor of a sloppier recent one (LLM merge exists precisely to mitigate this)."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:25 (Summarizer trait, ?Send)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:31 (MAX_ENTRIES=200)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:32 (RECALL_HEADER 'treat as leads')",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:60 (remember: dedup + cap)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:96 (recall: score + bit-pack + char/entry cap)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:109 (overlap*1_000_000 + ts recency packing)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:141 (consolidate: heuristic Jaccard near-dup, idempotent)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:179 (summarize_consolidate: LLM merge + newest-ts/union-tags + fallback)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:295 (semantic_aliases synonym map)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:311 (semantic_score: tag+8/text+4/phrase+6/jaccard*20)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:372 (jaccard)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:385 (parse_entries comment-header parser)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:1128 (RememberTool — CONFIRMED-only writes, SystemTime now)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/runner.rs:100 (recall(task,6,3000) injected into prompt)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/runner.rs:206 (LiveSummarizer — fast model, merge prompt)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:114 (summarize_consolidate at 0.85 subcommand; consolidate(0.85) at startup)",
+   "D:/agent_prac/ncx-train/rust/gui/src-tauri/src/bridge.rs:176 (GUI recall(\"\",8,4000) — recency-only at session start)"
+  ]
+ },
+ {
+  "subsystem": "skills-mcp-vision",
+  "one_liner": "Two-tier progressive-disclosure Agent Skills (SKILL.md index always-on, full body fetched via the `skill` tool), MCP server tools wrapped as first-class ncx Tools sharing one Rc<Mutex<McpClient>> with heuristic read-only/approval gating, and per-turn vision routing that diverts image-bearing turns to an optional dedicated vision Provider.",
+  "how_it_works": "SKILLS: A `Skill` (skills.rs) is a directory holding `SKILL.md` with `---`-fenced YAML frontmatter (`name:`, `description:`). `discover_skills` -> `discover_skills_with_home` seeds a `BTreeMap<String,Skill>` with `builtin_skills()` (compiled in via `include_str!`, currently just `commit-message`), then overlays two filesystem roots in order — `~/.ncx/skills/*` then `<workspace>/.ncx/skills/*` — so later same-name skills shadow earlier ones (workspace beats home beats builtin). `parse_frontmatter`/`frontmatter_lines`/`strip_frontmatter` hand-parse only the two needed keys (no YAML lib); `name` falls back to the directory name. Level-1 disclosure: `skills_index_block` emits only `- name: description` lines under a fixed header into the system prompt (composed in main.rs as `skills_index`, the 3rd extra block). Level-2: the `SkillTool` (tools.rs, `read_only`) is registered ONLY when `ctx.skills` is non-empty; on call it case-insensitively finds the skill and returns `Skill::load_body()` — embedded string for builtins, else `std::fs::read_to_string` + `strip_frontmatter` — prefixed with the skill's directory so the model can `read_file` bundled resources (level 3). MCP: `register_mcp_server` (mcp_tool.rs) does `McpClient::connect` over stdio, `list_tools`, then wraps the single client in `Rc<Mutex<McpClient>>` and registers one `McpTool` per `McpToolDef`, all sharing that handle. `McpTool` implements `Tool` (`?Send`), forwarding name/description/input_schema and computing `read_only` once via `is_read_only_name` (prefix/exact heuristic: read_/get_/list_/fetch_/search_/find_). On `execute`, non-read-only tools first run `Approver::new(&ctx.approval_policy).classify(name, true)`; `AutoDeny` returns an error string, `Ask` calls `ctx.approver.request(...)` with `escalated:true` (denial returns an error, missing approver falls through), `AutoApprove` proceeds; then `client.lock().await` serialises the `call_tool` RPC. VISION: each `run_turn_inner` sets `use_vision_this_turn = vision_provider.is_some() && has_image_block(user_input)`, where `has_image_block` checks the user content array for any block whose `type == \"image_url\"`. `active_provider()` returns the vision provider for that turn only when both are true, else the main provider; `call_model` calls `.chat` on whichever `active_provider()` returns. The vision provider is an optional `Box<dyn Provider>` built in main.rs by `build_vision_provider` (a `DeepSeekProvider` pointed at `vl_model`/`vl_base_url`/`vl_api_key`, falling back to the main creds when unset; `None` if `vl_model` is empty).",
+  "design_rationale": "Progressive disclosure exists to keep the always-on prompt cheap: injecting only name+description for every skill (which may bundle large bodies and helper files) avoids paying tokens for instructions the current task doesn't need; the doc comment explicitly frames this as the same two-tier catalog shape as `tool_search`. Builtins via `include_str!` guarantee a baseline skill set with zero filesystem dependency (ships in the single binary), while filesystem shadowing lets users override builtins without recompiling — the BTreeMap insert-order overlay is the cheapest way to express that precedence and also yields deterministic name-sorted output. The hand-rolled frontmatter parser is a deliberate dependency-minimisation choice: only two scalar keys matter, so pulling in a YAML crate would be overkill. For MCP, one `Rc<Mutex<McpClient>>` shared by all of a server's tools is forced by the architecture: the client owns one server process and one stdio JSON-RPC pipe, so concurrent calls MUST be serialised — the Mutex makes interleaved request/response framing impossible to corrupt, and `Rc` (not `Arc`) is correct because the whole agent runs on a current-thread, `!Send` runtime (note the `#[async_trait(?Send)]`). Reusing `ctx.approver`/`Approver`/`Decision` deliberately gives MCP side-effecting tools the exact same escalation model as `ShellTool` rather than inventing a parallel path; the name-prefix read-only heuristic is an admitted approximation (the test comment even flags `echo` as a misclassification edge) chosen because MCP's protocol exposes no machine-readable side-effect flag. Vision routing is per-turn and opt-in: rather than a separate multimodal pipeline or forcing one model to be both coder and vision-capable, image turns transparently divert to a specialised provider while text turns stay on the main coding model, and when no vision provider is configured image turns simply stay on the main provider (graceful no-op). Detection keys on the OpenAI-style `image_url` block so the same `content` array works for both providers.",
+  "key_mechanisms": [
+   {
+    "name": "Two-tier progressive disclosure",
+    "detail": "skills_index_block injects only `- name: description` lines (level 1); SkillTool.execute returns the full SKILL.md body + dir on demand (level 2), enabling read_file of bundled resources (level 3). SkillTool is registered only when ctx.skills is non-empty (tools.rs:213-216)."
+   },
+   {
+    "name": "Builtin + shadowing precedence",
+    "detail": "builtin_skills() via include_str! seeds a BTreeMap; ~/.ncx/skills then <workspace>/.ncx/skills overlay it (workspace > home > builtin). Skill.is_builtin() == embedded.is_some(); load_body() reads embedded string or filesystem (skills.rs:69-120)."
+   },
+   {
+    "name": "Shared serialised MCP client",
+    "detail": "register_mcp_server wraps one McpClient in Rc<Mutex<McpClient>>; every McpTool from that server clones the Rc, and execute does client.lock().await before call_tool, serialising stdio JSON-RPC on the current-thread runtime (mcp_tool.rs:106,128-131)."
+   },
+   {
+    "name": "Heuristic read-only + approval reuse",
+    "detail": "is_read_only_name matches read_/get_/list_/fetch_/search_/find_ prefixes (+ exact words). Non-read-only tools run Approver::classify(name,true): AutoDeny->error, Ask->ctx.approver.request(escalated:true), AutoApprove->proceed — identical to ShellTool (mcp_tool.rs:38-46,66-104)."
+   },
+   {
+    "name": "Per-turn vision routing",
+    "detail": "run_turn_inner sets use_vision_this_turn = vision_provider.is_some() && has_image_block(input); active_provider() swaps in the vision Provider only that turn. has_image_block scans the content array for type==\"image_url\" (agent_loop.rs:173-183,247,573-582)."
+   }
+  ],
+  "flow_steps": [
+   "Startup (main.rs): discover_skills(workspace) merges builtins + ~/.ncx + <workspace>/.ncx; skills_index_block -> skills_index folded into the system prompt; ToolContext.with_skills(skills) so SkillTool is registered when non-empty.",
+   "Startup MCP: for each configured server, register_mcp_server connects (stdio), list_tools, wraps client in Rc<Mutex<...>>, registers one McpTool per def into the ToolRegistry.",
+   "Startup vision: build_vision_provider returns Some(DeepSeekProvider on vl_model) or None; AgentLoop.with_vision_provider stores it.",
+   "run_turn_inner: compute use_vision_this_turn = vision_provider.is_some() && has_image_block(user_input).",
+   "Model call: active_provider() returns vision provider iff use_vision_this_turn, else main provider; call_model.chat on it.",
+   "Model reads the level-1 skills index, decides a task matches, and calls the `skill` tool with the exact name.",
+   "SkillTool.execute: case-insensitive lookup in ctx.skills; on hit returns 'Skill <name> (...): <body>' via load_body() (embedded or fs read+strip_frontmatter); on miss returns an error listing available skills.",
+   "Model optionally read_files bundled resources from the returned skill dir (filesystem skills) — level 3.",
+   "If the model emits an MCP tool call: McpTool.execute checks read_only; non-read-only runs Approver.classify -> maybe ctx.approver.request; on approval client.lock().await then call_tool, returning the result or an Error: string."
+  ],
+  "interview_talking_points": [
+   "Progressive disclosure is the headline: only name+description is always-on; the heavyweight SKILL.md body is fetched lazily by the `skill` tool. Explicitly modeled on the same two-tier catalog as tool_search to keep prompt tokens cheap.",
+   "Three disclosure levels: (1) index in system prompt, (2) full body via SkillTool, (3) bundled resource files the model reads with read_file from the returned skill directory.",
+   "Builtins are compiled in with include_str! (zero fs dependency, ships in one binary) but a same-named filesystem skill shadows them — workspace > home > builtin via ordered BTreeMap inserts; also yields deterministic name-sorted output.",
+   "Frontmatter is hand-parsed for just name+description (no YAML crate) — deliberate dependency minimisation; name falls back to the directory name, malformed/unreadable skills are silently skipped.",
+   "One Rc<Mutex<McpClient>> shared by all tools of a server: forced because the client owns a single server process + stdio JSON-RPC pipe, so concurrent calls must serialise. Rc not Arc because the runtime is current-thread / !Send (async_trait(?Send)).",
+   "MCP approval reuses the exact ShellTool path (Approver/Decision/ctx.approver) — AutoDeny / Ask (escalated:true) / AutoApprove — rather than a parallel mechanism.",
+   "read_only for MCP is a name-prefix heuristic (read_/get_/list_/fetch_/search_/find_), an explicit approximation because MCP advertises no side-effect flag; tests even note the `echo` edge case.",
+   "Vision routing is per-turn and opt-in: image turns (any image_url block in the content array) divert to a dedicated vision Provider (a DeepSeekProvider on vl_model); text turns stay on the main coding model, and a missing vision provider degrades gracefully to the main provider."
+  ],
+  "tradeoffs_or_gotchas": [
+   "read_only is a name-prefix heuristic with no protocol backing: a write tool named e.g. `search_and_replace` would be auto-approved, and the test comment itself flags that `echo` is not actually matched (it has no read-prefix) — so naming alone decides whether a side-effecting MCP tool is gated.",
+   "When Decision::Ask but no approver is configured, McpTool falls through and calls the tool anyway (matching ShellTool's auto-approve behavior) — non-read-only MCP calls can run unprompted in headless contexts.",
+   "Frontmatter parsing requires the opening `---` to be the very first line and a matching closing fence; otherwise the whole file is treated as body and name falls back to the dir — silent rather than erroring, and a builtin missing a name is skipped (packaging bug hidden).",
+   "Vision detection only recognises OpenAI-style `image_url` blocks in a top-level content array; a plain-string prompt or a differently-shaped image block won't route. Detection is recomputed per turn, so a tool/result turn following an image turn does NOT stay on the vision model.",
+   "The vision provider is hard-wired to DeepSeekProvider in build_vision_provider; routing the whole turn (not just the image) to it means the vision model also handles any tool-calling that turn.",
+   "All MCP tools of a server serialise through one Mutex, so a slow MCP call blocks sibling tools from the same server (acceptable on a single-thread runtime, but no per-tool concurrency)."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:52 (Skill::load_body)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:69 (builtin_skills via include_str!)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:101 (discover_skills_with_home + BTreeMap shadowing)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:160 (skills_index_block, level-1)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:177 (parse_frontmatter)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:213 (SkillTool registered only when skills present)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:1184 (SkillTool, level-2 body load)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:24 (McpTool struct, Rc<Mutex<McpClient>>)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:38 (is_read_only_name heuristic)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:66 (execute: approval + client.lock().await)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:118 (register_mcp_server)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:173 (active_provider vision swap)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:247 (use_vision_this_turn computed per turn)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:573 (has_image_block)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:148 (discover + index into system prompt)",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:1094 (build_vision_provider)"
+  ]
+ },
+ {
+  "subsystem": "ncx-forge — the harness-evolution training framework for the nanocodex Rust coding agent",
+  "one_liner": "A zero-GPU \"scaffold optimizer\": a strong-model teacher panel reflectively mutates the agent's evolvable harness (system prompt + tool descriptions = the \"genome\", injected via NCX_GENOME), hidden-check bench pass-rate is the fitness, and a sentinel self-check + train/val/test splits + noise-aware acceptance + Pareto small-population search guard against the dominant failure modes (silent no-op, overfitting, sampling noise), with graded trajectories exported as the bridge to actual weight training (SFT/agentic-GRPO).",
+  "how_it_works": "The evolvable unit is the \"genome\": only the agent's base `system_prompt` and per-tool `description` text — never tool behavior. In Rust (`genome.rs`), `Genome::from_env()` reads `NCX_GENOME=<path.toml>` at startup; if unset/empty/missing/malformed/blank it returns `Genome::default()` (a no-op that is byte-for-byte identical to the hardcoded scaffold), and `base_system_prompt(default)`/`describe(name, default)` apply overrides only where present. On the trainer side (pure Python in `train/`, driving `ncx.exe` only via subprocess + `NCX_GENOME`, never importing the legacy `nanocodex/*.py`), the baseline genome is obtained by running `ncx --dump-genome` (`genome.py:extract_current`) so it always reflects the real tool list and the real load-bearing descriptions rather than parsed Rust source. `evaluator.py:evaluate` runs the agent on bench tasks in a temp workspace, grades with the hidden `check.py`, and — crucially — harvests a redacted FAILURE TRAJECTORY (last assistant message + tool-call names) from the agent's own `.nanocodex/session.jsonl` BEFORE `grade()` copies `_check.py` in, stripping any line containing grader markers so `check.py` never leaks to the teacher. `forge.py:train` is a single-champion hill-climb: each round it re-evaluates the incumbent under a fresh draw (noise-aware), feeds the top-3 failing trajectories to `teacher.build_teacher_prompt`, has every available teacher backend (`codex`/`claude`/`api` in `teacher.py`, each probe-gated and emitting only a TOML override block parsed by `parse_candidate`) propose a mutation, evaluates candidates on TRAIN, and promotes the best only if it beats the incumbent on TRAIN by `accept_margin` AND does not regress on the held-out VAL split; TEST is scored exactly once at the end. `forge.py:evolve` (M2) replaces the single champion with a small Pareto population (pass-rate↑ vs token-cost↓ via `pareto.py` dominance + NSGA-II crowding trim). Before any optimizing run, `self_check` gates execution by planting a sentinel codeword in `system_prompt` and asserting it surfaces with-genome but is absent at baseline. `export.py` writes full graded trajectories (`ncx-forge-trajectory/v1`) and `rollout.py`/`finetune.py` define the agentic-GRPO bridge to weight training.",
+  "design_rationale": "The framing constraint is \"no GPU, model is the real lever\": you cannot make the base model smarter, so the framework optimizes the second lever — the harness — to use existing capability more reliably (DESIGN §1). This forces a pure text-substitution surface: the genome may change only descriptions/prompt, never behavior, because (a) the sandbox still governs execution so a teacher fed untrusted failure transcripts cannot inject new capability (a structural security boundary, DESIGN §9), and (b) it keeps the no-op guarantee provable. The no-op-on-failure default in `genome.rs` is load-bearing: an adversarial review found that without it, every candidate that failed to load would silently be ignored, all candidates would score identically, and the whole run would \"go green\" while no-opping — hence the sentinel self-check gate that refuses to train unless injection is demonstrably live. The sentinel is deterministic precisely because the original idea (a \"refuse all tasks\" self-destruct genome) proved unreliable: strong models ignore the refusal and complete the task anyway (compliance is noise), so a behavioral probe could not distinguish \"injection dead\" from \"model non-compliant\". The trajectory-harvesting in the evaluator exists because `bench/run.py` discards agent output and rmtrees the workspace, leaving the teacher to \"guess from the filename\" — P2 was a hard precondition. Trainer/trainee separation (Python trainer never imports the Rust trainee's legacy Python twin) keeps the only Rust change to the one `NCX_GENOME` injection point, minimizing conflict surface. The biggest acknowledged risk is overfitting/noise, which dictates: task-level (not run-level) train/val/test split so a task's signal can't leak across phases; grader output blanked from the teacher to prevent reward-hacking on note tails; `repeats` + a strict `accept_margin` band + per-round incumbent re-evaluation so a pure-variance +1 cannot be promoted and then frozen as \"monotone improvement.\" Size caps are derived from the measured baseline (apply_patch ≈8125 chars and load-bearing) with a round-trip self-test, because a too-tight cap would push the optimizer to trim apply_patch and trigger a known git-diff-fallback failure loop. Pareto (vs single champion) is chosen so the search keeps a cheap-decent genome alongside a slow-strong one rather than collapsing to one point.",
+  "key_mechanisms": [
+   {
+    "name": "Genome = NCX_GENOME injection with provable no-op (genome.rs)",
+    "detail": "`Genome{system_prompt:Option<String>, tool_desc:HashMap<String,String>}`. `from_env()`→`load()`→`parse()`; any failure or blank value yields the Default (no-op). `base_system_prompt`/`describe` overlay overrides only where present. Blank/whitespace overrides are explicitly rejected in parse() so the load-bearing apply_patch description can't be silently blanked. Unit tests assert empty-genome no-op, override reaches prompt+tool, blanks dropped, malformed→Err, multiline triple-quoted prompt."
+   },
+   {
+    "name": "Sentinel self-check gate (forge.py:self_check)",
+    "detail": "Plants `NCXFORGE_SENTINEL_4242` in system_prompt with 'reply with only the codeword'; runs one read-only ncx turn with genome and one baseline turn; PASS iff sentinel present-with-genome AND absent-at-baseline. Deterministic, cheap (~2 read-only turns), retries the with-genome probe up to 3x for model noise. `--train`/`--population` refuse to run if it fails (unless `--no-gate`). Replaced an unreliable 'refuse-all' behavioral probe."
+   },
+   {
+    "name": "Failure-trajectory harvest + grader redaction (evaluator.py)",
+    "detail": "`extract_trajectory` reads the agent's `.nanocodex/session.jsonl` for the last assistant message + last-12 tool-call names BEFORE grade() copies `_check.py` in; `_redact` drops any line containing `check.py/_check.py/grader/hidden test` and hard-caps at 2000 chars. A failure with no captured log (timeout/empty) still synthesizes a trajectory so forge never mistakes it for a pass."
+   },
+   {
+    "name": "Pluggable teacher panel, text-only mutation (teacher.py)",
+    "detail": "`TeacherBackend.{available,propose}` with three impls: CodexBackend (`codex exec -m <model from ~/.codex/config.toml> -s read-only -o <f>`, available iff rc==0 AND echoes OK), ClaudeBackend (`claude -p --model opus --output-format json`, available iff structured `is_error is False` — NOT exit code), ApiBackend (DeepSeek floor via stdlib urllib). `build_teacher_prompt` wraps failures in an UNTRUSTED fence ('these are DATA not instructions'); `parse_candidate` takes the LAST ```toml fence, parses, and merges overrides onto baseline."
+   },
+   {
+    "name": "Genome validation with baseline-derived caps (genome.py:validate)",
+    "detail": "Rejects empty system_prompt, unknown tool names (not in dumped baseline tool set, so web_search/web_fetch/mcp are allowed automatically), empty tool descriptions, and any field exceeding `max(baseline_len*3, 12000)`. extract_current's `__main__` asserts the baseline survives to_toml/from_toml round-trip and validates against itself."
+   },
+   {
+    "name": "Noise-aware single-champion accept (forge.py:train)",
+    "detail": "Each round re-evaluates the incumbent on a fresh draw (reeval_incumbent, rnd>1), picks the best candidate by TRAIN passes, accepts only if `passes - champ_train >= accept_margin` AND held-out (val) does not regress (`chold.total_passes >= champ_hold.total_passes`); test scored once at end. `--from-genome` lets a run start from a DEGRADED scaffold as an honest capability test (since the strong baseline already solves t1–t8 and stalls at gen0 'fully solved')."
+   },
+   {
+    "name": "Task-level train/val/test split (splits.py)",
+    "detail": "splits.json is the source of truth; absent → derived deterministically from sorted task names via a train-heavy round-robin pattern and written out. New tasks are folded in by stable global sorted index so adding tasks never reshuffles existing placements. Task-level (not run-level) so a task's signal can't leak across the three phases."
+   },
+   {
+    "name": "Self-validating TaskGen (taskgen.py)",
+    "detail": "Teacher emits a task as strict JSON {name,prompt,check,seed,reference}. Admitted only if (1) reference passes check TWICE (catches non-determinism) and (2) seed-only state FAILS check (proves real work). Grader lands as hidden check.py, never shown to the agent. Iterates over 6 capability DIMENSIONS; writes to bench/tasks/ for human review/promote."
+   },
+   {
+    "name": "Pareto small-population search (pareto.py + forge.py:evolve)",
+    "detail": "Objectives(passrate↑, cost↓) with `dominates`; `pareto_front` keeps non-dominated; `crowding_trim` uses NSGA-II crowding distance (boundaries +inf) to cap the front to pop_cap while preserving spread; `select_population`=front+trim; `best`=max passrate, tie-break min cost. `_objectives` uses real mean total tokens when ncx emits `[ncx-usage]`, else mean seconds; an EMPTY eval maps to cost=+inf so a zero-task misconfig can't silently win the front."
+   },
+   {
+    "name": "Weight-training bridge (export.py / finetune.py / rollout.py)",
+    "detail": "export.py writes full graded trajectories (schema ncx-forge-trajectory/v1: system_prompt/messages/final/reward 0|1/tokens/model/genome_id); `--reward-pass-only` yields an SFT imitation set. finetune.py `to_chat` builds chat SFT examples and lazy-loads trl SFTTrainer; `bench_reward(task, ws)` reuses the hidden grader as a verifiable 0/1 RL reward. rollout.py is the agentic-RL collector: `collect_rollout` (injected chat_fn/tool_exec model↔tools loop), `ncx_episode` (reuse ncx's real loop/tools/sandbox pointed at a vLLM-served policy, recommended), `grpo_advantages` ((r-mean)/(std+eps), all-equal→0), `collect_group`."
+   }
+  ],
+  "flow_steps": [
+   "Gate: forge.py:self_check plants the sentinel codeword in system_prompt, runs one read-only ncx turn with NCX_GENOME and one baseline turn, and asserts present-with-genome + absent-at-baseline; on failure the train/population run refuses to proceed.",
+   "Baseline genome: genome.py:extract_current runs `ncx --dump-genome` to get the real default system_prompt + per-tool descriptions; champion starts here (or from a degraded scaffold via --from-genome).",
+   "Splits: splits.py:load_splits resolves task-level train/val/test from splits.json (deterministically derived + persisted if absent).",
+   "gen0 eval: evaluator.evaluate runs ncx (NCX_GENOME injected) per task×repeats in temp workspaces, parses `[ncx-usage]` tokens, grades with hidden check.py, and harvests a redacted failure trajectory from session.jsonl before grading.",
+   "Per round: re-evaluate the incumbent on a fresh draw (noise band), then take the top-3 failing trajectories as the teacher signal.",
+   "Mutate: teacher.build_teacher_prompt embeds the current genome + UNTRUSTED-fenced failures; each available panel backend (codex/claude/api) proposes a single ```toml override block; parse_candidate merges the last fence onto baseline and genome.validate enforces caps/legal-tool/non-empty.",
+   "Evaluate candidates on TRAIN; pick the best by total passes.",
+   "Accept gate: promote only if TRAIN beats the incumbent by accept_margin AND held-out VAL does not regress; otherwise reject/log; record lineage JSON.",
+   "(Population mode) parents+children reduced to the next Pareto front by dominance + crowding trim to pop_cap; reeval_parents re-scores survivors each gen; viz.py renders the front + lineage to HTML.",
+   "Final: score baseline vs champion ONCE on the frozen TEST split (never used for acceptance) for the only unbiased 'did training help?' number; write lineage_<stamp>.json.",
+   "Bridge: export.py replays the champion genome over tasks to write graded trajectories; finetune.py/rollout.py consume them for SFT (imitate reward==1) or agentic GRPO (bench_reward terminal reward, group-normalized advantages)."
+  ],
+  "interview_talking_points": [
+   "The central design move: make ONLY text (system prompt + tool descriptions) evolvable, never tool behavior. This is simultaneously the security boundary (untrusted teacher → genome → agent with a real shell tool cannot inject new capability; the sandbox still governs execution) and what makes the no-op guarantee provable.",
+   "Why the no-op-on-failure default in genome.rs is load-bearing: without it a candidate that fails to load is silently ignored, all candidates score identically, and the run 'goes green' as a pure no-op — which is exactly why the sentinel self-check gate exists and is mandatory.",
+   "Why the gate is a deterministic sentinel codeword and not a 'refuse all tasks' genome: strong models ignore refusal instructions and complete the task anyway (compliance is noise), so a behavioral probe can't tell 'injection dead' from 'model non-compliant'. Echoing a unique codeword is deterministic and cheap.",
+   "The two hard preconditions found by adversarial review: P1 = NCX_GENOME injection did not exist (grep zero hits); P2 = bench/run.py discarded agent output and rmtree'd the workspace, so the teacher had no trajectory to diagnose. Both had to land before any optimization was meaningful.",
+   "Anti-overfit stack: task-level (not run-level) train/val/test split; grader output blanked from the teacher (prevents reward-hacking on leaked 'expected 15 got 0' note tails); per-round incumbent re-evaluation + a strict accept_margin band so a pure-variance +1 can't be promoted and frozen as fake 'monotone improvement.'",
+   "Self-validating TaskGen discipline: a generated task is admitted only if reference passes the check twice (determinism) AND the seed-only starting state fails it (proves real work) — the same discipline used to hand-write t1–t13, now gating machine output.",
+   "Cost model insight: the real cost bomb is the inner bench loop (candidates × tasks × repeats × up to 60 model turns), not the teacher calls — hence a wall-clock governor, cheap pre-screening, and budget measured in tokens/eval-count (every backend can report it) rather than USD.",
+   "Size caps are derived from the measured baseline (apply_patch ≈8125 chars, load-bearing) with a round-trip self-test, specifically to avoid pushing the optimizer toward trimming apply_patch and triggering a git-diff-fallback failure loop.",
+   "Pareto over single-champion keeps trade-offs (cheap-decent vs slow-strong) and uses NSGA-II crowding to preserve spread; the empty-eval→cost=+inf guard prevents a zero-task misconfig from silently winning the front.",
+   "Honest bridge to weights: the agent is a multi-turn tool loop, so vanilla trl GRPO doesn't fit — the team built an agentic rollout collector (ncx_episode reuses ncx's real loop/tools/sandbox against a vLLM-served policy) with bench_reward as a verifiable terminal reward, and the evolved system prompt can seed the RL system prompt."
+  ],
+  "tradeoffs_or_gotchas": [
+   "Capability ceiling: harness optimization only improves reliability/engineering-fit; it cannot raise the base model's intelligence (plan/verify run on the main model). DESIGN states 'model is the real lever' — this is the second lever, not a smarter model.",
+   "Strong-baseline stall: the default scaffold already passes t1–t8, so real runs often stop at gen0 'fully solved' with nothing to mutate. Seeing teacher lift requires harder tasks (TaskGen) or starting from a degraded genome (--from-genome) or a weaker base model (--base-model/-m injection).",
+   "Local teacher panel is effectively single-teacher: in the author's environment claude is unauthenticated (rc=0 but is_error:true → must be judged by the structured field, not exit code), so the panel is really codex(gpt-5.4 via CLIProxyAPI proxy) + api(DeepSeek). codex model name must be resolved from ~/.codex/config.toml — hardcoded gpt-5 502s on the proxied host.",
+   "Trust boundary depends on redaction completeness: the grader-leak defense is substring matching on `check.py/_check.py/grader/hidden test` in trajectory lines; `_check.py` still lands in the workspace under workspace-write, so an agent that is teacher-prompted could in principle read it — DESIGN flags isolating/renaming the grader copy as a hardening TODO.",
+   "Pareto cost axis is a proxy when token usage is unavailable: it uses real `[ncx-usage]` total_tokens when ncx emits it, else falls back to mean wall-clock seconds, so cost comparisons across runs without usage are latency-based, not token-based.",
+   "The composed system prompt is concatenated (base + project-instructions + memory/recall + skills) but the genome only evolves the BASE segment; export.py records the genome base because ncx does not log the composed system message — the run-context suffixes are excluded from the recorded artifact.",
+   "run_grpo / policy_update are deliberately NotImplemented (GPU/torch); only the loop + advantage math + episode collection are tested CPU-side. The actual weight update is left as a documented contract, not running code.",
+   "Acceptance is by integer pass-count thresholds (accept_margin defaults to 1, repeats defaults to 1), so with few tasks/repeats the 'noise band' is coarse; DESIGN itself flags small task counts (originally 8) as the largest risk that TaskGen + splits only partially mitigate."
+  ],
+  "code_refs": [
+   "D:/agent_prac/ncx-train/train/DESIGN.md",
+   "D:/agent_prac/ncx-train/train/forge.py",
+   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/genome.rs",
+   "D:/agent_prac/ncx-train/train/teacher.py",
+   "D:/agent_prac/ncx-train/train/evaluator.py",
+   "D:/agent_prac/ncx-train/train/genome.py",
+   "D:/agent_prac/ncx-train/train/taskgen.py",
+   "D:/agent_prac/ncx-train/train/pareto.py",
+   "D:/agent_prac/ncx-train/train/splits.py",
+   "D:/agent_prac/ncx-train/train/export.py",
+   "D:/agent_prac/ncx-train/train/rollout.py",
+   "D:/agent_prac/ncx-train/train/finetune.py"
+  ]
+ }
+]
