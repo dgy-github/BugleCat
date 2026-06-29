@@ -158,14 +158,12 @@ async fn run(args: Args) -> i32 {
         };
     let network = sandbox_mode == "danger-full-access";
     let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
-    // Project memory: recalled into the system prompt as leads; the `remember`
-    // tool lets the agent append verified notes (it gets smarter on THIS repo).
+    // Project memory: recalled per prompt by AgentLoop (query-scoped); the
+    // `remember` tool lets the agent append verified notes (smarter on THIS repo).
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     // Periodic consolidation: fold near-duplicate notes on every start (cheap,
     // idempotent) so the store stays tidy as it grows.
     let _ = memory.consolidate(0.85);
-    let recall_query = args.prompt.as_deref().unwrap_or("");
-    let recall = memory.recall(recall_query, 8, 4000);
     let instructions = load_project_instructions(&cfg.workspace, 16_000);
     // Agent Skills: inject only the name+description index (progressive
     // disclosure); the `skill` tool loads a full SKILL.md body on demand.
@@ -190,7 +188,7 @@ async fn run(args: Args) -> i32 {
         String::new()
     };
     let system_prompt =
-        compose_system_prompt(&base_prompt, &[instructions, recall, skills_index, plan_note]);
+        compose_system_prompt(&base_prompt, &[instructions, skills_index, plan_note]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
         .with_approval_policy(approval_policy)
         .with_require_edit_approval(require_edit)
@@ -209,10 +207,19 @@ async fn run(args: Args) -> i32 {
         print!("{}", dump_genome_toml(&base_prompt, &tools.ctx.tool_catalog.borrow()));
         return 0;
     }
-    for srv in load_mcp_servers() {
-        match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await {
-            Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
-            Err(e) => eprintln!("mcp({}): connect failed: {e}", srv.name),
+    // MCP is off by default: only connect servers (spawning subprocesses outside
+    // the sandbox) when the user opts in with --mcp. Keeps startup fast and quiet.
+    if args.mcp {
+        let servers = load_mcp_servers();
+        if servers.is_empty() {
+            eprintln!("mcp: --mcp set but no servers found in ~/.nanocodex/mcp.toml");
+        }
+        for srv in servers {
+            match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await
+            {
+                Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
+                Err(e) => eprintln!("mcp({}): connect failed: {e}", srv.name),
+            }
         }
     }
     let log_path = session_log_path(&cfg.workspace);

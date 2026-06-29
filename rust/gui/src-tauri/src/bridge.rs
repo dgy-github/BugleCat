@@ -239,7 +239,7 @@ fn build_agent(
     let network = sandbox_mode == "danger-full-access";
     let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
-    let recall = memory.recall("", 8, 4000); // recency at session start (no task yet)
+    // Memory is recalled per prompt by AgentLoop (query-scoped), not dumped here.
     // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
     // files (their handoff protocol would make a plain "hi" read HANDOFF.md etc.).
     let instructions = load_workspace_instructions(&cfg.workspace, 16_000);
@@ -251,7 +251,7 @@ fn build_agent(
         String::new()
     };
     let system_prompt =
-        compose_system_prompt(SYSTEM_PROMPT, &[instructions, recall, skills_index, plan_note]);
+        compose_system_prompt(SYSTEM_PROMPT, &[instructions, skills_index, plan_note]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
         .with_approval_policy(approval_policy)
         .with_require_edit_approval(require_edit)
