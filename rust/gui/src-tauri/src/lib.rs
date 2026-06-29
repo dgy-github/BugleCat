@@ -16,7 +16,10 @@ use ncx_config::{
     load_config, write_nanocodex_config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
 };
-use ncx_core::{CheckpointMeta, CheckpointStore, MemoryStore, RestoreReport, SessionIndex};
+use ncx_core::{
+    custom_command_prompt, list_custom_commands, CheckpointMeta, CheckpointStore, MemoryStore,
+    RestoreReport, SessionIndex,
+};
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -948,6 +951,48 @@ fn open_session_snapshot(session_id: String) -> Result<(), String> {
     open_file(&path)
 }
 
+#[derive(Serialize)]
+pub struct CustomCommandView {
+    scope: String,
+    name: String,
+    slash: String,
+    path: String,
+}
+
+/// List project/user custom slash commands (`.nanocodex|.claude/commands/*.md`).
+#[tauri::command]
+fn get_custom_commands() -> Result<Vec<CustomCommandView>, String> {
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(list_custom_commands(&cfg.workspace)
+        .into_iter()
+        .map(|cmd| CustomCommandView {
+            scope: cmd.scope.to_string(),
+            name: cmd.name.clone(),
+            slash: format!("/{}:{}", cmd.scope, cmd.name),
+            path: cmd.path.display().to_string(),
+        })
+        .collect())
+}
+
+/// Expand a custom command (with args) into the prompt the agent should run.
+#[tauri::command]
+fn expand_custom_command(slash: String, arg: String) -> Result<String, String> {
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    match custom_command_prompt(&cfg.workspace, &slash, &arg) {
+        Ok(Some(prompt)) => Ok(prompt),
+        Ok(None) => Err(format!("unknown custom command: {slash}")),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -990,6 +1035,8 @@ pub fn run() {
             list_sessions,
             open_session_log,
             open_session_snapshot,
+            get_custom_commands,
+            expand_custom_command,
             memory_list,
             memory_consolidate,
             memory_add,

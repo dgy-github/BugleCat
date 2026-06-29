@@ -23,10 +23,11 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
-    register_mcp_server, skills_index_block, AgentLoop, CheckpointMeta, CheckpointStore,
-    ContextEditPolicy, Genome, MemoryStore, Orchestrator, OrchestratorConfig, Provider, Session,
-    SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry, TurnResult,
+    custom_command_prompt, discover_skills, expand_file_mentions, list_custom_commands,
+    load_project_instructions, new_session_id, register_mcp_server, skills_index_block, AgentLoop,
+    CheckpointMeta, CheckpointStore, ContextEditPolicy, Genome, MemoryStore, Orchestrator,
+    OrchestratorConfig, Provider, Session, SessionIndex, SessionSummary, TaskBudget, ToolContext,
+    ToolRegistry, TurnResult,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -870,224 +871,6 @@ fn doc_prompt(fmt: &str, arg: &str) -> String {
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CustomCommandSummary {
-    scope: &'static str,
-    name: String,
-    path: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CustomCommandQuery {
-    scope: Option<&'static str>,
-    name: String,
-}
-
-fn custom_command_prompt(
-    workspace: &Path,
-    slash_cmd: &str,
-    arg: &str,
-) -> Result<Option<String>, String> {
-    let Some(query) = parse_custom_command_query(slash_cmd) else {
-        return Ok(None);
-    };
-    let Some(cmd) = resolve_custom_command(workspace, &query) else {
-        return Ok(None);
-    };
-    let template = std::fs::read_to_string(&cmd.path).map_err(|e| {
-        format!(
-            "could not read custom command {} from {}: {e}",
-            slash_cmd,
-            cmd.path.display()
-        )
-    })?;
-    Ok(Some(expand_custom_command_template(
-        strip_frontmatter(&template),
-        arg,
-    )))
-}
-
-fn parse_custom_command_query(slash_cmd: &str) -> Option<CustomCommandQuery> {
-    let body = slash_cmd.strip_prefix('/')?;
-    if body.is_empty() {
-        return None;
-    }
-    let (scope, name) = if let Some((scope, name)) = body.split_once(':') {
-        let scope = match scope {
-            "project" => "project",
-            "user" => "user",
-            _ => return None,
-        };
-        (Some(scope), name)
-    } else {
-        (None, body)
-    };
-    if !valid_custom_command_name(name) {
-        return None;
-    }
-    Some(CustomCommandQuery {
-        scope,
-        name: name.to_string(),
-    })
-}
-
-fn resolve_custom_command(
-    workspace: &Path,
-    query: &CustomCommandQuery,
-) -> Option<CustomCommandSummary> {
-    custom_command_roots(workspace)
-        .into_iter()
-        .filter(|root| query.scope.is_none_or(|s| s == root.scope))
-        .find_map(|root| {
-            let path = root.dir.join(format!("{}.md", query.name));
-            if path.is_file() {
-                Some(CustomCommandSummary {
-                    scope: root.scope,
-                    name: query.name.clone(),
-                    path,
-                })
-            } else {
-                None
-            }
-        })
-}
-
-fn list_custom_commands(workspace: &Path) -> Vec<CustomCommandSummary> {
-    let mut out: Vec<CustomCommandSummary> = Vec::new();
-    let mut seen: Vec<(&'static str, String)> = Vec::new();
-    for root in custom_command_roots(workspace) {
-        let Ok(entries) = std::fs::read_dir(&root.dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                continue;
-            }
-            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if !valid_custom_command_name(name) {
-                continue;
-            }
-            let name = name.to_string();
-            if seen
-                .iter()
-                .any(|(scope, n)| *scope == root.scope && n == &name)
-            {
-                continue;
-            }
-            seen.push((root.scope, name.clone()));
-            out.push(CustomCommandSummary {
-                scope: root.scope,
-                name,
-                path,
-            });
-        }
-    }
-    out.sort_by(|a, b| (a.scope, &a.name).cmp(&(b.scope, &b.name)));
-    out
-}
-
-struct CustomCommandRoot {
-    scope: &'static str,
-    dir: PathBuf,
-}
-
-fn custom_command_roots(workspace: &Path) -> Vec<CustomCommandRoot> {
-    let mut roots = vec![
-        CustomCommandRoot {
-            scope: "project",
-            dir: workspace.join(".nanocodex").join("commands"),
-        },
-        CustomCommandRoot {
-            scope: "project",
-            dir: workspace.join(".claude").join("commands"),
-        },
-    ];
-    if let Some(home) = home_dir() {
-        roots.push(CustomCommandRoot {
-            scope: "user",
-            dir: home.join(".nanocodex").join("commands"),
-        });
-        roots.push(CustomCommandRoot {
-            scope: "user",
-            dir: home.join(".claude").join("commands"),
-        });
-    }
-    roots
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-}
-
-fn valid_custom_command_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-fn strip_frontmatter(template: &str) -> &str {
-    let Some(rest) = template
-        .strip_prefix("---\n")
-        .or_else(|| template.strip_prefix("---\r\n"))
-    else {
-        return template.trim();
-    };
-    let mut offset = template.len() - rest.len();
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            return template[offset + line.len()..].trim();
-        }
-        offset += line.len();
-    }
-    template.trim()
-}
-
-fn expand_custom_command_template(template: &str, arg: &str) -> String {
-    let args = split_custom_args(arg);
-    let mut out = template.to_string();
-    for i in 0..10 {
-        let value = args.get(i).map(String::as_str).unwrap_or("");
-        out = out.replace(&format!("$ARGUMENTS[{i}]"), value);
-        out = out.replace(&format!("${i}"), value);
-    }
-    out = out.replace("$ARGUMENTS", arg.trim());
-    if !arg.trim().is_empty()
-        && !template.contains("$ARGUMENTS")
-        && !(0..10).any(|i| template.contains(&format!("${i}")))
-    {
-        out.push_str("\n\nArguments: ");
-        out.push_str(arg.trim());
-    }
-    out.trim().to_string()
-}
-
-fn split_custom_args(arg: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut quote: Option<char> = None;
-    for ch in arg.chars() {
-        match (quote, ch) {
-            (Some(q), c) if c == q => quote = None,
-            (None, '"' | '\'') => quote = Some(ch),
-            (None, c) if c.is_whitespace() => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
-            }
-            _ => cur.push(ch),
-        }
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
-}
 
 fn config_text(cfg: &ncx_config::Config, arg: &str) -> String {
     let path = ConfigPaths::default().nanocodex;
@@ -1606,42 +1389,6 @@ mod tests {
     }
 
     #[test]
-    fn custom_command_expands_project_prompt_template() {
-        let ws = std::env::temp_dir().join(format!("ncx_custom_cmd_{}", new_session_id()));
-        let dir = ws.join(".nanocodex").join("commands");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("review.md"),
-            "---\ndescription: Review a file\n---\nReview $ARGUMENTS[0] with $0. Full: $ARGUMENTS",
-        )
-        .unwrap();
-
-        let out = custom_command_prompt(&ws, "/review", "src/main.rs extra")
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(
-            out,
-            "Review src/main.rs with src/main.rs. Full: src/main.rs extra"
-        );
-        assert!(!out.contains("description"));
-    }
-
-    #[test]
-    fn custom_command_supports_claude_compatible_project_dir() {
-        let ws = std::env::temp_dir().join(format!("ncx_custom_claude_{}", new_session_id()));
-        let dir = ws.join(".claude").join("commands");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("audit.md"), "Audit the current change.").unwrap();
-
-        let out = custom_command_prompt(&ws, "/project:audit", "focus tests")
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(out, "Audit the current change.\n\nArguments: focus tests");
-    }
-
-    #[test]
     fn help_lists_custom_project_commands() {
         let ws = std::env::temp_dir().join(format!("ncx_custom_help_{}", new_session_id()));
         let dir = ws.join(".nanocodex").join("commands");
@@ -1652,23 +1399,6 @@ mod tests {
 
         assert!(help.contains("Custom commands"));
         assert!(help.contains("/project:ship"));
-    }
-
-    #[test]
-    fn custom_command_parser_rejects_unknown_scope_or_bad_name() {
-        assert!(parse_custom_command_query("/project:review").is_some());
-        assert!(parse_custom_command_query("/user:review").is_some());
-        assert!(parse_custom_command_query("/team:review").is_none());
-        assert!(parse_custom_command_query("/bad/name").is_none());
-        assert!(parse_custom_command_query("/bad name").is_none());
-    }
-
-    #[test]
-    fn split_custom_args_honors_simple_quotes() {
-        assert_eq!(
-            split_custom_args(r#"one "two words" 'three words'"#),
-            vec!["one", "two words", "three words"]
-        );
     }
 
     #[test]

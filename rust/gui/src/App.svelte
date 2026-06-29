@@ -384,6 +384,7 @@
     // (Tauri events aren't buffered), so the active session id would be missed.
     // Now that we're listening, ask the backend to re-emit it.
     invoke("request_ready").catch(() => {});
+    loadCustomCommands();
   });
 
   async function attachFiles() {
@@ -945,6 +946,25 @@
   function cmdRename() {
     messages.push({ role: "note", text: "会话重命名规划中（需要后端写入会话索引），下一步实现。" });
   }
+  // User-authored custom commands (.nanocodex|.claude/commands/*.md), surfaced
+  // in the palette alongside built-in actions.
+  let customCommands = $state<{ scope: string; name: string; slash: string; path: string }[]>([]);
+  let slashArg = ""; // trailing args captured when a palette item is chosen
+  async function loadCustomCommands() {
+    try {
+      customCommands = await invoke("get_custom_commands");
+    } catch (e) {
+      /* custom commands are optional */
+    }
+  }
+  async function runCustom(slash: string) {
+    try {
+      const expanded = await invoke<string>("expand_custom_command", { slash, arg: slashArg });
+      input = expanded; // fill the composer; user reviews, then Enter to send
+    } catch (e) {
+      messages.push({ role: "note", text: `自定义命令展开失败：${e}` });
+    }
+  }
   type SlashCmd = { id: string; label: string; desc: string; run: () => void };
   const SLASH_COMMANDS: SlashCmd[] = [
     { id: "new", label: "新建会话", desc: "开始一个空会话", run: () => newSession() },
@@ -965,12 +985,29 @@
     { id: "schedule", label: "定时任务", desc: "定时运行（规划中）", run: () => cmdSoon("定时任务") },
     { id: "workflows", label: "多-agent 编排", desc: "orchestrator 编排（规划中）", run: () => cmdSoon("多-agent 编排") },
   ];
+  const slashHead = $derived(slashFilter.split(/\s+/)[0] ?? "");
+  const customSlash = $derived(
+    customCommands.map((c) => ({
+      id: c.slash.slice(1),
+      label: c.name,
+      desc: `自定义命令 · ${c.scope}`,
+      run: () => runCustom(c.slash),
+    })),
+  );
   const slashMatches = $derived(
     showSlash
-      ? SLASH_COMMANDS.filter((c) => c.id.includes(slashFilter) || c.label.toLowerCase().includes(slashFilter))
+      ? [
+          ...SLASH_COMMANDS.filter(
+            (c) => c.id.includes(slashFilter) || c.label.toLowerCase().includes(slashFilter),
+          ),
+          ...customSlash.filter(
+            (c) => c.id.includes(slashHead) || c.label.toLowerCase().includes(slashHead),
+          ),
+        ]
       : [],
   );
   function runSlash(c: SlashCmd) {
+    slashArg = input.replace(/^\/\S+\s*/, "");
     input = "";
     c.run();
   }
