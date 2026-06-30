@@ -1353,7 +1353,7 @@
 
   {#if rightPanel === "files"}
     <aside class="rightpanel">
-      <div class="rp-head"><span class="rp-title">文件</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
+      <div class="rp-head"><span class="rp-title">文件</span><span class="rp-actions"><button class="plain" onclick={chooseWorkspace} title="选择任意 C/D 盘的项目目录作为工作区（系统对话框）">打开项目</button><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
       <div class="rp-body">
         {#if filePreview}
           <div class="fx-bar">
@@ -1366,6 +1366,7 @@
           <div class="fx-bar">
             <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ 上级</button>
             <code class="fx-path">/{filesPath}</code>
+            <button class="plain" onclick={chooseWorkspace} title="文件面板只浏览当前工作区；点此用系统对话框切到任意 C/D 盘项目">打开其它项目…</button>
           </div>
           <div class="wt-list">
             {#if filesEntries.length === 0}
