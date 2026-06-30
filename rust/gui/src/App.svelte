@@ -88,6 +88,10 @@
   let header = $state("连接中…");
   let workspace = $state("");
   let needsWorkspace = $state(false); // true when cwd is home/root — block prompts
+  // Last path segment of the workspace, for the header pill (full path on hover).
+  const wsName = $derived(
+    workspace ? workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspace : "",
+  );
   let sessionTitle = $state("新会话");
   let sidebarOpen = $state(true);
   let sandboxMode = $state("");
@@ -1101,6 +1105,14 @@
         {/if}
       </div>
       {#if sandboxMode}<span class="meta">{sandboxMode}</span>{/if}
+      <button
+        class="ws-pill"
+        class:warn={needsWorkspace}
+        onclick={chooseWorkspace}
+        title={needsWorkspace ? "当前在主目录（非项目），点击选择项目目录" : `工作区：${workspace}（点击切换）`}
+      >
+        📁 {needsWorkspace ? "选择项目目录" : wsName || "选择项目目录"}
+      </button>
       {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
       <span class="topbar-actions">
         <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">

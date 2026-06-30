@@ -1539,6 +1539,28 @@ main.app { flex-direction: row; }
 .model-pill:hover:not(:disabled) { background: var(--paper-3); color: var(--ink); box-shadow: none; }
 .model-pill:active { transform: none; }
 .model-pill:disabled { cursor: default; color: var(--ink-3); }
+
+/* Workspace pill — always shows the active project dir; click to switch. */
+.ws-pill {
+  background: var(--paper-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  padding: 0.18rem 0.6rem;
+  min-height: auto;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  letter-spacing: normal;
+  box-shadow: none;
+  cursor: pointer;
+}
+.ws-pill:hover { background: var(--paper-3); color: var(--ink); }
+.ws-pill.warn { background: var(--accent-soft); border-color: var(--danger); color: var(--danger); }
 .model-menu {
   position: absolute;
   top: calc(100% + 6px);
