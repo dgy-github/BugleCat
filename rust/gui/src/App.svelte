@@ -117,6 +117,18 @@
     const lines = lineCount(s);
     return lines > 1 ? `${lines} 行 · 点击展开` : `${s.length} 字 · 点击展开`;
   };
+  // Classify a finished tool result so the outcome (报错 / 无输出 / N 行) is
+  // visible at a glance — a bare "Exit code: 0" otherwise reads as "no info".
+  const toolOutcome = (result: string = ""): "err" | "empty" | "ok" => {
+    const exit = result.match(/Exit code: (-?\d+)/);
+    const body = result
+      .replace(/\n?Exit code: -?\d+\s*$/, "")
+      .replace(/^STDERR:\s*/, "")
+      .trim();
+    if (/^STDERR:/m.test(result) || (exit && exit[1] !== "0")) return "err";
+    if (body === "") return "empty";
+    return "ok";
+  };
   // Per-line class for unified-diff coloring.
   const diffLineClass = (ln: string) => {
     if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("diff ") || ln.startsWith("index ")) return "dl-meta";
@@ -1148,6 +1160,7 @@
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool"}
+          {@const oc = m.result === undefined ? "run" : toolOutcome(m.result)}
           <div class="tool" class:collapsed={m.collapsed} class:running={m.result === undefined}>
             <button
               class="tool-head"
@@ -1159,14 +1172,18 @@
               <span class="tcaret" aria-hidden="true">{m.result === undefined ? "•" : m.collapsed ? "▸" : "▾"}</span>
               <span class="tname">⚙ {m.name}</span>
               {#if m.args}<code class="targs">{m.args}</code>{/if}
-              {#if m.result === undefined}
+              {#if oc === "run"}
                 <span class="trunning">运行中…</span>
-              {:else if m.collapsed}
-                <span class="tcollapsed-hint">{collapsedHint(m.result)}</span>
+              {:else}
+                <span class="tstatus {oc}">{oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(m.result)} 行`}</span>
               {/if}
             </button>
             {#if m.result !== undefined && !m.collapsed}
-              <pre class="tresult">{m.result}</pre>
+              {#if oc === "empty"}
+                <pre class="tresult tempty">（命令无输出 · 退出码 0）</pre>
+              {:else}
+                <pre class="tresult">{m.result}</pre>
+              {/if}
             {/if}
           </div>
         {/if}

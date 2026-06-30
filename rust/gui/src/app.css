@@ -403,6 +403,20 @@ header {
   font-size: var(--fs-xs);
   white-space: nowrap;
 }
+/* Outcome chip on a finished tool block (报错 / 无输出 / N 行). */
+.tstatus {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tstatus.ok { color: var(--ok); background: rgba(63, 122, 78, 0.1); }
+.tstatus.empty { color: var(--ink-3); background: var(--paper-3); }
+.tstatus.err { color: var(--danger); background: var(--accent-soft); }
+.tresult.tempty { color: var(--ink-3); font-style: italic; }
 .tresult {
   margin: 0;
   border-top: 1px solid var(--line);
