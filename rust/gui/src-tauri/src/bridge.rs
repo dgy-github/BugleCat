@@ -104,6 +104,10 @@ pub enum UiEvent {
         session_id: String,
         models: Vec<String>,
         permission_mode: String,
+        /// True when the workspace is the user's home dir / fs root (not a
+        /// project). The UI then prompts for a real workspace and blocks prompts
+        /// instead of silently operating there (dangerous under full-access).
+        needs_workspace: bool,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
     AssistantDelta { text: String },
@@ -175,8 +179,77 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
                 session_id: session_id.to_string(),
                 models: cfg.available_models,
                 permission_mode: cfg.permission_mode,
+                needs_workspace: is_unsafe_workspace(workspace),
             },
         );
+    }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+}
+
+/// File where the GUI remembers the last chosen workspace, so it doesn't fall
+/// back to the launch cwd (often the user's home) on every start.
+pub fn last_workspace_file() -> Option<PathBuf> {
+    home_dir().map(|h| h.join(".nanocodex").join("gui_workspace.txt"))
+}
+
+/// Persist the chosen workspace (best-effort).
+pub fn save_last_workspace(path: &std::path::Path) {
+    if let Some(f) = last_workspace_file() {
+        if let Some(parent) = f.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(f, path.display().to_string());
+    }
+}
+
+/// The last chosen workspace, if it still exists as a directory.
+pub fn load_last_workspace() -> Option<PathBuf> {
+    let f = last_workspace_file()?;
+    let p = PathBuf::from(std::fs::read_to_string(f).ok()?.trim());
+    p.is_dir().then_some(p)
+}
+
+/// True when `dir` is the user's home directory or the filesystem root — not a
+/// project. Operating there silently (especially under danger-full-access) is a
+/// foot-gun, so the UI prompts for a real workspace instead.
+pub fn is_unsafe_workspace(dir: &std::path::Path) -> bool {
+    is_unsafe_against(dir, home_dir().as_deref())
+}
+
+/// Core of [`is_unsafe_workspace`], with `home` injected so it is testable.
+fn is_unsafe_against(dir: &std::path::Path, home: Option<&std::path::Path>) -> bool {
+    let canon = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    if let Some(home) = home {
+        let home_c = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+        if canon == home_c {
+            return true;
+        }
+    }
+    canon.parent().is_none()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn home_is_unsafe_but_a_project_dir_is_not() {
+        let base = std::env::temp_dir().join(format!("ncx_ws_{}", new_session_id()));
+        let home = base.join("home");
+        let project = base.join("home").join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+
+        assert!(is_unsafe_against(&home, Some(&home)), "home dir must be unsafe");
+        assert!(
+            !is_unsafe_against(&project, Some(&home)),
+            "a project under home must be safe"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 
@@ -343,6 +416,11 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     pending: pending.clone(),
                     counter: AtomicU64::new(1),
                 });
+                // Restore the last chosen workspace so we don't fall back to the
+                // launch cwd (often the user's home) on every start.
+                if let Some(ws) = load_last_workspace() {
+                    let _ = std::env::set_current_dir(&ws);
+                }
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));

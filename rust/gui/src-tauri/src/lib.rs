@@ -132,6 +132,7 @@ fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<Stri
         return Err(format!("not a directory: {}", p.display()));
     }
     std::env::set_current_dir(&p).map_err(|e| format!("cannot enter {}: {e}", p.display()))?;
+    bridge::save_last_workspace(&p); // remember it across launches
     let _ = state.tx.send(Command::Reload);
     Ok(p.display().to_string())
 }

@@ -10,7 +10,7 @@
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string }
+    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; needs_workspace: boolean }
     | { kind: "assistant_delta"; text: string }
     | { kind: "assistant"; text: string }
     | { kind: "tool_start"; name: string; args: string }
@@ -87,6 +87,7 @@
   let filesEntries = $state<DirEntry[]>([]);
   let header = $state("连接中…");
   let workspace = $state("");
+  let needsWorkspace = $state(false); // true when cwd is home/root — block prompts
   let sessionTitle = $state("新会话");
   let sidebarOpen = $state(true);
   let sandboxMode = $state("");
@@ -290,6 +291,7 @@
         case "ready":
           header = `${p.model} · ${p.sandbox}`;
           workspace = p.workspace;
+          needsWorkspace = p.needs_workspace;
           sandboxMode = p.sandbox;
           currentModel = p.model;
           if (p.models?.length) models = p.models;
@@ -494,6 +496,10 @@
   function send() {
     const text = input.trim();
     if (!text && attached.length === 0) return;
+    if (needsWorkspace) {
+      messages.push({ role: "note", text: "请先选择项目目录（左下角「工作区」或下方按钮），再开始对话。" });
+      return;
+    }
     // Images route through the vision pipeline; other files become @mentions.
     const images = attached.filter(isImage);
     const files = attached.filter((p) => !isImage(p));
@@ -1211,6 +1217,12 @@
           {/each}
         </div>
       {/if}
+      {#if needsWorkspace}
+        <div class="ws-warn">
+          <span>⚠ 当前工作区是主目录（非项目），已暂停对话以免误操作。请选择项目目录。</span>
+          <button class="plain" onclick={chooseWorkspace}>选择项目目录</button>
+        </div>
+      {/if}
       <div class="composer-row">
         <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">📎</button>
         <textarea
@@ -1218,10 +1230,10 @@
           onkeydown={onKey}
           oninput={() => { if (input.startsWith("/")) slashIdx = 0; }}
           onpaste={handlePaste}
-          placeholder="给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"
+          placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"}
           rows="2"
         ></textarea>
-        <button onclick={send} disabled={(input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
+        <button onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
           {busy ? "排队" : "发送"}
         </button>
       </div>

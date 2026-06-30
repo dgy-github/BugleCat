@@ -475,6 +475,22 @@ footer {
   gap: var(--sp-2);
 }
 
+/* ── Workspace warning (cwd is home/root — prompts blocked) ────────────────── */
+.ws-warn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+.ws-warn .plain { flex: 0 0 auto; color: var(--ink); }
+
 /* ── Slash-command palette (type / in the composer) ───────────────────────── */
 .slash-menu {
   max-height: 18rem;
