@@ -85,29 +85,36 @@ def arch_svg():
 
 
 def mindmap_svg():
+    RT, TR = "#6ea8fe", "#e8a33d"  # runtime / training category colors
     root = ("nanocodex", "Rust coding agent + ncx-forge")
+    # (name, sub, category): runtime = the live agent; training = the offline meta-loop.
     branches = [
-        ("Harness / turn loop", "call↔tools · RO-batch · budget · !Send"),
-        ("Context compression", "keep-recent · shrink tool results · drop prefix"),
-        ("Tool system", "Tool trait · registry · dynamic tool_search view"),
-        ("Sandbox + approval", "3 modes · auto/ask/deny · escalation"),
-        ("Tiered orchestrator", "classify→plan→workers→verify · recurse"),
-        ("Project memory", "remember/recall · jaccard consolidate · leads"),
-        ("Skills · MCP · vision", "progressive disclosure · stdio JSON-RPC · routing"),
-        ("ncx-forge training", "genome · teacher · bench fitness · Pareto · SFT/RL"),
+        ("Harness / turn loop", "call↔tools · RO-batch · budget · !Send", "rt"),
+        ("Context compression", "keep-recent · shrink tool results · drop prefix", "rt"),
+        ("Tool system", "Tool trait · registry · dynamic tool_search view", "rt"),
+        ("Sandbox + approval", "3 modes · auto/ask/deny · escalation", "rt"),
+        ("Tiered orchestrator", "classify→plan→workers→verify · recurse", "rt"),
+        ("Project memory", "remember/recall · jaccard consolidate · leads", "rt"),
+        ("Skills · MCP · vision", "progressive disclosure · stdio JSON-RPC · routing", "rt"),
+        ("ncx-forge training", "genome · teacher · bench fitness · Pareto · SFT/RL", "tr"),
     ]
-    H = 60 * len(branches) + 40
-    s = [f'<svg viewBox="0 0 800 {H}" role="img" aria-label="Subsystem mind map" style="width:100%;max-width:800px">{_DEF}']
-    cy = H / 2
-    s.append(f'<rect x="14" y="{cy-28}" width="150" height="56" rx="12" fill="#1a2230" stroke="#6ea8fe" stroke-width="2"/>')
+    H = 60 * len(branches) + 56
+    s = [f'<svg viewBox="0 0 800 {H}" role="img" aria-label="Subsystem mind map, colored by runtime vs training" style="width:100%;max-width:800px">{_DEF}']
+    # legend
+    s.append('<rect x="470" y="8" width="12" height="12" rx="3" fill="#6ea8fe"/>'
+             '<text x="488" y="18" font-size="11" fill="#9aa7b4">runtime (live agent)</text>')
+    s.append('<rect x="620" y="8" width="12" height="12" rx="3" fill="#e8a33d"/>'
+             '<text x="638" y="18" font-size="11" fill="#9aa7b4">training (meta-loop)</text>')
+    cy = (H + 36) / 2
+    s.append(f'<rect x="14" y="{cy-28}" width="150" height="56" rx="12" fill="#1a2230" stroke="#cfd7e0" stroke-width="2"/>')
     s.append(f'<text x="89" y="{cy-4}" text-anchor="middle" font-size="14" font-weight="600" fill="#e6edf3">{root[0]}</text>')
     s.append(f'<text x="89" y="{cy+15}" text-anchor="middle" font-size="10.5" fill="#9aa7b4">{root[1]}</text>')
-    n = len(branches)
-    for i, (name, sub) in enumerate(branches):
-        by = 30 + i * 60
-        s.append(f'<path d="M164,{cy} C 250,{cy} 250,{by+22} 320,{by+22}" fill="none" stroke="#3a4655" stroke-width="1.5"/>')
-        s.append(f'<rect x="320" y="{by}" width="232" height="44" rx="9" fill="#161b22" stroke="#2a313a" stroke-width="1.5"/>')
-        s.append(f'<text x="332" y="{by+19}" font-size="12.5" font-weight="600" fill="#6ea8fe">{name}</text>')
+    for i, (name, sub, cat) in enumerate(branches):
+        col = RT if cat == "rt" else TR
+        by = 46 + i * 60
+        s.append(f'<path d="M164,{cy} C 250,{cy} 250,{by+22} 320,{by+22}" fill="none" stroke="{col}" stroke-opacity="0.5" stroke-width="1.5"/>')
+        s.append(f'<rect x="320" y="{by}" width="232" height="44" rx="9" fill="#161b22" stroke="{col}" stroke-width="1.5"/>')
+        s.append(f'<text x="332" y="{by+19}" font-size="12.5" font-weight="600" fill="{col}">{name}</text>')
         s.append(f'<text x="332" y="{by+35}" font-size="10.5" fill="#9aa7b4">{esc(sub)}</text>')
         s.append(f'<text x="566" y="{by+27}" font-size="11" fill="#5b6673">§{i+1}</text>')
     s.append('</svg>')
@@ -178,7 +185,14 @@ def section(rec: dict, idx: int, title: str, sid: str) -> str:
         f'<div class="mech-detail">{esc(m["detail"])}</div></div>'
         for m in rec.get("key_mechanisms", [])
     )
-    steps = "".join(f"<li>{esc(s)}</li>" for s in rec.get("flow_steps", []))
+    fs = rec.get("flow_steps", [])
+    parts = []
+    for i, st in enumerate(fs):
+        parts.append(f'<div class="fc-step"><span class="fc-n">{i + 1}</span>'
+                     f'<span class="fc-t">{esc(st)}</span></div>')
+        if i < len(fs) - 1:
+            parts.append('<div class="fc-arrow" aria-hidden="true">&#9660;</div>')
+    steps = "".join(parts)
     talk = "".join(f"<li>{esc(t)}</li>" for t in rec.get("interview_talking_points", []))
     gotchas = "".join(f"<li>{esc(g)}</li>" for g in rec.get("tradeoffs_or_gotchas", []))
     refs = "".join(f"<code class='ref'>{esc(r)}</code>" for r in rec.get("code_refs", []))
@@ -200,7 +214,7 @@ def section(rec: dict, idx: int, title: str, sid: str) -> str:
   <div class="mechs">{mechs}</div>
 
   <h3>Control / data flow</h3>
-  <ol class="flow">{steps}</ol>
+  <div class="flowchart">{steps}</div>
 
   <div class="grid2">
     <div class="callout talk"><div class="callout-h">★ Interview talking points</div><ul>{talk}</ul></div>
@@ -262,9 +276,11 @@ def build() -> str:
  .mechs{{display:grid;gap:8px}}
  .mech{{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:11px 14px}}
  .mech-name{{font-weight:600;color:#fff}} .mech-detail{{color:#bcc7d2;font-size:14px;margin-top:3px}}
- ol.flow{{counter-reset:s;list-style:none;padding-left:0;margin:8px 0}}
- ol.flow li{{position:relative;padding:7px 0 7px 38px;border-left:2px solid var(--line);margin-left:13px;color:#cdd7e1}}
- ol.flow li:before{{counter-increment:s;content:counter(s);position:absolute;left:-13px;top:7px;width:24px;height:24px;background:var(--code);border:1px solid var(--line);border-radius:50%;display:grid;place-items:center;font-size:12px;color:var(--acc)}}
+ .flowchart{{display:flex;flex-direction:column;align-items:stretch;gap:0;margin:10px 0;max-width:760px}}
+ .fc-step{{display:flex;gap:11px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 13px}}
+ .fc-n{{flex:none;width:24px;height:24px;background:var(--code);border:1px solid var(--acc);border-radius:50%;display:grid;place-items:center;font-size:12px;color:var(--acc);font-weight:600}}
+ .fc-t{{color:#cdd7e1;font-size:14px}}
+ .fc-arrow{{text-align:center;color:#4a5563;font-size:13px;line-height:1.1;padding:3px 0}}
  .grid2{{display:grid;grid-template-columns:1fr 1fr;gap:14px}}
  .refs{{display:flex;flex-wrap:wrap;gap:6px}} code.ref{{background:#11161d;border:1px solid var(--line);font-size:12px}}
  .fig{{background:#0c1014;border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0;overflow-x:auto}}
