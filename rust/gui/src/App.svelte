@@ -174,7 +174,13 @@
       }
       const h = line.match(/^(#{1,6})\s+(.*)$/);
       if (h) { closeLists(); const l = h[1].length; out.push(`<h${l} class="md-h">${inlineMd(esc(h[2]))}</h${l}>`); i++; continue; }
-      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) { closeLists(); out.push("<hr/>"); i++; continue; }
+      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
+        closeLists();
+        // deepseek over-uses '---' as section separators; collapse consecutive /
+        // leading rules so they don't render as a stack of empty "striped" lines.
+        if (out.length && out[out.length - 1] !== "<hr/>") out.push("<hr/>");
+        i++; continue;
+      }
       if (/^\s*>\s?/.test(line)) { closeLists(); out.push(`<blockquote>${inlineMd(esc(line.replace(/^\s*>\s?/, "")))}</blockquote>`); i++; continue; }
       const um = line.match(/^\s*[-*+]\s+(.*)$/);
       if (um) { if (ol) { out.push("</ol>"); ol = false; } if (!ul) { out.push("<ul>"); ul = true; } out.push(`<li>${inlineMd(esc(um[1]))}</li>`); i++; continue; }
@@ -186,6 +192,7 @@
       i++;
     }
     closeLists();
+    while (out.length && out[out.length - 1] === "<hr/>") out.pop(); // drop trailing rules
     return out.join("\n");
   }
 
@@ -1129,7 +1136,7 @@
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool"}
-          <div class="tool" class:collapsed={m.collapsed}>
+          <div class="tool" class:collapsed={m.collapsed} class:running={m.result === undefined}>
             <button
               class="tool-head"
               onclick={() => toggleTool(m)}
