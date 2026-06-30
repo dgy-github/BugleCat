@@ -14,19 +14,22 @@ import re
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DATA = HERE / "design_data.json"
+# Prefer the Chinese-translated notes when present; fall back to English.
+DATA = HERE / "design_data.zh.json"
+if not DATA.exists():
+    DATA = HERE / "design_data.json"
 OUT = HERE / "nanocodex-design.html"
 
 # (match-key in the subsystem string, clean title, section id) in reading order.
 ORDER = [
-    ("harness", "The Harness — Agent Turn Loop", "harness"),
-    ("context-compression", "Context Compression — Context Editing", "context"),
-    ("tools", "Tool System & Dynamic Exposure", "tools"),
-    ("sandbox", "Sandbox & Approval State Machine", "sandbox"),
-    ("orchestrator", "Tiered Orchestrator (flash / pro)", "orch"),
-    ("memory", "Project Memory — Self-Evolution", "memory"),
-    ("skills", "Skills · MCP · Vision", "skills"),
-    ("ncx-forge", "ncx-forge — Harness Training Framework", "forge"),
+    ("harness", "Harness · Agent 回合循环", "harness"),
+    ("context-compression", "上下文压缩 · Context Editing", "context"),
+    ("tools", "工具系统 · 动态暴露", "tools"),
+    ("sandbox", "沙箱 · 审批状态机", "sandbox"),
+    ("orchestrator", "分层编排器 (flash / pro)", "orch"),
+    ("memory", "项目记忆 · 自进化", "memory"),
+    ("skills", "Skills · MCP · 视觉", "skills"),
+    ("ncx-forge", "ncx-forge · 骨架训练框架", "forge"),
 ]
 
 
@@ -53,58 +56,58 @@ def _arrow(x1, y1, x2, y2, label="", dash=""):
 def arch_svg():
     A = "#6ea8fe"; O = "#e8a33d"
     s = [f'<svg viewBox="0 0 780 430" role="img" aria-label="Runtime architecture and training meta-loop" style="width:100%;max-width:780px">{_DEF}']
-    s.append('<text x="390" y="16" text-anchor="middle" font-size="12" fill="#6b7785">RUNTIME (one turn)</text>')
-    s.append(_box(20, 70, 96, 46, "User", "prompt"))
-    s.append(_box(150, 34, 380, 150, "Agent Turn Loop", "ncx-core · single-thread (!Send)", A, A))
-    s.append(_box(178, 78, 130, 48, "call model"))
-    s.append(_box(372, 78, 130, 48, "run tools"))
+    s.append('<text x="390" y="16" text-anchor="middle" font-size="12" fill="#6b7785">运行时（单回合）</text>')
+    s.append(_box(20, 70, 96, 46, "用户", "提示"))
+    s.append(_box(150, 34, 380, 150, "Agent 回合循环", "ncx-core · 单线程 (!Send)", A, A))
+    s.append(_box(178, 78, 130, 48, "调模型"))
+    s.append(_box(372, 78, 130, 48, "跑工具"))
     s.append(_arrow(308, 92, 372, 92))
-    s.append(_arrow(372, 112, 308, 112, "loop ≤ budget"))
-    s.append('<text x="340" y="170" text-anchor="middle" font-size="11" fill="#9aa7b4">context-edit · read-only batch · cancel/budget · vision route</text>')
-    s.append(_box(566, 60, 196, 46, "Provider", "DeepSeek / vision (OpenAI-compat)"))
+    s.append(_arrow(372, 112, 308, 112, "循环 ≤ 预算"))
+    s.append('<text x="340" y="170" text-anchor="middle" font-size="11" fill="#9aa7b4">上下文编辑 · 只读并发批 · 取消/预算 · 视觉路由</text>')
+    s.append(_box(566, 60, 196, 46, "Provider", "DeepSeek / 视觉 (OpenAI 兼容)"))
     s.append(_arrow(308, 100, 178, 100))  # user-ish into call (decorative)
     s.append(_arrow(116, 93, 150, 100))
-    s.append(_arrow(502, 96, 566, 90, "chat"))
-    s.append(_box(372, 232, 150, 44, "Tools", "read_file·apply_patch·shell·…"))
+    s.append(_arrow(502, 96, 566, 90, "对话"))
+    s.append(_box(372, 232, 150, 44, "工具", "read_file·apply_patch·shell·…"))
     s.append(_arrow(437, 126, 437, 232))
-    s.append(_box(566, 232, 196, 44, "Sandbox + Approval", "RO / ws-write / full · ask/auto/deny", O, O))
+    s.append(_box(566, 232, 196, 44, "沙箱 + 审批", "只读/可写/全权 · 询问/自动/拒绝", O, O))
     s.append(_arrow(522, 254, 566, 254))
-    s.append(_box(20, 232, 150, 44, "Project memory", "recall (leads) / remember"))
-    s.append(_arrow(170, 250, 178, 120, "recall"))
-    s.append('<text x="390" y="312" text-anchor="middle" font-size="12" fill="#6b7785">META-LOOP — ncx-forge (offline training)</text>')
-    s.append(_box(20, 330, 150, 50, "Teacher panel", "codex / claude / api", O, O))
-    s.append(_box(210, 330, 150, 50, "genome", "NCX_GENOME (prompt+desc)"))
-    s.append(_box(400, 330, 150, 50, "Evaluator", "agent × bench → reward"))
-    s.append(_box(590, 330, 150, 50, "accept gate", "noise-aware / Pareto", A, A))
-    s.append(_arrow(170, 355, 210, 355, "mutate"))
-    s.append(_arrow(360, 355, 400, 355, "inject"))
-    s.append(_arrow(550, 355, 590, 355, "score"))
-    s.append(_arrow(665, 380, 95, 380, "champion ↻ next gen", "5 4"))
+    s.append(_box(20, 232, 150, 44, "项目记忆", "召回(线索) / 记忆"))
+    s.append(_arrow(170, 250, 178, 120, "召回"))
+    s.append('<text x="390" y="312" text-anchor="middle" font-size="12" fill="#6b7785">元循环 — ncx-forge（离线训练）</text>')
+    s.append(_box(20, 330, 150, 50, "教师面板", "codex / claude / api", O, O))
+    s.append(_box(210, 330, 150, 50, "genome", "NCX_GENOME (提示+描述)"))
+    s.append(_box(400, 330, 150, 50, "评测器", "agent × bench → reward"))
+    s.append(_box(590, 330, 150, 50, "接受门", "噪声感知 / Pareto", A, A))
+    s.append(_arrow(170, 355, 210, 355, "变异"))
+    s.append(_arrow(360, 355, 400, 355, "注入"))
+    s.append(_arrow(550, 355, 590, 355, "评分"))
+    s.append(_arrow(665, 380, 95, 380, "冠军 ↻ 下一代", "5 4"))
     s.append('</svg>')
     return "".join(s)
 
 
 def mindmap_svg():
     RT, TR = "#6ea8fe", "#e8a33d"  # runtime / training category colors
-    root = ("nanocodex", "Rust coding agent + ncx-forge")
+    root = ("nanocodex", "Rust 编码 agent + ncx-forge")
     # (name, sub, category): runtime = the live agent; training = the offline meta-loop.
     branches = [
-        ("Harness / turn loop", "call↔tools · RO-batch · budget · !Send", "rt"),
-        ("Context compression", "keep-recent · shrink tool results · drop prefix", "rt"),
-        ("Tool system", "Tool trait · registry · dynamic tool_search view", "rt"),
-        ("Sandbox + approval", "3 modes · auto/ask/deny · escalation", "rt"),
-        ("Tiered orchestrator", "classify→plan→workers→verify · recurse", "rt"),
-        ("Project memory", "remember/recall · jaccard consolidate · leads", "rt"),
-        ("Skills · MCP · vision", "progressive disclosure · stdio JSON-RPC · routing", "rt"),
-        ("ncx-forge training", "genome · teacher · bench fitness · Pareto · SFT/RL", "tr"),
+        ("Harness · 回合循环", "调模型↔工具 · 只读批 · 预算 · !Send", "rt"),
+        ("上下文压缩", "保留最近 · 截断 tool 结果 · 丢最老前缀", "rt"),
+        ("工具系统", "Tool trait · registry · 动态 tool_search 视图", "rt"),
+        ("沙箱 + 审批", "3 种模式 · 自动/询问/拒绝 · 升级", "rt"),
+        ("分层编排器", "classify→plan→workers→verify · 递归", "rt"),
+        ("项目记忆", "remember/recall · jaccard 合并 · 当线索", "rt"),
+        ("Skills · MCP · 视觉", "渐进披露 · stdio JSON-RPC · 路由", "rt"),
+        ("ncx-forge 训练", "genome · 教师 · bench fitness · Pareto · SFT/RL", "tr"),
     ]
     H = 60 * len(branches) + 56
     s = [f'<svg viewBox="0 0 800 {H}" role="img" aria-label="Subsystem mind map, colored by runtime vs training" style="width:100%;max-width:800px">{_DEF}']
     # legend
     s.append('<rect x="470" y="8" width="12" height="12" rx="3" fill="#6ea8fe"/>'
-             '<text x="488" y="18" font-size="11" fill="#9aa7b4">runtime (live agent)</text>')
-    s.append('<rect x="620" y="8" width="12" height="12" rx="3" fill="#e8a33d"/>'
-             '<text x="638" y="18" font-size="11" fill="#9aa7b4">training (meta-loop)</text>')
+             '<text x="488" y="18" font-size="11" fill="#9aa7b4">运行时（在线 agent）</text>')
+    s.append('<rect x="628" y="8" width="12" height="12" rx="3" fill="#e8a33d"/>'
+             '<text x="646" y="18" font-size="11" fill="#9aa7b4">训练（元循环）</text>')
     cy = (H + 36) / 2
     s.append(f'<rect x="14" y="{cy-28}" width="150" height="56" rx="12" fill="#1a2230" stroke="#cfd7e0" stroke-width="2"/>')
     s.append(f'<text x="89" y="{cy-4}" text-anchor="middle" font-size="14" font-weight="600" fill="#e6edf3">{root[0]}</text>')
@@ -123,38 +126,38 @@ def mindmap_svg():
 
 def harness_svg():
     s = [f'<svg viewBox="0 0 760 250" role="img" aria-label="Agent turn loop" style="width:100%;max-width:760px">{_DEF}']
-    s.append(_box(20, 100, 120, 46, "call model", "+ tool schemas", "#6ea8fe", "#6ea8fe"))
-    s.append(_box(200, 100, 130, 46, "tool_calls?", "finish_reason"))
+    s.append(_box(20, 100, 120, 46, "调模型", "+ 工具 schema", "#6ea8fe", "#6ea8fe"))
+    s.append(_box(200, 100, 130, 46, "有 tool_calls?", "finish_reason"))
     s.append(_arrow(140, 123, 200, 123))
-    s.append(_box(390, 30, 200, 46, "batch read-only ∥", "join_all (concurrent)"))
-    s.append(_box(390, 100, 200, 46, "run writes serially", "ordered, deterministic"))
-    s.append(_arrow(330, 110, 390, 60, "reads"))
-    s.append(_arrow(330, 123, 390, 123, "write"))
-    s.append(_box(640, 65, 100, 46, "append results"))
+    s.append(_box(390, 30, 200, 46, "只读并发批 ∥", "join_all (并发)"))
+    s.append(_box(390, 100, 200, 46, "写操作串行", "有序、确定"))
+    s.append(_arrow(330, 110, 390, 60, "读"))
+    s.append(_arrow(330, 123, 390, 123, "写"))
+    s.append(_box(640, 65, 100, 46, "追加结果"))
     s.append(_arrow(590, 53, 690, 65))
     s.append(_arrow(590, 123, 690, 111))
-    s.append(_arrow(690, 111, 80, 146, "loop (≤ model/tool budget)", "5 4"))
-    s.append(_box(200, 185, 130, 44, "final answer", "no tool_calls", "#e8a33d", "#e8a33d"))
-    s.append(_arrow(265, 146, 265, 185, "done"))
-    s.append('<text x="120" y="210" text-anchor="middle" font-size="11" fill="#9aa7b4">cancel closure polled at each step · synthetic tool results backfilled on stop</text>')
+    s.append(_arrow(690, 111, 80, 146, "循环 (≤ 模型/工具预算)", "5 4"))
+    s.append(_box(200, 185, 130, 44, "最终回答", "无 tool_calls", "#e8a33d", "#e8a33d"))
+    s.append(_arrow(265, 146, 265, 185, "完成"))
+    s.append('<text x="120" y="210" text-anchor="middle" font-size="11" fill="#9aa7b4">每步轮询取消闭包 · 中止时回填合成 tool 结果</text>')
     s.append('</svg>')
     return "".join(s)
 
 
 def compress_svg():
     s = [f'<svg viewBox="0 0 760 250" role="img" aria-label="Context compression pipeline" style="width:100%;max-width:760px">{_DEF}']
-    s.append(_box(16, 90, 120, 56, "full history", "session.messages"))
-    s.append(_box(210, 20, 230, 44, "keep recent N msgs", "verbatim (most relevant)"))
-    s.append(_box(210, 92, 230, 44, "older tool results", "→ shrink to max_chars"))
-    s.append(_box(210, 164, 230, 44, "over max_chars total", "drop oldest prefix → align to user"))
+    s.append(_box(16, 90, 120, 56, "完整历史", "session.messages"))
+    s.append(_box(210, 20, 230, 44, "保留最近 N 条", "原样（最相关）"))
+    s.append(_box(210, 92, 230, 44, "更老的 tool 结果", "→ 截断到 max_chars"))
+    s.append(_box(210, 164, 230, 44, "总量超 max_chars", "丢最老前缀 → 对齐到 user"))
     s.append(_arrow(136, 110, 210, 42))
     s.append(_arrow(136, 118, 210, 114))
     s.append(_arrow(136, 126, 210, 186))
-    s.append(_box(510, 90, 140, 56, "provider view", "sent this turn", "#6ea8fe", "#6ea8fe"))
+    s.append(_box(510, 90, 140, 56, "发送视图", "本回合发出", "#6ea8fe", "#6ea8fe"))
     s.append(_arrow(440, 42, 510, 108))
     s.append(_arrow(440, 114, 510, 116))
     s.append(_arrow(440, 186, 510, 124))
-    s.append('<text x="380" y="238" text-anchor="middle" font-size="11" fill="#9aa7b4">non-destructive: builds a send-time copy; session.messages stays intact (resume-safe)</text>')
+    s.append('<text x="380" y="238" text-anchor="middle" font-size="11" fill="#9aa7b4">非破坏：构造发送时副本；session.messages 原封不动（resume 安全）</text>')
     s.append('</svg>')
     return "".join(s)
 
@@ -203,25 +206,25 @@ def section(rec: dict, idx: int, title: str, sid: str) -> str:
   <h2><span class="num">{idx + 1}</span>{esc(title)}</h2>
   <p class="oneliner">{esc(rec.get("one_liner", ""))}</p>
 
-  <h3>How it works</h3>
+  <h3>工作原理</h3>
   <p>{esc(rec.get("how_it_works", ""))}</p>
   {diagram_html}
 
-  <div class="callout why"><div class="callout-h">Design rationale — why this way</div>
+  <div class="callout why"><div class="callout-h">设计理由 · 为什么这么设计</div>
     <p>{esc(rec.get("design_rationale", ""))}</p></div>
 
-  <h3>Key mechanisms</h3>
+  <h3>关键机制</h3>
   <div class="mechs">{mechs}</div>
 
-  <h3>Control / data flow</h3>
+  <h3>控制 / 数据流</h3>
   <div class="flowchart">{steps}</div>
 
   <div class="grid2">
-    <div class="callout talk"><div class="callout-h">★ Interview talking points</div><ul>{talk}</ul></div>
-    <div class="callout trade"><div class="callout-h">Trade-offs &amp; gotchas</div><ul>{gotchas}</ul></div>
+    <div class="callout talk"><div class="callout-h">★ 面试话术点</div><ul>{talk}</ul></div>
+    <div class="callout trade"><div class="callout-h">取舍与坑</div><ul>{gotchas}</ul></div>
   </div>
 
-  <h3>Code references</h3>
+  <h3>代码引用</h3>
   <div class="refs">{refs}</div>
 </section>"""
 
@@ -229,22 +232,22 @@ def section(rec: dict, idx: int, title: str, sid: str) -> str:
 def build() -> str:
     recs = json.loads(DATA.read_text(encoding="utf-8"))
     ordered = sorted(((classify(r), r) for r in recs), key=lambda x: x[0][0])
-    nav = '<a href="#overview">Architecture &amp; mind-map</a>' + "".join(
+    nav = '<a href="#overview">架构 · 思维导图</a>' + "".join(
         f'<a href="#{sid}">{esc(title)}</a>' for (_, title, sid), _ in ordered)
     overview = f"""
 <section id="overview">
-  <h2><span class="num">◆</span>Architecture &amp; mind-map</h2>
-  <p class="oneliner">One turn = call-model ↔ run-tools under a sandbox; an optional orchestrator wraps it; ncx-forge is an offline meta-loop that evolves the agent's own prompt/tool-descriptions against a benchmark.</p>
-  <h3>Runtime &amp; training meta-loop</h3>
+  <h2><span class="num">◆</span>架构 · 思维导图</h2>
+  <p class="oneliner">一个回合 = 在沙箱下「调模型 ↔ 跑工具」；可选的编排器在外层包裹它；ncx-forge 是一条离线元循环，用基准测试反向进化 agent 自己的 prompt / 工具描述。</p>
+  <h3>运行时 · 训练元循环</h3>
   <div class="fig">{arch_svg()}</div>
-  <h3>Subsystem mind-map</h3>
+  <h3>子系统思维导图</h3>
   <div class="fig">{mindmap_svg()}</div>
 </section>"""
     body = overview + "".join(section(r, i, title, sid)
                               for (i, ((_, title, sid), r)) in enumerate(ordered))
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>nanocodex — Design &amp; Architecture</title>
+<title>nanocodex — 设计与架构</title>
 <style>
  :root{{--bg:#0f1216;--panel:#161b22;--ink:#e6edf3;--mut:#9aa7b4;--acc:#6ea8fe;--acc2:#e8a33d;
         --line:#2a313a;--code:#1c2330;--ok:#3fb950;--warn:#d29922}}
@@ -288,11 +291,11 @@ def build() -> str:
  @media print{{nav{{display:none}} .wrap{{display:block}} body{{background:#fff;color:#000}} section{{break-inside:avoid}}}}
 </style></head>
 <body><div class="wrap">
-<nav><div class="brand">nanocodex</div><div class="tag">Rust coding agent · design reference</div>{nav}
-<a href="#" style="margin-top:14px;color:#5b6673;font-size:12px">— built from source by 8-agent deep read —</a></nav>
+<nav><div class="brand">nanocodex</div><div class="tag">Rust 编码 agent · 设计参考</div>{nav}
+<a href="#" style="margin-top:14px;color:#5b6673;font-size:12px">— 由 8 个 agent 深读源码生成 —</a></nav>
 <main>
-<header class="hero"><h1>nanocodex — Design &amp; Architecture</h1>
-<p>A from-scratch, single-binary coding agent in Rust (an OpenAI-compatible LLM loop with sandboxed tools), plus <b>ncx-forge</b>, a framework that evolves the agent's own harness against a verifiable benchmark. This reference walks each subsystem: how it works, <i>why</i> it's built that way, and the talking points behind each decision.</p></header>
+<header class="hero"><h1>nanocodex — 设计与架构</h1>
+<p>一个用 Rust 从零写的单二进制编码 agent（OpenAI 兼容的 LLM 循环 + 沙箱化工具），外加 <b>ncx-forge</b> —— 一个用可验证基准反向进化 agent 自身骨架的框架。本参考逐个子系统讲清：怎么工作、<i>为什么</i>这么设计、以及每个决策背后的面试话术。</p></header>
 {body}
 </main></div></body></html>"""
 
