@@ -129,6 +129,10 @@
     if (body === "") return "empty";
     return "ok";
   };
+  const toolStatusLabel = (result: string = "") => {
+    const oc = toolOutcome(result);
+    return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
+  };
   // Per-line class for unified-diff coloring.
   const diffLineClass = (ln: string) => {
     if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("diff ") || ln.startsWith("index ")) return "dl-meta";
@@ -1160,7 +1164,6 @@
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool"}
-          {@const oc = m.result === undefined ? "run" : toolOutcome(m.result)}
           <div class="tool" class:collapsed={m.collapsed} class:running={m.result === undefined}>
             <button
               class="tool-head"
@@ -1172,14 +1175,14 @@
               <span class="tcaret" aria-hidden="true">{m.result === undefined ? "•" : m.collapsed ? "▸" : "▾"}</span>
               <span class="tname">⚙ {m.name}</span>
               {#if m.args}<code class="targs">{m.args}</code>{/if}
-              {#if oc === "run"}
+              {#if m.result === undefined}
                 <span class="trunning">运行中…</span>
               {:else}
-                <span class="tstatus {oc}">{oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(m.result)} 行`}</span>
+                <span class="tstatus {toolOutcome(m.result)}">{toolStatusLabel(m.result)}</span>
               {/if}
             </button>
             {#if m.result !== undefined && !m.collapsed}
-              {#if oc === "empty"}
+              {#if toolOutcome(m.result) === "empty"}
                 <pre class="tresult tempty">（命令无输出 · 退出码 0）</pre>
               {:else}
                 <pre class="tresult">{m.result}</pre>
