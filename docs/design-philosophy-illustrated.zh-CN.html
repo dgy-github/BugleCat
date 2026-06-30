@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex 设计哲学图解手册</title>
+<style>
+:root {
+  --bg: #f7f2e8;
+  --paper: #fffaf2;
+  --paper-2: #f2ebdd;
+  --ink: #1f2423;
+  --muted: #5f685f;
+  --line: #d9ceb8;
+  --green: #1f7a56;
+  --teal: #1d6673;
+  --orange: #d56d28;
+  --rose: #c15361;
+  --navy: #1f2a47;
+  --shadow: 0 26px 70px rgba(65, 49, 24, 0.12);
+  --sans: "Aptos", "Trebuchet MS", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --display: "Bahnschrift", "Trebuchet MS", "Microsoft YaHei UI", sans-serif;
+  --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html {
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.74;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(31, 122, 86, 0.16), transparent 30rem),
+    radial-gradient(circle at 100% 10%, rgba(29, 102, 115, 0.18), transparent 28rem),
+    linear-gradient(180deg, #fbf7ef, var(--bg));
+}
+a {
+  color: var(--teal);
+}
+.page {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 60px;
+}
+.hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 34px;
+  padding: 34px;
+  background:
+    linear-gradient(135deg, rgba(255,250,242,0.98), rgba(242,235,221,0.9)),
+    var(--paper);
+  box-shadow: var(--shadow);
+}
+.hero::before,
+.hero::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.hero::before {
+  width: 320px;
+  height: 320px;
+  right: -90px;
+  top: -90px;
+  background: radial-gradient(circle, rgba(31,122,86,0.18), rgba(31,122,86,0));
+}
+.hero::after {
+  width: 260px;
+  height: 260px;
+  left: -70px;
+  bottom: -100px;
+  background: radial-gradient(circle, rgba(197,83,97,0.16), rgba(197,83,97,0));
+}
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-family: var(--mono);
+  color: var(--green);
+  border: 1px solid rgba(31,122,86,0.24);
+  background: rgba(31,122,86,0.08);
+}
+h1, h2, h3 {
+  font-family: var(--display);
+  letter-spacing: -0.04em;
+}
+h1 {
+  margin: 16px 0 12px;
+  font-size: clamp(42px, 6vw, 76px);
+  line-height: 0.98;
+  max-width: 980px;
+}
+.lead {
+  max-width: 920px;
+  font-size: 19px;
+  color: #3a433b;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 18px;
+  margin-top: 24px;
+}
+.hero-card,
+.panel,
+.manga,
+.stage,
+.callout,
+.metric,
+.character,
+.card,
+.quote,
+.table-wrap,
+.diagram {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255,255,255,0.56);
+}
+.hero-card,
+.panel,
+.manga,
+.stage,
+.callout,
+.metric,
+.character,
+.card,
+.quote,
+.table-wrap,
+.diagram {
+  padding: 18px;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+.metric b {
+  display: block;
+  color: var(--green);
+  font-size: 28px;
+}
+.metric span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.toc {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.toc a {
+  display: block;
+  text-decoration: none;
+  color: var(--ink);
+  border: 1px dashed rgba(29,102,115,0.22);
+  background: rgba(29,102,115,0.06);
+  border-radius: 16px;
+  padding: 12px;
+  min-height: 88px;
+}
+.toc b {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--teal);
+}
+section {
+  margin-top: 20px;
+}
+h2 {
+  margin: 0 0 12px;
+  font-size: 34px;
+}
+h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  color: var(--green);
+}
+p {
+  margin: 8px 0;
+}
+.section-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--navy);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 14px;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(248,243,234,0.84));
+}
+.card h3 small {
+  color: var(--muted);
+  font-size: 14px;
+  font-family: var(--mono);
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.tag {
+  display: inline-flex;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-family: var(--mono);
+  border: 1px solid rgba(31,122,86,0.16);
+  background: rgba(31,122,86,0.08);
+  color: var(--green);
+}
+.diagram {
+  background:
+    linear-gradient(180deg, rgba(31,122,86,0.07), rgba(255,255,255,0.54)),
+    var(--paper);
+}
+.diagram svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.preview {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 16px 34px rgba(31, 42, 71, 0.08);
+}
+.character {
+  position: relative;
+  overflow: hidden;
+}
+.character::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -50px auto;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(213,109,40,0.14), rgba(213,109,40,0));
+}
+.avatar {
+  width: 68px;
+  height: 68px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  background: linear-gradient(135deg, rgba(31,122,86,0.16), rgba(29,102,115,0.22));
+  border: 1px solid rgba(29,102,115,0.2);
+}
+.character-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.speech {
+  margin-top: 12px;
+  border: 1px solid rgba(197,83,97,0.2);
+  border-radius: 18px;
+  padding: 12px 14px;
+  background: rgba(197,83,97,0.06);
+  font-weight: 700;
+}
+.manga {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.92), rgba(244,238,228,0.88)),
+    var(--paper);
+}
+.manga-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--navy);
+  font-weight: 800;
+}
+.burst {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--orange);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.quote {
+  border-left: 6px solid var(--green);
+  background: rgba(31,122,86,0.08);
+  font-weight: 700;
+}
+ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+li {
+  margin: 6px 0;
+}
+code, pre {
+  font-family: var(--mono);
+}
+pre {
+  margin: 0;
+  overflow: auto;
+  border-radius: 20px;
+  padding: 16px;
+  background: #18211d;
+  color: #daf8ea;
+  border: 1px solid rgba(31,122,86,0.26);
+  line-height: 1.58;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+th, td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 10px;
+  vertical-align: top;
+  text-align: left;
+}
+th {
+  color: var(--green);
+  font-size: 13px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.table-wrap {
+  overflow: auto;
+}
+.footer {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+@media (max-width: 980px) {
+  .hero-grid,
+  .metric-grid,
+  .toc,
+  .grid-2,
+  .grid-3,
+  .manga-grid {
+    grid-template-columns: 1fr;
+  }
+  h1 {
+    font-size: 50px;
+  }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="eyebrow">nanocodex / 中文设计手册 / illustrated edition</div>
+    <h1>设计不是把功能堆出来，<br>而是让约束长成系统性格。</h1>
+    <p class="lead">
+      这是一份给 <code>nanocodex</code> 的图解型设计哲学手册。它不只回答“这个 agent 有什么能力”，
+      而是试图回答三个更根本的问题：为什么能力会这样组合、为什么成本会这样分配、为什么失败会这样暴露。
+    </p>
+
+    <div class="metric-grid">
+      <div class="metric"><b>模型</b><span>能力天花板，框架只能抬下限</span></div>
+      <div class="metric"><b>结构</b><span>用便宜 tier 换稳定，用 verify 换可信</span></div>
+      <div class="metric"><b>边界</b><span>数据与指令分层，动作统一收口</span></div>
+      <div class="metric"><b>回滚</b><span>checkpoint 先行，失败也要可逆</span></div>
+    </div>
+
+    <div class="hero-grid">
+      <div class="hero-card">
+        <h3>阅读方式</h3>
+        <p>把这份文档当成一张“约束 → 推论 → 机制 → 失效模式”的地图，而不是产品功能清单。</p>
+        <div class="tags">
+          <span class="tag">Rust release line</span>
+          <span class="tag">Python baseline</span>
+          <span class="tag">orchestrator</span>
+          <span class="tag">memory</span>
+          <span class="tag">sandbox</span>
+        </div>
+      </div>
+      <div class="hero-card">
+        <h3>配套文件</h3>
+        <p><a href="design-philosophy.zh-CN.md">Markdown 深度版</a></p>
+        <p><a href="ai-coding-agent-design-brief.html">设计说明 HTML</a></p>
+        <p><a href="../README.zh-CN.md">项目总览 README</a></p>
+      </div>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="section-head">
+      <span class="badge">TOC</span>
+      <h2>导航</h2>
+    </div>
+    <div class="toc">
+      <a href="#constraints"><b>01 约束</b><span>五条硬事实如何把机制逼出来</span></a>
+      <a href="#flow"><b>02 流程图</b><span>一次任务如何在运行时穿过系统</span></a>
+      <a href="#cast"><b>03 角色卡</b><span>分类器、planner、worker、verifier、memory</span></a>
+      <a href="#economics"><b>04 经济学</b><span>为什么多跑不是天然更贵</span></a>
+      <a href="#safety"><b>05 安全边界</b><span>sandbox、approval、hooks、checkpoint</span></a>
+      <a href="#memory"><b>06 渐进披露</b><span>skills、tool_search、memory recall</span></a>
+      <a href="#battle"><b>07 漫画分镜</b><span>把整条路径讲成一场战斗</span></a>
+      <a href="#summary"><b>08 一页总结</b><span>把系统的性格压成几条句子</span></a>
+    </div>
+  </section>
+
+  <section id="constraints" class="panel">
+    <div class="section-head">
+      <span class="badge">01</span>
+      <h2>五条约束，五种设计冲动</h2>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>约束 A <small>模型才是瓶颈</small></h3>
+        <p>框架不负责制造更高推理天花板，只负责减少随机失败。</p>
+        <ul>
+          <li>推出分层 orchestrator，而不是“神奇 prompt”。</li>
+          <li>允许 cheap worker 多跑，把预算花在稳定性上。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>约束 B <small>单次调用不可靠</small></h3>
+        <p>一次成功不能证明能力，一次失败也不能直接判死刑。</p>
+        <ul>
+          <li>best-of-N 负责撒网。</li>
+          <li>verifier 负责收网。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>约束 C <small>上下文昂贵而且稀缺</small></h3>
+        <p>系统默认少给，而不是默认全给。</p>
+        <ul>
+          <li>skills 只常驻索引。</li>
+          <li>tool_search 在大工具表里做惰性暴露。</li>
+          <li>memory recall 是 leads，不是整库注入。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>约束 D <small>强模型会越权勤奋</small></h3>
+        <p>如果让判断节点持有工具，它很可能直接执行，而不是判断。</p>
+        <ul>
+          <li><code>reason()</code> 无工具。</li>
+          <li><code>run()</code> / <code>run_worker()</code> 才有工具。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>约束 E <small>外部内容不可信</small></h3>
+        <p>文件、命令输出、web、MCP 结果都是数据，不是指令。</p>
+        <ul>
+          <li>动作统一经过 <code>ToolContext</code> 与 <code>ToolRegistry</code>。</li>
+          <li>sandbox 与 approval 是双轴门控。</li>
+        </ul>
+      </div>
+      <div class="quote">
+        这套设计最核心的姿态不是“我能做很多事”，而是“我知道哪些地方必须被约束，哪些地方值得花钱”。
+      </div>
+    </div>
+  </section>
+
+  <section id="flow" class="panel">
+    <div class="section-head">
+      <span class="badge">02</span>
+      <h2>运行时主流程图</h2>
+    </div>
+    <div class="diagram">
+      <svg viewBox="0 0 1160 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="nanocodex runtime flow">
+        <defs>
+          <linearGradient id="g1" x1="0%" x2="100%">
+            <stop offset="0%" stop-color="#1f7a56" stop-opacity="0.18"/>
+            <stop offset="100%" stop-color="#1d6673" stop-opacity="0.12"/>
+          </linearGradient>
+          <linearGradient id="g2" x1="0%" x2="100%">
+            <stop offset="0%" stop-color="#d56d28" stop-opacity="0.16"/>
+            <stop offset="100%" stop-color="#c15361" stop-opacity="0.12"/>
+          </linearGradient>
+          <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto">
+            <path d="M0,0 L12,6 L0,12 Z" fill="#1f7a56"/>
+          </marker>
+        </defs>
+        <rect x="24" y="28" width="220" height="92" rx="22" fill="url(#g1)" stroke="#c9bea8"/>
+        <text x="50" y="64" font-size="22" font-family="Bahnschrift, sans-serif" fill="#1f2423">用户输入</text>
+        <text x="50" y="96" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#425148">CLI / Tauri GUI / REPL</text>
+
+        <rect x="300" y="28" width="250" height="92" rx="22" fill="url(#g1)" stroke="#c9bea8"/>
+        <text x="326" y="64" font-size="22" font-family="Bahnschrift, sans-serif" fill="#1f2423">配置与上下文装配</text>
+        <text x="326" y="96" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#425148">config + instructions + skills index + memory recall</text>
+
+        <rect x="608" y="28" width="240" height="92" rx="22" fill="url(#g1)" stroke="#c9bea8"/>
+        <text x="632" y="64" font-size="22" font-family="Bahnschrift, sans-serif" fill="#1f2423">ToolContext / Registry</text>
+        <text x="632" y="96" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#425148">sandbox + approval + hooks + search + memory</text>
+
+        <rect x="908" y="28" width="220" height="92" rx="22" fill="url(#g1)" stroke="#c9bea8"/>
+        <text x="938" y="64" font-size="22" font-family="Bahnschrift, sans-serif" fill="#1f2423">AgentLoop</text>
+        <text x="938" y="96" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#425148">模型输出文本或工具调用</text>
+
+        <path d="M244 74 H286" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M550 74 H594" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M848 74 H894" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+
+        <rect x="110" y="190" width="270" height="120" rx="24" fill="#fffef9" stroke="#d9ceb8"/>
+        <text x="136" y="228" font-size="24" font-family="Bahnschrift, sans-serif" fill="#1f7a56">Reason Path</text>
+        <text x="136" y="258" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">classify / plan / decompose / verify</text>
+        <text x="136" y="286" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">无工具，职责只限判断</text>
+
+        <rect x="438" y="190" width="270" height="120" rx="24" fill="#fffef9" stroke="#d9ceb8"/>
+        <text x="464" y="228" font-size="24" font-family="Bahnschrift, sans-serif" fill="#1f7a56">Action Path</text>
+        <text x="464" y="258" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">run / run_worker</text>
+        <text x="464" y="286" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">有工具，真正修改工作区</text>
+
+        <rect x="766" y="190" width="276" height="120" rx="24" fill="url(#g2)" stroke="#d9ceb8"/>
+        <text x="792" y="228" font-size="24" font-family="Bahnschrift, sans-serif" fill="#1f2423">动作闸门</text>
+        <text x="792" y="258" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">pre_tool / approval / sandbox / post_tool</text>
+        <text x="792" y="286" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">不是建议，而是执行边界</text>
+
+        <path d="M1018 122 V172" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M1018 250 H724" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M724 250 H712" stroke="#1f7a56" stroke-width="4"/>
+        <path d="M908 122 V172 H574" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M908 122 V172 H246" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+
+        <rect x="84" y="384" width="300" height="120" rx="24" fill="#fffef9" stroke="#d9ceb8"/>
+        <text x="112" y="422" font-size="24" font-family="Bahnschrift, sans-serif" fill="#1f7a56">Session 与 Context Edit</text>
+        <text x="112" y="452" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">本地历史完整保存</text>
+        <text x="112" y="478" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">发送给 provider 的视图可压缩</text>
+
+        <rect x="432" y="384" width="300" height="120" rx="24" fill="#fffef9" stroke="#d9ceb8"/>
+        <text x="462" y="422" font-size="24" font-family="Bahnschrift, sans-serif" fill="#1f7a56">Checkpoint / Restore</text>
+        <text x="462" y="452" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">模型轮次前存快照</text>
+        <text x="462" y="478" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">失败时仍可逆转</text>
+
+        <rect x="780" y="384" width="284" height="120" rx="24" fill="#fffef9" stroke="#d9ceb8"/>
+        <text x="808" y="422" font-size="24" font-family="Bahnschrift, sans-serif" fill="#1f7a56">最终结果</text>
+        <text x="808" y="452" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">成功落地 / 失败可追 / 预算内收敛</text>
+        <text x="808" y="478" font-size="16" font-family="Microsoft YaHei UI, sans-serif" fill="#435046">这才叫“可用的 agent”</text>
+
+        <path d="M906 310 V364" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M574 310 V364" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M246 310 V364" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M384 444 H418" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+        <path d="M732 444 H766" stroke="#1f7a56" stroke-width="4" marker-end="url(#arrow)"/>
+      </svg>
+    </div>
+    <p>上图最关键的一点是：<strong>判断路径和执行路径被故意拆开</strong>。这不是为了抽象层次好看，而是为了让“会动手的节点”和“只能判断的节点”从权限上就不是同一个生物。</p>
+    <img class="preview" src="../assets/nanocodex-ui-preview.svg" alt="nanocodex GUI 预览图">
+  </section>
+
+  <section id="cast" class="panel">
+    <div class="section-head">
+      <span class="badge">03</span>
+      <h2>角色卡：系统里的几位“主要角色”</h2>
+    </div>
+    <div class="grid-3">
+      <div class="character">
+        <div class="character-head">
+          <div class="avatar">🧭</div>
+          <div>
+            <h3>Classifier</h3>
+            <p>不是经理，是预算开关。</p>
+          </div>
+        </div>
+        <p>它不试图理解全部任务，只负责决定值不值得多花结构成本。</p>
+        <div class="speech">“Simple 直接冲，Medium 上保险，High 才谈分解。”</div>
+      </div>
+      <div class="character">
+        <div class="character-head">
+          <div class="avatar">🗺️</div>
+          <div>
+            <h3>Planner</h3>
+            <p>不是 TODO 生成器，是搜索空间压缩器。</p>
+          </div>
+        </div>
+        <p>它把 worker 的独立尝试放进同一坐标系里，让 verifier 有比较基准。</p>
+        <div class="speech">“我不替你打架，但我给你一张能对齐的战术图。”</div>
+      </div>
+      <div class="character">
+        <div class="character-head">
+          <div class="avatar">⚒️</div>
+          <div>
+            <h3>Worker</h3>
+            <p>真正会改文件、跑命令、试实现的人。</p>
+          </div>
+        </div>
+        <p>每个 worker 都是一次独立尝试。并行的前提是：它们不能共享危险写路径。</p>
+        <div class="speech">“我负责去做，不负责证明自己没做错。”</div>
+      </div>
+      <div class="character">
+        <div class="character-head">
+          <div class="avatar">🧪</div>
+          <div>
+            <h3>Verifier</h3>
+            <p>整个结构的上限，不是装饰性质检。</p>
+          </div>
+        </div>
+        <p>verify 太弱，best-of-N 就会变成“多花钱买错觉”。</p>
+        <div class="speech">“Worker 负责撒网，我负责收网；收错了，一切白费。”</div>
+      </div>
+      <div class="character">
+        <div class="character-head">
+          <div class="avatar">🧠</div>
+          <div>
+            <h3>Memory</h3>
+            <p>不是外挂知识库，是项目驯化层。</p>
+          </div>
+        </div>
+        <p>它不提高 IQ，只减少同一个坑摔两次的概率。</p>
+        <div class="speech">“我是前辈笔记，不是神谕。”</div>
+      </div>
+      <div class="character">
+        <div class="character-head">
+          <div class="avatar">🛡️</div>
+          <div>
+            <h3>Sandbox / Approval</h3>
+            <p>不是背景板，而是结界。</p>
+          </div>
+        </div>
+        <p>所有动作统一经过它们，风险管理不是提示词，而是执行时物理门槛。</p>
+        <div class="speech">“想越权可以，但得先敲门。”</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="economics" class="panel">
+    <div class="section-head">
+      <span class="badge">04</span>
+      <h2>经济学：为什么“多跑”不一定是浪费</h2>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>结构 ROI 的成立条件</h3>
+        <ul>
+          <li>cheap tier 必须真的便宜，最好还能吃到 prompt cache。</li>
+          <li>verifier 必须足够强，至少不能弱于 worker 这一层。</li>
+          <li>递归必须有 <code>max_depth</code>、<code>max_subtasks</code> 之类的收口阀门。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>为什么默认是 2 worker / 3 high_workers</h3>
+        <p>因为边际收益递减。第二个 worker 经常很值，第三个在高风险任务上仍有意义，但继续往上加，收益未必覆盖 token 成本与 wall-clock 时间。</p>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:14px;">
+      <table>
+        <thead>
+          <tr>
+            <th>设计动作</th>
+            <th>买来的东西</th>
+            <th>付出的代价</th>
+            <th>什么时候不划算</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>best-of-N</td>
+            <td>提高至少一个候选做对的概率</td>
+            <td>多次 worker 调用</td>
+            <td>verifier 太弱时，增益会被封顶</td>
+          </tr>
+          <tr>
+            <td>closed-loop retry</td>
+            <td>把 verifier 反馈喂回下一轮</td>
+            <td>整轮重跑</td>
+            <td>反馈模糊或错误时只会放大浪费</td>
+          </tr>
+          <tr>
+            <td>recursive decomposition</td>
+            <td>把高风险任务切成可顺序吸收的子战役</td>
+            <td>调用数近似乘法增长</td>
+            <td>没 cheap tier、或子任务过度拆分时</td>
+          </tr>
+          <tr>
+            <td>checkpoint</td>
+            <td>失败后仍能回滚</td>
+            <td>磁盘拷贝与额外 I/O</td>
+            <td>超大工作区里快照成本上升</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="safety" class="panel">
+    <div class="section-head">
+      <span class="badge">05</span>
+      <h2>安全与可逆：不是附加层，而是主舞台地板</h2>
+    </div>
+    <div class="grid-3">
+      <div class="card">
+        <h3>sandbox</h3>
+        <p>控制“物理上允许什么”。路径、可写根、网络许可都在这里决定。</p>
+      </div>
+      <div class="card">
+        <h3>approval policy</h3>
+        <p>控制“越界时怎么办”。它不是布尔开关，而是系统与用户之间的风险协议。</p>
+      </div>
+      <div class="card">
+        <h3>hooks</h3>
+        <p>把确定性规则挂在动作前后。它们不靠模型自觉，而是外置质量闸门。</p>
+      </div>
+    </div>
+    <div class="diagram" style="margin-top:14px;">
+      <pre>用户意图
+  ↓
+ToolRegistry::execute
+  ↓
+pre_tool hook
+  ↓
+approval classify / ask / deny
+  ↓
+PolicyExecutor / apply_patch
+  ↓
+post_tool hook
+  ↓
+session log + checkpoint + next turn</pre>
+    </div>
+    <p>这一整套设计说明了一个很清楚的态度：<strong>真正危险的地方不能只靠提示词说“请小心”</strong>。必须让危险动作在运行时撞上一道墙，哪怕这道墙有时只是策略级，而不是内核级。</p>
+  </section>
+
+  <section id="memory" class="panel">
+    <div class="section-head">
+      <span class="badge">06</span>
+      <h2>渐进披露：上下文不是仓库，是配给制度</h2>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>skills</h3>
+        <p>系统 prompt 只挂 <code>name + description</code>，正文通过 <code>skill</code> 工具按需取回。</p>
+      </div>
+      <div class="card">
+        <h3>tool_search</h3>
+        <p>大工具表不全量铺开；先给核心工具，再让模型按关键词主动搜能力。</p>
+      </div>
+      <div class="card">
+        <h3>memory recall</h3>
+        <p>不是把整个记忆库塞进来，而是根据 query 做 lightweight semantic ranking，返回少量可验证 leads。</p>
+      </div>
+      <div class="card">
+        <h3>context edit</h3>
+        <p>本地历史完整保留，但 provider 只看“发送时编辑视图”，因此既节流又可审计。</p>
+      </div>
+    </div>
+    <div class="quote" style="margin-top:14px;">
+      默认少给，不是抠门，而是承认模型注意力本身也是一种稀缺资源。
+    </div>
+  </section>
+
+  <section id="battle" class="manga">
+    <div class="section-head">
+      <span class="badge">07</span>
+      <h2>漫画分镜：把一条任务路径讲成一场战斗</h2>
+    </div>
+    <div class="manga-grid">
+      <div class="stage">
+        <div class="panel-title"><span class="burst">Scene 1</span>任务登场</div>
+        <p>用户发出一个高风险编码请求。系统首先不会热血上头，而是先问：这件事简单吗？</p>
+        <p><strong>主旨：</strong>先判断投入级别，再决定是否升级结构。</p>
+      </div>
+      <div class="stage">
+        <div class="panel-title"><span class="burst">Scene 2</span>战术会商</div>
+        <p>planner 出场，生成可对齐的任务计划。它不是抢戏，而是把 worker 的尝试压进同一坐标系。</p>
+        <p><strong>主旨：</strong>让并行尝试可比较。</p>
+      </div>
+      <div class="stage">
+        <div class="panel-title"><span class="burst">Scene 3</span>多名 worker 下场</div>
+        <p>多个 worker 在隔离环境里分别尝试。这里的浪漫不是“各显神通”，而是“互不踩写”。</p>
+        <p><strong>主旨：</strong>先隔离，后比较。</p>
+      </div>
+      <div class="stage">
+        <div class="panel-title"><span class="burst">Scene 4</span>审判时刻</div>
+        <p>verifier 不是看谁说得更响，而是看谁更像完成了任务。如果 FAIL，反馈会被喂回闭环重试。</p>
+        <p><strong>主旨：</strong>失败要大声，问题要具体。</p>
+      </div>
+      <div class="stage">
+        <div class="panel-title"><span class="burst">Scene 5</span>落地或回村</div>
+        <p>通过者被 promote，失败者也不会把工作区炸穿，因为 checkpoint 与 restore 在后面兜底。</p>
+        <p><strong>主旨：</strong>真正的强，不是永不失败，而是失败仍可逆。</p>
+      </div>
+      <div class="stage">
+        <div class="panel-title"><span class="burst">Scene 6</span>前辈笔记写入</div>
+        <p>如果本轮确认了一个稳定 gotcha 或项目约定，<code>remember</code> 才值得调用。</p>
+        <p><strong>主旨：</strong>记忆是项目驯化，不是神话升级。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="summary" class="panel">
+    <div class="section-head">
+      <span class="badge">08</span>
+      <h2>一页总结</h2>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>一句话看系统</h3>
+        <p><code>nanocodex</code> 不是“给模型套个壳”，而是把模型、工具、预算、回滚和风险协议拼成一条可控的工作流水线。</p>
+      </div>
+      <div class="card">
+        <h3>一句话看哲学</h3>
+        <p>先承认约束，再让机制从约束里被逼出来；如果一个机制追溯不到约束，它大概率只是装饰。</p>
+      </div>
+      <div class="card">
+        <h3>一句话看强弱</h3>
+        <p>这套结构的强项不是抬高模型智商，而是把偶尔做对的事，变成更经常做对；把做错的代价，变得可逆、可见、可审计。</p>
+      </div>
+      <div class="card">
+        <h3>一句话看边界</h3>
+        <p>它不解决一切，也不假装解决一切；它只是把最值得认真设计的几道边界，做成了系统默认行为。</p>
+      </div>
+    </div>
+    <div class="footer">
+      基于仓库中的 <code>README.md</code>、<code>README.zh-CN.md</code>、<code>docs/design-philosophy.zh-CN.md</code> 以及 Rust 核心实现文件整理与图解。
+    </div>
+  </section>
+</div>
+</body>
+</html>

@@ -12,7 +12,8 @@
     "tauri:installer": "tauri build --target x86_64-pc-windows-gnu --bundles nsis"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.8.0"
+    "@tauri-apps/api": "2.8.0",
+    "@tauri-apps/plugin-dialog": "~2.3.2"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5",

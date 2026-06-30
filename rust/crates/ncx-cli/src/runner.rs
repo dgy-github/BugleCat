@@ -97,9 +97,8 @@ impl LiveRunner {
         } else {
             ToolRegistry::empty(ctx)
         };
-        let recall = self.memory.recall(task, 6, 3000);
         let instructions = load_project_instructions(workspace, 16_000);
-        let system = compose_system_prompt(system, &[instructions, recall, skills_index]);
+        let system = compose_system_prompt(system, &[instructions, skills_index]);
         let session = Session::new(system);
         let mut agent = AgentLoop::new(Box::new(provider), tools, session)
             .with_task_budget(task_budget_from_config(&self.cfg))

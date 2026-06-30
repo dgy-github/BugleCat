@@ -1,0 +1,14 @@
+[
+  {
+    "intent": "estimate_setup",
+    "input": "setup time for machine M5 job 5001",
+    "error_code": "NEG_SETUP",
+    "expected": "clamp to 0"
+  },
+  {
+    "intent": "validate_schedule",
+    "input": "validate plan for line 9",
+    "error_code": "GAP_TOO_LARGE",
+    "expected": "flag gap > 30m"
+  }
+]

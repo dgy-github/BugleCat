@@ -17,6 +17,9 @@ use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::session::{ContextEditPolicy, ContextEditStats, Session};
 use crate::tools::ToolRegistry;
 
+const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
+const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
+
 /// Minimal async chat interface the loop drives. `?Send` so trait objects can
 /// hold the single-threaded REPL's providers and mock closures.
 #[async_trait(?Send)]
@@ -31,6 +34,23 @@ pub trait Provider {
         tools: &[Value],
         reasoning_effort: Option<&str>,
     ) -> ModelResponse;
+
+    /// Streaming completion: `on_content` is called with each text delta as it
+    /// arrives. Default falls back to [`Provider::chat`] and emits the whole
+    /// content as one delta, so non-streaming providers (mocks, etc.) still work.
+    async fn chat_streaming(
+        &self,
+        messages: &[Value],
+        tools: &[Value],
+        reasoning_effort: Option<&str>,
+        on_content: &mut dyn FnMut(String),
+    ) -> ModelResponse {
+        let resp = self.chat(messages, tools, reasoning_effort).await;
+        if resp.finish_reason != "error" && !resp.content.is_empty() {
+            on_content(resp.content.clone());
+        }
+        resp
+    }
 }
 
 /// Adapt the real HTTP provider to the loop's trait, mapping errors to an
@@ -48,6 +68,35 @@ impl Provider for DeepSeekProvider {
     ) -> ModelResponse {
         let tools_opt = if tools.is_empty() { None } else { Some(tools) };
         match DeepSeekProvider::chat(self, messages, tools_opt, None, None, reasoning_effort).await
+        {
+            Ok(resp) => resp,
+            Err(e) => ModelResponse {
+                content: e.to_string(),
+                finish_reason: "error".to_string(),
+                ..Default::default()
+            },
+        }
+    }
+
+    async fn chat_streaming(
+        &self,
+        messages: &[Value],
+        tools: &[Value],
+        reasoning_effort: Option<&str>,
+        on_content: &mut dyn FnMut(String),
+    ) -> ModelResponse {
+        let tools_opt = if tools.is_empty() { None } else { Some(tools) };
+        match DeepSeekProvider::chat_stream(
+            self,
+            messages,
+            tools_opt,
+            None,
+            None,
+            reasoning_effort,
+            |c: &str| on_content(c.to_string()),
+            |_r| {},
+        )
+        .await
         {
             Ok(resp) => resp,
             Err(e) => ModelResponse {
@@ -89,7 +138,11 @@ impl Default for TaskBudget {
 /// The GUI bridge forwards these to the frontend; the CLI ignores them.
 #[derive(Debug, Clone)]
 pub enum LoopEvent {
-    /// The assistant produced visible text this step (non-streaming: whole message).
+    /// A streamed chunk of assistant text (token delta). The UI appends it to the
+    /// in-progress assistant bubble.
+    AssistantDelta(String),
+    /// The assistant's final visible text for this step. The UI finalizes the
+    /// streamed bubble with this authoritative text (or creates one if no deltas).
     AssistantText(String),
     /// A tool is about to run.
     ToolStart { name: String, args: String },
@@ -186,14 +239,20 @@ impl AgentLoop {
         &self,
         schemas: &[Value],
         system_notes: &[String],
+        sink: &mut Option<EventSink>,
     ) -> (ModelResponse, ContextEditStats) {
         let edited = self
             .session
             .for_model_edited(system_notes, &self.context_edit);
         let effort = self.reasoning_effort.as_deref();
+        // Stream the assistant text live: each delta becomes an AssistantDelta the
+        // UI appends. `sink` is a local (threaded from run_turn), not borrowed
+        // from self, so this does not conflict with the &self provider borrow.
         let response = self
             .active_provider()
-            .chat(&edited.messages, schemas, effort)
+            .chat_streaming(&edited.messages, schemas, effort, &mut |delta: String| {
+                emit(sink, LoopEvent::AssistantDelta(delta));
+            })
             .await;
         (response, edited.stats)
     }
@@ -274,6 +333,14 @@ impl AgentLoop {
         } else {
             vec![format!("[user_prompt hook output]\n{}", prompt_hook.notes)]
         };
+        // Project memory recalled for THIS prompt (query-scoped), injected as a
+        // per-turn system note rather than dumped once at session start.
+        let memory_notes = memory_recall_notes(
+            &self.tools.ctx.memory,
+            &tool_query,
+            MEMORY_RECALL_MAX_ENTRIES,
+            MEMORY_RECALL_MAX_CHARS,
+        );
         self.session.add_user(user_input);
 
         let mut tools_used: Vec<String> = Vec::new();
@@ -300,7 +367,8 @@ impl AgentLoop {
             let schemas = self.tools.schemas_for_query(&tool_query);
             let mut notes = vec![self.budget_note(iteration + 1, tools_used.len())];
             notes.extend(prompt_hook_notes.clone());
-            let (response, edit_stats) = self.call_model(&schemas, &notes).await;
+            notes.extend(memory_notes.clone());
+            let (response, edit_stats) = self.call_model(&schemas, &notes, sink).await;
             add_usage(&mut turn_usage, &response.usage);
             if trace_on() {
                 eprintln!(
@@ -630,6 +698,26 @@ fn add_usage(
     }
 }
 
+/// Per-prompt project-memory recall: a query-scoped system note (or none), so
+/// each turn sees notes relevant to THIS prompt instead of a one-time dump at
+/// session start. Sent as a runtime note — it is never written into the session.
+fn memory_recall_notes(
+    memory: &Option<std::rc::Rc<crate::memory::MemoryStore>>,
+    query: &str,
+    max_entries: usize,
+    max_chars: usize,
+) -> Vec<String> {
+    let Some(memory) = memory else {
+        return Vec::new();
+    };
+    let recall = memory.recall(query, max_entries, max_chars);
+    if recall.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![format!("[memory recall for this prompt]\n{recall}")]
+    }
+}
+
 // ── tests (mirror tests/test_loop.py) ─────────────────────────────────────────
 
 #[cfg(test)]
@@ -891,6 +979,56 @@ mod tests {
                 ..Default::default()
             }
         }
+    }
+
+    #[tokio::test]
+    async fn memory_recall_is_sent_as_query_scoped_system_note() {
+        let ws = tmpdir("memory_recall_note");
+        let memory = Rc::new(crate::memory::MemoryStore::new(
+            ws.join(".ncx").join("memory"),
+        ));
+        memory
+            .remember("Use the GNU target for Windows release builds.", &[], 1)
+            .unwrap();
+        memory
+            .remember("The storyboard panel renders thumbnails.", &[], 2)
+            .unwrap();
+
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let policy = SandboxPolicy::new(WORKSPACE_WRITE, &ws);
+        let ctx = ToolContext::new(ws.clone(), policy).with_memory(memory);
+        let tools = ToolRegistry::new(ctx);
+        let session = Session::new("system prompt");
+        let mut loop_ = AgentLoop::new(
+            Box::new(CapturingProvider { seen: seen.clone() }),
+            tools,
+            session,
+        );
+
+        let r = loop_
+            .run_turn(json!("fix the Windows build target"), None)
+            .await;
+
+        assert_eq!(r.stop_reason, "completed");
+        let messages = seen.borrow();
+        let note = messages
+            .iter()
+            .find(|m| {
+                m["role"] == "system"
+                    && m["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains("[memory recall for this prompt]")
+            })
+            .expect("query-scoped memory recall note is sent");
+        assert!(note["content"].as_str().unwrap_or("").contains("GNU target"));
+        // Runtime note only — never persisted into the session history.
+        assert!(!loop_.session.messages.iter().any(|m| {
+            m["content"]
+                .as_str()
+                .unwrap_or("")
+                .contains("[memory recall for this prompt]")
+        }));
     }
 
     #[tokio::test]

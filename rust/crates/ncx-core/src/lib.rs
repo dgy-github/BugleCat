@@ -11,6 +11,7 @@
 
 pub mod agent_loop;
 pub mod checkpoint;
+pub mod custom_commands;
 pub mod genome;
 pub mod hooks;
 pub mod isolate;
@@ -28,6 +29,10 @@ pub mod tools;
 
 pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult};
 pub use checkpoint::{CheckpointMeta, CheckpointStore, RestoreReport};
+pub use custom_commands::{
+    custom_command_prompt, expand_custom_command_template, list_custom_commands,
+    parse_custom_command_query, resolve_custom_command, CustomCommandQuery, CustomCommandSummary,
+};
 pub use genome::Genome;
 pub use hooks::{HookEvent, HookOutcome};
 pub use memory::{MemoryEntry, MemoryStore, Summarizer};
@@ -35,10 +40,13 @@ pub use mentions::{expand_file_mentions, find_mentions};
 pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
-pub use project_instructions::load_project_instructions;
-pub use session::{ContextEditPolicy, ContextEditStats, Session};
+pub use project_instructions::{load_project_instructions, load_workspace_instructions};
+pub use session::{estimate_tokens, ContextEditPolicy, ContextEditStats, Session};
 pub use session_index::{new_session_id, SessionIndex, SessionSummary};
 pub use skills::{discover_skills, skills_index_block, Skill};
 pub use slash::{parse_slash, split_loop_arg, SLASH_HELP};
 pub use mcp_tool::register_mcp_server;
-pub use tools::{ApprovalHandler, ApprovalRequest, Tool, ToolContext, ToolRegistry};
+pub use tools::{
+    ApprovalDecision, ApprovalHandler, ApprovalRequest, SessionGrants, Tool, ToolContext,
+    ToolRegistry,
+};

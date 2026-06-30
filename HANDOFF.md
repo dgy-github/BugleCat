@@ -4,12 +4,34 @@
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 
 ## 元信息
-- 最后更新：2026-06-26
-- 分支：**`rust-capability`**（基于 rust-rewrite，已推 `origin`）。Python 树 `nanocodex/*.py` 不动。
+- 最后更新：2026-06-29
+- 分支：**`rust-capability`**（整合线，推 **`origin/gui-merge-featgui`**；`origin/rust-capability` = codex
+  的独立 GUI 线，**勿覆盖**）。Python 树 `nanocodex/*.py` 不动。
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
 - 路径：crates `rust/crates/`，GUI `rust/gui/`，基准 `bench/`。
 - 工具链：无 MSVC，用 `x86_64-pc-windows-gnu`；每条 cargo 前 `export PATH="$HOME/.cargo/bin:$PATH"`。
 - ✅ **`feat/train` 已并入 rust-capability**（merge `a26793b`）：ncx-forge 训练框架全部回灌 —— `genome.rs` 读 `NCX_GENOME` 覆盖 prompt/工具描述、`--dump-genome`/`--from-genome` CLI、`train/` 纯 Python 框架。详见下节 + `train/DESIGN.md`。
+
+## 最近改动（2026-06-29，已测，已推 `origin/gui-merge-featgui`）
+> ⚠️ push 坑：`rust-capability` 默认 upstream 误指 `origin/rust-capability`（codex 线）。**推必须显式**
+> `git push origin rust-capability:gui-merge-featgui`，别裸 `git push`。
+
+- **合入 feat/gui 完整前端**（merge `9d623cc`）：feat/gui 的 1490 行 GUI（侧栏会话列表/最近会话、resume+fork、
+  git·diff·记忆·文件·checkpoints 面板、slash 面板、token 流式+用量、4 模式权限、中文化）并入整合线。
+  **之前给精简 GUI 加的 token 条（b78dfba）被 feat/gui 自带 usage 取代**。6 文件冲突已解（GUI 文件取 feat/gui，
+  lib.rs/main.rs/.gitignore 取并集）；`.gitignore` 现忽略 `.nanocodex/`、`.ncx/`。
+- **CLI slash 扩展**（早于合并）：`/export`（会话→md，动态围栏、拒覆盖/拒目录）、`/review`·`/security-review`·
+  `/verify`、`/docx·pdf·pptx·xlsx`（prompt+shell 调后端，未装给 pip 并征询）、别名 `/update-config`·`/usage-credits`。
+- **eval 数据持续更新机制**（`26b9b76`）：`templates/eval-data-pipeline/`——可移植模板（自定义命令 + analyze
+  skill + 日报 + gate 文档）+ `example/` 自包含可跑参考（`run_pipeline.py --self-check` + `eval.py`，纯 stdlib，
+  13 行合成快照→4 候选）。原则：生产只采集、本地 agent 分析提案、CI/人审做 gate；daily loop 对 eval 集**只读**。
+- **与 codex 线对齐**（codex 独有项全部摘到整合线）：
+  - `c167348` **per-prompt 记忆召回**（agent_loop 按 prompt 召回为 per-turn note；去掉 main/runner/bridge 的启动静态召回）+ **`--mcp` 启动门**（默认不起 MCP，加 `--mcp` 才连）。
+  - `20cd53b` GUI **打开会话日志/快照/记忆文件**（`open_session_log`/`open_session_snapshot`/`open_memory_file`）。
+  - `056a622` GUI **自定义命令面板**：把自定义命令引擎抽到 **`ncx-core::custom_commands`**（CLI+GUI 共享、去重）+ `get_custom_commands`/`expand_custom_command` + App.svelte slash 面板并入自定义命令（选中展开进输入框；`runSlash` 清空前先捕获尾随参数）。
+  - 跳过 codex 的 `remember_note`（本线 `memory_add` 已覆盖）。
+- 测试：全 rust 工作区 **273 绿**；GUI 后端 `cargo check` + 前端 `vite build` 均过；GUI 已实跑（含自定义命令面板）。
+- 坑：`tauri dev` 报「Port 5179 already in use」= 上次残留 vite 孤儿占端口；`taskkill //F //PID <node>` 后重启即可。
 
 ## ncx-forge 训练框架（分支 `feat/train`，已推 origin）— 当前活跃工作线
 目标：让强模型当"教师"迭代优化 agent 骨架（system_prompt + 工具描述），用 bench 通过率当

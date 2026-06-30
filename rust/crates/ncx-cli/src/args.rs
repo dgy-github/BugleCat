@@ -19,6 +19,9 @@ OPTIONS:
     -p, --profile <NAME>    Config profile from ~/.nanocodex/config.toml.
     -s, --sandbox <MODE>    read-only | workspace-write | danger-full-access.
     -a, --approval <POLICY> untrusted | on-failure | on-request | never.
+        --permission-mode <MODE>
+                            plan | default | accept-edits | bypass (Claude-Code
+                            style; when set, overrides --sandbox / --approval).
         --max-iterations <N>
                             Max model calls for one task (default: config/60).
         --max-tool-calls <N>
@@ -33,6 +36,8 @@ OPTIONS:
                             Send full history without runtime context editing.
         --image <PATH>      Attach an image to the prompt (repeatable). Routes the
                             turn to the configured vision model. One-shot only.
+        --mcp               Connect MCP servers from ~/.nanocodex/mcp.toml and expose
+                            their tools (runs outside the sandbox; off by default).
     -r, --resume            Resume the workspace session log before starting.
         --history           List recent saved sessions, then exit.
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
@@ -51,6 +56,9 @@ pub struct Args {
     pub profile: Option<String>,
     pub sandbox: Option<String>,
     pub approval: Option<String>,
+    /// Claude-Code permission mode (plan/default/accept-edits/bypass). When set,
+    /// derives sandbox + approval + edit/plan gating, overriding --sandbox/--approval.
+    pub permission_mode: Option<String>,
     pub max_iterations: Option<i64>,
     pub max_tool_calls: Option<i64>,
     pub context_edit_max_chars: Option<i64>,
@@ -59,6 +67,9 @@ pub struct Args {
     pub disable_context_edit: bool,
     /// Image files to attach to the one-shot prompt (multimodal / vision turn).
     pub images: Vec<PathBuf>,
+    /// Connect MCP servers at startup (off by default — keeps startup fast and
+    /// avoids spawning server subprocesses unless explicitly requested).
+    pub mcp: bool,
     pub resume: bool,
     pub history: bool,
     pub orchestrate: bool,
@@ -94,6 +105,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--memory-merge" => args.memory_merge = true,
             "--dump-genome" => args.dump_genome = true,
             "--disable-context-edit" => args.disable_context_edit = true,
+            "--mcp" => args.mcp = true,
             "-w" | "--workspace" => {
                 args.workspace = Some(PathBuf::from(take_value(argv, &mut i, a)?));
             }
@@ -102,6 +114,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-p" | "--profile" => args.profile = Some(take_value(argv, &mut i, a)?),
             "-s" | "--sandbox" => args.sandbox = Some(take_value(argv, &mut i, a)?),
             "-a" | "--approval" => args.approval = Some(take_value(argv, &mut i, a)?),
+            "--permission-mode" => args.permission_mode = Some(take_value(argv, &mut i, a)?),
             "--max-iterations" => args.max_iterations = Some(take_i64(argv, &mut i, a)?),
             "--max-tool-calls" => args.max_tool_calls = Some(take_i64(argv, &mut i, a)?),
             "--context-edit-max-chars" => {
@@ -217,9 +230,10 @@ mod tests {
 
     #[test]
     fn resume_and_history_flags() {
-        let a = args(&["--resume", "--history"]).unwrap();
+        let a = args(&["--resume", "--history", "--mcp"]).unwrap();
         assert!(a.resume);
         assert!(a.history);
+        assert!(a.mcp);
     }
 
     #[test]

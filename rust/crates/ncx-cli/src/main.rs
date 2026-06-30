@@ -16,21 +16,22 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use ncx_config::{
-    load_config, load_mcp_servers, write_nanocodex_config, Config, ConfigPaths, Overrides,
-    WRITABLE_KEYS,
+    load_config, load_mcp_servers, permission_mode_to_knobs, write_nanocodex_config, Config,
+    ConfigPaths, Overrides, VALID_PERMISSION_MODES, WRITABLE_KEYS,
 };
 use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    discover_skills, expand_file_mentions, load_project_instructions, new_session_id,
-    register_mcp_server, skills_index_block, AgentLoop, CheckpointMeta, CheckpointStore,
-    ContextEditPolicy, Genome, MemoryStore, Orchestrator, OrchestratorConfig, Provider, Session,
-    SessionIndex, SessionSummary, TaskBudget, ToolContext, ToolRegistry, TurnResult,
+    custom_command_prompt, discover_skills, expand_file_mentions, list_custom_commands,
+    load_project_instructions, new_session_id, register_mcp_server, skills_index_block, AgentLoop,
+    CheckpointMeta, CheckpointStore, ContextEditPolicy, Genome, MemoryStore, Orchestrator,
+    OrchestratorConfig, Provider, Session, SessionIndex, SessionSummary, TaskBudget, ToolContext,
+    ToolRegistry, TurnResult,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use args::{parse_args, Args};
 use runner::{LiveRunner, LiveSummarizer};
@@ -38,6 +39,12 @@ use runner::{LiveRunner, LiveSummarizer};
 const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use the provided tools \
     (read_file, apply_patch, update_plan) to inspect and edit the workspace. Prefer apply_patch \
     for edits. Keep responses concise.";
+
+/// Injected into the system prompt under `--permission-mode plan`.
+const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run state-changing \
+    commands — apply_patch is disabled and write/escalating shell commands are blocked. \
+    Investigate (read files, run read-only commands) and produce a concrete plan for the user \
+    to approve; make no changes.";
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -108,6 +115,14 @@ async fn run(args: Args) -> i32 {
         eprintln!("ncx: {e}");
         return 1;
     }
+    if let Some(pm) = args.permission_mode.as_deref() {
+        if !VALID_PERMISSION_MODES.contains(&pm) {
+            eprintln!(
+                "ncx: invalid --permission-mode {pm:?}; expected one of {VALID_PERMISSION_MODES:?}"
+            );
+            return 1;
+        }
+    }
 
     // Maintenance: LLM-fold near-duplicate memory notes, then exit.
     if args.memory_merge {
@@ -132,16 +147,24 @@ async fn run(args: Args) -> i32 {
         cfg.timeout_s as u64,
         cfg.max_retries as u32,
     );
-    let policy = SandboxPolicy::new(cfg.sandbox_mode.clone(), &cfg.workspace)
-        .with_network_access(cfg.network_access);
-    // Project memory: recalled into the system prompt as leads; the `remember`
-    // tool lets the agent append verified notes (it gets smarter on THIS repo).
+    // --permission-mode (when given) is the single source of gating, overriding
+    // --sandbox/--approval; otherwise keep the classic sandbox+approval behavior.
+    let (sandbox_mode, approval_policy, require_edit, plan_mode) =
+        match args.permission_mode.as_deref() {
+            Some(pm) => {
+                let (s, a, r, p) = permission_mode_to_knobs(pm);
+                (s.to_string(), a.to_string(), r, p)
+            }
+            None => (cfg.sandbox_mode.clone(), cfg.approval_policy.clone(), false, false),
+        };
+    let network = sandbox_mode == "danger-full-access";
+    let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
+    // Project memory: recalled per prompt by AgentLoop (query-scoped); the
+    // `remember` tool lets the agent append verified notes (smarter on THIS repo).
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     // Periodic consolidation: fold near-duplicate notes on every start (cheap,
     // idempotent) so the store stays tidy as it grows.
     let _ = memory.consolidate(0.85);
-    let recall_query = args.prompt.as_deref().unwrap_or("");
-    let recall = memory.recall(recall_query, 8, 4000);
     let instructions = load_project_instructions(&cfg.workspace, 16_000);
     // Agent Skills: inject only the name+description index (progressive
     // disclosure); the `skill` tool loads a full SKILL.md body on demand.
@@ -158,9 +181,19 @@ async fn run(args: Args) -> i32 {
         );
     }
     let base_prompt = genome.base_system_prompt(SYSTEM_PROMPT).to_string();
-    let system_prompt = compose_system_prompt(&base_prompt, &[instructions, recall, skills_index]);
+    // Plan-mode steering note (feat/gui permission model): appended to the
+    // composed prompt so the agent knows it is in read-only/plan mode.
+    let plan_note = if plan_mode {
+        PLAN_MODE_NOTE.to_string()
+    } else {
+        String::new()
+    };
+    let system_prompt =
+        compose_system_prompt(&base_prompt, &[instructions, skills_index, plan_note]);
     let ctx = ToolContext::new(cfg.workspace.clone(), policy)
-        .with_approval_policy(cfg.approval_policy.clone())
+        .with_approval_policy(approval_policy)
+        .with_require_edit_approval(require_edit)
+        .with_plan_mode(plan_mode)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
@@ -175,10 +208,19 @@ async fn run(args: Args) -> i32 {
         print!("{}", dump_genome_toml(&base_prompt, &tools.ctx.tool_catalog.borrow()));
         return 0;
     }
-    for srv in load_mcp_servers() {
-        match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await {
-            Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
-            Err(e) => eprintln!("mcp({}): connect failed: {e}", srv.name),
+    // MCP is off by default: only connect servers (spawning subprocesses outside
+    // the sandbox) when the user opts in with --mcp. Keeps startup fast and quiet.
+    if args.mcp {
+        let servers = load_mcp_servers();
+        if servers.is_empty() {
+            eprintln!("mcp: --mcp set but no servers found in ~/.nanocodex/mcp.toml");
+        }
+        for srv in servers {
+            match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await
+            {
+                Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
+                Err(e) => eprintln!("mcp({}): connect failed: {e}", srv.name),
+            }
         }
     }
     let log_path = session_log_path(&cfg.workspace);
@@ -412,8 +454,8 @@ fn dispatch_slash(
         "/exit" => SlashOutcome::Exit,
         "/help" => SlashOutcome::Printed(render_help_for_workspace(&cfg.workspace)),
         "/status" => SlashOutcome::Printed(render_status(cfg)),
-        "/usage" | "/cost" => SlashOutcome::Printed(usage.render()),
-        "/config" => SlashOutcome::Printed(config_text(cfg, arg)),
+        "/usage" | "/cost" | "/usage-credits" => SlashOutcome::Printed(usage.render()),
+        "/config" | "/update-config" => SlashOutcome::Printed(config_text(cfg, arg)),
         "/history" => SlashOutcome::Printed(render_history(&SessionIndex::default().entries(), 20)),
         "/checkpoint" => SlashOutcome::Printed(create_checkpoint_text(&cfg.workspace, arg)),
         "/checkpoints" => SlashOutcome::Printed(render_checkpoints(
@@ -421,6 +463,19 @@ fn dispatch_slash(
             20,
         )),
         "/restore" => SlashOutcome::Printed(restore_checkpoint_text(&cfg.workspace, arg)),
+        "/export" => SlashOutcome::Printed(export_session_text(
+            &agent.session,
+            cfg,
+            recorder.session_id(),
+            arg,
+        )),
+        "/review" => SlashOutcome::Prompt(review_prompt(arg)),
+        "/security-review" => SlashOutcome::Prompt(security_review_prompt(arg)),
+        "/verify" => SlashOutcome::Prompt(verify_prompt(arg)),
+        "/docx" => SlashOutcome::Prompt(doc_prompt("docx", arg)),
+        "/pdf" => SlashOutcome::Prompt(doc_prompt("pdf", arg)),
+        "/pptx" => SlashOutcome::Prompt(doc_prompt("pptx", arg)),
+        "/xlsx" => SlashOutcome::Prompt(doc_prompt("xlsx", arg)),
         "/compact" => SlashOutcome::Printed(compact_session_text(agent, recorder)),
         "/model" => {
             if arg.is_empty() {
@@ -522,224 +577,300 @@ fn render_status(cfg: &ncx_config::Config) -> String {
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CustomCommandSummary {
-    scope: &'static str,
-    name: String,
-    path: PathBuf,
-}
+// ── /export ──────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CustomCommandQuery {
-    scope: Option<&'static str>,
-    name: String,
-}
-
-fn custom_command_prompt(
-    workspace: &Path,
-    slash_cmd: &str,
+/// Export the conversation to a Markdown file and return a status line.
+///
+/// With no argument the file lands at `<workspace>/.nanocodex/exports/<id>.md`,
+/// overwriting any prior export there (a managed, per-session location). An
+/// explicit argument is the target path (relative paths resolve against the
+/// workspace, absolute paths are used as-is); an explicit path that already
+/// exists — file or directory — is refused rather than overwritten, so a typo
+/// like `/export Cargo.toml` cannot clobber an existing file. The system prompt
+/// and every user/assistant/tool message are rendered; inline image data is
+/// shown as a `[image]` placeholder, never dumped.
+fn export_session_text(
+    session: &Session,
+    cfg: &ncx_config::Config,
+    session_id: &str,
     arg: &str,
-) -> Result<Option<String>, String> {
-    let Some(query) = parse_custom_command_query(slash_cmd) else {
-        return Ok(None);
-    };
-    let Some(cmd) = resolve_custom_command(workspace, &query) else {
-        return Ok(None);
-    };
-    let template = std::fs::read_to_string(&cmd.path).map_err(|e| {
-        format!(
-            "could not read custom command {} from {}: {e}",
-            slash_cmd,
-            cmd.path.display()
-        )
-    })?;
-    Ok(Some(expand_custom_command_template(
-        strip_frontmatter(&template),
-        arg,
-    )))
+) -> String {
+    let path = export_target_path(&cfg.workspace, session_id, arg);
+    // Only the default managed path may overwrite (its own prior export). An
+    // explicitly named destination is never clobbered.
+    if !arg.trim().is_empty() {
+        if path.is_dir() {
+            return format!("export failed: {} is a directory; pass a file path", path.display());
+        }
+        if path.exists() {
+            return format!(
+                "export failed: {} already exists; choose a different name or delete it first",
+                path.display()
+            );
+        }
+    }
+    let markdown =
+        render_session_markdown(&session.system, &session.messages, &cfg.model, &cfg.workspace);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return format!("export failed: cannot create {}: {e}", parent.display());
+        }
+    }
+    match std::fs::write(&path, markdown.as_bytes()) {
+        Ok(()) => format!(
+            "Exported {} message(s) to {}",
+            session.messages.len(),
+            path.display()
+        ),
+        Err(e) => format!("export failed: {e}"),
+    }
 }
 
-fn parse_custom_command_query(slash_cmd: &str) -> Option<CustomCommandQuery> {
-    let body = slash_cmd.strip_prefix('/')?;
-    if body.is_empty() {
-        return None;
-    }
-    let (scope, name) = if let Some((scope, name)) = body.split_once(':') {
-        let scope = match scope {
-            "project" => "project",
-            "user" => "user",
-            _ => return None,
+/// Resolve where `/export` writes: the trimmed argument as a path (relative to
+/// the workspace unless absolute), or a default under `.nanocodex/exports/`.
+fn export_target_path(workspace: &Path, session_id: &str, arg: &str) -> PathBuf {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        let name = if session_id.is_empty() {
+            "session"
+        } else {
+            session_id
         };
-        (Some(scope), name)
+        return workspace
+            .join(".nanocodex")
+            .join("exports")
+            .join(format!("{name}.md"));
+    }
+    let p = PathBuf::from(arg);
+    if p.is_absolute() {
+        p
     } else {
-        (None, body)
-    };
-    if !valid_custom_command_name(name) {
-        return None;
+        workspace.join(p)
     }
-    Some(CustomCommandQuery {
-        scope,
-        name: name.to_string(),
-    })
 }
 
-fn resolve_custom_command(
-    workspace: &Path,
-    query: &CustomCommandQuery,
-) -> Option<CustomCommandSummary> {
-    custom_command_roots(workspace)
-        .into_iter()
-        .filter(|root| query.scope.is_none_or(|s| s == root.scope))
-        .find_map(|root| {
-            let path = root.dir.join(format!("{}.md", query.name));
-            if path.is_file() {
-                Some(CustomCommandSummary {
-                    scope: root.scope,
-                    name: query.name.clone(),
-                    path,
-                })
-            } else {
-                None
+/// Render the system prompt + message history as a single Markdown document.
+fn render_session_markdown(system: &str, messages: &[Value], model: &str, workspace: &Path) -> String {
+    let mut out = String::from("# nanocodex session export\n\n");
+    let (users, assistants, tools) = count_roles(messages);
+    out.push_str(&format!("- model: `{model}`\n"));
+    out.push_str(&format!("- workspace: `{}`\n", workspace.display()));
+    out.push_str(&format!(
+        "- messages: {} (user {users}, assistant {assistants}, tool {tools})\n",
+        messages.len()
+    ));
+
+    if !system.trim().is_empty() {
+        out.push_str("\n## System prompt\n\n");
+        out.push_str("<details><summary>show</summary>\n\n");
+        push_fenced(&mut out, "", system.trim());
+        out.push_str("\n</details>\n");
+    }
+
+    for msg in messages {
+        match msg.get("role").and_then(|v| v.as_str()).unwrap_or("?") {
+            "user" => {
+                out.push_str("\n## User\n\n");
+                push_block(&mut out, &content_to_markdown(msg.get("content")));
             }
-        })
-}
-
-fn list_custom_commands(workspace: &Path) -> Vec<CustomCommandSummary> {
-    let mut out: Vec<CustomCommandSummary> = Vec::new();
-    let mut seen: Vec<(&'static str, String)> = Vec::new();
-    for root in custom_command_roots(workspace) {
-        let Ok(entries) = std::fs::read_dir(&root.dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                continue;
-            }
-            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if !valid_custom_command_name(name) {
-                continue;
-            }
-            let name = name.to_string();
-            if seen
-                .iter()
-                .any(|(scope, n)| *scope == root.scope && n == &name)
-            {
-                continue;
-            }
-            seen.push((root.scope, name.clone()));
-            out.push(CustomCommandSummary {
-                scope: root.scope,
-                name,
-                path,
-            });
-        }
-    }
-    out.sort_by(|a, b| (a.scope, &a.name).cmp(&(b.scope, &b.name)));
-    out
-}
-
-struct CustomCommandRoot {
-    scope: &'static str,
-    dir: PathBuf,
-}
-
-fn custom_command_roots(workspace: &Path) -> Vec<CustomCommandRoot> {
-    let mut roots = vec![
-        CustomCommandRoot {
-            scope: "project",
-            dir: workspace.join(".nanocodex").join("commands"),
-        },
-        CustomCommandRoot {
-            scope: "project",
-            dir: workspace.join(".claude").join("commands"),
-        },
-    ];
-    if let Some(home) = home_dir() {
-        roots.push(CustomCommandRoot {
-            scope: "user",
-            dir: home.join(".nanocodex").join("commands"),
-        });
-        roots.push(CustomCommandRoot {
-            scope: "user",
-            dir: home.join(".claude").join("commands"),
-        });
-    }
-    roots
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-}
-
-fn valid_custom_command_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-fn strip_frontmatter(template: &str) -> &str {
-    let Some(rest) = template
-        .strip_prefix("---\n")
-        .or_else(|| template.strip_prefix("---\r\n"))
-    else {
-        return template.trim();
-    };
-    let mut offset = template.len() - rest.len();
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            return template[offset + line.len()..].trim();
-        }
-        offset += line.len();
-    }
-    template.trim()
-}
-
-fn expand_custom_command_template(template: &str, arg: &str) -> String {
-    let args = split_custom_args(arg);
-    let mut out = template.to_string();
-    for i in 0..10 {
-        let value = args.get(i).map(String::as_str).unwrap_or("");
-        out = out.replace(&format!("$ARGUMENTS[{i}]"), value);
-        out = out.replace(&format!("${i}"), value);
-    }
-    out = out.replace("$ARGUMENTS", arg.trim());
-    if !arg.trim().is_empty()
-        && !template.contains("$ARGUMENTS")
-        && !(0..10).any(|i| template.contains(&format!("${i}")))
-    {
-        out.push_str("\n\nArguments: ");
-        out.push_str(arg.trim());
-    }
-    out.trim().to_string()
-}
-
-fn split_custom_args(arg: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut quote: Option<char> = None;
-    for ch in arg.chars() {
-        match (quote, ch) {
-            (Some(q), c) if c == q => quote = None,
-            (None, '"' | '\'') => quote = Some(ch),
-            (None, c) if c.is_whitespace() => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
+            "assistant" => {
+                out.push_str("\n## Assistant\n\n");
+                if let Some(reasoning) = msg.get("reasoning_content").and_then(|v| v.as_str()) {
+                    if !reasoning.trim().is_empty() {
+                        out.push_str("<details><summary>reasoning</summary>\n\n");
+                        push_fenced(&mut out, "", reasoning.trim());
+                        out.push_str("\n</details>\n\n");
+                    }
+                }
+                let content = content_to_markdown(msg.get("content"));
+                if !content.trim().is_empty() {
+                    push_block(&mut out, &content);
+                }
+                if let Some(calls) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+                    for call in calls {
+                        let func = call.get("function");
+                        let name = func
+                            .and_then(|f| f.get("name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?");
+                        let args = func
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        out.push_str(&format!("\n**tool call: `{name}`**\n\n"));
+                        push_fenced(&mut out, "json", args.trim());
+                    }
                 }
             }
-            _ => cur.push(ch),
+            "tool" => {
+                let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+                out.push_str(&format!("\n### Tool result: `{name}`\n\n"));
+                let tool_content = content_to_markdown(msg.get("content"));
+                push_fenced(&mut out, "", tool_content.trim());
+            }
+            other => {
+                out.push_str(&format!("\n## {other}\n\n"));
+                push_block(&mut out, &content_to_markdown(msg.get("content")));
+            }
         }
-    }
-    if !cur.is_empty() {
-        out.push(cur);
     }
     out
 }
+
+fn push_block(out: &mut String, text: &str) {
+    out.push_str(text.trim_end());
+    out.push('\n');
+}
+
+/// Choose a Markdown code fence that can wrap `content` verbatim: one backtick
+/// longer than the longest run of backticks inside it (CommonMark), min 3. This
+/// keeps tool results / file contents that themselves contain ``` from breaking
+/// out of the exported code block.
+fn code_fence(content: &str) -> String {
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for c in content.chars() {
+        if c == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    "`".repeat((longest + 1).max(3))
+}
+
+/// Push a fenced code block (optionally language-tagged) whose fence is sized to
+/// contain `content` without being terminated early.
+fn push_fenced(out: &mut String, lang: &str, content: &str) {
+    let fence = code_fence(content);
+    out.push_str(&fence);
+    out.push_str(lang);
+    out.push('\n');
+    out.push_str(content);
+    if !content.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&fence);
+    out.push('\n');
+}
+
+fn count_roles(messages: &[Value]) -> (usize, usize, usize) {
+    let (mut users, mut assistants, mut tools) = (0, 0, 0);
+    for msg in messages {
+        match msg.get("role").and_then(|v| v.as_str()) {
+            Some("user") => users += 1,
+            Some("assistant") => assistants += 1,
+            Some("tool") => tools += 1,
+            _ => {}
+        }
+    }
+    (users, assistants, tools)
+}
+
+/// Flatten an OpenAI-shape `content` field (string, or a multimodal block array)
+/// into Markdown text. Inline image blocks become a `[image]` placeholder so an
+/// export never dumps base64 data.
+fn content_to_markdown(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(blocks)) => {
+            let mut parts = Vec::new();
+            for block in blocks {
+                if block.get("type").and_then(|v| v.as_str()) == Some("image_url") {
+                    parts.push("[image]".to_string());
+                } else if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                    parts.push(text.to_string());
+                }
+            }
+            parts.join("\n\n")
+        }
+        Some(other) => other.to_string(),
+        None => String::new(),
+    }
+}
+
+// ── /review · /security-review · /verify ─────────────────────────────────────
+// These return a canned prompt that the REPL runs as a normal turn, so the agent
+// drives the work with its tools (shell for git diff / tests, read_file, …). A
+// trailing argument narrows the scope.
+
+fn scope_suffix(arg: &str) -> String {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nScope/focus for this pass: {arg}")
+    }
+}
+
+fn review_prompt(arg: &str) -> String {
+    format!(
+        "Review the current code changes for correctness and quality.\n\n\
+         1. Run `git --no-pager diff` and `git --no-pager diff --staged` via the shell tool to see the working-tree changes. If there are none, review the most recently discussed code instead.\n\
+         2. For each issue, report: file:line, severity (blocker/major/minor/nit), what is wrong, and a concrete fix.\n\
+         3. Focus on real bugs, edge cases, error handling, and unintended behavior changes — skip pure style nits unless they hide a bug.\n\
+         4. End with a one-line verdict: is the change safe to ship?{}",
+        scope_suffix(arg)
+    )
+}
+
+fn security_review_prompt(arg: &str) -> String {
+    format!(
+        "Perform a security review of the current changes.\n\n\
+         1. Run `git --no-pager diff` via the shell tool to see what changed. If nothing changed, review the areas that handle untrusted input.\n\
+         2. Look for: command/SQL/path injection, unsafe deserialization, missing input validation, secrets in code or logs, auth/authorization gaps, and unsafe file or network operations.\n\
+         3. For each finding, report: file:line, severity (critical/high/medium/low), the vulnerability, a short exploit sketch, and the fix.\n\
+         4. If you find nothing exploitable, say so explicitly and note any residual risks.{}",
+        scope_suffix(arg)
+    )
+}
+
+fn verify_prompt(arg: &str) -> String {
+    format!(
+        "Verify that the recent change actually works — do not assume, observe.\n\n\
+         1. Identify what changed (`git --no-pager diff`) and what it should do.\n\
+         2. Run the relevant build and tests via the shell tool (prefer the narrowest command that exercises the change, e.g. a single test).\n\
+         3. Report the actual command output, pass or fail. On failure, show the error and the likely cause.\n\
+         4. End with a clear verdict: VERIFIED (with evidence) or NOT VERIFIED (with the blocking failure).{}",
+        scope_suffix(arg)
+    )
+}
+
+// ── /docx · /pdf · /pptx · /xlsx ─────────────────────────────────────────────
+// Document handling is delegated to a backend the agent drives through the shell
+// tool (these formats are binary/zip containers — never hand-parse them). The
+// command injects a prompt naming the right library and the read/edit/create
+// workflow; the backend itself is a runtime dependency (the agent confirms it is
+// installed and asks before installing).
+
+fn doc_backend_hint(fmt: &str) -> &'static str {
+    match fmt {
+        "docx" => "the `python-docx` library (`import docx`) to read or write, or `pandoc` for format conversion",
+        "pdf" => "`pdfplumber` or `pypdf` to read/extract text and tables, `reportlab` to create PDFs, or `pandoc` for conversion",
+        "pptx" => "the `python-pptx` library (`import pptx`) to read or build slide decks",
+        "xlsx" => "`openpyxl` (or `pandas`) to read, edit, or create spreadsheets",
+        _ => "an appropriate document library",
+    }
+}
+
+fn doc_prompt(fmt: &str, arg: &str) -> String {
+    let target = arg.trim();
+    let file_line = if target.is_empty() {
+        format!("Work with the .{fmt} file the user names next (ask which file if it is unclear).")
+    } else {
+        format!("Target file: {target}")
+    };
+    format!(
+        "Help the user work with a .{fmt} document. {file_line}\n\n\
+         1. Decide the operation: extract/read, edit, or create.\n\
+         2. Use {backend} via the shell tool. First confirm the backend is importable (e.g. `python -c \"import <lib>\"`); if it is missing, give the exact `pip install` command and ask before installing.\n\
+         3. Perform the operation with a short Python script (or pandoc) run through the shell tool — do not hand-parse the binary format.\n\
+         4. Report what you did and show the result (extracted text, the written path, etc.).",
+        backend = doc_backend_hint(fmt),
+    )
+}
+
 
 fn config_text(cfg: &ncx_config::Config, arg: &str) -> String {
     let path = ConfigPaths::default().nanocodex;
@@ -917,6 +1048,10 @@ impl SessionRecorder {
             workspace,
             log_path,
         }
+    }
+
+    fn session_id(&self) -> &str {
+        &self.session_id
     }
 
     fn record(&mut self, session: &Session) {
@@ -1254,42 +1389,6 @@ mod tests {
     }
 
     #[test]
-    fn custom_command_expands_project_prompt_template() {
-        let ws = std::env::temp_dir().join(format!("ncx_custom_cmd_{}", new_session_id()));
-        let dir = ws.join(".nanocodex").join("commands");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("review.md"),
-            "---\ndescription: Review a file\n---\nReview $ARGUMENTS[0] with $0. Full: $ARGUMENTS",
-        )
-        .unwrap();
-
-        let out = custom_command_prompt(&ws, "/review", "src/main.rs extra")
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(
-            out,
-            "Review src/main.rs with src/main.rs. Full: src/main.rs extra"
-        );
-        assert!(!out.contains("description"));
-    }
-
-    #[test]
-    fn custom_command_supports_claude_compatible_project_dir() {
-        let ws = std::env::temp_dir().join(format!("ncx_custom_claude_{}", new_session_id()));
-        let dir = ws.join(".claude").join("commands");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("audit.md"), "Audit the current change.").unwrap();
-
-        let out = custom_command_prompt(&ws, "/project:audit", "focus tests")
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(out, "Audit the current change.\n\nArguments: focus tests");
-    }
-
-    #[test]
     fn help_lists_custom_project_commands() {
         let ws = std::env::temp_dir().join(format!("ncx_custom_help_{}", new_session_id()));
         let dir = ws.join(".nanocodex").join("commands");
@@ -1300,23 +1399,6 @@ mod tests {
 
         assert!(help.contains("Custom commands"));
         assert!(help.contains("/project:ship"));
-    }
-
-    #[test]
-    fn custom_command_parser_rejects_unknown_scope_or_bad_name() {
-        assert!(parse_custom_command_query("/project:review").is_some());
-        assert!(parse_custom_command_query("/user:review").is_some());
-        assert!(parse_custom_command_query("/team:review").is_none());
-        assert!(parse_custom_command_query("/bad/name").is_none());
-        assert!(parse_custom_command_query("/bad name").is_none());
-    }
-
-    #[test]
-    fn split_custom_args_honors_simple_quotes() {
-        assert_eq!(
-            split_custom_args(r#"one "two words" 'three words'"#),
-            vec!["one", "two words", "three words"]
-        );
     }
 
     #[test]
@@ -1419,6 +1501,7 @@ mod tests {
             updated_at: "2026-06-01T10:00:00".into(),
             log_path: "/p/.nanocodex/session.jsonl".into(),
             has_snapshot: true,
+            archived: false,
         }];
         let out = render_history(&rows, 10);
         assert!(out.contains("sid"));
@@ -1440,5 +1523,176 @@ mod tests {
         assert!(out.contains("cp1"));
         assert!(out.contains("before edit"));
         assert!(out.contains("skipped=1"));
+    }
+
+    #[test]
+    fn export_renders_user_assistant_tool_markdown() {
+        let mut s = Session::new("system instructions");
+        s.add_user_text("fix the bug");
+        s.add_assistant(
+            "looking into it",
+            Some(vec![json!({
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "shell", "arguments": "{\"cmd\":\"ls\"}"}
+            })]),
+            "thinking step by step",
+        );
+        s.add_tool_result("c1", "shell", "file.rs");
+
+        let md = render_session_markdown(&s.system, &s.messages, "deepseek-chat", Path::new("/ws"));
+
+        assert!(md.starts_with("# nanocodex session export"));
+        assert!(md.contains("model: `deepseek-chat`"));
+        assert!(md.contains("messages: 3 (user 1, assistant 1, tool 1)"));
+        assert!(md.contains("## System prompt"));
+        assert!(md.contains("## User"));
+        assert!(md.contains("fix the bug"));
+        assert!(md.contains("## Assistant"));
+        assert!(md.contains("<details><summary>reasoning</summary>"));
+        assert!(md.contains("thinking step by step"));
+        assert!(md.contains("tool call: `shell`"));
+        assert!(md.contains("### Tool result: `shell`"));
+        assert!(md.contains("file.rs"));
+    }
+
+    #[test]
+    fn export_flattens_multimodal_and_hides_image_data() {
+        let mut s = Session::new("");
+        s.add_user(json!([
+            {"type": "text", "text": "what is this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        ]));
+
+        let md = render_session_markdown(&s.system, &s.messages, "m", Path::new("/ws"));
+
+        assert!(md.contains("what is this"));
+        assert!(md.contains("[image]"));
+        assert!(!md.contains("AAAA"));
+        // An empty system prompt is omitted entirely.
+        assert!(!md.contains("## System prompt"));
+    }
+
+    #[test]
+    fn export_writes_markdown_file_to_explicit_path() {
+        let dir = std::env::temp_dir().join(format!("ncx_export_{}", new_session_id()));
+        let cfg = ncx_config::Config {
+            workspace: dir.clone(),
+            model: "m".into(),
+            ..Default::default()
+        };
+        let mut s = Session::new("sys");
+        s.add_user_text("hello world");
+        let target = dir.join("out.md");
+
+        let status = export_session_text(&s, &cfg, "sid", target.to_str().unwrap());
+
+        assert!(status.contains("Exported 1 message(s)"));
+        assert!(status.contains("out.md"));
+        let written = std::fs::read_to_string(&target).unwrap();
+        assert!(written.contains("hello world"));
+    }
+
+    #[test]
+    fn export_refuses_to_overwrite_existing_explicit_file() {
+        let dir = std::env::temp_dir().join(format!("ncx_export_clob_{}", new_session_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = ncx_config::Config {
+            workspace: dir.clone(),
+            model: "m".into(),
+            ..Default::default()
+        };
+        let existing = dir.join("keep.md");
+        std::fs::write(&existing, "IMPORTANT").unwrap();
+        let mut s = Session::new("sys");
+        s.add_user_text("hi");
+
+        let status = export_session_text(&s, &cfg, "sid", existing.to_str().unwrap());
+
+        assert!(status.contains("already exists"), "{status}");
+        // The original file is untouched.
+        assert_eq!(std::fs::read_to_string(&existing).unwrap(), "IMPORTANT");
+    }
+
+    #[test]
+    fn export_refuses_directory_arg_with_clear_message() {
+        let dir = std::env::temp_dir().join(format!("ncx_export_dir_{}", new_session_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = ncx_config::Config {
+            workspace: dir.clone(),
+            model: "m".into(),
+            ..Default::default()
+        };
+        let mut s = Session::new("sys");
+        s.add_user_text("hi");
+
+        let status = export_session_text(&s, &cfg, "sid", dir.to_str().unwrap());
+
+        assert!(status.contains("is a directory"), "{status}");
+    }
+
+    #[test]
+    fn export_default_path_uses_session_id_under_exports() {
+        let p = export_target_path(Path::new("/ws"), "abc123", "");
+        let s = p.to_string_lossy();
+        assert!(s.contains("exports"), "{s}");
+        assert!(s.ends_with("abc123.md"), "{s}");
+
+        // A relative arg resolves against the workspace; absolute is taken as-is.
+        let rel = export_target_path(Path::new("/ws"), "abc123", "notes/out.md");
+        assert!(rel.ends_with(Path::new("notes/out.md")));
+    }
+
+    #[test]
+    fn export_uses_longer_fence_when_content_has_backticks() {
+        assert_eq!(code_fence("no backticks"), "```");
+        assert_eq!(code_fence("inline `code`"), "```");
+        assert_eq!(code_fence("a ``` b"), "````");
+        assert_eq!(code_fence("````x"), "`````");
+
+        let mut s = Session::new("");
+        s.add_tool_result("c1", "read_file", "here:\n```rust\nfn main() {}\n```\n");
+        let md = render_session_markdown(&s.system, &s.messages, "m", Path::new("/ws"));
+        // The wrapping fence is longer than the inner triple backticks, and the
+        // inner content survives verbatim.
+        assert!(md.contains("````\n"), "{md}");
+        assert!(md.contains("```rust"));
+        assert!(md.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn review_verify_prompts_reference_diff_and_scope() {
+        let review = review_prompt("src/main.rs");
+        assert!(review.contains("git --no-pager diff"));
+        assert!(review.contains("Scope/focus for this pass: src/main.rs"));
+
+        let sec = security_review_prompt("");
+        assert!(sec.to_lowercase().contains("injection"));
+        assert!(!sec.contains("Scope/focus"));
+
+        let verify = verify_prompt("the parser");
+        assert!(verify.contains("VERIFIED"));
+        assert!(verify.contains("the parser"));
+    }
+
+    #[test]
+    fn doc_prompts_name_format_file_and_backend() {
+        let d = doc_prompt("docx", "report.docx");
+        assert!(d.contains(".docx"));
+        assert!(d.contains("Target file: report.docx"));
+        assert!(d.to_lowercase().contains("python-docx"));
+
+        // No file arg -> the agent is told to ask which file.
+        let x = doc_prompt("xlsx", "");
+        assert!(x.contains(".xlsx"));
+        assert!(x.to_lowercase().contains("openpyxl"));
+        assert!(x.contains("names next"));
+
+        let p = doc_prompt("pdf", "a.pdf");
+        let pl = p.to_lowercase();
+        assert!(pl.contains("pdfplumber") || pl.contains("pypdf"));
+
+        let pptx = doc_prompt("pptx", "deck.pptx");
+        assert!(pptx.to_lowercase().contains("python-pptx"));
     }
 }

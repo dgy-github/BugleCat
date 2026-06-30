@@ -298,6 +298,11 @@ impl Tool for WebSearchTool {
         let Some(query) = args.get("query").and_then(|v| v.as_str()) else {
             return "Error: 'query' is required and must be a string.".into();
         };
+        if ctx.policy.mode == ncx_sandbox::READ_ONLY {
+            return "Error: web access is disabled in plan / read-only mode. Switch to default, \
+                    accept-edits, or bypass to use the network."
+                .into();
+        }
         // Keyed Tavily when configured; otherwise (or on failure) DuckDuckGo.
         if ctx.search_provider.eq_ignore_ascii_case("tavily") && !ctx.search_api_key.is_empty() {
             match ncx_provider::tavily_search(query, &ctx.search_api_key, 6).await {
@@ -344,10 +349,15 @@ impl Tool for WebFetchTool {
     fn read_only(&self) -> bool {
         true
     }
-    async fn execute(&self, _ctx: &ToolContext, args: &Value) -> String {
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
         let Some(url) = args.get("url").and_then(|v| v.as_str()) else {
             return "Error: 'url' is required and must be a string.".into();
         };
+        if ctx.policy.mode == ncx_sandbox::READ_ONLY {
+            return "Error: web access is disabled in plan / read-only mode. Switch to default, \
+                    accept-edits, or bypass to use the network."
+                .into();
+        }
         match ncx_provider::fetch_url(url).await {
             Ok(s) => s,
             Err(e) => format!("Error: web_fetch failed: {e}"),
@@ -430,5 +440,19 @@ mod tests {
         assert!(out.contains("src/main.rs"));
         assert!(out.contains("src/util.rs"));
         assert!(!out.contains("junk.rs")); // target/ ignored
+    }
+
+    #[tokio::test]
+    async fn web_tools_blocked_in_read_only() {
+        use crate::tools::ToolContext;
+        use ncx_sandbox::{SandboxPolicy, READ_ONLY};
+        let ws = std::env::temp_dir();
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(READ_ONLY, &ws));
+        let s = WebSearchTool.execute(&ctx, &json!({ "query": "x" })).await;
+        assert!(s.contains("disabled") && s.contains("read-only"), "{s}");
+        let f = WebFetchTool
+            .execute(&ctx, &json!({ "url": "http://example.com" }))
+            .await;
+        assert!(f.contains("disabled") && f.contains("read-only"), "{f}");
     }
 }

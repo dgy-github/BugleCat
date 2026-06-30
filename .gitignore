@@ -47,10 +47,12 @@ bench/reports/
 # ncx-forge generated artifacts
 train/genomes/
 train/runs/
+train/splits.json
+train/data/
 
 # machine-generated bench tasks (TaskGen) — promote to bench/tasks after review
 bench/tasks/gen_*/
-train/genomes/
-train/runs/
-train/splits.json
-train/data/
+
+# nanocodex agent runtime state (session log, checkpoints, project memory)
+.nanocodex/
+.ncx/
