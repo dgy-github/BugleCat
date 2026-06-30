@@ -205,6 +205,11 @@ header {
   gap: var(--sp-3);
   scroll-behavior: smooth;
 }
+/* Keep every message at its natural height. Without this, flex children with
+   overflow:hidden (the tool blocks) get min-height:0 and are COMPRESSED/clipped
+   when the conversation outgrows the viewport — which made them stack into thin
+   overlapping "striped" bars instead of letting the list scroll. */
+.scroll > * { flex-shrink: 0; }
 .scroll::-webkit-scrollbar { width: 11px; }
 .scroll::-webkit-scrollbar-thumb {
   background: var(--line-strong);
