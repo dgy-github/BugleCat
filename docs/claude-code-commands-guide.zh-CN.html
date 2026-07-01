@@ -1,0 +1,1459 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Claude Code 指令说明书：做什么，以及原理是什么</title>
+  <style>
+    :root {
+      --paper: #fbf7ee;
+      --paper-2: #fffdf7;
+      --ink: #222019;
+      --muted: #6f695f;
+      --line: #e6dcc9;
+      --green: #1f7a5b;
+      --green-2: #dff2e7;
+      --blue: #285f9f;
+      --blue-2: #e7f0ff;
+      --orange: #bf6a2a;
+      --orange-2: #fff0df;
+      --rose: #a04355;
+      --rose-2: #ffe8ed;
+      --shadow: 0 22px 70px rgba(61, 49, 29, 0.14);
+      --radius: 24px;
+      --mono: "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      --sans: "LXGW WenKai", "Noto Serif SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--sans);
+      line-height: 1.72;
+      background:
+        radial-gradient(circle at 8% 6%, rgba(31, 122, 91, 0.18), transparent 26rem),
+        radial-gradient(circle at 92% 12%, rgba(191, 106, 42, 0.20), transparent 30rem),
+        linear-gradient(135deg, #fbf7ee 0%, #f4efe3 58%, #eff7f0 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.42;
+      background-image:
+        linear-gradient(rgba(34, 32, 25, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34, 32, 25, 0.035) 1px, transparent 1px);
+      background-size: 36px 36px;
+      mask-image: linear-gradient(to bottom, #000, transparent 78%);
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.2em;
+    }
+
+    .page {
+      position: relative;
+      width: min(1180px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 34px 0 80px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      gap: 26px;
+      align-items: stretch;
+      margin-top: 14px;
+    }
+
+    .hero-card,
+    .panel,
+    .flow,
+    .command-card,
+    .source-box {
+      background: rgba(255, 253, 247, 0.86);
+      border: 1px solid rgba(230, 220, 201, 0.9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    .hero-card {
+      overflow: hidden;
+      padding: 38px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      color: #315247;
+      background: var(--green-2);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.18;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      max-width: 820px;
+      font-size: clamp(38px, 7vw, 74px);
+    }
+
+    h2 {
+      font-size: clamp(28px, 4vw, 44px);
+    }
+
+    h3 {
+      font-size: 21px;
+    }
+
+    .lead {
+      max-width: 760px;
+      margin: 22px 0 0;
+      color: var(--muted);
+      font-size: 19px;
+    }
+
+    .quick-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fffaf0;
+      color: #514a40;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .hero-side {
+      position: relative;
+      overflow: hidden;
+      min-height: 420px;
+      padding: 28px;
+    }
+
+    .mascot {
+      position: absolute;
+      right: 22px;
+      bottom: 18px;
+      width: min(330px, 86%);
+      filter: drop-shadow(0 22px 34px rgba(70, 45, 22, 0.22));
+    }
+
+    .speech {
+      position: relative;
+      z-index: 2;
+      width: fit-content;
+      max-width: 310px;
+      padding: 16px 18px;
+      border: 1px solid rgba(31, 122, 91, 0.25);
+      border-radius: 18px 18px 18px 6px;
+      background: rgba(255, 255, 255, 0.86);
+      color: #40554e;
+      font-size: 14px;
+      box-shadow: 0 12px 32px rgba(49, 40, 24, 0.10);
+    }
+
+    .toc {
+      position: sticky;
+      top: 16px;
+      z-index: 4;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 26px 0;
+      padding: 10px;
+      border: 1px solid rgba(230, 220, 201, 0.8);
+      border-radius: 999px;
+      background: rgba(255, 253, 247, 0.84);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 10px 40px rgba(54, 43, 25, 0.10);
+    }
+
+    .toc a {
+      padding: 8px 13px;
+      border-radius: 999px;
+      color: #4f493f;
+      font-size: 14px;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      background: var(--green-2);
+      color: #1f604b;
+    }
+
+    section {
+      margin-top: 44px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      max-width: 640px;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .principle-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 260px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 253, 247, 0.82);
+      box-shadow: 0 14px 42px rgba(61, 49, 29, 0.08);
+    }
+
+    .principle-card::after {
+      content: "";
+      position: absolute;
+      right: -42px;
+      bottom: -52px;
+      width: 150px;
+      height: 150px;
+      border-radius: 999px;
+      background: var(--bubble, var(--green-2));
+      opacity: 0.9;
+    }
+
+    .principle-card .num {
+      display: inline-flex;
+      width: 38px;
+      height: 38px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 18px;
+      border-radius: 14px;
+      background: var(--bubble, var(--green-2));
+      color: var(--accent, var(--green));
+      font-family: var(--mono);
+      font-weight: 900;
+    }
+
+    .principle-card p {
+      position: relative;
+      z-index: 1;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .flow {
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 26px;
+    }
+
+    .flow svg {
+      display: block;
+      width: 100%;
+      min-width: 1040px;
+      min-height: 500px;
+    }
+
+    .flow::-webkit-scrollbar {
+      height: 10px;
+    }
+
+    .flow::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: rgba(31, 122, 91, 0.24);
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .legend span {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #fff7ea;
+      color: #675b4a;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .panel {
+      padding: 24px;
+    }
+
+    .searchbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fffaf0;
+    }
+
+    .searchbar input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--ink);
+      font: 700 16px/1.3 var(--sans);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(255, 253, 247, 0.72);
+    }
+
+    table {
+      width: 100%;
+      min-width: 980px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 15px 16px;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f8f1e3;
+      color: #514230;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code,
+    .cmd {
+      font-family: var(--mono);
+    }
+
+    .cmd {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 10px;
+      background: #1f2a24;
+      color: #f6ffe9;
+      font-size: 13px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .kind {
+      display: inline-flex;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: var(--blue-2);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .kind.skill {
+      background: var(--green-2);
+      color: var(--green);
+    }
+
+    .kind.plugin {
+      background: var(--orange-2);
+      color: var(--orange);
+    }
+
+    .kind.conditional {
+      background: var(--rose-2);
+      color: var(--rose);
+    }
+
+    .note {
+      margin: 14px 0 0;
+      padding: 14px 16px;
+      border-left: 5px solid var(--orange);
+      border-radius: 14px;
+      background: #fff4e7;
+      color: #5c4935;
+    }
+
+    .command-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .command-card {
+      padding: 20px;
+    }
+
+    .command-card p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .mini {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 10px;
+      margin-top: 14px;
+      font-size: 14px;
+    }
+
+    .mini strong {
+      color: #574b3c;
+    }
+
+    .source-box {
+      padding: 24px;
+    }
+
+    .source-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .path {
+      overflow-wrap: anywhere;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: #544b3f;
+    }
+
+    .callout {
+      display: grid;
+      grid-template-columns: 76px 1fr;
+      gap: 16px;
+      align-items: center;
+      padding: 18px;
+      border: 1px solid rgba(31, 122, 91, 0.25);
+      border-radius: 22px;
+      background: linear-gradient(135deg, #f2fbf4, #fffaf0);
+    }
+
+    .face {
+      width: 76px;
+      height: 76px;
+      border-radius: 26px;
+      background: #ffdf91;
+      box-shadow: inset 0 -10px 0 rgba(191, 106, 42, 0.18);
+    }
+
+    .face svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .footer {
+      margin-top: 48px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    @media (max-width: 960px) {
+      .hero,
+      .grid-4,
+      .command-grid,
+      .source-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-side {
+        min-height: 320px;
+      }
+
+      .toc {
+        border-radius: 24px;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      body::before,
+      .toc,
+      .searchbar {
+        display: none;
+      }
+
+      .hero-card,
+      .panel,
+      .flow,
+      .command-card,
+      .source-box {
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero" id="top">
+      <div class="hero-card">
+        <div class="eyebrow">Claude Code slash command map</div>
+        <h1>Claude Code 指令说明书：它做什么，以及为什么能做到</h1>
+        <p class="lead">
+          这份 HTML 面向“看到 <code>/</code> 命令菜单却不知道每个指令背后发生了什么”的场景。
+          它把指令分成官方 commands、运行时 skills、插件缓存命令、自定义命令四类，并重点解释你截图里出现的那组命令。
+        </p>
+        <div class="quick-tags">
+          <span class="tag">覆盖截图命令</span>
+          <span class="tag">解释执行原理</span>
+          <span class="tag">标注来源与风险</span>
+          <span class="tag">适合打印/分享</span>
+        </div>
+      </div>
+
+      <aside class="hero-card hero-side" aria-label="anime style helper">
+        <div class="speech">
+          把 <code>/</code> 菜单想象成“魔法书目录”：有些咒语直接改会话，有些只是把一套工作流提示词交给 Claude，有些会调用插件和工具。
+        </div>
+        <svg class="mascot" viewBox="0 0 360 360" role="img" aria-label="动漫风格命令导航小助手">
+          <defs>
+            <linearGradient id="cape" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#1f7a5b" />
+              <stop offset="1" stop-color="#285f9f" />
+            </linearGradient>
+          </defs>
+          <path d="M86 292c24-82 65-126 124-132 50 17 76 61 83 132-50 26-117 32-207 0z" fill="url(#cape)" />
+          <path d="M117 155c0-62 44-104 101-104 58 0 101 42 101 104s-44 111-101 111c-58 0-101-49-101-111z" fill="#ffe0b7" stroke="#442d24" stroke-width="6" />
+          <path d="M119 136c10-56 46-91 100-91 48 2 82 28 100 78-39-22-78-24-120-8-31 12-59 19-80 21z" fill="#3b2b24" />
+          <circle cx="182" cy="162" r="9" fill="#30261f" />
+          <circle cx="254" cy="162" r="9" fill="#30261f" />
+          <path d="M205 203c19 13 39 13 58 0" fill="none" stroke="#8f4a33" stroke-width="6" stroke-linecap="round" />
+          <path d="M81 112l49-62 22 77z" fill="#ffcc68" stroke="#442d24" stroke-width="6" />
+          <path d="M113 84l18-22 8 28z" fill="#fff4cf" />
+          <rect x="31" y="248" width="97" height="61" rx="18" fill="#fffaf0" stroke="#442d24" stroke-width="6" />
+          <path d="M52 272h54M52 291h36" stroke="#1f7a5b" stroke-width="7" stroke-linecap="round" />
+          <path d="M273 245c19-10 37-9 52 5 9 9 6 24-7 28-18 6-38-6-45-33z" fill="#ffdf91" stroke="#442d24" stroke-width="6" />
+          <path d="M75 72c22-20 41-32 58-36" stroke="#1f7a5b" stroke-width="8" stroke-linecap="round" />
+          <circle cx="135" cy="35" r="11" fill="#1f7a5b" />
+        </svg>
+      </aside>
+    </section>
+
+    <nav class="toc" aria-label="目录">
+      <a href="#mental-model">总原理</a>
+      <a href="#flow">执行流程</a>
+      <a href="#screenshot">截图命令</a>
+      <a href="#builtin">官方全表</a>
+      <a href="#runtime-skills">运行时 Skills</a>
+      <a href="#plugins">插件命令</a>
+      <a href="#write-your-own">自己写命令</a>
+      <a href="#sources">来源</a>
+    </nav>
+
+    <section id="mental-model">
+      <div class="section-head">
+        <div>
+          <h2>先建立一个总模型</h2>
+        </div>
+        <p>
+          Claude Code 里的 <code>/</code> 菜单不是单一类型。它更像一个路由器，把“内置操作”“Markdown 指令模板”“Skill 工作流”“插件提供的能力”和“MCP prompt”放在同一个入口里。
+        </p>
+      </div>
+
+      <div class="grid-4">
+        <article class="principle-card" style="--bubble: var(--blue-2); --accent: var(--blue);">
+          <span class="num">01</span>
+          <h3>内置命令</h3>
+          <p>由 Claude Code 程序本身实现，常用于清空上下文、导出会话、修改配置、登录、查看状态等。原理是直接调用 CLI 的内部能力，不只是给模型发一句提示词。</p>
+        </article>
+        <article class="principle-card" style="--bubble: var(--green-2); --accent: var(--green);">
+          <span class="num">02</span>
+          <h3>Skill</h3>
+          <p>一个 <code>SKILL.md</code> 包。前置元数据告诉 Claude 何时触发，正文给工作方法，必要时再读取 references/scripts/assets。原理是“渐进加载”，节省上下文。</p>
+        </article>
+        <article class="principle-card" style="--bubble: var(--orange-2); --accent: var(--orange);">
+          <span class="num">03</span>
+          <h3>插件命令</h3>
+          <p>插件可以提供 commands、skills、agents、hooks、MCP server。命令通常是 Markdown 文件加 frontmatter，通过允许工具、参数提示、模型偏好来定义工作流。</p>
+        </article>
+        <article class="principle-card" style="--bubble: var(--rose-2); --accent: var(--rose);">
+          <span class="num">04</span>
+          <h3>自定义命令</h3>
+          <p>项目或用户目录里的 <code>.claude/commands/*.md</code> 会变成 slash command。原理很朴素：把文件内容展开成 Claude 要执行的专用任务说明。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="flow">
+      <div class="section-head">
+        <div>
+          <h2>从输入 <code>/</code> 到执行：流程图</h2>
+        </div>
+        <p>这张图解释“为什么同一个菜单里既有 <code>/clear</code>，又有 <code>/session-compact</code> 这种技能”。</p>
+      </div>
+
+      <div class="flow">
+        <svg viewBox="0 0 1120 500" role="img" aria-label="Claude Code slash command 执行流程">
+          <defs>
+            <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#3d311d" flood-opacity="0.16" />
+            </filter>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L9,3 z" fill="#6f695f" />
+            </marker>
+          </defs>
+
+          <rect x="20" y="35" width="170" height="82" rx="20" fill="#1f7a5b" filter="url(#softShadow)" />
+          <text x="105" y="68" text-anchor="middle" fill="#fff" font-size="18" font-weight="800">用户输入 /</text>
+          <text x="105" y="94" text-anchor="middle" fill="#e7fff3" font-size="13">弹出命令选择器</text>
+
+          <line x1="190" y1="76" x2="265" y2="76" stroke="#6f695f" stroke-width="3" marker-end="url(#arrow)" />
+
+          <rect x="270" y="25" width="210" height="104" rx="22" fill="#fffaf0" stroke="#e6dcc9" stroke-width="2" filter="url(#softShadow)" />
+          <text x="375" y="58" text-anchor="middle" fill="#222019" font-size="18" font-weight="800">命令解析器</text>
+          <text x="375" y="84" text-anchor="middle" fill="#6f695f" font-size="13">按来源聚合、排序、去重</text>
+          <text x="375" y="105" text-anchor="middle" fill="#6f695f" font-size="13">匹配参数和命名空间</text>
+
+          <line x1="480" y1="76" x2="555" y2="76" stroke="#6f695f" stroke-width="3" marker-end="url(#arrow)" />
+
+          <rect x="560" y="20" width="520" height="162" rx="24" fill="#f6fbff" stroke="#d7e8ff" stroke-width="2" filter="url(#softShadow)" />
+          <text x="820" y="51" text-anchor="middle" fill="#222019" font-size="18" font-weight="800">找到命令定义</text>
+          <rect x="584" y="70" width="145" height="88" rx="16" fill="#fffdf7" stroke="#d7e8ff" stroke-width="1.5" />
+          <rect x="747" y="70" width="145" height="88" rx="16" fill="#fffdf7" stroke="#d7e8ff" stroke-width="1.5" />
+          <rect x="910" y="70" width="145" height="88" rx="16" fill="#fffdf7" stroke="#d7e8ff" stroke-width="1.5" />
+          <text x="656" y="94" text-anchor="middle" fill="#285f9f" font-size="14" font-weight="800">内置</text>
+          <text x="656" y="118" text-anchor="middle" fill="#6f695f" font-size="12">Claude Code</text>
+          <text x="656" y="138" text-anchor="middle" fill="#6f695f" font-size="12">CLI 内核实现</text>
+          <text x="820" y="94" text-anchor="middle" fill="#1f7a5b" font-size="14" font-weight="800">Skill</text>
+          <text x="820" y="118" text-anchor="middle" fill="#6f695f" font-size="12">name/description</text>
+          <text x="820" y="138" text-anchor="middle" fill="#6f695f" font-size="12">再读 SKILL.md</text>
+          <text x="982" y="94" text-anchor="middle" fill="#bf6a2a" font-size="14" font-weight="800">插件/自定义</text>
+          <text x="982" y="118" text-anchor="middle" fill="#6f695f" font-size="12">commands/*.md</text>
+          <text x="982" y="138" text-anchor="middle" fill="#6f695f" font-size="12">和 frontmatter</text>
+
+          <line x1="820" y1="182" x2="820" y2="225" stroke="#6f695f" stroke-width="3" marker-end="url(#arrow)" />
+
+          <rect x="600" y="230" width="440" height="94" rx="22" fill="#fffdf7" stroke="#e6dcc9" stroke-width="2" filter="url(#softShadow)" />
+          <text x="820" y="264" text-anchor="middle" fill="#222019" font-size="18" font-weight="800">准备执行上下文</text>
+          <text x="820" y="292" text-anchor="middle" fill="#6f695f" font-size="13">展开参数、注入 @文件、执行 !`bash`、加载允许工具</text>
+
+          <line x1="600" y1="277" x2="480" y2="277" stroke="#6f695f" stroke-width="3" marker-end="url(#arrow)" />
+
+          <rect x="270" y="230" width="210" height="94" rx="22" fill="#fff4e7" stroke="#f0d2b2" stroke-width="2" filter="url(#softShadow)" />
+          <text x="375" y="264" text-anchor="middle" fill="#222019" font-size="18" font-weight="800">权限与工具闸</text>
+          <text x="375" y="292" text-anchor="middle" fill="#6f695f" font-size="13">Read/Bash/Edit/MCP/Task</text>
+
+          <line x1="270" y1="277" x2="190" y2="277" stroke="#6f695f" stroke-width="3" marker-end="url(#arrow)" />
+
+          <rect x="20" y="230" width="170" height="94" rx="22" fill="#ffe8ed" stroke="#f2c6d0" stroke-width="2" filter="url(#softShadow)" />
+          <text x="105" y="264" text-anchor="middle" fill="#222019" font-size="18" font-weight="800">Claude 执行</text>
+          <text x="105" y="292" text-anchor="middle" fill="#6f695f" font-size="13">分析、调用工具、产出结果</text>
+
+          <line x1="105" y1="324" x2="105" y2="382" stroke="#6f695f" stroke-width="3" marker-end="url(#arrow)" />
+
+          <rect x="20" y="390" width="1060" height="72" rx="18" fill="#222019" />
+          <text x="550" y="421" text-anchor="middle" fill="#fffaf0" font-size="16" font-weight="800">结果可能是：清空上下文、导出文件、修改配置、创建提交、运行测试</text>
+          <text x="550" y="446" text-anchor="middle" fill="#fffaf0" font-size="16" font-weight="800">也可能是生成报告，或只给你一份建议</text>
+        </svg>
+        <div class="legend">
+          <span>内置命令：偏“状态操作”</span>
+          <span>Skill：偏“专用工作方法”</span>
+          <span>插件命令：偏“可安装工作流”</span>
+          <span>自定义命令：偏“团队自己的快捷流程”</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="screenshot">
+      <div class="section-head">
+        <div>
+          <h2>你截图里的命令全集逐项说明</h2>
+        </div>
+        <p>
+          三张截图里可见 31 条命令。这里按“做什么 / 原理 / 什么时候用 / 注意点”解释，并把旧别名 <code>extra-usage</code> 也单独列出，方便和你的菜单逐项对照。
+        </p>
+      </div>
+
+      <div class="panel">
+        <div class="searchbar">
+          <strong>搜索</strong>
+          <input id="commandSearch" type="search" placeholder="输入 security、compact、xlsx、clear 等关键词过滤表格" />
+        </div>
+        <div class="table-wrap">
+          <table id="screenshotTable">
+            <thead>
+              <tr>
+                <th>命令</th>
+                <th>来源类型</th>
+                <th>它做什么</th>
+                <th>背后原理</th>
+                <th>适合什么时候用</th>
+                <th>注意点</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="cmd">/context</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>查看当前上下文窗口的占用情况。</td>
+                <td>把消息、工具结果、memory、skills 等上下文来源按 token 占用可视化。</td>
+                <td>模型开始“记不住”或会话很长时。</td>
+                <td>它只诊断，不会自动清理；清理用 <code>/compact</code> 或 <code>/clear</code>。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/debug</span></td>
+                <td><span class="kind skill">Bundled Skill</span></td>
+                <td>开启或分析 Claude Code debug 日志，排查工具、网络、配置问题。</td>
+                <td>让 Claude 读取当前会话 debug log，用日志证据定位根因。</td>
+                <td>Claude Code 行为异常、工具报错、MCP/插件加载失败。</td>
+                <td>debug 日志可能含路径或环境信息，分享前要检查。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/deep-research</span></td>
+                <td><span class="kind skill">研究 Skill</span></td>
+                <td>进行多源网页研究，生成带来源的综合报告。</td>
+                <td>并行搜索、抓取资料、交叉验证，再综合成结构化结论。</td>
+                <td>需要最新资料、竞品调研、技术选型或事实核验。</td>
+                <td>问题太宽时应先收窄范围；需要联网。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/docx</span></td>
+                <td><span class="kind skill">文档 Skill</span></td>
+                <td>读取、创建、编辑 Word 文档。</td>
+                <td>使用专门的文档处理流程保留标题、表格、页眉页脚、目录和样式。</td>
+                <td>报告、合同、申请书、模板、带格式的 Word 交付物。</td>
+                <td>不适合 PDF/XLSX/PPTX，它们各有专门 skill。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/extra-usage</span></td>
+                <td><span class="kind conditional">旧别名/账号</span></td>
+                <td>配置额外用量或 usage credits，让超限后还能继续使用。</td>
+                <td>进入账号额度/付费续用配置；新文档中对应 <code>/usage-credits</code>。</td>
+                <td>看到额度不足、需要临时追加用量时。</td>
+                <td>现在通常显示为 <code>/usage-credits</code>，旧菜单可能仍出现 <code>/extra-usage</code>。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/fewer-permission-prompts</span></td>
+                <td><span class="kind skill">Bundled Skill</span></td>
+                <td>减少反复出现的只读权限确认弹窗。</td>
+                <td>扫描历史中常见只读 Bash/MCP 调用，写入项目 allowlist。</td>
+                <td>频繁被 git status、rg、ls 等只读命令打断时。</td>
+                <td>会修改项目 <code>.claude/settings.json</code>，改前看计划。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/glm-stability</span></td>
+                <td><span class="kind skill">本机自定义 Skill</span></td>
+                <td>稳定 GLM/第三方模型在编码、排障、配置修改中的表现。</td>
+                <td>加强“先验证再结论”的纪律，减少猜测、漂移和未证实建议。</td>
+                <td>使用 GLM 类模型时感觉回答发散、过度自信或忘约束。</td>
+                <td>它改善工作方式，不改变底层模型能力。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/goal</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>设置一个持续目标，让 Claude 跨多轮继续工作直到完成。</td>
+                <td>把完成条件保存成会话状态，驱动后续自动续做和检查。</td>
+                <td>需要长时间推进、自动延续的明确任务。</td>
+                <td>目标要具体；模糊目标容易让任务跑偏。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/heapdump</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>导出 Claude Code 进程的 JS heap 快照和内存报告。</td>
+                <td>让运行中的 CLI 写出内存诊断文件，用于排查内存异常。</td>
+                <td>Claude Code 占用内存过高或疑似泄漏。</td>
+                <td>这是诊断工具，不是普通用户日常命令。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/init</span></td>
+                <td><span class="kind">官方内置/Skill</span></td>
+                <td>初始化项目 <code>CLAUDE.md</code> 指南。</td>
+                <td>扫描项目结构、命令、约束，写成 Claude 后续可读取的长期上下文。</td>
+                <td>新项目第一次让 Claude Code 接手。</td>
+                <td>生成后应人工删掉不准确或临时内容。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/insights</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>生成 Claude Code 使用洞察报告。</td>
+                <td>分析历史会话、项目区域、常用工具和摩擦点，整理成报告。</td>
+                <td>想复盘自己的 AI coding 工作流或给团队总结经验。</td>
+                <td>可能包含本地项目名、路径或使用习惯，分享前检查。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/loop</span></td>
+                <td><span class="kind skill">Bundled Skill</span></td>
+                <td>按间隔重复执行一个 prompt 或 slash command。</td>
+                <td>在会话内建立循环调度，周期性检查状态或执行维护任务。</td>
+                <td>等部署、轮询测试、定时检查某个状态。</td>
+                <td>要有明确停止条件，避免无限消耗额度。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/pdf</span></td>
+                <td><span class="kind skill">文档 Skill</span></td>
+                <td>读取、拆分、合并、旋转、OCR 或编辑 PDF。</td>
+                <td>按 PDF 页面、表格、图片和表单结构处理，而不是简单当纯文本。</td>
+                <td>扫描件、合同、报告、表单、需要抽取表格的 PDF。</td>
+                <td>OCR 结果要抽样核对。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/pptx</span></td>
+                <td><span class="kind skill">文档 Skill</span></td>
+                <td>读取、创建、修改 PowerPoint 演示文稿。</td>
+                <td>处理 slides、layouts、speaker notes、模板和图片资源。</td>
+                <td>路演、汇报、培训课件、需要批量改 PPT。</td>
+                <td>涉及视觉排版时，完成后最好人工打开看一遍。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/reload-skills</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>重新扫描 skills 和 custom commands。</td>
+                <td>让当前会话重新读取磁盘上的 <code>SKILL.md</code> 和命令文件。</td>
+                <td>刚新增/修改 skill 后，不想重启 Claude Code。</td>
+                <td>只重新发现能力，不会自动运行它们。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/remote-control</span></td>
+                <td><span class="kind conditional">远程控制</span></td>
+                <td>让当前终端会话可以从 claude.ai 远程控制。</td>
+                <td>建立本地 session 与网页端的控制通道。</td>
+                <td>想在网页端接管或监控本地 Claude Code 会话。</td>
+                <td>需要账号、网络和远程控制权限。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/review</span></td>
+                <td><span class="kind">官方内置/Skill</span></td>
+                <td>审查 GitHub Pull Request。</td>
+                <td>读取 PR diff 和上下文，使用 review 引擎生成问题和建议。</td>
+                <td>看远端 PR；本地当前 diff 更适合 <code>/code-review</code>。</td>
+                <td>需要 GitHub/gh 权限。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/run</span></td>
+                <td><span class="kind skill">Bundled Skill</span></td>
+                <td>启动并驾驶当前项目应用，真实观察运行效果。</td>
+                <td>识别项目启动方式，运行 app，再通过终端/浏览器/截图验证。</td>
+                <td>前端、CLI、服务端功能改完后想看真实行为。</td>
+                <td>需要项目依赖和运行环境可用。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/run-skill-generator</span></td>
+                <td><span class="kind skill">Bundled Skill</span></td>
+                <td>为项目生成指导 <code>/run</code> 和 <code>/verify</code> 的项目级 skill。</td>
+                <td>把“如何构建、启动、访问、验证这个项目”沉淀成可复用流程。</td>
+                <td>项目启动步骤复杂，Claude 每次都要重新摸索时。</td>
+                <td>可能写入项目 skill 文件，需要 review。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/security-review</span></td>
+                <td><span class="kind">内置/示例工作流</span></td>
+                <td>对当前分支或待提交变更做安全审查，寻找注入、鉴权、越权、密钥泄露、不安全数据流等问题。</td>
+                <td>把 Claude 的评审目标限定为安全威胁，并通常围绕 git diff、文件读取、grep 等证据展开。它不是普通代码美化，而是“威胁建模 + 漏洞扫描”的提示词框架。</td>
+                <td>登录、支付、权限、上传、外部输入、数据导出、发布前检查。</td>
+                <td>不能替代人工安全测试或 SAST/DAST；高风险系统仍要复核。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/session-compact</span></td>
+                <td><span class="kind skill">本机自定义 Skill</span></td>
+                <td>把很长的会话压缩成短 handoff：目标、已确认事实、已做决策、未决问题、下一步。</td>
+                <td>读取本机 <code>SKILL.md</code> 的固定模板，只保留“下一步仍需要”的工作记忆，丢掉旧分支、日志噪声、重复解释。</td>
+                <td>会话太长、模型开始忘约束、准备换子任务、想把上下文交给新会话。</td>
+                <td>它压缩的是对话上下文，不会压缩仓库文件；关键证据最好仍保留在文件里。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/setup-cowork</span></td>
+                <td><span class="kind skill">Anthropic Skill</span></td>
+                <td>引导配置 Cowork/协作环境，推荐或安装角色匹配的插件、连接工具，并试跑一个 skill。</td>
+                <td>把“环境初始化”拆成一套可复用清单：检查使用场景、选择插件/工具、写入配置、验证是否可用。</td>
+                <td>新机器、新项目、团队成员第一次接入 Claude Code/Cowork。</td>
+                <td>可能改 settings 或安装插件；执行前看它要改哪些文件。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/simplify</span></td>
+                <td><span class="kind">Bundled command</span></td>
+                <td>审查当前改动，寻找可复用、可简化、可提升效率或可降低抽象高度的地方，并可直接应用修正。</td>
+                <td>它把任务目标设成“保持行为不变的重构”，重点是代码清晰度和维护性，而不是主动找功能 bug。</td>
+                <td>功能已经跑通，但代码显得绕、重复、过度设计，准备提交前做一轮打磨。</td>
+                <td>如果你想找 bug，用 <code>/code-review</code> 或 <code>/review</code> 更合适。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/skill-creator</span></td>
+                <td><span class="kind skill">官方插件 Skill</span></td>
+                <td>创建、修改、评估 Claude Skill，包括写 <code>SKILL.md</code>、设计触发描述、做测试 prompts、迭代优化。</td>
+                <td>基于 Skill 的三层结构：元数据常驻、正文按需加载、references/scripts/assets 渐进读取。再通过 eval loop 比较有 skill 与无 skill 的效果。</td>
+                <td>你想把一套常用流程沉淀成可复用能力，比如“生成中文投标书”“读取固定格式表格”。</td>
+                <td>Skill 描述写得太宽会误触发，写得太窄会不触发；需要用真实任务测试。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/team-onboarding</span></td>
+                <td><span class="kind conditional">版本内置/条件显示</span></td>
+                <td>根据本地 Claude Code 使用情况生成队友上手指南，比如常用命令、项目习惯、推荐工作流。</td>
+                <td>从本地使用记录、配置、插件/技能信息中抽取“团队协作知识”，转成新同事可读的 ramp-up guide。</td>
+                <td>新人入组、交接项目、想把自己的 Claude Code 工作方法整理给同事。</td>
+                <td>可能涉及本地使用痕迹；分享前检查是否包含私密路径、账号、项目名。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/update-config</span></td>
+                <td><span class="kind skill">配置 Skill</span></td>
+                <td>帮助修改 Claude Code 的 settings：权限、环境变量、hooks、自动化行为、settings.local.json 等。</td>
+                <td>把“偏好记忆”和“真正可执行配置”分开：自动化、权限、hook 必须落到 settings JSON，不能只靠模型记住。</td>
+                <td>你说“以后每次 X 都 Y”“允许 npm test”“添加环境变量”“配置 hook”的时候。</td>
+                <td>它可能改变后续所有会话行为；建议改完看 diff。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/usage-credits</span></td>
+                <td><span class="kind conditional">账号/用量命令</span></td>
+                <td>查看当前账号、套餐、额度或用量相关信息。</td>
+                <td>通过 Claude Code 的登录状态和服务端账号信息展示额度，不依赖当前代码仓库。</td>
+                <td>想确认剩余额度、是否接近限制、为什么模型/远程功能不可用。</td>
+                <td>不同订阅、组织、版本显示不同；它通常不修改项目文件。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/verify</span></td>
+                <td><span class="kind skill">验证 Skill</span></td>
+                <td>验证一个代码改动是否真的可用：运行应用、执行测试、观察 UI 或命令输出。</td>
+                <td>采用“不要只相信实现描述”的独立验证闭环：用真实运行结果、测试计数、截图或日志来确认。</td>
+                <td>修完 bug、合 PR 前、用户说“确认一下是不是真的好了”。</td>
+                <td>会运行项目命令，可能需要浏览器/服务进程/测试环境。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/xlsx</span></td>
+                <td><span class="kind skill">文档处理 Skill</span></td>
+                <td>读取、创建、编辑 Excel 工作簿：表格、公式、样式、多个 sheet、导入导出。</td>
+                <td>借助专门的 spreadsheet 处理流程和库来保留 workbook 结构，比把表格当纯文本更可靠。</td>
+                <td>财务表、运营表、商品 SKU 表、需要生成或批量修改 .xlsx 文件。</td>
+                <td>注意隐私和公式正确性；复杂表建议改完抽样打开核对。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/clear</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>清空当前对话历史，让后续回复不再背着旧上下文。</td>
+                <td>重置会话上下文窗口，减少 token 占用和旧信息干扰。它改变的是 Claude 的“工作记忆”，不是 git、文件或终端状态。</td>
+                <td>任务结束、上下文变脏、旧目标已经不相关、想降低 token 成本。</td>
+                <td>清掉后 Claude 可能忘记你刚才的约束；重要信息先写进文件或 handoff。</td>
+              </tr>
+              <tr>
+                <td><span class="cmd">/export</span></td>
+                <td><span class="kind">官方内置</span></td>
+                <td>导出当前会话，便于分享、归档、交接或复盘。</td>
+                <td>把 transcript/session 信息序列化为可保存文件。它是“把过程拿出来”，不是运行代码。</td>
+                <td>需要把一次排障过程交给别人、保存证据、整理项目复盘。</td>
+                <td>导出前检查是否包含密钥、账号、商业信息或本地路径。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">
+          小结：看到 <code>/</code> 菜单时，先问一个问题：这个指令是“改变 Claude Code 状态”，还是“给 Claude 一套任务模板”？前者通常是内置命令，后者通常是 skill/插件/自定义命令。
+        </p>
+      </div>
+    </section>
+
+    <section id="builtin">
+      <div class="section-head">
+        <div>
+          <h2>官方 Commands 全表</h2>
+        </div>
+        <p>
+          从 Claude Code 官方 commands 文档提取到 98 条。注意：本机 CLI 版本是 <code>2.1.104</code>，官方文档可能包含更新版本才出现的命令；登录状态、套餐、远程功能、平台和组织策略也会影响菜单显示。
+        </p>
+      </div>
+
+      <div class="panel">
+        <div class="searchbar">
+          <strong>搜索全表</strong>
+          <input id="officialSearch" type="search" placeholder="输入 advisor、usage、workflow、review、remote 等关键词过滤 98 条官方命令" />
+        </div>
+        <div class="table-wrap">
+          <table id="officialTable">
+            <thead>
+              <tr>
+                <th>命令</th>
+                <th>类型</th>
+                <th>做什么</th>
+                <th>原理</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="runtime-skills">
+      <div class="section-head">
+        <div>
+          <h2>当前项目运行时 Skills 全表</h2>
+        </div>
+        <p>
+          从 <code>C:\Users\jingc\.claude\projects\D--agent-prac-nanocodex</code> 最近的 <code>skill_listing</code> 中读取到 23 条。它们会像 slash command 一样出现在 <code>/</code> 菜单里，很多就是你截图里的条目。
+        </p>
+      </div>
+
+      <div class="panel">
+        <div class="searchbar">
+          <strong>搜索 Skills</strong>
+          <input id="skillSearch" type="search" placeholder="输入 xlsx、docx、setup、config、compact 等关键词过滤 23 条运行时 skill" />
+        </div>
+        <div class="table-wrap">
+          <table id="runtimeSkillsTable">
+            <thead>
+              <tr>
+                <th>菜单名</th>
+                <th>来源</th>
+                <th>做什么</th>
+                <th>原理</th>
+                <th>注意点</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="plugins">
+      <div class="section-head">
+        <div>
+          <h2>官方插件缓存中的命令</h2>
+        </div>
+        <p>
+          下面这些来自 <code>C:\Users\jingc\.claude\plugins\marketplaces\claude-plugins-official\plugins</code> 的缓存目录。当前 <code>claude plugins list</code> 返回“没有已安装插件”，所以这些是“本机缓存/可安装来源”，不代表当前菜单一定显示。
+        </p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>命令</th>
+              <th>做什么</th>
+              <th>原理</th>
+              <th>注意点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="cmd">/agent-sdk-dev:new-sdk-app</span></td>
+              <td>创建 Claude Agent SDK Python/TypeScript 应用。</td>
+              <td>一套脚手架工作流：确认语言、查最新包版本、生成项目、再用 verifier 检查。</td>
+              <td>会创建文件并安装依赖；适合新项目，不适合随手在脏目录里跑。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/code-review:code-review</span></td>
+              <td>对指定 PR 做代码审查并可回写 GitHub 评论。</td>
+              <td>通过 <code>gh</code> 拉取 PR 信息，使用多轮/并行 agent 审查，再按置信度过滤。</td>
+              <td>需要 GitHub CLI 和权限；它通常不跑构建，构建信号要单独验证。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/pr-review-toolkit:review-pr</span></td>
+              <td>综合 PR review，可按 tests、errors、comments、simplify 等维度审查。</td>
+              <td>把 PR 拆给不同专长 agent：测试、静默失败、注释、类型设计、简化等。</td>
+              <td>并行审查覆盖广，但耗时和 token 更多。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/commit-commands:commit</span></td>
+              <td>根据当前变更创建一次 git commit。</td>
+              <td>命令文件预置 <code>git status</code>、diff、最近提交等上下文，并限制允许的 git 工具。</td>
+              <td>只提交应该进入同一主题的文件；脏工作区要小心。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/commit-commands:commit-push-pr</span></td>
+              <td>提交、推送并创建 PR。</td>
+              <td>把 git add/commit/push 和 <code>gh pr create</code> 串成发布工作流。</td>
+              <td>不要在混杂改动上运行；PR base/head 要确认。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/commit-commands:clean_gone</span></td>
+              <td>清理远端已删除但本地仍存在的 gone 分支。</td>
+              <td>读取 git branch 跟踪状态，删除无远端对应的本地分支。</td>
+              <td>删除分支前确认没有未合并工作。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/claude-md-management:revise-claude-md</span></td>
+              <td>整理或改进项目 <code>CLAUDE.md</code>。</td>
+              <td>把项目命令、约束、架构和协作规则写成 Claude 可长期复用的项目记忆。</td>
+              <td>避免把临时偏好或敏感信息写成永久规则。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/plugin-dev:create-plugin</span></td>
+              <td>创建 Claude Code 插件。</td>
+              <td>按插件 manifest、commands、skills、agents、hooks 的目录规范生成结构。</td>
+              <td>插件能扩展工具和行为，安装前要信任来源。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/feature-dev:feature-dev</span></td>
+              <td>按探索、设计、实现、审查的阶段开发功能。</td>
+              <td>利用多个专用 agent 分别做代码探索、架构设计和代码评审。</td>
+              <td>适合中等以上复杂度功能；小修小补可能太重。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/hookify:hookify</span></td>
+              <td>把自然语言规则变成 Claude Code hook。</td>
+              <td>将“修改敏感文件前提醒”“停止前跑测试”等规则写入 settings hooks。</td>
+              <td>hook 会自动触发，规则太宽会打扰工作流。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/hookify:list</span></td>
+              <td>查看现有 hook。</td>
+              <td>读取 settings 中的 hook 配置并展示触发点。</td>
+              <td>适合排查“为什么它每次都自动做某事”。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/hookify:configure</span></td>
+              <td>配置 hookify 行为。</td>
+              <td>修改 hookify 插件相关设置。</td>
+              <td>改完建议重载/新开会话验证。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/ralph-loop:ralph-loop</span></td>
+              <td>运行循环式任务工作流。</td>
+              <td>把提示或命令按循环策略重复执行，直到满足退出条件或被取消。</td>
+              <td>长循环要设置明确停止条件，避免消耗过多额度。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/ralph-loop:cancel-ralph</span></td>
+              <td>取消 Ralph loop。</td>
+              <td>向正在运行的循环任务发送取消信号。</td>
+              <td>取消后检查是否有半完成文件或进程。</td>
+            </tr>
+            <tr>
+              <td><span class="cmd">/example-plugin:example-command</span></td>
+              <td>示例插件命令。</td>
+              <td>用于演示插件命令格式和 frontmatter。</td>
+              <td>通常不用于真实工作。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="write-your-own">
+      <div class="section-head">
+        <div>
+          <h2>自己写一个命令时，Claude 真正读到什么</h2>
+        </div>
+        <p>自定义 slash command 的核心是一个 Markdown 文件。它不是 shell alias，而是“给 Claude 的任务说明 + 可选执行约束”。</p>
+      </div>
+
+      <div class="source-box">
+        <div class="callout">
+          <div class="face" aria-hidden="true">
+            <svg viewBox="0 0 76 76">
+              <circle cx="24" cy="31" r="5" fill="#30261f" />
+              <circle cx="52" cy="31" r="5" fill="#30261f" />
+              <path d="M28 48c7 6 14 6 21 0" fill="none" stroke="#8f4a33" stroke-width="5" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div>
+            <h3>一个好命令像“任务卡”，不是“万能咒语”。</h3>
+            <p>名字要短，职责要单一，允许工具要收紧，参数要明确，输出格式要稳定。这样 Claude 执行时更少漂移。</p>
+          </div>
+        </div>
+
+        <pre><code>---
+description: Review code for security vulnerabilities
+argument-hint: [optional target]
+allowed-tools: Read, Grep, Bash(git diff:*)
+model: sonnet
+---
+
+Perform a security review for $ARGUMENTS.
+
+Focus on:
+- authentication and authorization
+- injection risks
+- secret leakage
+- unsafe file/network operations
+
+Return findings with file path, line, severity, and recommended fix.</code></pre>
+
+        <div class="source-grid">
+          <div class="panel">
+            <h3>frontmatter 控制“怎么运行”</h3>
+            <div class="mini"><strong>description</strong><span>显示在菜单里，也帮助 Claude 判断何时使用。</span></div>
+            <div class="mini"><strong>argument-hint</strong><span>提示用户要传什么参数。</span></div>
+            <div class="mini"><strong>allowed-tools</strong><span>限制这个命令能用哪些工具，降低误操作风险。</span></div>
+            <div class="mini"><strong>model/effort</strong><span>为复杂度选择模型或推理力度。</span></div>
+          </div>
+          <div class="panel">
+            <h3>正文控制“做什么”</h3>
+            <div class="mini"><strong><code>$ARGUMENTS</code></strong><span>把用户在命令后的所有参数插入任务。</span></div>
+            <div class="mini"><strong><code>$1</code></strong><span>读取第一个参数，适合固定参数位置。</span></div>
+            <div class="mini"><strong><code>@file</code></strong><span>把文件内容作为上下文引用。</span></div>
+            <div class="mini"><strong><code>!`cmd`</code></strong><span>先执行命令，把输出注入上下文；要谨慎授权。</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="section-head">
+        <div>
+          <h2>来源与可信边界</h2>
+        </div>
+        <p>这份文档把官方机制、本机可见文件和版本变更记录合并整理。Claude Code 的菜单会随安装和登录状态变化，所以建议把它当“当前环境说明书”。</p>
+      </div>
+
+      <div class="source-box">
+        <h3>参考来源</h3>
+        <ul>
+          <li>Anthropic 官方文档：<a href="https://code.claude.com/docs/en/commands">Claude Code commands</a></li>
+          <li>Anthropic 官方文档：<a href="https://code.claude.com/docs/en/skills">Claude Code skills</a></li>
+          <li>Anthropic 官方文档：<a href="https://code.claude.com/docs/en/plugins">Claude Code plugins</a></li>
+          <li>Anthropic 官方文档：<a href="https://code.claude.com/docs/en/settings">Claude Code settings</a></li>
+          <li>官方 commands 提取结果：98 条；本机 CLI：<span class="path">Claude Code 2.1.104</span></li>
+          <li>当前 nanocodex 项目最近运行时 <code>skill_listing</code>：23 条 skills</li>
+          <li>当前插件状态：<code>claude plugins list</code> 返回“没有已安装插件”；插件区展示的是官方 marketplace 缓存命令</li>
+          <li>用户级/项目级 custom commands：<span class="path">C:\Users\jingc\.claude\commands</span> 和 <span class="path">D:\agent_prac\nanocodex\.claude\commands</span> 当前不存在</li>
+          <li>本机 Skill：<span class="path">C:\Users\jingc\.claude\skills\session-compact\SKILL.md</span></li>
+          <li>本机官方插件缓存：<span class="path">C:\Users\jingc\.claude\plugins\marketplaces\claude-plugins-official\plugins</span></li>
+          <li>本机 changelog：<span class="path">C:\Users\jingc\.claude\cache\changelog.md</span></li>
+        </ul>
+
+        <p class="note">
+          安全提醒：任何会修改配置、安装插件、运行 shell、提交代码、创建 PR 的命令，都应该先看它的来源和允许工具。最稳的习惯是：先让 Claude 解释计划，再允许执行。
+        </p>
+      </div>
+    </section>
+
+    <p class="footer">
+      生成日期：2026-06-28。文档路径：<code>docs/claude-code-commands-guide.zh-CN.html</code>。
+    </p>
+  </main>
+
+  <script>
+    const officialCommands = [
+      ["/add-dir <path>", "内置", "把额外目录加入当前会话的文件访问范围。", "扩展 Claude Code 的工作目录授权；只影响文件访问，不自动加载该目录的配置。", "适合跨目录查代码；不是切换项目。"],
+      ["/advisor [model|off]", "内置/模型协作", "开启或关闭 advisor，让第二个模型在关键时刻给建议。", "在主模型之外调用一个顾问模型，形成轻量交叉检查。", "版本和模型可用性相关；菜单可能不显示。"],
+      ["/agents", "内置/Agent", "管理 subagent 配置。", "把专门角色、提示词和工具权限注册成可委派的 agent。", "适合复杂任务分工。"],
+      ["/autofix-pr [prompt]", "云端/PR", "让 Claude Code on the web 盯住当前 PR，自动修 CI 或 review 评论。", "用 gh 找到 PR，再在云端会话持续观察和推送修复。", "需要 GitHub CLI 和云端权限。"],
+      ["/background [prompt]", "后台会话", "把当前会话转到后台运行，释放终端。", "将会话进程 detached，后续通过 agent/task 视图观察。", "别忘了查看后台任务结果；别和 /clear 混淆。"],
+      ["/batch <instruction>", "Bundled Skill", "把大型改动拆成多个独立单元并行执行。", "先研究代码库，再拆成多个 worktree/background agent 并行实现。", "适合大迁移；会创建多个工作区/PR。"],
+      ["/branch [name]", "会话分支", "从当前对话点复制出一个新分支继续尝试。", "保存原会话状态，再创建可回退的对话分叉。", "适合试路线；不是 git branch。"],
+      ["/btw <question>", "旁路提问", "问一个不写入主对话上下文的临时问题。", "把问题作为短暂旁路处理，避免污染主任务上下文。", "适合小疑问，不适合需要长期记忆的决定。"],
+      ["/cd <path>", "内置/工作目录", "把当前会话迁移到另一个工作目录。", "移动会话的 cwd 和项目存储，并追加新目录记忆。", "较新版本才有；本机 2.1.104 可能不可用。"],
+      ["/chrome", "集成配置", "配置 Claude in Chrome。", "连接浏览器扩展/浏览器上下文能力。", "需要对应浏览器扩展和授权。"],
+      ["/claude-api [migrate|managed-agents-onboard]", "Bundled Skill", "加载 Claude API/SDK 参考，或迁移 Anthropic SDK 代码。", "用专门 skill 选择语言文档、检查模型参数和迁移点。", "只适合 Anthropic/Claude API 场景。"],
+      ["/clear [name]", "内置/上下文", "开启一个空上下文的新对话，并保留旧会话可恢复。", "重置当前上下文窗口，旧 transcript 存入 resume 列表。", "会忘掉刚才约束；重要信息先写 handoff。"],
+      ["/code-review [level] [--fix] [--comment] [target]", "Bundled Skill", "审查当前 diff 的正确性 bug、复用、简化和效率问题。", "以 diff 为中心组织多级审查，可选择直接修复或发 PR 评论。", "找 bug 用它；纯清理用 /simplify。"],
+      ["/color [color|default]", "界面", "设置当前会话提示栏颜色。", "修改本地 UI 状态，远程控制时可同步显示。", "只是视觉标记，不影响模型。"],
+      ["/compact [instructions]", "内置/上下文", "压缩当前会话，释放上下文空间。", "把长对话总结成短状态，继续同一会话。", "和 /clear 不同；它保留任务连续性。"],
+      ["/config [key=value ...]", "配置", "打开或直接修改 Claude Code 设置。", "读写 settings 配置，如主题、模型、输出风格、思考开关。", "新版支持 key=value；本机版本可能只支持界面。"],
+      ["/context [all]", "诊断", "查看当前上下文用量。", "按消息、工具、memory、skill 等来源统计 token 占用。", "适合查为什么快满上下文。"],
+      ["/copy [N]", "剪贴板", "复制最近一次或第 N 次 assistant 回复。", "读取会话输出并写入剪贴板或文件。", "代码块多时会弹选择器。"],
+      ["/cost", "别名", "查看使用成本；是 /usage 的别名。", "调用 usage 统计视图。", "新版更推荐 /usage。"],
+      ["/debug [description]", "Bundled Skill", "开启或分析 debug 日志来排障 Claude Code 问题。", "打开调试记录，再让 Claude 读取日志定位配置/工具/网络问题。", "可能产生日志文件，注意敏感信息。"],
+      ["/deep-research <question>", "Workflow/Skill", "做多源网页研究并生成带引用的报告。", "并行搜索、抓取、交叉验证，再综合结论。", "需要网络；适合事实会变化的问题。"],
+      ["/desktop", "桌面集成", "把当前会话继续到 Claude Code Desktop。", "通过桌面应用接管 session。", "需要桌面端和订阅；别名 /app。"],
+      ["/diff", "Git/查看", "打开未提交改动和每轮改动的交互 diff。", "读取 git diff 和会话编辑记录，做可浏览视图。", "只看差异，不自动修。"],
+      ["/doctor", "诊断", "检查安装、认证、配置和更新器健康。", "运行本地健康检查，可让 Claude 尝试修复。", "可能启动 MCP/server 检查，信任目录再运行。"],
+      ["/effort [level|auto]", "模型设置", "调整模型推理力度。", "修改后续请求的 reasoning/effort 配置。", "高 effort 更慢更贵；不同模型支持不同。"],
+      ["/exit", "会话控制", "退出 CLI；后台会话中则 detach。", "结束或脱离终端进程，不回滚文件。", "别名 /quit。"],
+      ["/export [filename]", "导出", "导出当前 conversation。", "把 transcript 序列化成文本文件或复制到剪贴板。", "分享前检查密钥和隐私。"],
+      ["/fast [on|off]", "模式开关", "开关 fast mode。", "改变 Claude Code 的速度优先行为。", "可能牺牲部分深度。"],
+      ["/feedback [report]", "反馈", "提交反馈、bug 或分享会话。", "收集报告内容和必要上下文进入反馈通道。", "别名 /bug、/share。"],
+      ["/fewer-permission-prompts", "Bundled Skill", "减少常见只读操作的权限弹窗。", "扫描历史常用只读工具调用，写入项目 allowlist。", "会修改 .claude/settings.json。"],
+      ["/focus", "界面", "切换专注视图，只显示关键 prompt、工具摘要和最终回复。", "改变 TUI 渲染模式，隐藏冗长过程。", "仅部分 fullscreen 渲染可用。"],
+      ["/fork <directive>", "Agent/后台", "把当前完整上下文交给后台子 agent 去做旁支任务。", "复制会话上下文给 subagent，主线继续工作，结果回传。", "适合并行调查；不是 git fork。"],
+      ["/goal [condition|clear]", "目标循环", "设置持续目标，让 Claude 跨轮工作直到满足条件。", "把停止条件变成会话级状态，驱动自动续做。", "目标要具体，否则容易跑偏。"],
+      ["/heapdump", "诊断", "导出 JS heap 快照和内存分解。", "让 Claude Code 进程写内存诊断文件。", "用于内存占用异常排查。"],
+      ["/help", "帮助", "显示帮助和可用命令。", "读取当前运行时命令注册表。", "交互模式更准确；--print 下不适用。"],
+      ["/hooks", "配置", "查看 tool event hook 配置。", "读取 settings 中的 PreToolUse/PostToolUse/Stop 等规则。", "hook 会自动触发，改动前要理解影响。"],
+      ["/ide", "IDE 集成", "管理 IDE 连接并查看状态。", "和 VS Code/JetBrains 等扩展交换打开文件、诊断、选择内容。", "需要 IDE 插件或连接能力。"],
+      ["/init", "项目记忆", "生成项目 CLAUDE.md 指南。", "扫描项目结构和常用命令，写成长期上下文文件。", "适合新仓库；生成后要人工删错。"],
+      ["/insights", "分析报告", "分析 Claude Code 使用会话和摩擦点。", "读取会话历史，抽取常见项目区域、习惯和问题。", "可能包含本地使用痕迹。"],
+      ["/install-github-app", "GitHub 集成", "安装 Claude GitHub App。", "走 GitHub 授权流程并配置仓库集成。", "需要浏览器和 GitHub 权限。"],
+      ["/install-slack-app", "Slack 集成", "安装 Claude Slack app。", "打开 OAuth 授权流程连接 Slack。", "需要组织/工作区授权。"],
+      ["/keybindings", "配置", "打开键盘快捷键文件。", "定位并编辑 keybindings JSON。", "JSON 写错会影响输入体验。"],
+      ["/login", "账号", "登录 Anthropic/Claude 账号。", "建立本地 OAuth/认证状态。", "与 API key/第三方代理配置可能不同。"],
+      ["/logout", "账号", "退出当前账号。", "清除或断开本地认证状态。", "退出后云能力和用量查询可能不可用。"],
+      ["/loop [interval] [prompt]", "Bundled Skill", "按间隔重复运行 prompt 或命令。", "在会话内自调度循环任务。", "要设置清晰停止条件；别让它无限消耗。"],
+      ["/mcp [subcommand]", "MCP", "管理 MCP server 连接、启用、禁用和 OAuth。", "读取 MCP 配置并控制外部工具/资源/提示词提供方。", "外部工具结果应当作不可信数据。"],
+      ["/memory", "记忆", "编辑 CLAUDE.md memory 和 auto-memory。", "把长期项目规则或个人偏好落到 Markdown。", "不要写入密钥或临时状态。"],
+      ["/mobile", "移动端", "显示下载 Claude mobile app 的二维码。", "本地终端生成移动端引导。", "别名 /ios、/android。"],
+      ["/model [model]", "模型设置", "切换模型并可保存为默认。", "改变后续模型请求目标；可能重读历史。", "切换会影响速度、成本和缓存。"],
+      ["/passes", "账号/邀请", "分享 Claude Code 免费体验。", "账号资格检查后展示邀请入口。", "只有符合条件账号可见。"],
+      ["/permissions", "权限", "管理 allow/ask/deny 工具权限规则。", "读写工具权限策略，控制 Bash/Edit/MCP 等调用。", "别名 /allowed-tools。"],
+      ["/plan [description]", "工作模式", "进入 plan mode 并可带任务描述。", "切换到先规划、待确认再执行的模式。", "适合有风险或范围不清的改动。"],
+      ["/plugin [subcommand]", "插件", "管理 Claude Code 插件。", "列出、安装、启用、禁用插件组件。", "本机当前 plugins list 显示无已安装插件。"],
+      ["/powerup", "学习", "通过交互课程发现 Claude Code 功能。", "打开内置引导/演示流程。", "适合学习新功能。"],
+      ["/pr-comments [PR]", "已移除/PR", "旧版本用于查看 PR 评论。", "以前通过 GitHub CLI 拉取评论；新版本建议直接让 Claude 查看。", "官方标注已移除。"],
+      ["/privacy-settings", "账号/隐私", "查看或更新隐私设置。", "打开账号级隐私配置入口。", "通常只对 Pro/Max 可见。"],
+      ["/radio", "娱乐", "打开 Claude FM lo-fi radio。", "启动浏览器或输出流地址。", "部分企业/第三方环境不可用。"],
+      ["/recap", "总结", "生成当前会话一句话摘要。", "读取会话状态并压成极短 recap。", "适合离开回来快速续上。"],
+      ["/release-notes", "版本", "查看 Claude Code changelog。", "打开交互版本选择器和更新说明。", "用于确认命令是否是版本差异。"],
+      ["/reload-plugins [--force]", "插件", "重载活跃插件。", "重新扫描插件组件并处理 MCP 工具变化。", "改变 MCP 工具时可能破坏 prompt cache。"],
+      ["/reload-skills", "Skill", "重新扫描 skill 和 command 目录。", "把会话中新增/修改的 skills 重新载入。", "适合刚写了 SKILL.md 后使用。"],
+      ["/remote-control", "远程控制", "让当前会话可从 claude.ai 远程控制。", "建立本地 session 和网页端的控制通道。", "别名 /rc；需要支持的账号/网络。"],
+      ["/remote-env", "云端环境", "选择云端 agent 默认环境。", "配置远程 session/workflow 运行的环境目标。", "和本地 cwd 不同。"],
+      ["/rename [name]", "会话管理", "重命名当前会话。", "更新会话元数据和 prompt bar 显示名。", "便于 /resume 查找。"],
+      ["/resume [session]", "会话管理", "恢复历史会话或打开选择器。", "从本地 session 存储重载 transcript。", "别名 /continue。"],
+      ["/review [PR]", "PR Review", "审查 GitHub PR。", "用 code-review 引擎读取 PR diff 并生成审查结论。", "本地 diff 用 /code-review。"],
+      ["/rewind", "回退", "回退对话和/或代码到之前检查点。", "基于 checkpoint/turn history 选择恢复点。", "别名 /checkpoint、/undo；使用前确认文件状态。"],
+      ["/run", "Bundled Skill", "启动并驱动项目应用来观察真实行为。", "识别项目运行方式，启动 app，用浏览器/终端观察结果。", "较新版本；需要可运行环境。"],
+      ["/run-skill-generator", "Bundled Skill", "为项目生成教 /run 和 /verify 如何启动 app 的 skill。", "把启动、构建、验证步骤沉淀成项目级技能。", "会写项目文件。"],
+      ["/sandbox", "安全/平台", "切换 sandbox mode。", "改变 Bash/工具执行隔离策略。", "平台支持情况不同。"],
+      ["/schedule [description]", "云端例行任务", "创建、更新、列出或运行 routines。", "把周期任务交给 Anthropic 管理的云基础设施执行。", "别名 /routines；需要云端能力。"],
+      ["/scroll-speed", "界面", "调整鼠标滚轮滚动速度。", "修改 fullscreen TUI 的滚动参数。", "仅部分终端渲染可用。"],
+      ["/security-review", "安全审查", "审查当前分支 pending changes 的安全漏洞。", "围绕 git diff 做注入、鉴权、数据暴露等风险检查。", "只读审查；不能替代真实安全测试。"],
+      ["/setup-bedrock", "云厂商配置", "配置 Amazon Bedrock 认证、区域和模型。", "交互式写入 Bedrock 相关设置。", "仅 Bedrock 模式可见。"],
+      ["/setup-vertex", "云厂商配置", "配置 Google Vertex AI 认证、项目、区域和模型。", "交互式写入 Vertex 相关设置。", "仅 Vertex 模式可见。"],
+      ["/simplify [target]", "Bundled Skill", "审查变更里的清理机会并应用修复。", "多个清理 agent 并行看复用、简化、效率和抽象层级。", "不找正确性 bug；找 bug 用 /code-review。"],
+      ["/skills", "Skill 管理", "列出可用 skills，并可隐藏某些 skill。", "读取运行时 skill 注册表和 frontmatter。", "菜单项数量会随项目/用户/版本变化。"],
+      ["/stats", "别名", "打开使用统计；是 /usage 的别名。", "进入 usage 视图的统计页。", "适合看活动和用量。"],
+      ["/status", "状态", "查看版本、模型、账号和连接状态。", "打开 Settings 的 Status 页。", "可在 Claude 回复时使用。"],
+      ["/statusline", "界面配置", "配置 Claude Code 状态栏。", "根据 shell prompt 或描述生成 status line 设置。", "会影响终端底部显示。"],
+      ["/stickers", "周边", "订购 Claude Code stickers。", "打开周边订购流程。", "与项目无关。"],
+      ["/stop", "后台会话", "停止当前 attached background session。", "向后台会话发送停止信号，保留 transcript/worktree。", "只在后台会话 attached 时可用。"],
+      ["/tasks", "后台任务", "查看和管理后台运行内容。", "聚合 background agents、bashes、workflow 任务。", "也可用 /bashes。"],
+      ["/team-onboarding", "团队文档", "从最近使用历史生成队友上手指南。", "分析 session、commands、MCP 使用，产出可分享 Markdown。", "分享前检查隐私路径和项目名。"],
+      ["/teleport", "云端/会话迁移", "把 Claude Code on the web 会话拉到终端。", "选择云端 session，拉取分支和对话。", "别名 /tp；需要订阅。"],
+      ["/terminal-setup", "终端配置", "配置 Shift+Enter 等终端快捷键。", "写入或提示终端所需键盘设置。", "只在需要的终端里显示。"],
+      ["/theme", "界面", "切换颜色主题或创建自定义主题。", "修改 TUI 主题配置，可读取用户/插件主题。", "视觉变化，不影响模型。"],
+      ["/tui [default|fullscreen]", "界面", "切换终端 UI 渲染器。", "用新的 renderer 重启显示层并保留会话。", "fullscreen 更流畅但依赖终端支持。"],
+      ["/ultraplan <prompt>", "云端规划", "在 ultraplan session 里生成计划并可远程执行。", "把规划放到浏览器/云端审阅，再回传终端或执行。", "需要相关远程能力。"],
+      ["/ultrareview [PR]", "云端审查", "运行深度多 agent 云端代码审查。", "在云 sandbox 中多 agent 审查；现在推荐 /code-review ultra。", "免费次数/usage credits 可能限制。"],
+      ["/upgrade", "账号", "打开升级页面。", "跳转账号套餐升级入口。", "只影响订阅，不改项目。"],
+      ["/usage", "用量", "查看会话成本、套餐限制和活动统计。", "汇总模型调用、skill、subagent、plugin、MCP 使用数据。", "/cost 和 /stats 是别名。"],
+      ["/usage-credits", "账号/额度", "配置 usage credits 以便超限后继续使用。", "进入额外额度/付费续用配置。", "以前叫 /extra-usage。"],
+      ["/verify", "Bundled Skill", "确认代码改动真的按预期工作。", "构建/运行应用并观察行为，而不是只看测试或自述。", "需要可启动项目环境。"],
+      ["/vim", "已移除", "旧版用于切换 Vim 模式。", "新版改为通过 /config 的 Editor mode 控制。", "官方标注 v2.1.92 后移除。"],
+      ["/voice [hold|tap|off]", "语音", "开关语音听写或选择按住/点击模式。", "连接 Claude 账号的语音输入能力。", "需要 Claude.ai 账号。"],
+      ["/web-setup", "云端/GitHub", "用本地 gh 凭据连接 Claude Code on the web。", "走 GitHub 连接流程，为云端功能准备授权。", "/schedule 可能自动提示。"],
+      ["/workflows", "Workflow", "打开 workflow 进度视图。", "查看、暂停、恢复或保存运行中的 workflow。", "适合长任务监控。"]
+    ];
+
+    const runtimeSkills = [
+      ["/glm-stability", "用户 Skill", "稳定 GLM/第三方模型在长排障和编码中的表现。", "用额外约束减少猜测、跑题和未验证结论。", "来自用户目录。"],
+      ["/session-compact", "用户 Skill", "把长会话压缩成短 handoff。", "固定输出 Goal/Facts/Decisions/Open Questions/Next Step。", "适合换会话或清噪。"],
+      ["/deep-research", "运行时 Skill", "做多源深度研究报告。", "搜索、抓取、对抗校验、综合引用。", "需要网络；问题太宽时先收窄。"],
+      ["/consolidate-memory", "Anthropic Skill", "整理 memory 文件，合并重复、清理过期内容。", "读取记忆索引和条目，做反思式维护。", "改长期记忆前要看 diff。"],
+      ["/docx", "Anthropic Skill", "创建、读取、编辑 Word 文档。", "使用文档处理流程保留结构、样式、目录、页眉页脚等。", "不用于 PDF/XLSX。"],
+      ["/pdf", "Anthropic Skill", "读取、拆分、合并、旋转、加水印、OCR 或处理 PDF。", "按 PDF 页面/表格/图片/表单结构处理，而不是只当纯文本。", "扫描件需要 OCR。"],
+      ["/pptx", "Anthropic Skill", "创建、读取或编辑 PowerPoint 演示文稿。", "处理 slide、layout、notes、模板和图片资源。", "只要涉及 .pptx 就应优先用。"],
+      ["/schedule", "Anthropic Skill", "创建或修改定时任务。", "把自然语言时间转成可执行的 schedule/routine 配置。", "涉及自动运行，需确认频率。"],
+      ["/setup-cowork", "Anthropic Skill", "引导 Cowork/团队协作环境设置。", "推荐插件、连接工具并试跑一个 skill。", "可能安装/配置组件。"],
+      ["/skill-creator", "Anthropic Skill", "创建、评估、优化 Claude Skill。", "按 SKILL.md、测试 prompts、eval loop 迭代。", "适合沉淀重复流程。"],
+      ["/xlsx", "Anthropic Skill", "处理 Excel 工作簿。", "用 spreadsheet 流程保留 sheet、公式、样式和表格结构。", "复杂公式要抽样核对。"],
+      ["/update-config", "运行时 Skill", "修改 Claude Code settings、权限、环境变量和 hooks。", "把自动化行为落到 settings.json，而不是只靠记忆。", "可能改变后续会话行为。"],
+      ["/keybindings-help", "运行时 Skill", "帮助修改键盘快捷键。", "读写 ~/.claude/keybindings.json 并解释 chord/key 绑定。", "JSON 语法要正确。"],
+      ["/verify", "Bundled Skill", "验证代码改动是否真的生效。", "运行 app/测试/观察 UI，而不是相信实现说明。", "与官方 /verify 重合。"],
+      ["/code-review", "Bundled Skill", "审查当前 diff 的 bug 和清理点。", "按 effort、target、fix/comment 选项组织 review。", "与官方 /code-review 重合。"],
+      ["/simplify", "Bundled Skill", "对已改代码做行为不变的清理。", "聚焦复用、简化、效率和抽象层级。", "不主动找 bug。"],
+      ["/fewer-permission-prompts", "Bundled Skill", "减少反复权限弹窗。", "扫描历史只读工具调用并写 allowlist。", "会改项目 settings。"],
+      ["/loop", "Bundled Skill", "按间隔重复执行 prompt 或 slash command。", "会话内循环调度。", "不要用于一次性任务。"],
+      ["/claude-api", "Bundled Skill", "查看 Claude API/SDK 参考和迁移模型配置。", "按项目语言加载对应 Anthropic SDK 资料。", "其他 provider 场景应跳过。"],
+      ["/run", "Bundled Skill", "启动并驾驶当前项目应用。", "找启动方式、运行 app、观察真实行为。", "需要项目可运行。"],
+      ["/init", "Bundled/内置", "初始化 CLAUDE.md 项目说明。", "扫描项目并写长期上下文。", "与官方 /init 重合。"],
+      ["/review", "Bundled/内置", "审查 GitHub PR。", "读取 PR diff 和评论上下文。", "工作区 diff 用 /code-review。"],
+      ["/security-review", "Bundled/内置", "审查当前分支安全风险。", "围绕 pending diff 做安全威胁检查。", "与官方 /security-review 重合。"]
+    ];
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function kindClass(value) {
+      if (value.includes("Skill")) return "skill";
+      if (value.includes("插件")) return "plugin";
+      if (value.includes("账号") || value.includes("云端") || value.includes("已移除")) return "conditional";
+      return "";
+    }
+
+    function renderTable(tableId, rows) {
+      const table = document.getElementById(tableId);
+      if (!table) return;
+      const body = table.querySelector("tbody");
+      body.innerHTML = rows.map((row) => `
+        <tr>
+          <td><span class="cmd">${escapeHtml(row[0])}</span></td>
+          <td><span class="kind ${kindClass(row[1])}">${escapeHtml(row[1])}</span></td>
+          <td>${escapeHtml(row[2])}</td>
+          <td>${escapeHtml(row[3])}</td>
+          <td>${escapeHtml(row[4])}</td>
+        </tr>
+      `).join("");
+    }
+
+    function bindSearch(inputId, selector) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      input.addEventListener("input", () => {
+        const query = input.value.trim().toLowerCase();
+        document.querySelectorAll(selector).forEach((row) => {
+          row.style.display = row.textContent.toLowerCase().includes(query) ? "" : "none";
+        });
+      });
+    }
+
+    renderTable("officialTable", officialCommands);
+    renderTable("runtimeSkillsTable", runtimeSkills);
+    bindSearch("commandSearch", "#screenshotTable tbody tr");
+    bindSearch("officialSearch", "#officialTable tbody tr");
+    bindSearch("skillSearch", "#runtimeSkillsTable tbody tr");
+  </script>
+</body>
+</html>

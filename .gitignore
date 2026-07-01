@@ -29,11 +29,21 @@ credentials*
 
 # Local probe / scratch files
 _probe_*.py
+_*.py
+_*.ps1
 *.log
 HANDOFF.md
-.claude/worktrees/
+.claude/
 releases/*
 !releases/.gitkeep
+.pytest_tmp/
+sb_out_probe/
+story_probe.txt
+fizzbuzz.py
+mathutils.py
+stack.py
+tank_battle.html
+nanocodex_fable_design.html
 
 # OS / editor
 .DS_Store

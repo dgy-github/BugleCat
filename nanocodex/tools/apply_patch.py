@@ -20,6 +20,10 @@ _EXAMPLE = (
 
 
 class ApplyPatchTool(Tool):
+    # The file-editing capability. Read-only roles (planner / research /
+    # verifier) are never granted "edit", so they cannot get this tool at all.
+    capability_tags = ("edit",)
+
     @property
     def name(self) -> str:
         return "apply_patch"
@@ -87,6 +91,7 @@ class ApplyPatchTool(Tool):
                         reason="The patch modifies files outside the writable roots.",
                         cwd=str(self.ctx.workspace),
                         escalated=True,
+                        details=patch_text,
                     )
                 )
                 if not approved:
@@ -102,6 +107,7 @@ class ApplyPatchTool(Tool):
                     command=f"apply_patch: {files}",
                     reason="Per-step confirmation is on; approve this file change.",
                     cwd=str(self.ctx.workspace),
+                    details=patch_text,
                 )
             )
             if not approved:

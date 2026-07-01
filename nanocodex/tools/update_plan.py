@@ -15,6 +15,8 @@ _VALID_STATUS = ("pending", "in_progress", "completed")
 
 
 class UpdatePlanTool(Tool):
+    capability_tags = ("plan",)
+
     @property
     def name(self) -> str:
         return "update_plan"

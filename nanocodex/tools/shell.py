@@ -11,6 +11,7 @@ This is the Codex `shell` / `local_shell` tool. The flow mirrors Codex:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,12 @@ from nanocodex.tools.base import Tool
 
 
 class ShellTool(Tool):
+    # "shell" not "write": read-only roles still get the shell, but their
+    # ToolContext carries a read-only sandbox policy, so the same tool object
+    # physically cannot write/network for them. File EDITING is a separate
+    # "edit" capability (apply_patch), which read-only roles never receive.
+    capability_tags = ("shell",)
+
     @property
     def name(self) -> str:
         return "shell"
@@ -147,10 +154,41 @@ class ShellTool(Tool):
 _READ_ONLY_PREFIXES = (
     "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "rg", "find",
     "which", "type", "file", "stat", "tree", "git status", "git log", "git diff",
-    "git show", "git branch", "dir", "python -c", "node -e",
+    "git show", "git branch", "dir",
+    # NB: `python -c` / `node -e` were intentionally REMOVED — they run arbitrary
+    # code (incl. file writes / network) and must never be assumed read-only.
 )
+
+# Shell metacharacters that can hide a write even when the leading token looks
+# read-only: output redirection (`>`/`>>`/`&>`), command substitution (`$(...)`
+# or backticks), and process substitution. Their mere presence disqualifies the
+# whole command from the read-only fast-path.
+_WRITE_OR_SUBSHELL = (">", "`", "$(", "<(", ">(")
+
+# Operators that chain several commands into one line. We must check EVERY
+# segment, not just the leading token — `ls && rm -rf x` starts with `ls` but
+# is obviously not read-only.
+_CHAIN_SPLIT = re.compile(r"&&|\|\||[;|&\n]")
 
 
 def _looks_read_only(command: str) -> bool:
-    stripped = command.strip().lower()
-    return any(stripped.startswith(p) for p in _READ_ONLY_PREFIXES)
+    """Best-effort: True only if EVERY chained segment is a known read-only command.
+
+    Conservative on purpose — when in doubt it returns False so the action goes
+    through the approval/escalation path rather than silently running. A single
+    write/subshell metacharacter, or any segment whose leading token isn't in the
+    read-only allowlist, disqualifies the command.
+    """
+    stripped = command.strip()
+    if not stripped:
+        return False
+    if any(tok in stripped for tok in _WRITE_OR_SUBSHELL):
+        return False
+    for segment in _CHAIN_SPLIT.split(stripped):
+        seg = segment.strip().lower()
+        if not seg:
+            continue
+        if not any(seg == p or seg.startswith(p + " ") or seg.startswith(p + "\t")
+                   for p in _READ_ONLY_PREFIXES):
+            return False
+    return True

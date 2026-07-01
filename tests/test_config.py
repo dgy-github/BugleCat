@@ -213,3 +213,73 @@ def test_env_wins_over_nanocodex_file(tmp_path, monkeypatch):
 
     cfg = load_config(workspace=tmp_path)
     assert cfg.api_key == "sk-env"    # environment still overrides the file
+
+
+def test_max_retries_default_and_env_override(tmp_path, monkeypatch):
+    # Defaults to 3 (a notch above the SDK's built-in 2); tunable via env.
+    monkeypatch.setattr(config_mod, "DEEPSEEK_CONFIG", tmp_path / "nope-ds.toml")
+    monkeypatch.setattr(config_mod, "CODEX_CONFIG", tmp_path / "nope-cx.toml")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
+    monkeypatch.delenv("NANOCODEX_MAX_RETRIES", raising=False)
+    assert load_config(workspace=tmp_path).max_retries == 3
+
+    monkeypatch.setenv("NANOCODEX_MAX_RETRIES", "5")
+    assert load_config(workspace=tmp_path).max_retries == 5
+
+    # Garbage falls back to the default rather than raising.
+    monkeypatch.setenv("NANOCODEX_MAX_RETRIES", "not-a-number")
+    assert load_config(workspace=tmp_path).max_retries == 3
+
+
+def test_profile_overrides_base_but_below_env(tmp_path, monkeypatch):
+    nano = tmp_path / "nano.toml"
+    nano.write_text(
+        'api_key = "sk-base"\n'
+        'model = "deepseek-chat"\n'
+        'reasoning_effort = "auto"\n'
+        '\n'
+        '[profiles.fast]\n'
+        'model = "deepseek-v4-pro"\n'
+        'reasoning_effort = "high"\n'
+        'sandbox_mode = "read-only"\n'
+    )
+    monkeypatch.setattr(config_mod, "DEEPSEEK_CONFIG", tmp_path / "nope-ds.toml")
+    monkeypatch.setattr(config_mod, "CODEX_CONFIG", tmp_path / "nope-cx.toml")
+    monkeypatch.setattr(config_mod, "NANOCODEX_CONFIG", nano)
+    for var in ("DEEPSEEK_API_KEY", "NANOCODEX_API_KEY", "NANOCODEX_MODEL",
+                "NANOCODEX_PROFILE", "NANOCODEX_SANDBOX"):
+        monkeypatch.delenv(var, raising=False)
+
+    # Profile applied: its values win over the file base.
+    cfg = load_config(workspace=tmp_path, profile="fast")
+    assert cfg.model == "deepseek-v4-pro"
+    assert cfg.reasoning_effort == "high"
+    assert cfg.sandbox_mode == "read-only"
+
+    # Env still beats the profile.
+    monkeypatch.setenv("NANOCODEX_MODEL", "deepseek-reasoner")
+    cfg2 = load_config(workspace=tmp_path, profile="fast")
+    assert cfg2.model == "deepseek-reasoner"
+
+
+def test_profile_name_from_env_and_unknown_raises(tmp_path, monkeypatch):
+    nano = tmp_path / "nano.toml"
+    nano.write_text('api_key = "sk-base"\n[profiles.fast]\nmodel = "m-fast"\n')
+    monkeypatch.setattr(config_mod, "DEEPSEEK_CONFIG", tmp_path / "nope-ds.toml")
+    monkeypatch.setattr(config_mod, "CODEX_CONFIG", tmp_path / "nope-cx.toml")
+    monkeypatch.setattr(config_mod, "NANOCODEX_CONFIG", nano)
+    monkeypatch.delenv("NANOCODEX_MODEL", raising=False)
+
+    monkeypatch.setenv("NANOCODEX_PROFILE", "fast")
+    assert load_config(workspace=tmp_path).model == "m-fast"
+
+    monkeypatch.setenv("NANOCODEX_PROFILE", "ghost")
+    with pytest.raises(ConfigError, match="ghost"):
+        load_config(workspace=tmp_path)
+
+
+def test_list_profiles(tmp_path, monkeypatch):
+    nano = tmp_path / "nano.toml"
+    nano.write_text('[profiles.a]\nmodel="x"\n[profiles.b]\nmodel="y"\n')
+    monkeypatch.setattr(config_mod, "NANOCODEX_CONFIG", nano)
+    assert config_mod.list_profiles() == ["a", "b"]

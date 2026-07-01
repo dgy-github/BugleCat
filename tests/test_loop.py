@@ -267,6 +267,92 @@ async def test_text_turn_stays_on_main_provider_even_with_vision_configured(tmp_
     assert len(vision.calls) == 0
 
 
+async def test_read_only_calls_run_concurrently(tmp_path):
+    # A3: a run of consecutive read-only tool calls runs in parallel, so N slow
+    # reads finish in ~one read's time, not N times it. A fake read_only tool
+    # sleeps, so wall-clock proves concurrency.
+    import asyncio
+    import time as _time
+
+    from nanocodex.tools.base import Tool
+
+    class SlowReadTool(Tool):
+        read_only = True
+
+        @property
+        def name(self):
+            return "slow_read"
+
+        @property
+        def description(self):
+            return "A read-only tool that sleeps (test only)."
+
+        @property
+        def parameters(self):
+            return {"type": "object", "properties": {"i": {"type": "integer"}}}
+
+        async def execute(self, **kwargs):
+            await asyncio.sleep(0.3)
+            return f"read {kwargs.get('i')}"
+
+    provider = ScriptedProvider([
+        ModelResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id=f"c{i}", name="slow_read", arguments={"i": i})
+                for i in range(4)
+            ],
+            finish_reason="tool_calls",
+        ),
+        ModelResponse(content="done"),
+    ])
+    loop = _build(tmp_path, provider)
+    loop.tools.register(SlowReadTool(loop.tools.ctx))
+
+    t0 = _time.monotonic()
+    result = await loop.run_turn("read four things")
+    elapsed = _time.monotonic() - t0
+
+    assert result.stop_reason == "completed"
+    # 4 reads x 0.3s serial would be ~1.2s; concurrent should be well under.
+    assert elapsed < 0.8
+    # Every read produced a result, in order (results keyed by call id).
+    tool_msgs = [m for m in loop.session.messages if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == ["c0", "c1", "c2", "c3"]
+
+
+async def test_write_between_reads_stays_serial_and_ordered(tmp_path):
+    # A read-only call, then a write (apply_patch), then a read. The write must
+    # NOT be batched/parallelized with the reads around it: each segment runs in
+    # issue order so a read never races the write. Result order is preserved.
+    patch = (
+        "*** Begin Patch\n"
+        "*** Add File: mid.txt\n"
+        "+x\n"
+        "*** End Patch"
+    )
+    provider = ScriptedProvider([
+        ModelResponse(
+            content="",
+            tool_calls=[
+                ToolCall(id="r1", name="read_file", arguments={"path": "none1.txt"}),
+                ToolCall(id="w1", name="apply_patch", arguments={"patch": patch}),
+                ToolCall(id="r2", name="read_file", arguments={"path": "none2.txt"}),
+            ],
+            finish_reason="tool_calls",
+        ),
+        ModelResponse(content="done"),
+    ])
+    loop = _build(tmp_path, provider)
+    result = await loop.run_turn("read, write, read")
+
+    assert result.stop_reason == "completed"
+    assert (tmp_path / "mid.txt").read_text() == "x\n"
+    tool_msgs = [m for m in loop.session.messages if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in tool_msgs] == ["r1", "w1", "r2"]
+    assert result.tools_used == ["read_file", "apply_patch", "read_file"]
+
+
 async def test_stop_interrupts_a_hanging_tool(tmp_path):
     # A tool that never returns on its own. Stop must abandon it and end the
     # turn as 'cancelled' instead of blocking forever — the "Stop 停止不了" bug.

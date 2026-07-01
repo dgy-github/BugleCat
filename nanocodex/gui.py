@@ -2423,8 +2423,11 @@ class NanocodexGUI:
         dlg.title("Approval required")
         dlg.transient(self.root)
         dlg.grab_set()  # modal
-        dlg.resizable(False, False)
-        dlg.geometry("560x280")
+        # A diff preview (apply_patch passes the patch in `details`) needs room
+        # and scrolling; without one keep the compact fixed-size dialog.
+        has_details = bool(getattr(req, "details", ""))
+        dlg.resizable(False, has_details)
+        dlg.geometry("560x460" if has_details else "560x280")
 
         # Buttons are packed FIRST at the bottom so they always reserve their
         # space and can never be clipped by the body (same lesson as the main
@@ -2485,6 +2488,14 @@ class NanocodexGUI:
             # AND an MCP tool that acts outside the sandbox, so don't claim
             # "ran sandboxed and failed" (wrong for the desktop/MCP case).
             txt.insert("end", "\n(escalated — requires elevated approval)\n", "muted")
+        if has_details:
+            # Show the actual change (apply_patch's patch is a diff) so the user
+            # reviews WHAT will be written, not just the file names.
+            diff = req.details
+            if len(diff) > 8000:
+                diff = diff[:8000] + "\n… (diff truncated)"
+            txt.insert("end", "\nChange to apply:\n", "muted")
+            txt.insert("end", f"{diff}\n")
         txt.config(state="disabled")
 
         # Closing the window counts as Deny (don't leave the worker blocked).
@@ -2532,6 +2543,12 @@ class NanocodexGUI:
         if low in ("/storyboard", "/sb") or low.startswith(("/storyboard ", "/sb ")):
             rest = text.split(None, 1)[1].strip() if " " in text else ""
             self._handle_storyboard_command(rest)
+            return "break"
+        # `/loop [interval] <prompt>`: repeat a prompt on an interval (Stop ends
+        # it). Ad-hoc + in-session — complements the persistent scheduler.
+        if low == "/loop" or low.startswith("/loop "):
+            arg = text.split(None, 1)[1].strip() if " " in text else ""
+            self._handle_loop_command(arg)
             return "break"
         if self._busy:
             # Queue it: the running turn keeps going, this waits its turn.
@@ -2903,6 +2920,19 @@ class NanocodexGUI:
         om["menu"].config(bg=P["panel"], fg=P["fg"], activebackground=P["accent"],
                           activeforeground=P["accent_fg"])
         om.pack(side=tk.LEFT, padx=(6, 16))
+        # On-screen text language: controls what language any text rendered IN
+        # the video (signs, subtitles, dialogue captions) comes out as. Distinct
+        # from the (English) prompt language. 中文 / English / 无文字.
+        tk.Label(ctrl, text="字幕语言", anchor="w", bg=P["bg"], fg=P["muted"],
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self._sb_caplang = tk.StringVar(value="zh")
+        cap_om = tk.OptionMenu(ctrl, self._sb_caplang, "zh", "en", "none")
+        cap_om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
+                      activeforeground=P["fg"], relief="flat", bd=0,
+                      highlightthickness=0, font=("Segoe UI", 9), anchor="w")
+        cap_om["menu"].config(bg=P["panel"], fg=P["fg"], activebackground=P["accent"],
+                              activeforeground=P["accent_fg"])
+        cap_om.pack(side=tk.LEFT, padx=(6, 16))
         self._sb_preview_btn = self._flat_btn(ctrl, "生成预览", self._sb_run_preview,
                                               accent=True)
         self._sb_preview_btn.pack(side=tk.RIGHT)
@@ -2937,6 +2967,10 @@ class NanocodexGUI:
                                     font=("Cascadia Code", 10, "bold"), spacing1=6)
         self._sb_preview.tag_config("fail", foreground=P["err"],
                                     font=("Cascadia Code", 10, "bold"), spacing1=6)
+        # 一镜疑似多动作的本地告警（黄字），紧跟在被标记镜头下方。
+        self._sb_preview.tag_config(
+            "warn", foreground=P.get("warn", "#d6a100"),
+            font=("Cascadia Code", 9, "bold"))
 
         # --- results: per-shot status + ▶播放 / ↻重试 (filled after a render) ---
         # A scrollable list packed between the preview and the bottom bar. Each
@@ -2977,6 +3011,24 @@ class NanocodexGUI:
             state=tk.DISABLED,
         )
         self._sb_render_btn.pack(side=tk.RIGHT)
+        # Merge: stitch this run's clips into one full.mp4 (enabled once ≥2
+        # clips landed — see _sb_show_render_done). Disabled until then.
+        self._sb_merge_btn = tk.Button(
+            bot, text="⧉ 合并整片", command=self._sb_run_merge,
+            bg=P["panel"], fg=P["fg"], activebackground=P["border"],
+            activeforeground=P["fg"], relief="flat", bd=0, padx=12, pady=6,
+            font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
+            state=tk.DISABLED,
+        )
+        self._sb_merge_btn.pack(side=tk.RIGHT, padx=(0, 8))
+        # History: browse past 出片 runs (reads storyboard_out/runs/index.json).
+        self._sb_history_btn = tk.Button(
+            bot, text="🕘 历史", command=self._sb_show_history,
+            bg=P["panel"], fg=P["fg"], activebackground=P["border"],
+            activeforeground=P["fg"], relief="flat", bd=0, padx=12, pady=6,
+            font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
+        )
+        self._sb_history_btn.pack(side=tk.RIGHT, padx=(0, 8))
         self._sb_status = tk.Label(dlg, text="", anchor="w", bg=P["bg"],
                                    fg=P["muted"], font=("Segoe UI", 9),
                                    wraplength=720, justify="left")
@@ -2998,6 +3050,11 @@ class NanocodexGUI:
             if mem.get("ratio"):
                 try:
                     self._sb_ratio.set(mem["ratio"])
+                except Exception:  # noqa: BLE001
+                    pass
+            if mem.get("caption_language"):
+                try:
+                    self._sb_caplang.set(mem["caption_language"])
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -3035,10 +3092,16 @@ class NanocodexGUI:
             ratio = self._sb_ratio.get()
         except Exception:  # noqa: BLE001
             pass
+        caplang = "zh"
+        try:
+            caplang = self._sb_caplang.get()
+        except Exception:  # noqa: BLE001
+            pass
         data = {
             "story": story,
             "images": list(getattr(self, "_sb_image_paths", []) or []),
             "ratio": ratio,
+            "caption_language": caplang,
         }
         try:
             path = self._sb_memory_path()
@@ -3147,6 +3210,7 @@ class NanocodexGUI:
                 "target_model": "seedance",
                 "aspect_ratio": self._sb_ratio.get(),
                 "language": "zh",
+                "caption_language": self._sb_caplang.get(),
             },
             "inputs": {
                 "story_text": story,
@@ -3166,7 +3230,8 @@ class NanocodexGUI:
         from nanocodex.config import load_config
         from nanocodex.provider.deepseek import DeepSeekProvider
         from nanocodex.storyboard.clients import (
-            ChapterPlanner, SeedanceClient, TextPlanner, VisionAnalyzer,
+            ChapterPlanner, ContinuityChecker, SeedanceClient, TextPlanner,
+            VisionAnalyzer,
         )
         from nanocodex.storyboard.pipeline import PipelineDeps
 
@@ -3177,6 +3242,7 @@ class NanocodexGUI:
                                 model=cfg.model, timeout_s=cfg.timeout_s)
         chapters = ChapterPlanner(prov)
         planner = TextPlanner(prov)
+        continuity = ContinuityChecker(prov)
         vision = None
         if self._sb_image_paths and cfg.vl_model:
             vision = VisionAnalyzer(DeepSeekProvider(
@@ -3190,7 +3256,7 @@ class NanocodexGUI:
             # merges it), so reading config alone covers both file + env.
             seedance = SeedanceClient(cfg.ark_api_key)
         return PipelineDeps(vision=vision, chapters=chapters, planner=planner,
-                            seedance=seedance)
+                            continuity=continuity, seedance=seedance)
 
     def _sb_run_preview(self) -> None:
         """[生成预览]: plan chapters + shots on a worker thread (never renders)."""
@@ -3249,27 +3315,60 @@ class NanocodexGUI:
             self._sb_render_btn.config(state=self._tk.DISABLED)
         except Exception:  # noqa: BLE001
             pass
-        self._sb_set_status("出片中…（每镜需轮询，耐心等）")
+        self._sb_set_status("出片中…（前后帧衔接，逐镜串行，耐心等）")
         threading.Thread(target=self._sb_render_thread, args=(state,),
                          daemon=True).start()
 
     def _sb_render_thread(self, state) -> None:
         """Daemon thread: render the planned state via Seedance, download the
-        finished clips locally, then export. Results to the UI queue."""
+        finished clips locally, then export. Results to the UI queue.
+
+        Each render gets its OWN archived directory under storyboard_out/runs/
+        (timestamp_故事名) so renders never overwrite each other — the run dir is
+        created here and remembered on self so re-renders / merge reuse it, and a
+        summary row is appended to the runs index for the 历史 list."""
         try:
             deps = self._sb_build_deps(want_render=True)
-            from nanocodex.storyboard.pipeline import render, export
-            out_dir = (self._workspace / "storyboard_out").resolve()
+            from nanocodex.storyboard.pipeline import (
+                render, export, make_run_dir, write_run_index,
+            )
+            base = (self._workspace / "storyboard_out").resolve()
+            title = getattr(state.project, "title", "") or "Untitled"
+            run_dir = make_run_dir(base, title)
+            self._sb_run_dir = run_dir
 
             def _prog(sid: str, i: int, st: str) -> None:
                 self._ui_queue.put(_UiEvent("sb_render_progress", (sid, i, st)))
 
-            render(state, deps, on_progress=_prog)
-            self._sb_download_clips(state, out_dir)
-            export(state, out_dir)
+            # chain_frames=True: render shots serially, anchoring each shot's
+            # first_frame to the previous shot's last frame so consecutive clips
+            # join连贯 (前后帧衔接). Serial is the accepted trade-off for continuity.
+            render(state, deps, on_progress=_prog, chain_frames=True)
+            self._sb_download_clips(state, run_dir)
+            export(state, run_dir)
+            write_run_index(base, self._sb_run_meta(state, run_dir))
             self._ui_queue.put(_UiEvent("sb_render_done", state))
         except Exception as exc:  # noqa: BLE001 - surfaced to the panel
             self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_run_meta(self, state, run_dir) -> dict:
+        """Build the index row for one 出片 run (id/title/time/counts/cost/dir)."""
+        from datetime import datetime
+        ok_n = sum(1 for u in (state.video_urls or {}).values()
+                   if u and not str(u).startswith("[failed"))
+        cost = round(sum(float(c.get("cost_cny", 0.0))
+                         for c in (state.video_costs or {}).values()), 4)
+        return {
+            "run_id": getattr(state.project, "id", ""),
+            "title": getattr(state.project, "title", ""),
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "dir": str(run_dir),
+            "shots": len(state.shots),
+            "ok": ok_n,
+            "cost_cny": cost,
+            "ratio": getattr(state.project, "aspect_ratio", ""),
+            "caption_language": getattr(state.project, "caption_language", ""),
+        }
 
     def _sb_download_clips(self, state, out_dir) -> None:
         """Download each successful shot's signed URL to ``out_dir/<shot_id>.mp4``.
@@ -3320,18 +3419,31 @@ class NanocodexGUI:
                          args=(state, shot_id), daemon=True).start()
 
     def _sb_rerender_thread(self, state, shot_id: str) -> None:
-        """Daemon thread: re-render ONE shot in place, download, export, refresh."""
+        """Daemon thread: re-render ONE shot in place, download, export, refresh.
+
+        A 重试 belongs to the SAME run as the original render (it's补 the failed
+        shot, not a new history entry): reuse self._sb_run_dir, and refresh the
+        same index row by run_id rather than appending a new one. Falls back to a
+        fresh run dir only if somehow no prior run dir is remembered."""
         try:
             deps = self._sb_build_deps(want_render=True)
-            from nanocodex.storyboard.pipeline import render_one, export
-            out_dir = (self._workspace / "storyboard_out").resolve()
+            from nanocodex.storyboard.pipeline import (
+                render_one, export, make_run_dir, write_run_index,
+            )
+            base = (self._workspace / "storyboard_out").resolve()
+            run_dir = getattr(self, "_sb_run_dir", None)
+            if run_dir is None:
+                title = getattr(state.project, "title", "") or "Untitled"
+                run_dir = make_run_dir(base, title)
+                self._sb_run_dir = run_dir
 
             def _prog(sid: str, i: int, st: str) -> None:
                 self._ui_queue.put(_UiEvent("sb_render_progress", (sid, i, st)))
 
             render_one(state, deps, shot_id, on_progress=_prog)
-            self._sb_download_clips(state, out_dir)
-            export(state, out_dir)
+            self._sb_download_clips(state, run_dir)
+            export(state, run_dir)
+            write_run_index(base, self._sb_run_meta(state, run_dir))
             self._ui_queue.put(_UiEvent("sb_render_done", state))
         except Exception as exc:  # noqa: BLE001 - surfaced to the panel
             self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
@@ -3363,10 +3475,28 @@ class NanocodexGUI:
                     view.insert("end", f"      · {km}\n", "body")
             view.insert("end", "\n")
 
-        view.insert("end", f"镜头（{len(state.shots)}）\n", "chapter")
+        # 本地启发式：哪些镜头疑似塞了多个先后动作（标黄提示人工复查）。
+        try:
+            from nanocodex.storyboard.pipeline import scan_multi_action_shots
+            multi = scan_multi_action_shots(state)
+        except Exception:  # noqa: BLE001 - 提示性功能，失败不应挡住预览
+            multi = {}
+
+        n_flag = len(multi)
+        head = f"镜头（{len(state.shots)}）"
+        if n_flag:
+            head += f"  ⚠ {n_flag} 个镜头疑似一镜多动作"
+        view.insert("end", head + "\n", "chapter")
         for s in state.shots:
             view.insert("end", f"  {s.shot_id}  {s.title}  ({s.duration_sec:g}s)\n",
                         "shot")
+            markers = multi.get(s.shot_id)
+            if markers:
+                view.insert(
+                    "end",
+                    "     ⚠ 疑似一镜多动作（命中：" + "、".join(markers[:6])
+                    + "）。建议拆成多镜，否则视频里动作可能错乱/颠倒。\n",
+                    "warn")
             if s.camera:
                 view.insert("end", "     镜头: ", "field")
                 view.insert("end", s.camera + "\n", "body")
@@ -3384,6 +3514,11 @@ class NanocodexGUI:
             if s.negative_prompt:
                 view.insert("end", "     负向: ", "field")
                 view.insert("end", s.negative_prompt + "\n", "body")
+            # 台词（中文原文）——驱动 Seedance 的中文语音/口型，老数据无此字段则跳过。
+            dlg = [d for d in getattr(s, "dialogue", []) if d and d.strip()]
+            if dlg:
+                view.insert("end", "     台词: ", "field")
+                view.insert("end", "  ".join(dlg) + "\n", "body")
         view.config(state=tk.DISABLED)
         view.see("1.0")
 
@@ -3421,9 +3556,20 @@ class NanocodexGUI:
         except Exception:  # noqa: BLE001
             pass
         self._sb_render_results(state)
+        run_dir = getattr(self, "_sb_run_dir", None)
+        where = run_dir.name if run_dir is not None else "storyboard_out/"
         self._sb_set_status(
             f"出片完成：{ok_n}/{len(state.video_urls)} 成功，本次 ¥{run_cny:.4f} CNY。"
-            f"成功的已下载到 storyboard_out/，失败的可单独点「↻重试」重出。")
+            f"已归档到 runs/{where}/，失败的可单独点「↻重试」重出，"
+            f"≥2 个成功可点「⧉ 合并整片」。")
+        # Enable the merge button once at least 2 clips landed (nothing to join
+        # otherwise). The button itself re-checks before shelling out to ffmpeg.
+        try:
+            btn = getattr(self, "_sb_merge_btn", None)
+            if btn is not None:
+                btn.config(state=(self._tk.NORMAL if ok_n >= 2 else self._tk.DISABLED))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _sb_render_results(self, state) -> None:
         """(Re)build the per-shot result rows: status + ▶播放 / ↻重试.
@@ -3440,7 +3586,32 @@ class NanocodexGUI:
         for child in inner.winfo_children():
             child.destroy()
 
-        out_dir = (self._workspace / "storyboard_out").resolve()
+        # Clips now live in this run's archived dir (set at render start); fall
+        # back to the legacy fixed dir only if no run dir was recorded.
+        out_dir = getattr(self, "_sb_run_dir", None) or \
+            (self._workspace / "storyboard_out").resolve()
+
+        # Merged 整片 row, pinned at the top whenever full.mp4 already exists in
+        # the run dir (after a 合并, or when loading a past run that was merged).
+        try:
+            full = out_dir / "full.mp4"
+            if full.exists() and full.stat().st_size > 0:
+                frow = tk.Frame(inner, bg=P["panel"])
+                frow.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
+                tk.Label(frow, text="🎬", width=2, anchor="w", bg=P["panel"],
+                         fg=P["accent"], font=("Segoe UI", 10, "bold")).pack(
+                             side=tk.LEFT)
+                tk.Label(frow, text="整片  full.mp4（已合并）", anchor="w",
+                         bg=P["panel"], fg=P["fg"],
+                         font=("Segoe UI", 9, "bold")).pack(
+                             side=tk.LEFT, padx=(4, 8))
+                self._flat_btn(
+                    frow, "▶ 播放",
+                    lambda p=full: self._sb_play_clip(p, ""), accent=True,
+                ).pack(side=tk.RIGHT, padx=(0, 2))
+        except Exception:  # noqa: BLE001 - the per-shot rows still render
+            pass
+
         urls = state.video_urls or {}
         for s in state.shots:
             url = str(urls.get(s.shot_id, ""))
@@ -3507,6 +3678,542 @@ class NanocodexGUI:
                 webbrowser.open(target)
         except Exception as exc:  # noqa: BLE001
             self._sb_set_status(f"打开失败：{exc}", error=True)
+
+    def _sb_run_merge(self) -> None:
+        """Pre-check continuity, THEN (after the user OKs) stitch into full.mp4.
+
+        Merging hard-cuts the clips in shot order, so a storyboard with missing
+        transitions plays as a jumpy story. Before spending the (slow) ffmpeg
+        pass we let DeepSeek review the shots for剧情跳跃 and surface a report;
+        the actual concat is deferred to _sb_proceed_merge once the user chooses
+        仍然合并. _sb_busy stays set across check → report → merge so nothing else
+        runs in between; it's cleared on merge-done or if the user cancels.
+        """
+        if getattr(self, "_sb_busy", False):
+            return
+        state = getattr(self, "_sb_render_state", None)
+        run_dir = getattr(self, "_sb_run_dir", None)
+        if state is None or run_dir is None:
+            self._sb_set_status("没有可合并的出片结果。", error=True)
+            return
+        self._sb_busy = True
+        self._sb_open_merge_progress(
+            title="连贯性校验",
+            label="正在校验镜头连贯性…（DeepSeek）",
+            sub="检查相邻镜头之间是否缺少过渡细节。请稍候。")
+        self._sb_set_status("校验连贯性中…（DeepSeek）")
+        threading.Thread(target=self._sb_check_thread,
+                         args=(state, run_dir), daemon=True).start()
+
+    def _sb_check_thread(self, state, run_dir) -> None:
+        """Daemon thread: run the continuity check over its own asyncio loop.
+
+        Mirrors _sb_preview_thread. ``available`` is the same filter the rest of
+        the panel uses (a shot has a clip iff its URL is set and not a [failed
+        marker) — un-rendered shots are真实缺口 the checker should weigh. State +
+        run_dir ride along in the event payload so proceeding to merge doesn't
+        re-fetch them (avoids a race with anything that swaps the panel state).
+        """
+        try:
+            deps = self._sb_build_deps(want_render=False)
+            from nanocodex.storyboard.pipeline import check_continuity
+            available = [sid for sid, u in (state.video_urls or {}).items()
+                         if u and not str(u).startswith("[failed")]
+            report = asyncio.run(
+                check_continuity(state, deps, available_ids=available))
+            self._ui_queue.put(
+                _UiEvent("sb_check_done", (report, state, run_dir)))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the panel
+            self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_open_merge_progress(self, *, title: str = "合并整片",
+                                label: str = "正在用 ffmpeg 合并整片…",
+                                sub: str = "按镜头顺序拼接，跳过缺失/失败的镜。请稍候."
+                                ) -> None:
+        """Show a small modal progress dialog (reused for both check & merge).
+
+        The bar runs in indeterminate (marquee) mode — neither the DeepSeek check
+        nor ffmpeg's concat give a clean percentage, so it signals "working,
+        don't touch" rather than a real fraction. Modal (grab_set) over the panel
+        so the operation can't be started twice; closed by _sb_close_merge_progress
+        on done/error. ``title``/``label``/``sub`` are parameterized so the same
+        dialog serves the校验 step and the合并 step with the right wording.
+        """
+        tk = self._tk
+        P = self._palette
+        try:
+            from tkinter import ttk
+        except Exception:  # noqa: BLE001 - no ttk: skip the dialog, thread still runs
+            self._sb_merge_progress = None
+            return
+        dlg = tk.Toplevel(self._sb_dlg)
+        self._sb_merge_progress = dlg
+        dlg.title(title)
+        dlg.configure(bg=P["bg"])
+        dlg.geometry("360x130")
+        dlg.resizable(False, False)
+        dlg.transient(self._sb_dlg)
+        tk.Label(dlg, text=label, anchor="w", bg=P["bg"],
+                 fg=P["fg"], font=("Segoe UI", 10)).pack(
+                     side=tk.TOP, fill=tk.X, padx=18, pady=(20, 6))
+        tk.Label(dlg, text=sub,
+                 anchor="w", bg=P["bg"], fg=P["muted"], font=("Segoe UI", 8)).pack(
+                     side=tk.TOP, fill=tk.X, padx=18, pady=(0, 10))
+        bar = ttk.Progressbar(dlg, mode="indeterminate", length=320)
+        bar.pack(side=tk.TOP, padx=18, pady=(0, 14))
+        bar.start(12)
+        self._sb_merge_bar = bar
+        # Block the close button: the merge runs on a daemon thread we don't
+        # cancel, so swallow the [x] to avoid a half-open dialog state.
+        dlg.protocol("WM_DELETE_WINDOW", lambda: None)
+        try:
+            dlg.grab_set()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sb_close_merge_progress(self) -> None:
+        """Tear down the merge progress dialog (idempotent: done OR error)."""
+        bar = getattr(self, "_sb_merge_bar", None)
+        if bar is not None:
+            try:
+                bar.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self._sb_merge_bar = None
+        dlg = getattr(self, "_sb_merge_progress", None)
+        if dlg is not None:
+            try:
+                dlg.grab_release()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                dlg.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        self._sb_merge_progress = None
+
+    def _sb_show_continuity_report(self, report, state, run_dir, *,
+                                   fresh: bool = True) -> None:
+        """Show the pre-merge continuity report; let the user 补镜 / 合并 / 取消.
+
+        Built like _sb_open_merge_progress (palette Toplevel) with a scrollable
+        list of gaps. Each gap carries a 「补这镜」button that adopts the
+        suggestion as a REAL shot (insert_fill_shot), renders it (real spend),
+        and re-opens this report so the user can 补 more or merge — the
+        采纳→补镜→重新合并 loop. Already-filled gaps show ✓ 已补 instead of a
+        button. The merge is gated but never blocked: 合并 proceeds to the concat,
+        取消 releases _sb_busy. An empty/clean report still shows (a consistent
+        gate) with the primary button relabeled「连贯，合并」.
+
+        ``fresh`` True resets the filled-gap tracking (a brand-new report from the
+        check); False preserves it (re-opened after a 补镜 finished).
+        """
+        tk = self._tk
+        P = self._palette
+        if fresh:
+            # gap-key -> new shot_id for gaps already adopted as fill shots.
+            self._sb_filled_gaps: dict = {}
+        filled = getattr(self, "_sb_filled_gaps", {})
+        # Remembered so the 补镜 flow can re-open this same report on done, and
+        # so _sb_render_results shows the newly inserted fill shots.
+        self._sb_report_ctx = (report, state, run_dir)
+        self._sb_render_state = state
+
+        gaps = list(getattr(report, "gaps", []) or [])
+        n = len(gaps)
+        dlg = tk.Toplevel(self._sb_dlg)
+        self._sb_report_dlg = dlg
+        dlg.title("连贯性校验报告")
+        dlg.configure(bg=P["bg"])
+        dlg.geometry("660x560")
+        dlg.transient(self._sb_dlg)
+
+        head = (report.summary or "").strip()
+        if n:
+            head = (head + "\n\n" if head else "") + (
+                f"发现 {n} 处可能的剧情跳跃。点「补这镜」按建议生成过渡镜并插入到"
+                "对应位置（真实计费），补完再合并。")
+        elif not head:
+            head = "未发现明显的剧情跳跃，镜头衔接连贯。"
+        tk.Label(dlg, text=head, anchor="w", justify="left", bg=P["bg"],
+                 fg=P["fg"], font=("Segoe UI", 10), wraplength=620).pack(
+                     side=tk.TOP, fill=tk.X, padx=16, pady=(16, 8))
+
+        # Scrollable list: one block per gap, each with its own 「补这镜」button
+        # (mirrors the results canvas pattern so we can pack real buttons, not
+        # just text). _sb_show_preview-style field/body coloring.
+        outer = tk.Frame(dlg, bg=P["bg"])
+        outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+        canvas = tk.Canvas(outer, bg=P["bg"], highlightthickness=0)
+        vsb = tk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+        inner = tk.Frame(canvas, bg=P["bg"])
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfig(win, width=e.width))
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        def _gap_key(g):
+            return (g.after_shot_id, g.before_shot_id, g.suggested_title)
+
+        if n:
+            for i, g in enumerate(gaps, 1):
+                blk = tk.Frame(inner, bg=P["panel"])
+                blk.pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
+                top = tk.Frame(blk, bg=P["panel"])
+                top.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(6, 2))
+                sev = getattr(g, "severity", "") or "medium"
+                tk.Label(
+                    top,
+                    text=f"{i}. {g.after_shot_id} → {g.before_shot_id}  [{sev}]",
+                    anchor="w", bg=P["panel"], fg=P["accent"],
+                    font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+                key = _gap_key(g)
+                if key in filled:
+                    tk.Label(top, text=f"✓ 已补 {filled[key]}", anchor="e",
+                             bg=P["panel"], fg=P["tool"],
+                             font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
+                else:
+                    self._flat_btn(
+                        top, "补这镜", lambda gg=g: self._sb_fill_one(gg),
+                        accent=True).pack(side=tk.RIGHT)
+
+                def _line(lbl: str, val: str) -> None:
+                    if not val:
+                        return
+                    row = tk.Frame(blk, bg=P["panel"])
+                    row.pack(side=tk.TOP, fill=tk.X, padx=8)
+                    tk.Label(row, text=lbl, anchor="nw", bg=P["panel"],
+                             fg=P["muted"], font=("Segoe UI", 8), width=10).pack(
+                                 side=tk.LEFT)
+                    tk.Label(row, text=val, anchor="w", justify="left",
+                             bg=P["panel"], fg=P["fg"], font=("Segoe UI", 9),
+                             wraplength=500).pack(side=tk.LEFT, fill=tk.X,
+                                                  expand=True)
+
+                _line("缺失:", g.missing)
+                _line("补镜:", g.suggested_title)
+                _line("画面:", g.suggested_prompt_zh)
+                _line("prompt(英):", g.suggested_prompt)
+                _line("时长:", f"{g.suggested_duration_sec:g}s")
+                dl = [d for d in (g.suggested_dialogue or []) if str(d).strip()]
+                _line("台词:", "  ".join(dl))
+                tk.Frame(blk, bg=P["panel"], height=6).pack(
+                    side=tk.TOP, fill=tk.X)
+        else:
+            tk.Label(inner, text="（无补镜建议）", anchor="w", bg=P["bg"],
+                     fg=P["fg"], font=("Segoe UI", 9)).pack(
+                         side=tk.TOP, fill=tk.X)
+
+        bot = tk.Frame(dlg, bg=P["bg"])
+        bot.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=(0, 14))
+
+        def _cancel() -> None:
+            self._sb_busy = False
+            self._sb_report_dlg = None
+            try:
+                dlg.grab_release()
+            except Exception:  # noqa: BLE001
+                pass
+            dlg.destroy()
+            self._sb_set_status("已取消合并，可据建议补镜后再合并。")
+
+        def _proceed() -> None:
+            self._sb_report_dlg = None
+            try:
+                dlg.grab_release()
+            except Exception:  # noqa: BLE001
+                pass
+            dlg.destroy()
+            self._sb_proceed_merge(state, run_dir)
+
+        any_filled = bool(filled)
+        if n and not any_filled:
+            proceed_text = "仍然合并"
+        elif n and any_filled:
+            proceed_text = "合并整片"
+        else:
+            proceed_text = "连贯，合并"
+        self._flat_btn(bot, proceed_text, _proceed, accent=True).pack(
+            side=tk.RIGHT)
+        self._flat_btn(bot, "取消" if any_filled else "去补镜 / 取消",
+                       _cancel).pack(side=tk.RIGHT, padx=(0, 8))
+        # Closing the window == cancel (always release _sb_busy so the panel
+        # isn't wedged busy after dismissing the report).
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+        try:
+            dlg.grab_set()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sb_fill_one(self, gap) -> None:
+        """Adopt one gap suggestion as a real shot and render it (real spend).
+
+        Confirms cost, splices the suggestion into ``state`` via insert_fill_shot
+        (so it lands between the two shots it bridges), closes the report dialog
+        while the single clip renders, and kicks off _sb_fill_thread. On done the
+        report re-opens (see the sb_fill_done event) with this gap marked ✓ 已补.
+        """
+        ctx = getattr(self, "_sb_report_ctx", None)
+        if ctx is None:
+            return
+        _report, state, run_dir = ctx
+        from tkinter import messagebox
+        from nanocodex.agent.pricing import estimate_seedance_cost_cny
+        dur = float(getattr(gap, "suggested_duration_sec", 5) or 5)
+        est = estimate_seedance_cost_cny(dur)
+        ok = messagebox.askyesno(
+            "补镜出片（真实计费）",
+            f"将按建议生成补镜「{gap.suggested_title or '补镜'}」并插入到 "
+            f"{gap.after_shot_id} 之后，预计 ≈ ¥{est:.2f} CNY"
+            f"（约 {dur:.0f}s，720p 估算）。\n\n这会真实计费，确定继续？",
+            parent=getattr(self, "_sb_report_dlg", None) or self._sb_dlg,
+        )
+        if not ok:
+            return
+        from nanocodex.storyboard.pipeline import insert_fill_shot
+        new_id = insert_fill_shot(state, gap)
+        key = (gap.after_shot_id, gap.before_shot_id, gap.suggested_title)
+        # Close the report while the one shot renders (re-opened on done).
+        dlg = getattr(self, "_sb_report_dlg", None)
+        self._sb_report_dlg = None
+        if dlg is not None:
+            try:
+                dlg.grab_release()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                dlg.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        self._sb_open_merge_progress(
+            title="补镜出片", label="正在生成补镜并出片…（Seedance）",
+            sub="按建议补一个过渡镜，插入到对应位置。每镜需轮询，请稍候。")
+        self._sb_set_status(f"补镜出片中… {new_id}（真实计费）")
+        threading.Thread(target=self._sb_fill_thread,
+                         args=(state, run_dir, new_id, key), daemon=True).start()
+
+    def _sb_fill_thread(self, state, run_dir, new_id, key) -> None:
+        """Daemon thread: render ONE fill shot, download, export, refresh index.
+
+        The fill shot belongs to the SAME run as the originals (it補 a gap, not a
+        new history entry): reuse run_dir and refresh the same index row by
+        run_id. render_one records a [failed marker rather than raising, so the
+        ok flag rides along to the event and a failure re-opens the report with
+        the gap still un-filled (button stays, retry possible)."""
+        try:
+            deps = self._sb_build_deps(want_render=True)
+            from nanocodex.storyboard.pipeline import (
+                render_one, export, write_run_index,
+            )
+
+            def _prog(sid: str, i: int, st: str) -> None:
+                self._ui_queue.put(_UiEvent("sb_render_progress", (sid, i, st)))
+
+            ok = render_one(state, deps, new_id, on_progress=_prog)
+            self._sb_download_clips(state, run_dir)
+            export(state, run_dir)
+            base = (self._workspace / "storyboard_out").resolve()
+            write_run_index(base, self._sb_run_meta(state, run_dir))
+            self._ui_queue.put(
+                _UiEvent("sb_fill_done", (state, run_dir, new_id, key, ok)))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the panel
+            self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_proceed_merge(self, state, run_dir) -> None:
+        """Run the actual ffmpeg concat after the continuity report was OK'd.
+
+        This is the back-half of the old _sb_run_merge (split out so the check
+        gates it). _sb_busy is already set (held since _sb_run_merge through the
+        check + report), so we don't set it again here; it's cleared on
+        _sb_show_merge_done.
+        """
+        self._sb_open_merge_progress()  # default ffmpeg wording
+        self._sb_set_status("合并整片中…（ffmpeg）")
+        threading.Thread(target=self._sb_merge_thread,
+                         args=(state, run_dir), daemon=True).start()
+
+    def _sb_merge_thread(self, state, run_dir) -> None:
+        """Daemon thread: run concat_clips, report the merged path (or error)."""
+        try:
+            from nanocodex.storyboard.pipeline import concat_clips
+            shot_ids = [s.shot_id for s in state.shots]
+            dest = concat_clips(run_dir, shot_ids)
+            self._ui_queue.put(_UiEvent("sb_merge_done", dest))
+        except Exception as exc:  # noqa: BLE001 - surfaced to the panel
+            self._ui_queue.put(_UiEvent("sb_error", f"{type(exc).__name__}: {exc}"))
+
+    def _sb_show_merge_done(self, dest) -> None:
+        """Report the merged full video; surface it as a persistent 整片 row.
+
+        Closes the progress dialog, re-enables 合并, and re-renders the result
+        rows so the 整片 row appears (it's rendered whenever full.mp4 exists in
+        the run dir — see _sb_render_results). Does NOT auto-open the player; the
+        user clicks ▶播放 on the row when they want it.
+        """
+        self._sb_close_merge_progress()
+        self._sb_busy = False
+        try:
+            self._sb_merge_btn.config(state=self._tk.NORMAL)
+        except Exception:  # noqa: BLE001
+            pass
+        if dest is None:
+            self._sb_set_status("合并跳过：可用片段不足 2 个。", error=True)
+            return
+        from pathlib import Path as _Path
+        dest = _Path(dest)
+        state = getattr(self, "_sb_render_state", None)
+        if state is not None:
+            self._sb_render_results(state)  # re-render -> 整片 row now shows
+        self._sb_set_status(
+            f"已合并整片 → {dest.name}（在 {dest.parent.name}/）。"
+            f"点上方「🎬 整片」行的 ▶播放 即可观看。")
+
+    def _sb_show_history(self) -> None:
+        """Popup listing past 出片 runs from storyboard_out/runs/index.json.
+
+        Each row: time · title · ok/总镜 · ¥cost, with a 载入 button that
+        reopens that run in the panel (replay clips / retry failed shots /
+        merge) and a 打开目录 button that reveals its archived folder. Browsing
+        history never deletes or re-renders anything on its own.
+        """
+        tk = self._tk
+        P = self._palette
+        from nanocodex.storyboard.pipeline import read_run_index
+        base = (self._workspace / "storyboard_out").resolve()
+        entries = read_run_index(base)
+
+        prev = getattr(self, "_sb_history_dlg", None)
+        if prev is not None:
+            try:
+                prev.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        dlg = tk.Toplevel(self._sb_dlg)
+        self._sb_history_dlg = dlg
+        dlg.title("出片历史")
+        dlg.configure(bg=P["bg"])
+        dlg.geometry("560x420")
+
+        tk.Label(dlg, text="出片历史（点「载入」恢复到面板可重播/重出/合并，"
+                            "「打开目录」查看归档）",
+                 anchor="w", bg=P["bg"], fg=P["muted"],
+                 font=("Segoe UI", 9)).pack(side=tk.TOP, fill=tk.X,
+                                            padx=14, pady=(12, 6))
+        if not entries:
+            tk.Label(dlg, text="还没有出片记录。", anchor="w", bg=P["bg"],
+                     fg=P["fg"], font=("Segoe UI", 10)).pack(
+                         side=tk.TOP, fill=tk.X, padx=14, pady=8)
+            return
+
+        wrap = tk.Frame(dlg, bg=P["bg"])
+        wrap.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
+        # newest first
+        for e in reversed(entries):
+            row = tk.Frame(wrap, bg=P["panel"])
+            row.pack(side=tk.TOP, fill=tk.X, pady=2)
+            t = e.get("time", "")
+            title = e.get("title", "") or "(无标题)"
+            ok = e.get("ok", 0)
+            shots = e.get("shots", 0)
+            cost = e.get("cost_cny", 0.0)
+            label = f"{t}  ·  {title[:24]}  ·  {ok}/{shots} 镜  ·  ¥{cost:.2f}"
+            tk.Label(row, text=label, anchor="w", bg=P["panel"], fg=P["fg"],
+                     font=("Segoe UI", 9)).pack(side=tk.LEFT, fill=tk.X,
+                                                expand=True, padx=(8, 6), pady=6)
+            d = e.get("dir", "")
+            self._flat_btn(
+                row, "打开目录", lambda p=d: self._sb_open_dir(p),
+            ).pack(side=tk.RIGHT, padx=(0, 8))
+            # 载入: reopen this run in the panel (replay/retry/merge) — needs the
+            # run dir AND the index row (project fields aren't in the exported
+            # JSON, so they're taken from the meta row).
+            self._flat_btn(
+                row, "载入", lambda p=d, meta=dict(e): self._sb_load_run(p, meta),
+                accent=True,
+            ).pack(side=tk.RIGHT, padx=(0, 8))
+
+    def _sb_load_run(self, run_dir: str, meta: dict) -> None:
+        """Reload a past run's exported state into the panel for replay/retry/merge.
+
+        Rebuilds the PipelineState from the run dir's JSON (via load_run_state),
+        points the panel at that dir so 播放/重试/合并 act on the archived clips,
+        re-renders the preview + per-shot result rows, and enables 合并整片 when
+        ≥2 clips landed. Read-only on disk — nothing re-renders or spends here.
+        """
+        from pathlib import Path as _Path
+        from nanocodex.storyboard.pipeline import load_run_state
+        if getattr(self, "_sb_busy", False):
+            self._sb_set_status("忙着呢，等当前任务完成再载入。", error=True)
+            return
+        p = _Path(run_dir)
+        if not p.exists():
+            self._sb_set_status(f"目录不存在：{run_dir}", error=True)
+            return
+        try:
+            state = load_run_state(p, meta=meta)
+        except Exception as exc:  # noqa: BLE001
+            self._sb_set_status(f"载入失败：{type(exc).__name__}: {exc}", error=True)
+            return
+        # Wire the loaded run as the panel's current + rendered state, and point
+        # clip lookups at its archived dir so 播放/合并 use the local mp4s.
+        self._sb_state = state
+        self._sb_render_state = state
+        self._sb_run_dir = p
+        self._sb_folded_cny = 0.0
+        # Restore the story text + ratio/caption controls from the loaded run.
+        try:
+            if getattr(state.project, "aspect_ratio", ""):
+                self._sb_ratio.set(state.project.aspect_ratio)
+            if getattr(state.project, "caption_language", ""):
+                self._sb_caplang.set(state.project.caption_language)
+        except Exception:  # noqa: BLE001
+            pass
+        # Show the planned preview, then the per-shot results (✓播放 / ✗重试).
+        self._sb_show_preview(state)
+        self._sb_render_results(state)
+        ok_n = sum(1 for u in (state.video_urls or {}).values()
+                   if u and not str(u).startswith("[failed"))
+        try:
+            btn = getattr(self, "_sb_merge_btn", None)
+            if btn is not None:
+                btn.config(state=(self._tk.NORMAL if ok_n >= 2
+                                  else self._tk.DISABLED))
+        except Exception:  # noqa: BLE001
+            pass
+        # Close the history popup and report what landed.
+        hist = getattr(self, "_sb_history_dlg", None)
+        if hist is not None:
+            try:
+                hist.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        title = getattr(state.project, "title", "") or "(无标题)"
+        self._sb_set_status(
+            f"已载入：{title} · {ok_n}/{len(state.shots)} 镜成功。"
+            f"可点 ▶播放 看片、↻重试 重出失败镜、"
+            f"{'⧉合并整片 拼成一条' if ok_n >= 2 else '（成功≥2 镜才能合并）'}。")
+
+    def _sb_open_dir(self, path: str) -> None:
+        """Open a run's archived directory in the OS file manager."""
+        import os
+        from pathlib import Path as _Path
+        try:
+            p = _Path(path)
+            if not p.exists():
+                self._sb_set_status(f"目录不存在：{path}", error=True)
+                return
+            startfile = getattr(os, "startfile", None)
+            if startfile is not None:
+                startfile(str(p))
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", str(p)])
+        except Exception as exc:  # noqa: BLE001
+            self._sb_set_status(f"打开目录失败：{exc}", error=True)
 
     def _on_ab_compare(self) -> None:
         """Open the A/B setup dialog: two configs + one prompt, run isolated.
@@ -3847,7 +4554,14 @@ class NanocodexGUI:
         when images are attached, so a vision model can see them).
         """
         self._append(f"\nyou › {text}\n", "user")
-        content = self._consume_attachments(text)
+        # @path mentions -> inline file context (Codex-style). Echo the plain
+        # typed text to the transcript, but hand the worker the expanded text.
+        from nanocodex.agent.mentions import expand_file_mentions
+        try:
+            sent = expand_file_mentions(text, self._loop.tools.ctx.workspace)
+        except Exception:  # noqa: BLE001 - mention expansion is best-effort
+            sent = text
+        content = self._consume_attachments(sent)
         self._cancel_event.clear()
         self._set_busy(True)
         self._worker = threading.Thread(
@@ -3919,6 +4633,86 @@ class NanocodexGUI:
             # Tell the UI WHY the turn ended, so "it just stopped" is never a
             # mystery (completed vs max_iterations vs cancelled vs error).
             self._ui_queue.put(_UiEvent("turn_end", result))
+            self._ui_queue.put(_UiEvent("done"))
+
+    def _handle_loop_command(self, arg: str) -> None:
+        """`/loop [interval] <prompt>`: repeat a prompt on an interval until Stop.
+
+        Ad-hoc, in-session, no persistence — complements the (cron-like)
+        scheduler. The interval accepts 30s / 5m / 1h (default 10m).
+        """
+        if self._loop is None:
+            return
+        if self._busy:
+            self._append("\n[busy — wait for the current turn before /loop]\n", "system")
+            return
+        from nanocodex.agent.slash import split_loop_arg
+        interval_s, prompt = split_loop_arg(arg)
+        if not prompt:
+            self._append("\n[usage: /loop [interval] <prompt>  "
+                         "e.g. /loop 5m run the tests]\n", "system")
+            return
+        self._append(f"\nyou › /loop {arg}\n", "user")
+        self._append(f"\n[looping every {interval_s}s — press Stop to end]\n", "system")
+        self._cancel_event.clear()
+        self._set_busy(True)
+        self._worker = threading.Thread(
+            target=self._run_loop_thread, args=(interval_s, prompt), daemon=True,
+        )
+        self._worker.start()
+
+    def _run_loop_thread(self, interval_s: int, prompt: str) -> None:
+        """Daemon thread: re-run `prompt` every `interval_s`s until Stop.
+
+        Mirrors _run_turn_thread per iteration (own asyncio loop, desktop lock,
+        results via the UI queue), then waits the interval interruptibly. Posts a
+        single 'done' when the loop ends, so busy clears and the input queue
+        drains exactly once — not per iteration.
+        """
+        import time
+
+        from nanocodex.agent.mentions import expand_file_mentions
+        n = 0
+        try:
+            while not self._cancel_event.is_set():
+                n += 1
+                self._ui_queue.put(_UiEvent("system_text", f"\n— loop iteration {n} —\n"))
+                try:
+                    text = expand_file_mentions(prompt, self._loop.tools.ctx.workspace)
+                except Exception:  # noqa: BLE001 - mention expansion is best-effort
+                    text = prompt
+                hooks = self._make_gui_hooks()
+                # Same desktop-lock dance as _run_turn_thread: the user's loop and
+                # a scheduled task share the mouse/keyboard, so never overlap.
+                got_lock = self._desktop_lock.acquire(blocking=False)
+                if not got_lock:
+                    self._ui_queue.put(_UiEvent(
+                        "system_text",
+                        "\n[waiting for a background scheduled task to finish…]\n"))
+                    self._desktop_lock.acquire()
+                    got_lock = True
+                result = None
+                try:
+                    result = asyncio.run(self._loop.run_turn(
+                        text, hooks, cancel_check=self._cancel_event.is_set))
+                except ProviderError as exc:
+                    self._ui_queue.put(_UiEvent("error", f"Provider error: {exc}"))
+                except Exception as exc:  # noqa: BLE001 - surfaced to the UI
+                    self._ui_queue.put(_UiEvent("error", f"{type(exc).__name__}: {exc}"))
+                finally:
+                    if got_lock:
+                        self._desktop_lock.release()
+                self._ui_queue.put(_UiEvent("turn_end", result))
+                if self._cancel_event.is_set():
+                    break
+                # Interruptible interval wait so Stop ends the loop promptly.
+                waited = 0.0
+                while waited < interval_s and not self._cancel_event.is_set():
+                    time.sleep(0.2)
+                    waited += 0.2
+        finally:
+            self._ui_queue.put(_UiEvent(
+                "system_text", f"\n[loop stopped after {n} iteration(s)]\n"))
             self._ui_queue.put(_UiEvent("done"))
 
     def _make_gui_hooks(self) -> LoopHooks:
@@ -4034,8 +4828,36 @@ class NanocodexGUI:
             except Exception:  # noqa: BLE001
                 pass
             self._sb_show_render_done(ev.payload)
+        elif ev.kind == "sb_check_done":
+            # Pre-merge continuity report is ready: close the校验 progress
+            # dialog and show the report. _sb_busy stays set — we're still inside
+            # the merge transaction (the user hasn't chosen 仍然合并 / 去补镜 yet).
+            report, state, run_dir = ev.payload
+            self._sb_close_merge_progress()
+            self._sb_show_continuity_report(report, state, run_dir)
+        elif ev.kind == "sb_fill_done":
+            # A 补镜 finished rendering: mark its gap ✓ 已补 (on success) and
+            # re-open the report so the user can 补 more gaps or merge. _sb_busy
+            # stays set — still inside the merge transaction. On failure the gap
+            # is left un-filled so its 补这镜 button returns for a retry.
+            state, run_dir, new_id, key, ok = ev.payload
+            self._sb_close_merge_progress()
+            report = self._sb_report_ctx[0] if getattr(
+                self, "_sb_report_ctx", None) else None
+            if ok:
+                self._sb_filled_gaps[key] = new_id
+                self._sb_set_status(f"补镜 {new_id} 已生成并插入。可继续补镜或合并。")
+            else:
+                self._sb_set_status(f"补镜 {new_id} 出片失败，可重试。", error=True)
+            if report is not None:
+                self._sb_show_continuity_report(report, state, run_dir, fresh=False)
+        elif ev.kind == "sb_merge_done":
+            self._sb_show_merge_done(ev.payload)
         elif ev.kind == "sb_error":
             self._sb_busy = False
+            # A check/merge error must not leave a half-open progress dialog
+            # (idempotent: a no-op when no merge/check dialog is open).
+            self._sb_close_merge_progress()
             try:
                 self._sb_preview_btn.config(text="生成预览", state=self._tk.NORMAL)
                 self._sb_render_btn.config(state=self._tk.NORMAL)

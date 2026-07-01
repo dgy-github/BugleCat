@@ -1,0 +1,43 @@
+[package]
+name = "ncx-video-agent"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fasttext-pure-rs = "0.1.0"
+hmac = "0.12"
+ncx-config = { path = "../ncx-config" }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+rusqlite = { version = "0.40.1", features = ["bundled", "serde_json"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting", "macros"] }
+futures = { version = "0.3", optional = true }
+temporalio-client = { version = "0.5.0", optional = true }
+temporalio-common = { version = "0.5.0", optional = true }
+temporalio-macros = { version = "0.5.0", optional = true }
+temporalio-sdk = { version = "0.5.0", optional = true }
+temporalio-sdk-core = { version = "0.5.0", optional = true }
+temporalio-workflow = { version = "0.5.0", optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+
+[features]
+default = []
+temporal = [
+    "dep:futures",
+    "dep:temporalio-client",
+    "dep:temporalio-common",
+    "dep:temporalio-macros",
+    "dep:temporalio-sdk",
+    "dep:temporalio-sdk-core",
+    "dep:temporalio-workflow",
+    "dep:tokio",
+]
+
+[[bin]]
+name = "p1_temporal_probe"
+path = "src/bin/p1_temporal_probe.rs"
+required-features = ["temporal"]

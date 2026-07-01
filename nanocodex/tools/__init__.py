@@ -30,10 +30,12 @@ _DEFAULT_TOOL_CLASSES: list[type[Tool]] = [
 
 
 class ToolRegistry:
-    def __init__(self, ctx: ToolContext) -> None:
+    def __init__(
+        self, ctx: ToolContext, tool_classes: "list[type[Tool]] | None" = None
+    ) -> None:
         self.ctx = ctx
         self._tools: dict[str, Tool] = {}
-        for cls in _DEFAULT_TOOL_CLASSES:
+        for cls in tool_classes if tool_classes is not None else _DEFAULT_TOOL_CLASSES:
             tool = cls(ctx)
             self._tools[tool.name] = tool
 

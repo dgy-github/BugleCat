@@ -100,9 +100,19 @@ class DeepSeekProvider:
         model: str,
         *,
         timeout_s: int = 120,
+        max_retries: int = 3,
     ) -> None:
-        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_s)
+        # The SDK retries transient failures itself (connection error / 408 /
+        # 409 / 429 / >=500) with exponential backoff that honors Retry-After,
+        # then raises APIError once exhausted. We set max_retries explicitly
+        # (SDK default is 2) so a flaky/rate-limited endpoint recovers without
+        # killing the turn; permanent 4xx (auth, bad-request) are never retried.
+        self._client = AsyncOpenAI(
+            api_key=api_key, base_url=base_url,
+            timeout=timeout_s, max_retries=max_retries,
+        )
         self.model = model
+        self.max_retries = max_retries
 
     def _build_kwargs(
         self,
@@ -281,26 +291,54 @@ def _extract_reasoning(obj: Any) -> str:
     return (getattr(obj, "reasoning_content", None) or getattr(obj, "reasoning", None) or "")
 
 
+def _is_deepseek_model(model: str) -> bool:
+    """True for DeepSeek's own models (their thinking-mode API shape applies)."""
+    return model.strip().lower().startswith("deepseek")
+
+
 def _apply_reasoning_effort(kwargs: dict[str, Any], effort: str | None) -> None:
+    """Translate a reasoning-effort tier into the right request fields per backend.
+
+    DeepSeek's thinking-mode API (the default backend) only understands
+    enabled/disabled plus ``reasoning_effort`` high|max, so low/medium collapse
+    to high there — it cannot honor finer tiers. For any OTHER OpenAI-compatible
+    model we instead pass the tier through to the STANDARD top-level
+    ``reasoning_effort`` field (minimal|low|medium|high), so a server that
+    supports fine-grained effort actually receives the requested tier rather
+    than DeepSeek-shaped ``extra_body`` it would ignore. (A server that doesn't
+    support reasoning_effort at all typically ignores the unknown field.)
+    """
     if not effort:
         return
     normalized = effort.strip().lower()
     if not normalized or normalized == "auto":
         return
 
-    extra_body = dict(kwargs.get("extra_body") or {})
-    if normalized in _DISABLED_REASONING_EFFORTS:
-        extra_body["thinking"] = {"type": "disabled"}
-    elif normalized in {"xhigh", "max", "highest"}:
-        extra_body["reasoning_effort"] = "max"
-        extra_body["thinking"] = {"type": "enabled"}
-    elif normalized in {"low", "minimal", "medium", "mid", "high"}:
-        # DeepSeek maps low/medium to high in its current thinking-mode API.
-        extra_body["reasoning_effort"] = "high"
-        extra_body["thinking"] = {"type": "enabled"}
-    else:
+    if _is_deepseek_model(str(kwargs.get("model", ""))):
+        extra_body = dict(kwargs.get("extra_body") or {})
+        if normalized in _DISABLED_REASONING_EFFORTS:
+            extra_body["thinking"] = {"type": "disabled"}
+        elif normalized in {"xhigh", "max", "highest"}:
+            extra_body["reasoning_effort"] = "max"
+            extra_body["thinking"] = {"type": "enabled"}
+        elif normalized in {"low", "minimal", "medium", "mid", "high"}:
+            # DeepSeek maps low/medium to high in its current thinking-mode API.
+            extra_body["reasoning_effort"] = "high"
+            extra_body["thinking"] = {"type": "enabled"}
+        else:
+            return
+        kwargs["extra_body"] = extra_body
         return
-    kwargs["extra_body"] = extra_body
+
+    # Generic OpenAI-compatible endpoint: standard reasoning_effort field with
+    # the real tier. Disabling isn't standardized, so "off" omits the field and
+    # lets the server use its own default.
+    if normalized in _DISABLED_REASONING_EFFORTS:
+        return
+    tier = {"xhigh": "high", "max": "high", "highest": "high",
+            "mid": "medium"}.get(normalized, normalized)
+    if tier in {"minimal", "low", "medium", "high"}:
+        kwargs["reasoning_effort"] = tier
 
 
 def _sanitize_reasoning_replay(

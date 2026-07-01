@@ -23,6 +23,15 @@ class ToolContext:
     timeout_s: int = 120
     # Shared mutable plan state for update_plan / the CLI to read.
     plan: list[dict[str, str]] | None = None
+    # The orchestrator's explicit AgentState, injected when a tool call runs
+    # inside an orchestrated worker. write_checkpoint / request_verification /
+    # record_fact mutate it; plain single-turn runs leave it None. Typed as Any
+    # to avoid a base-layer import cycle with nanocodex.agent.state.
+    agent_state: Any = None
+    # The id of the task node the current worker is executing, so checkpoint /
+    # verification tools attribute their writes to the right node without the
+    # model having to pass it. Set per-node by the orchestrator.
+    current_node_id: str | None = None
     # When True, write actions (shell / apply_patch) prompt for approval on
     # EVERY step — even inside the sandbox. This is the "confirm each step"
     # mode the GUI's auto-approve toggle flips (auto-approve OFF -> True). It's
@@ -37,6 +46,21 @@ class ToolContext:
 
 class Tool(ABC):
     """An agent capability exposed to the model as an OpenAI function tool."""
+
+    # True for tools that only READ (no file/network/state side effects) and
+    # never prompt for approval. The agent loop runs a run of consecutive
+    # read-only tool calls CONCURRENTLY (a write/unknown tool stays serial and
+    # ordered). Default False — a tool must explicitly opt in. MCP and other
+    # tools of unknown behavior keep the safe default.
+    read_only: bool = False
+
+    # Capability tags used by role-based tool isolation (see agent/roles.py).
+    # A role grants a set of tags; a tool is exposed to a worker only if at
+    # least one of its tags is granted. Default () means "untagged" — untagged
+    # tools are only available to roles that explicitly allow untagged tools
+    # (the full/default role), so a planner physically cannot be handed a writer
+    # tool. Examples: ("read",), ("write",), ("plan",), ("verify_control",).
+    capability_tags: tuple[str, ...] = ()
 
     def __init__(self, ctx: ToolContext) -> None:
         self.ctx = ctx

@@ -88,6 +88,11 @@ class ApprovalRequest:
     reason: str
     cwd: str
     escalated: bool = False
+    # Optional extra context for the human, shown verbatim below the command —
+    # e.g. apply_patch passes the full patch (a diff) so the user reviews the
+    # actual change before approving, not just the file names. Empty = nothing
+    # extra to show.
+    details: str = ""
 
 
 # (request) -> approved?

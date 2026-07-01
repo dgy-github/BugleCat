@@ -94,3 +94,34 @@ async def test_parse_error_skips_approval(tmp_path):
     tool = ApplyPatchTool(ctx)
     result = await tool.execute(patch="not a patch at all")
     assert result.startswith("Error applying patch")
+
+
+async def test_approval_request_carries_patch_diff(tmp_path):
+    # diff preview: the out-of-sandbox approval request must include the full
+    # patch in `details` so the human reviews the actual change, not just paths.
+    captured: list = []
+
+    async def cb(req):
+        captured.append(req)
+        return True
+
+    ctx = _ctx(tmp_path, Approver(ON_REQUEST, cb))
+    tool = ApplyPatchTool(ctx)
+    await tool.execute(patch=_outside_patch())
+    assert captured and captured[0].details == _outside_patch()
+
+
+async def test_step_approval_request_carries_patch_diff(tmp_path):
+    # With per-step confirmation on, even an in-workspace patch prompts AND
+    # carries the diff in `details`.
+    captured: list = []
+
+    async def cb(req):
+        captured.append(req)
+        return True
+
+    ctx = _ctx(tmp_path, Approver(ON_REQUEST, cb))
+    ctx.require_step_approval = True
+    tool = ApplyPatchTool(ctx)
+    await tool.execute(patch=_inside_patch())
+    assert captured and captured[0].details == _inside_patch()

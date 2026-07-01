@@ -33,9 +33,14 @@ for _stream in (sys.stdout, sys.stderr):
 
 from nanocodex.agent import AgentLoop, CompactionConfig, LoopHooks, Session, build_system_prompt
 from nanocodex.agent.agents_md import discover_agents
+from nanocodex.agent.compaction import compact
 from nanocodex.agent.memory_store import render_for_prompt as render_memory
 from nanocodex.agent.skills_store import discover_skills
 from nanocodex.agent.images import ImageError, build_user_content
+from nanocodex.agent.mentions import expand_file_mentions
+from nanocodex.agent.slash import SLASH_HELP, parse_slash
+from nanocodex.agent.orchestrator import OrchestratorLoop
+from nanocodex.agent.store import AgentStateStore
 from nanocodex.tools.mcp import McpManager, discover_mcp_servers
 from nanocodex.config import VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES, ConfigError, load_config
 from nanocodex.provider import ToolCall
@@ -95,6 +100,14 @@ def _build_console_approver(policy_name: str) -> Approver:
             body.append(req.reason + "\n")
         if req.escalated:
             body.append("\nThis is an escalated retry (ran sandboxed and failed).", style="yellow")
+        if getattr(req, "details", ""):
+            # apply_patch passes the full patch here — show the diff so the user
+            # reviews the actual change, not just file names, before approving.
+            body.append("\nChange to apply:\n", style="bold")
+            diff = req.details
+            if len(diff) > 4000:
+                diff = diff[:4000] + "\n… (diff truncated)"
+            body.append(diff, style="dim")
         console.print(Panel(body, title="Approval required", border_style="yellow"))
         # Confirm.ask is blocking; run it off the event loop.
         return await asyncio.to_thread(Confirm.ask, "Allow this command?", default=False)
@@ -188,6 +201,7 @@ def _build_loop(
     approver_factory=_build_console_approver,
     log_path: "Path | None" = _UNSET,
     seed_messages: "list[dict] | None" = None,
+    profile: "str | None" = None,
 ) -> AgentLoop:
     """Build an AgentLoop.
 
@@ -197,7 +211,7 @@ def _build_loop(
       managed scheduler so unattended task runs never mix into — or pollute the
       session directory of — the user's interactive conversation.
     """
-    cfg = load_config(workspace=workspace, overrides=overrides)
+    cfg = load_config(workspace=workspace, overrides=overrides, profile=profile)
     cfg.validate()
 
     policy = SandboxPolicy.from_config(cfg)
@@ -215,7 +229,8 @@ def _build_loop(
     )
     tools = ToolRegistry(tool_ctx)
     provider = DeepSeekProvider(
-        api_key=cfg.api_key, base_url=cfg.base_url, model=cfg.model, timeout_s=cfg.timeout_s
+        api_key=cfg.api_key, base_url=cfg.base_url, model=cfg.model,
+        timeout_s=cfg.timeout_s, max_retries=cfg.max_retries,
     )
     # Optional vision backend: when a VL model is configured, image-bearing turns
     # route to it (e.g. DashScope Qwen-VL) while text/coding stays on the main
@@ -228,6 +243,7 @@ def _build_loop(
             base_url=cfg.vl_base_url or cfg.base_url,
             model=cfg.vl_model,
             timeout_s=cfg.timeout_s,
+            max_retries=cfg.max_retries,
         )
     agents = discover_agents(cfg.workspace)
     skills = discover_skills()
@@ -272,6 +288,125 @@ def _print_banner(loop: AgentLoop) -> None:
     console.print(Panel(body, title="nanocodex", border_style="cyan"))
 
 
+def _build_orchestrator(
+    overrides: dict,
+    workspace: Path,
+    *,
+    profile: "str | None" = None,
+    cancel_check=None,
+) -> "tuple[OrchestratorLoop, object]":
+    """Build an OrchestratorLoop sharing _build_loop's config/provider/ctx setup.
+
+    Returns (orchestrator, cfg). The orchestrator builds its own role-scoped
+    registries per worker, so we hand it a single base ToolContext (not a
+    ToolRegistry) plus the providers and a state store rooted at the workspace.
+    """
+    cfg = load_config(workspace=workspace, overrides=overrides, profile=profile)
+    cfg.validate()
+
+    policy = SandboxPolicy.from_config(cfg)
+    approver = _build_console_approver(cfg.approval_policy)
+    executor = make_executor(policy)
+    base_ctx = ToolContext(
+        workspace=cfg.workspace,
+        policy=policy,
+        approver=approver,
+        executor=executor,
+        timeout_s=cfg.timeout_s,
+        plan=[],
+    )
+    provider = DeepSeekProvider(
+        api_key=cfg.api_key, base_url=cfg.base_url, model=cfg.model,
+        timeout_s=cfg.timeout_s, max_retries=cfg.max_retries,
+    )
+    vision_provider = None
+    if cfg.vl_model:
+        vision_provider = DeepSeekProvider(
+            api_key=cfg.vl_api_key or cfg.api_key,
+            base_url=cfg.vl_base_url or cfg.base_url,
+            model=cfg.vl_model,
+            timeout_s=cfg.timeout_s, max_retries=cfg.max_retries,
+        )
+    store = AgentStateStore(cfg.workspace / ".nanocodex")
+    orch = OrchestratorLoop(
+        provider, base_ctx, store,
+        vision_provider=vision_provider,
+        worker_max_iterations=cfg.max_iterations,
+        cancel_check=cancel_check,
+    )
+    return orch, cfg
+
+
+def _print_orchestrator_result(result) -> None:
+    """Render the final task graph + verdicts after an orchestrated run."""
+    state = result.state
+    marks = {
+        "done": "[green][x][/green]", "failed": "[red][!][/red]",
+        "skipped": "[dim][-][/dim]", "blocked": "[yellow][~][/yellow]",
+        "needs_clarification": "[yellow][?][/yellow]",
+    }
+    body = Text.from_markup(f"status: [bold]{result.status}[/bold]\n{result.summary}\n")
+    console.print(Panel(body, title="orchestrator", border_style="cyan"))
+    if state.current_plan:
+        lines = []
+        for n in state.current_plan:
+            mark = marks.get(n.status, f"[{n.status}]")
+            extra = f"  (retries {n.retries})" if n.retries else ""
+            lines.append(f"  {mark} {n.id} [{n.kind}] {n.title}{extra}")
+        console.print("\n".join(lines))
+    for v in state.verify_results:
+        tag = "PASS" if v.passed else v.status.upper()
+        reasks = f" (re-asks {v.reask_count})" if v.reask_count else ""
+        console.print(f"[dim]verify {v.node_id}: {tag}{reasks} — {v.summary}[/dim]")
+    if state.repo_facts:
+        console.print(f"[dim]{len(state.repo_facts)} fact(s) recorded.[/dim]")
+
+
+@app.command("orchestrate")
+def orchestrate_cmd(
+    goal: str = typer.Argument(..., help="The goal to plan, execute, and verify across worker roles."),
+    sandbox: Optional[str] = typer.Option(None, "--sandbox", "-s", help=f"Sandbox mode: {', '.join(VALID_SANDBOX_MODES)}."),
+    approval: Optional[str] = typer.Option(None, "--approval", "-a", help=f"Approval policy: {', '.join(VALID_APPROVAL_POLICIES)}."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Override the model name."),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Use a named [profiles.<name>] bundle."),
+    workdir: Optional[Path] = typer.Option(None, "--cd", help="Workspace directory (default: current)."),
+    max_iterations: Optional[int] = typer.Option(None, "--max-iterations", help="Max tool-loop steps per worker."),
+) -> None:
+    """Run the multi-agent orchestrator: plan -> execute -> verify -> replan."""
+    overrides = {
+        "sandbox_mode": sandbox,
+        "approval_policy": approval,
+        "model": model,
+        "max_iterations": max_iterations,
+    }
+    workspace = (workdir or Path.cwd()).resolve()
+    try:
+        orch, cfg = _build_orchestrator(overrides, workspace, profile=profile)
+    except ConfigError as exc:
+        console.print(f"[red]Config error:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    console.print(Panel(
+        Text.from_markup(
+            f"[bold]goal[/bold]: {goal}\n"
+            f"model: {cfg.model}   sandbox: {cfg.sandbox_mode}   approval: {cfg.approval_policy}\n"
+            f"workspace: {cfg.workspace}"
+        ),
+        title="orchestrate", border_style="cyan",
+    ))
+    try:
+        result = asyncio.run(orch.run(goal))
+    except ProviderError as exc:
+        console.print(f"[red]Provider error:[/red] {exc}")
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        console.print("[yellow]Interrupted.[/yellow]")
+        raise typer.Exit(code=130)
+    _print_orchestrator_result(result)
+    if result.status not in ("completed",):
+        raise typer.Exit(code=1)
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -279,6 +414,7 @@ def main(
     sandbox: Optional[str] = typer.Option(None, "--sandbox", "-s", help=f"Sandbox mode: {', '.join(VALID_SANDBOX_MODES)}."),
     approval: Optional[str] = typer.Option(None, "--approval", "-a", help=f"Approval policy: {', '.join(VALID_APPROVAL_POLICIES)}."),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="Override the model name."),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Use a named [profiles.<name>] bundle from ~/.nanocodex/config.toml."),
     workdir: Optional[Path] = typer.Option(None, "--cd", help="Workspace directory (default: current)."),
     resume: bool = typer.Option(False, "--resume", "-r", help="Resume the previous session from this workspace's history."),
     context_budget: Optional[int] = typer.Option(None, "--context-budget", help="Approx token budget that triggers context compaction (0 = off)."),
@@ -317,7 +453,7 @@ def main(
         return
 
     try:
-        loop = _build_loop(overrides, workspace, resume=resume)
+        loop = _build_loop(overrides, workspace, resume=resume, profile=profile)
     except ConfigError as exc:
         console.print(f"[red]Config error:[/red] {exc}")
         raise typer.Exit(code=1)
@@ -371,6 +507,8 @@ async def _orchestrate(
         manager = await _connect_mcp(loop)
     try:
         if task:
+            # Expand @path mentions into inline file context (Codex-style).
+            task = expand_file_mentions(task, loop.tools.ctx.workspace)
             content = build_user_content(task, images)
             await _run_once(loop, content)
         else:
@@ -413,8 +551,9 @@ async def _run_once(loop: AgentLoop, task: "str | list") -> None:
 
 
 async def _repl(loop: AgentLoop) -> None:
-    console.print("[dim]Type your task. Commands: /plan, /exit.[/dim]")
+    console.print("[dim]Type your task, or /help for commands. @path inlines a file.[/dim]")
     hooks = _make_hooks()
+    usage_total: dict[str, int] = {}
     while True:
         try:
             user_input = await asyncio.to_thread(console.input, "[bold cyan]you ›[/bold cyan] ")
@@ -424,12 +563,13 @@ async def _repl(loop: AgentLoop) -> None:
         text = user_input.strip()
         if not text:
             continue
-        if text in ("/exit", "/quit"):
-            console.print("[dim]bye[/dim]")
-            return
-        if text == "/plan":
-            _print_plan(loop)
+        cmd, arg = parse_slash(text)
+        if cmd is not None:
+            if await _dispatch_slash(loop, cmd, arg, usage_total, hooks=hooks):
+                return  # /exit
             continue
+        # @path mentions -> inline file context before the model sees the turn.
+        text = expand_file_mentions(text, loop.tools.ctx.workspace)
         try:
             result = await loop.run_turn(text, hooks)
         except ProviderError as exc:
@@ -438,9 +578,149 @@ async def _repl(loop: AgentLoop) -> None:
         except KeyboardInterrupt:
             console.print("\n[yellow]interrupted[/yellow]")
             continue
+        from nanocodex.agent.pricing import add_usage
+        usage_total.update(add_usage(usage_total, result.usage))
         _print_plan(loop)
         if result.stop_reason != "completed":
             console.print(f"[yellow]({result.stop_reason})[/yellow]")
+
+
+async def _dispatch_slash(
+    loop: AgentLoop, cmd: str, arg: str, usage_total: dict[str, int],
+    hooks: "LoopHooks | None" = None,
+) -> bool:
+    """Handle a REPL slash command. Returns True only for /exit (quit the REPL).
+
+    Read-only commands (/help /status /diff /plan) just print; the mutating ones
+    (/model /approvals /compact /clear) act on the live loop in place so the user
+    can steer a session without restarting; /loop re-runs a prompt on an interval.
+    """
+    cfg = getattr(loop, "_cfg", None)
+    if cmd == "/exit":
+        console.print("[dim]bye[/dim]")
+        return True
+    if cmd == "/loop":
+        await _run_loop_command(loop, arg, usage_total, hooks)
+        return False
+    if cmd == "/help":
+        body = Text()
+        for name, help_text in SLASH_HELP.items():
+            body.append(f"{name}", style="bold cyan")
+            body.append(f"  {help_text}\n")
+        console.print(Panel(body, title="commands", border_style="cyan"))
+        return False
+    if cmd == "/plan":
+        _print_plan(loop)
+        return False
+    if cmd == "/status":
+        body = Text()
+        body.append("model:    ", style="bold"); body.append(f"{getattr(cfg, 'model', '?')}\n")
+        body.append("sandbox:  ", style="bold"); body.append(f"{getattr(cfg, 'sandbox_mode', '?')}\n")
+        body.append("approval: ", style="bold"); body.append(f"{loop.tools.ctx.approver.policy}\n")
+        body.append("workspace:", style="bold"); body.append(f" {loop.tools.ctx.workspace}\n")
+        body.append("messages: ", style="bold"); body.append(f"{len(loop.session.messages)}\n")
+        pt = usage_total.get("prompt_tokens", 0)
+        ct = usage_total.get("completion_tokens", 0)
+        body.append("tokens:   ", style="bold")
+        body.append(f"{pt + ct} this session (in {pt} / out {ct})")
+        console.print(Panel(body, title="status", border_style="cyan"))
+        return False
+    if cmd == "/model":
+        if not arg:
+            console.print(f"[dim]model: {getattr(cfg, 'model', '?')}[/dim]")
+            return False
+        if cfg is None:
+            console.print("[red]No config available to switch models.[/red]")
+            return False
+        loop.provider = DeepSeekProvider(
+            api_key=cfg.api_key, base_url=cfg.base_url, model=arg,
+            timeout_s=cfg.timeout_s, max_retries=cfg.max_retries,
+        )
+        cfg.model = arg
+        console.print(f"[green]model -> {arg}[/green]")
+        return False
+    if cmd == "/approvals":
+        if not arg:
+            console.print(f"[dim]approval policy: {loop.tools.ctx.approver.policy}[/dim]")
+            return False
+        if arg not in VALID_APPROVAL_POLICIES:
+            console.print(f"[red]Invalid policy {arg!r}; expected one of "
+                          f"{', '.join(VALID_APPROVAL_POLICIES)}.[/red]")
+            return False
+        loop.tools.ctx.approver.policy = arg
+        console.print(f"[green]approval policy -> {arg}[/green]")
+        return False
+    if cmd == "/diff":
+        import subprocess
+        try:
+            proc = await asyncio.to_thread(
+                subprocess.run, ["git", "diff"],
+                cwd=str(loop.tools.ctx.workspace),
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+        except FileNotFoundError:
+            console.print("[red]git not found on PATH.[/red]")
+            return False
+        out = (proc.stdout or "").strip()
+        console.print(Panel(out or "(no changes)", title="git diff", border_style="blue"))
+        return False
+    if cmd == "/compact":
+        before = len(loop.session.messages)
+        loop.session.messages = await compact(loop.session.messages, loop.compaction)
+        after = len(loop.session.messages)
+        if after < before:
+            console.print(f"[green]compacted {before} -> {after} messages[/green]")
+        else:
+            console.print("[dim]nothing to compact (under budget or compaction off).[/dim]")
+        return False
+    if cmd == "/clear":
+        # Reset the in-memory conversation to just the system prompt. The JSONL
+        # log is append-only and is NOT truncated, so a later --resume still
+        # replays the full history; this only clears the active context.
+        loop.session.messages = loop.session.messages[:1]
+        console.print("[green]conversation cleared (settings kept).[/green]")
+        return False
+    console.print(f"[yellow]unknown command {cmd}. Try /help.[/yellow]")
+    return False
+
+
+async def _run_loop_command(
+    loop: AgentLoop, arg: str, usage_total: dict[str, int],
+    hooks: "LoopHooks | None",
+) -> None:
+    """`/loop [interval] <prompt>`: re-run a prompt on an interval until Ctrl+C.
+
+    Ad-hoc, in-session, no persistence — complements the (cron-like, unattended)
+    scheduler. The interval accepts 30s / 5m / 1h (default 10m). Each iteration
+    is a full turn; @path mentions are expanded like a normal prompt. Ctrl+C
+    stops the loop and drops back to the REPL prompt.
+    """
+    from nanocodex.agent.pricing import add_usage
+    from nanocodex.agent.slash import split_loop_arg
+
+    interval_s, prompt = split_loop_arg(arg)
+    if not prompt:
+        console.print("[red]usage: /loop [interval] <prompt>  "
+                      "(e.g. /loop 5m run the tests)[/red]")
+        return
+    hooks = hooks or _make_hooks()
+    console.print(f"[dim]looping every {interval_s}s — Ctrl+C to stop.[/dim]")
+    n = 0
+    try:
+        while True:
+            n += 1
+            console.print(f"[cyan]— loop iteration {n} —[/cyan]")
+            text = expand_file_mentions(prompt, loop.tools.ctx.workspace)
+            try:
+                result = await loop.run_turn(text, hooks)
+            except ProviderError as exc:
+                console.print(f"[red]Provider error:[/red] {exc}")
+            else:
+                usage_total.update(add_usage(usage_total, result.usage))
+                _print_plan(loop)
+            await asyncio.sleep(interval_s)
+    except KeyboardInterrupt:
+        console.print(f"\n[dim]loop stopped after {n} iteration(s).[/dim]")
 
 
 def _print_plan(loop: AgentLoop) -> None:
@@ -660,6 +940,16 @@ def storyboard_run(
         None, "--images", help="Directory of reference images (png/jpg/...)."),
     out: Path = typer.Option(Path("storyboard_out"), "--out", help="Output directory for the JSON files."),
     aspect_ratio: str = typer.Option("16:9", "--aspect-ratio", help="Video aspect ratio, e.g. 16:9 or 9:16."),
+    caption_language: str = typer.Option(
+        "zh", "--caption-language",
+        help="Language of on-screen text the video renders (signs/subtitles/captions): zh | en | none."),
+    chapters: bool = typer.Option(
+        True, "--chapters/--no-chapters",
+        help="Split the story into chapters before shots (story-detail layer). On by default."),
+    chain_frames: bool = typer.Option(
+        True, "--chain-frames/--no-chain-frames",
+        help="When rendering, anchor each shot's first frame to the previous shot's last "
+             "frame for 前后帧衔接 (serial, needs ffmpeg). Ignored without --render."),
     render: bool = typer.Option(
         False, "--render",
         help="DANGEROUS/$$$: actually generate video via Seedance (needs ARK_API_KEY). "
@@ -671,9 +961,16 @@ def storyboard_run(
     import uuid
 
     from nanocodex.provider.deepseek import DeepSeekProvider
-    from nanocodex.storyboard.clients import SeedanceClient, SeedanceError, TextPlanner, VisionAnalyzer
+    from nanocodex.storyboard.clients import (
+        ChapterPlanner, SeedanceClient, SeedanceError, TextPlanner, VisionAnalyzer,
+    )
     from nanocodex.storyboard.models import StoryboardError
     from nanocodex.storyboard.pipeline import PipelineDeps, run_pipeline
+
+    caption_language = (caption_language or "zh").lower()
+    if caption_language not in ("zh", "en", "none"):
+        console.print("[red]--caption-language must be zh, en, or none.[/red]")
+        raise typer.Exit(code=1)
 
     workspace = (workdir or Path.cwd()).resolve()
 
@@ -702,9 +999,13 @@ def storyboard_run(
         console.print("[red]No API key configured for the text planner (set DEEPSEEK_API_KEY).[/red]")
         raise typer.Exit(code=1)
 
-    planner = TextPlanner(DeepSeekProvider(
-        api_key=cfg.api_key, base_url=cfg.base_url, model=cfg.model, timeout_s=cfg.timeout_s,
-    ))
+    text_provider = DeepSeekProvider(
+        api_key=cfg.api_key, base_url=cfg.base_url, model=cfg.model,
+        timeout_s=cfg.timeout_s, max_retries=cfg.max_retries,
+    )
+    planner = TextPlanner(text_provider)
+    # Chapter layer (story-detail above shots), on by default — mirrors the GUI.
+    chapter_planner = ChapterPlanner(text_provider) if chapters else None
 
     vision = None
     if image_paths and cfg.vl_model:
@@ -738,6 +1039,7 @@ def storyboard_run(
             "target_model": "seedance",
             "aspect_ratio": aspect_ratio,
             "language": "zh",
+            "caption_language": caption_language,
         },
         "inputs": {
             "story_text": story_text,
@@ -751,19 +1053,20 @@ def storyboard_run(
     def _progress(shot_id: str, i: int, status: str) -> None:
         console.print(f"[dim]{shot_id}: poll {i} — {status}[/dim]")
 
-    deps = PipelineDeps(vision=vision, planner=planner, seedance=seedance)
+    deps = PipelineDeps(vision=vision, chapters=chapter_planner, planner=planner,
+                        seedance=seedance)
     try:
         state, written = asyncio.run(run_pipeline(
             obj, deps, out_dir=out.resolve(), render_video=render,
-            on_progress=_progress,
+            on_progress=_progress, chain_frames=chain_frames,
         ))
     except StoryboardError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
 
     console.print(
-        f"[green]Storyboard built[/green]: {len(state.shots)} shots, "
-        f"{len(state.asset_analysis)} images analysed."
+        f"[green]Storyboard built[/green]: {len(state.chapters)} chapters, "
+        f"{len(state.shots)} shots, {len(state.asset_analysis)} images analysed."
     )
     for name, path in written.items():
         console.print(f"  wrote {name}: {path}")

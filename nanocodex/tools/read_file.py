@@ -13,6 +13,10 @@ _DEFAULT_LIMIT = 2000
 
 
 class ReadFileTool(Tool):
+    # Pure read, no approval prompt — safe to run concurrently with other reads.
+    read_only = True
+    capability_tags = ("read",)
+
     @property
     def name(self) -> str:
         return "read_file"

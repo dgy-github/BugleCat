@@ -62,6 +62,12 @@ class Project:
     genre: str = ""
     language: str = "zh"
     global_style: str = ""
+    # Language of TEXT THAT APPEARS IN THE VIDEO (signs, subtitles, dialogue
+    # captions) — distinct from `language` (the planning language) and from the
+    # prompt language (English, for model comprehension). "zh" | "en" | "none"
+    # ("none" =画面尽量不出现任何文字). Injected into each shot's prompt at
+    # build_payloads time so Seedance renders on-screen text in this language.
+    caption_language: str = "zh"
 
 
 @dataclass
@@ -124,6 +130,51 @@ class Shot:
     action: str = ""
     negative_prompt: str = ""
     chapter_id: str = ""  # which Chapter this shot belongs to (for grouped preview)
+    # 台词 / spoken dialogue for this shot, kept in the ORIGINAL language (Chinese)
+    # — NOT translated to English like `prompt`. Each line is "角色名:台词". Seedance
+    # generates speech + lip-sync from the dialogue text in the prompt, so to get
+    # Chinese voice the line must reach the payload in Chinese (quoted), per the
+    # ARK docs. Empty list = no one speaks in this shot. Injected by build_payloads.
+    dialogue: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ContinuityGap:
+    """A missing story beat between two consecutive shots.
+
+    The continuity checker (clients.py:ContinuityChecker) flags places where the
+    storyboard jumps — a small transition/beat is missing between ``after_shot_id``
+    and ``before_shot_id`` — and proposes a 补镜 (fill-in shot) to bridge it. The
+    suggestion mirrors a Shot's fields so a user could turn it into a real shot,
+    but nothing here auto-adds shots: it is advice only. Conventions match Shot:
+    ``suggested_prompt`` is English (for the video model), ``suggested_prompt_zh``
+    and ``suggested_dialogue`` stay in the original (Chinese) language.
+    """
+
+    after_shot_id: str
+    before_shot_id: str
+    missing: str                 # 中文：相邻两镜之间缺了什么节拍
+    severity: str = "medium"     # low | medium | high
+    suggested_title: str = ""
+    suggested_prompt_zh: str = ""
+    suggested_prompt: str = ""
+    suggested_duration_sec: float = 5.0
+    suggested_dialogue: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ContinuityReport:
+    """Result of a pre-merge continuity check over a storyboard.
+
+    ``ok`` True with empty ``gaps`` means the shots flow cleanly; otherwise
+    ``gaps`` lists the missing beats with 补镜 suggestions. This gates the GUI
+    merge (the user reviews it then chooses 仍然合并 / 去补镜) but never blocks —
+    an empty report is a valid good result, NOT an error.
+    """
+
+    gaps: list[ContinuityGap] = field(default_factory=list)
+    summary: str = ""
+    ok: bool = True
 
 
 @dataclass
@@ -148,6 +199,7 @@ def project_from_dict(obj: dict[str, Any]) -> tuple[Project, list[ImageInput]]:
         genre=p.get("genre", ""),
         language=p.get("language", "zh"),
         global_style=p.get("global_style", ""),
+        caption_language=p.get("caption_language", "zh"),
     )
     images = [
         ImageInput(

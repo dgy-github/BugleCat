@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -122,6 +123,11 @@ class AgentLoop:
             reasoning_effort=effort,
         )
 
+    def _is_parallel_safe(self, tc: ToolCall) -> bool:
+        """True when this call's tool is read-only (safe to run concurrently)."""
+        tool = self.tools.get(tc.name)
+        return bool(tool and getattr(tool, "read_only", False))
+
     async def _execute_cancellable(self, tc, cancelled) -> str:
         """Run one tool call, but abandon (and let it be killed) on Stop.
 
@@ -133,8 +139,6 @@ class AgentLoop:
         that CancelledError into a real subprocess kill, so the command dies
         instead of lingering.
         """
-        import asyncio
-
         task = asyncio.ensure_future(self.tools.execute(tc.name, tc.arguments))
         while True:
             done, _ = await asyncio.wait({task}, timeout=0.1)
@@ -221,21 +225,22 @@ class AgentLoop:
             if hooks.on_assistant_text and response.content and not self._streaming_active(hooks):
                 await hooks.on_assistant_text(response.content)
 
-            for tc in response.tool_calls:
-                # Check cancellation BEFORE each tool — a turn with many tool
-                # calls would otherwise run them all before reaching the next
-                # iteration boundary, making Stop feel unresponsive.
-                if _cancelled():
-                    # The assistant tool_calls message is already in the
-                    # session; some calls may be unanswered. Backfill synthetic
-                    # results so the history stays valid (every tool_call has a
-                    # tool reply) — otherwise the next request 400s.
-                    self.session.backfill_unanswered_tool_calls(
-                        "[interrupted: stopped by user before this tool ran]"
-                    )
-                    text = "Stopped by user."
-                    self.session.add_assistant(text)
-                    return TurnResult(text, iteration + 1, "cancelled", tools_used, turn_usage)
+            calls = response.tool_calls
+
+            def _cancelled_result(*, before: bool) -> TurnResult:
+                # The assistant tool_calls message is already in the session;
+                # some calls may be unanswered. Backfill synthetic results so the
+                # history stays valid (every tool_call has a tool reply) —
+                # otherwise the next request 400s.
+                self.session.backfill_unanswered_tool_calls(
+                    "[interrupted: stopped by user before this tool ran]" if before
+                    else "[interrupted: stopped by user]"
+                )
+                text = "Stopped by user."
+                self.session.add_assistant(text)
+                return TurnResult(text, iteration + 1, "cancelled", tools_used, turn_usage)
+
+            async def _run_one(tc: ToolCall) -> None:
                 tools_used.append(tc.name)
                 if hooks.on_tool_start:
                     await hooks.on_tool_start(tc)
@@ -243,16 +248,45 @@ class AgentLoop:
                 self.session.add_tool_result(tc.id, tc.name, result)
                 if hooks.on_tool_result:
                     await hooks.on_tool_result(tc.name, result)
+
+            idx = 0
+            n_calls = len(calls)
+            while idx < n_calls:
+                # Check cancellation BEFORE starting the next tool / batch — a
+                # turn with many tool calls would otherwise run them all before
+                # reaching the next iteration boundary, making Stop unresponsive.
+                if _cancelled():
+                    return _cancelled_result(before=True)
+
+                # A3: run a RUN of >=2 consecutive read-only calls concurrently
+                # (e.g. several read_file). A write/unknown tool stays serial and
+                # in order, so a read never races a write issued in the same turn.
+                if (self._is_parallel_safe(calls[idx]) and idx + 1 < n_calls
+                        and self._is_parallel_safe(calls[idx + 1])):
+                    batch: list[ToolCall] = []
+                    while idx < n_calls and self._is_parallel_safe(calls[idx]):
+                        batch.append(calls[idx])
+                        idx += 1
+                    for tc in batch:
+                        tools_used.append(tc.name)
+                        if hooks.on_tool_start:
+                            await hooks.on_tool_start(tc)
+                    results = await asyncio.gather(
+                        *(self._execute_cancellable(tc, _cancelled) for tc in batch)
+                    )
+                    for tc, result in zip(batch, results):
+                        self.session.add_tool_result(tc.id, tc.name, result)
+                        if hooks.on_tool_result:
+                            await hooks.on_tool_result(tc.name, result)
+                else:
+                    await _run_one(calls[idx])
+                    idx += 1
+
                 # A command can hang for a long time; if Stop was pressed while
                 # it ran, honor it right after instead of looping to the next
                 # tool / iteration boundary.
                 if _cancelled():
-                    text = "Stopped by user."
-                    self.session.backfill_unanswered_tool_calls(
-                        "[interrupted: stopped by user]"
-                    )
-                    self.session.add_assistant(text)
-                    return TurnResult(text, iteration + 1, "cancelled", tools_used, turn_usage)
+                    return _cancelled_result(before=False)
 
         text = (
             f"Reached the maximum of {self.max_iterations} steps without finishing. "

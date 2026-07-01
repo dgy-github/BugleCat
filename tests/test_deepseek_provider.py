@@ -144,3 +144,68 @@ async def test_chat_stream_raises_provider_error_on_open_timeout(monkeypatch):
     with pytest.raises(ProviderError) as excinfo:
         await provider.chat_stream([{"role": "user", "content": "hi"}])
     assert "no streaming response headers" in str(excinfo.value)
+
+
+def test_provider_sets_sdk_max_retries():
+    # max_retries flows into the OpenAI SDK client so transient failures are
+    # retried (with backoff) before surfacing — explicit and tunable.
+    p = DeepSeekProvider(api_key="sk-test", base_url="https://example.invalid",
+                         model="deepseek-chat", max_retries=5)
+    assert p.max_retries == 5
+    assert p._client.max_retries == 5
+
+
+def test_provider_default_max_retries_is_three():
+    p = _provider()
+    assert p.max_retries == 3
+    assert p._client.max_retries == 3
+
+
+def test_deepseek_collapses_low_medium_to_high():
+    # DeepSeek's thinking API can't do fine tiers: low/medium -> high (extra_body).
+    for tier in ("low", "medium", "minimal"):
+        provider = _provider("deepseek-chat")
+        kwargs = provider._build_kwargs(
+            [{"role": "user", "content": "x"}], tools=None,
+            temperature=None, max_tokens=None, reasoning_effort=tier,
+        )
+        assert kwargs["extra_body"]["reasoning_effort"] == "high"
+        assert kwargs["extra_body"]["thinking"] == {"type": "enabled"}
+        assert "reasoning_effort" not in kwargs  # not the top-level field
+
+
+def test_generic_model_passes_real_tier_through_top_level():
+    # A non-DeepSeek OpenAI-compatible model gets the STANDARD reasoning_effort
+    # field with the actual tier — no DeepSeek-shaped extra_body.
+    cases = {"low": "low", "medium": "medium", "high": "high",
+             "minimal": "minimal", "max": "high", "mid": "medium"}
+    for tier, expected in cases.items():
+        provider = _provider("Qwen3.6-27B")
+        kwargs = provider._build_kwargs(
+            [{"role": "user", "content": "x"}], tools=None,
+            temperature=None, max_tokens=None, reasoning_effort=tier,
+        )
+        assert kwargs.get("reasoning_effort") == expected, tier
+        assert "extra_body" not in kwargs
+
+
+def test_generic_model_off_omits_reasoning_field():
+    provider = _provider("Qwen3.6-27B")
+    kwargs = provider._build_kwargs(
+        [{"role": "user", "content": "x"}], tools=None,
+        temperature=None, max_tokens=None, reasoning_effort="off",
+    )
+    assert "reasoning_effort" not in kwargs
+    assert "extra_body" not in kwargs
+
+
+def test_auto_and_none_set_no_reasoning_fields():
+    for tier in (None, "auto"):
+        for model in ("deepseek-chat", "Qwen3.6-27B"):
+            provider = _provider(model)
+            kwargs = provider._build_kwargs(
+                [{"role": "user", "content": "x"}], tools=None,
+                temperature=None, max_tokens=None, reasoning_effort=tier,
+            )
+            assert "reasoning_effort" not in kwargs
+            assert "extra_body" not in kwargs

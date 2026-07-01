@@ -24,7 +24,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from nanocodex.agent.images import encode_image_block
-from nanocodex.storyboard.models import AssetAnalysis, Chapter, Shot
+from nanocodex.storyboard.models import (
+    AssetAnalysis,
+    Chapter,
+    ContinuityGap,
+    ContinuityReport,
+    Shot,
+)
 
 # --- prompt templates (loaded from files next to this module) ---------------
 
@@ -233,11 +239,119 @@ class TextPlanner:
                     action=str(s.get("action", "")),
                     negative_prompt=str(s.get("negative_prompt", "")),
                     chapter_id=str(s.get("chapter_id", "")),
+                    dialogue=[str(d) for d in s.get("dialogue", [])],
                 )
             )
         if not shots:
             raise ValueError("planner returned no usable shots")
         return shots
+
+
+def _shots_for_prompt(shots: "list[Shot]") -> str:
+    """Render shots as a compact ordered outline for the continuity prompt.
+
+    One block per shot (shot_id · title, then its 中文画面 prompt_zh — or the
+    English prompt as a fallback — and any dialogue), so the reviewer reads the
+    sequence the way it will play. Returns "(none)" when there are no shots.
+    """
+    if not shots:
+        return "(none)"
+    blocks: list[str] = []
+    for i, s in enumerate(shots, 1):
+        lines = [f"{i}. [{s.shot_id}] {s.title} ({s.duration_sec:g}s)"]
+        desc = getattr(s, "prompt_zh", "") or s.prompt
+        if desc:
+            lines.append(f"   画面: {desc}")
+        dlg = [d for d in getattr(s, "dialogue", []) if d and str(d).strip()]
+        if dlg:
+            lines.append(f"   台词: {'  '.join(dlg)}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _available_for_prompt(shots: "list[Shot]",
+                          available_ids: "list[str] | set[str] | None") -> str:
+    """Describe which shots actually have a rendered clip (vs. real gaps).
+
+    ``available_ids is None`` means the caller is checking at planning time with
+    no render yet — return "(all)" so the prompt evaluates the whole sequence.
+    Otherwise mark each shot 有片/缺片 in order; a 缺片 shot is a true hole in the
+    merged video (its neighbours hard-cut across it), which the prompt flags as
+    a place to scrutinize.
+    """
+    if available_ids is None:
+        return "(all)"
+    have = set(available_ids)
+    if not shots:
+        return "(none)"
+    return "\n".join(
+        f"[{s.shot_id}] {'有片' if s.shot_id in have else '缺片'}"
+        for s in shots
+    )
+
+
+class ContinuityChecker:
+    """Flag missing story beats between consecutive shots (pre-merge review).
+
+    Unlike the planners, an EMPTY result is a valid good outcome: clean shots
+    return ``ok=True`` with no gaps and must NOT raise. The provider reply is
+    parsed leniently (``_extract_json``) and coerced field by field, so a minor
+    model deviation degrades to a usable report rather than blowing up the merge.
+    """
+
+    def __init__(self, provider: ChatProvider) -> None:
+        self._provider = provider
+        self._prompt = _load_prompt("check_continuity.txt")
+
+    async def check(self, shots: "list[Shot]", *,
+                    chapters: "list[Chapter] | None" = None,
+                    available_ids: "list[str] | set[str] | None" = None
+                    ) -> ContinuityReport:
+        # str.replace (not str.format) — the prompt embeds literal JSON braces.
+        filled = (
+            self._prompt
+            .replace("{shots}", _shots_for_prompt(shots))
+            .replace("{chapters}", _chapters_for_prompt(chapters))
+            .replace("{available}", _available_for_prompt(shots, available_ids))
+        )
+        resp = await self._provider.chat([{"role": "user", "content": filled}])
+        data = _extract_json(getattr(resp, "content", "") or "")
+        # dict → read gaps/ok/summary; bare list → treat the list as gaps.
+        if isinstance(data, dict):
+            gaps_raw = data.get("gaps", [])
+            summary = str(data.get("summary", ""))
+            ok = bool(data.get("ok", not gaps_raw))
+        elif isinstance(data, list):
+            gaps_raw = data
+            summary = ""
+            ok = not gaps_raw
+        else:
+            return ContinuityReport(gaps=[], summary="", ok=True)
+        if not isinstance(gaps_raw, list):
+            gaps_raw = []
+        gaps: list[ContinuityGap] = []
+        for g in gaps_raw:
+            if not isinstance(g, dict):
+                continue
+            gaps.append(
+                ContinuityGap(
+                    after_shot_id=str(g.get("after_shot_id", "")),
+                    before_shot_id=str(g.get("before_shot_id", "")),
+                    missing=str(g.get("missing", "")),
+                    severity=str(g.get("severity", "medium")),
+                    suggested_title=str(g.get("suggested_title", "")),
+                    suggested_prompt_zh=str(g.get("suggested_prompt_zh", "")),
+                    suggested_prompt=str(g.get("suggested_prompt", "")),
+                    suggested_duration_sec=float(
+                        g.get("suggested_duration_sec", 5) or 5),
+                    suggested_dialogue=[
+                        str(d) for d in g.get("suggested_dialogue", [])],
+                )
+            )
+        # ok defaults to "no gaps" but trust an explicit false even if parsing
+        # dropped malformed gap rows; never raise on an empty result.
+        return ContinuityReport(gaps=gaps, summary=summary,
+                                ok=ok if gaps_raw else True)
 
 
 # --- Seedance (Volcengine ARK) video client ---------------------------------

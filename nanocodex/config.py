@@ -68,6 +68,13 @@ class Config:
     network_access: bool = False
     max_iterations: int = 60
     timeout_s: int = 120
+    # How many times the OpenAI-compatible SDK retries a transient model call
+    # (connection error / 408 / 409 / 429 / >=500) before surfacing the failure,
+    # with exponential backoff that honors Retry-After. The SDK default is 2; we
+    # bump it to 3 and make it tunable (NANOCODEX_MAX_RETRIES) so a flaky network
+    # / rate-limited endpoint recovers without killing the whole turn. 4xx other
+    # than 408/409/429 (auth, bad-request) are NOT retried — those are permanent.
+    max_retries: int = 3
     # Approximate prompt token budget that triggers context compaction.
     # 0 disables compaction. Default ON at ~50% of the 1M window (512K): long
     # conversations fold their middle automatically (Codex-style) so the prompt
@@ -134,6 +141,7 @@ class Config:
             "network_access": self.network_access,
             "max_iterations": self.max_iterations,
             "timeout_s": self.timeout_s,
+            "max_retries": self.max_retries,
         }
 
 
@@ -212,15 +220,42 @@ def _codex_values(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Keys a [profiles.<name>] table may set (a named bundle of model + sandbox +
+# approval + reasoning, à la Codex). Restricted to scalar Config fields so a
+# profile can't smuggle in arbitrary keys.
+_PROFILE_KEYS = (
+    "model", "base_url", "sandbox_mode", "approval_policy", "reasoning_effort",
+    "vl_base_url", "vl_api_key", "vl_model", "ark_api_key",
+    "max_iterations", "max_retries", "context_token_budget", "context_window",
+)
+
+
+def _profile_values(selected: dict[str, Any]) -> dict[str, Any]:
+    """Pull the known profile-able keys out of one [profiles.<name>] table."""
+    return {k: selected[k] for k in _PROFILE_KEYS if selected.get(k) is not None}
+
+
+def list_profiles() -> list[str]:
+    """Names of [profiles.<name>] tables defined in ~/.nanocodex/config.toml."""
+    profiles = _load_toml(NANOCODEX_CONFIG).get("profiles")
+    return sorted(profiles) if isinstance(profiles, dict) else []
+
+
 def load_config(
     *,
     workspace: Path | None = None,
     overrides: dict[str, Any] | None = None,
+    profile: str | None = None,
 ) -> Config:
     """Resolve a :class:`Config` from files, environment, and explicit overrides.
 
     *overrides* (typically from CLI flags) win over everything else. ``None``
     values inside *overrides* are ignored so callers can pass partial dicts.
+    *profile* selects a ``[profiles.<name>]`` bundle from ~/.nanocodex/config.toml
+    whose values override the base config files but stay below environment and
+    CLI flags. The profile name may also come from ``NANOCODEX_PROFILE`` or a
+    top-level ``profile = "…"`` key in that file. An unknown name raises
+    :class:`ConfigError`.
     """
     merged: dict[str, Any] = {
         "base_url": _DEFAULT_BASE_URL,
@@ -229,9 +264,23 @@ def load_config(
 
     # Lowest priority: Codex config, then DeepSeek config, then nanocodex's
     # own file (so a value set in the GUI Settings dialog wins over the CLIs').
+    nano_raw = _load_toml(NANOCODEX_CONFIG)
     merged.update(_codex_values(_load_toml(CODEX_CONFIG)))
     merged.update(_deepseek_values(_load_toml(DEEPSEEK_CONFIG)))
-    merged.update(_nanocodex_values(_load_toml(NANOCODEX_CONFIG)))
+    merged.update(_nanocodex_values(nano_raw))
+
+    # Profile: a named bundle layered ABOVE the base files, BELOW env/CLI.
+    prof_name = profile or os.environ.get("NANOCODEX_PROFILE") or nano_raw.get("profile")
+    if prof_name:
+        profiles = nano_raw.get("profiles")
+        selected = profiles.get(prof_name) if isinstance(profiles, dict) else None
+        if not isinstance(selected, dict):
+            available = ", ".join(sorted(profiles)) if isinstance(profiles, dict) else "(none)"
+            raise ConfigError(
+                f"Profile {prof_name!r} not found in {NANOCODEX_CONFIG}. "
+                f"Available profiles: {available}."
+            )
+        merged.update(_profile_values(selected))
 
     # Environment overrides.
     env_map = {
@@ -250,6 +299,7 @@ def load_config(
         "context_window": ("NANOCODEX_CONTEXT_WINDOW",),
         "available_models": ("NANOCODEX_MODELS",),
         "max_iterations": ("NANOCODEX_MAX_ITERATIONS",),
+        "max_retries": ("NANOCODEX_MAX_RETRIES",),
     }
     for field_name, env_keys in env_map.items():
         for env_key in env_keys:
@@ -280,6 +330,7 @@ def load_config(
         context_token_budget=_as_int(merged.get("context_token_budget"), 512_000),
         context_window=_as_int(merged.get("context_window"), 1_048_576),
         max_iterations=_as_int(merged.get("max_iterations"), 60),
+        max_retries=_as_int(merged.get("max_retries"), 3),
         available_models=_model_list(merged.get("available_models"), active_model),
     )
     if cfg.sandbox_mode == "danger-full-access":

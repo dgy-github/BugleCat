@@ -31,6 +31,8 @@ def _default_search(query: str, max_results: int) -> list[dict[str, str]]:
 
 
 class WebSearchTool(Tool):
+    capability_tags = ("research",)
+
     def __init__(self, ctx, search_fn: SearchFn | None = None) -> None:
         super().__init__(ctx)
         self._search_fn = search_fn or _default_search
