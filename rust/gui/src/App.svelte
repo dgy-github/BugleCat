@@ -496,7 +496,18 @@
       if (!dir || Array.isArray(dir)) return;
       const set = await invoke<string>("set_workspace", { path: dir });
       workspace = set;
-      messages.push({ role: "note", text: `已切换工作区到 ${set}，agent 已重载。` });
+      // Switching project starts a fresh conversation — the old one belongs to
+      // the old workspace, and set_workspace already reloaded the agent into a
+      // new session. Reset the conversation-scoped UI state to match.
+      messages = [];
+      sessionTitle = "新会话";
+      currentSessionId = "";
+      tokIn = 0;
+      tokOut = 0;
+      queued = [];
+      attached = [];
+      messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
+      refreshSessions();
     } catch (e) {
       messages.push({ role: "note", text: `切换工作区失败：${e}` });
     }
