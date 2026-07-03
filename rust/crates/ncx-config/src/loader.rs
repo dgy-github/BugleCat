@@ -600,8 +600,8 @@ pub(crate) fn load_config_impl(
         workspace,
         writable_roots: vec![],
         network_access,
-        max_iterations: as_int(merged.get("max_iterations").map(|s| s.as_str()), 60),
-        max_tool_calls: as_int(merged.get("max_tool_calls").map(|s| s.as_str()), 120),
+        max_iterations: as_int(merged.get("max_iterations").map(|s| s.as_str()), 150),
+        max_tool_calls: as_int(merged.get("max_tool_calls").map(|s| s.as_str()), 300),
         timeout_s: 120,
         max_retries: as_int(merged.get("max_retries").map(|s| s.as_str()), 3),
         context_token_budget: as_int(
@@ -810,7 +810,7 @@ approval_policy = "on-request"
             &empty_env(),
         )
         .unwrap();
-        assert_eq!(cfg.max_iterations, 60);
+        assert_eq!(cfg.max_iterations, 150);
 
         let cfg2 = load_config_impl(
             Overrides {
