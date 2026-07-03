@@ -214,6 +214,19 @@ pub fn load_last_workspace() -> Option<PathBuf> {
     p.is_dir().then_some(p)
 }
 
+/// Switch the process cwd to a resumed session's original workspace (best-effort)
+/// so the conversation reopens against the right project. Strips the Windows
+/// verbatim `\\?\` prefix, which `set_current_dir` rejects.
+fn restore_session_workspace(ws: Option<&str>) {
+    let Some(ws) = ws else { return };
+    let ws = ws.strip_prefix(r"\\?\").unwrap_or(ws);
+    let p = PathBuf::from(ws);
+    if p.is_dir() {
+        let _ = std::env::set_current_dir(&p);
+        save_last_workspace(&p);
+    }
+}
+
 /// True when `dir` is the user's home directory or the filesystem root — not a
 /// project. Operating there silently (especially under danger-full-access) is a
 /// foot-gun, so the UI prompts for a real workspace instead.
@@ -492,6 +505,10 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Resume(id) => {
                             let msgs = session_index.load_snapshot(&id).unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
+                            // Reopen the conversation in ITS original workspace, not
+                            // whatever dir we're currently in — otherwise a resumed
+                            // session runs against the wrong project.
+                            restore_session_workspace(session_index.get(&id).map(|s| s.workspace.as_str()));
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(approver.clone(), Some((id, msgs)), grants.clone()) {
                                 Ok((a, ws, sid, lp, idx)) => {
@@ -510,6 +527,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Fork(id) => {
                             let msgs = session_index.load_snapshot(&id).unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
+                            restore_session_workspace(session_index.get(&id).map(|s| s.workspace.as_str()));
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(approver.clone(), Some((new_session_id(), msgs)), grants.clone()) {
                                 Ok((a, ws, sid, lp, idx)) => {
