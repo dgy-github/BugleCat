@@ -824,8 +824,9 @@ fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
 
 #[tauri::command]
 fn list_sessions() -> Result<Vec<SessionRow>, String> {
-    let mut entries = SessionIndex::default().entries();
-    entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)); // newest first
+    // entries() already sorts newest-first by parsed epoch (handles mixed
+    // ms-epoch / legacy-ISO timestamps); don't re-sort by raw string here.
+    let entries = SessionIndex::default().entries();
     Ok(entries
         .into_iter()
         .take(50)

@@ -733,8 +733,9 @@
 
   // 13-digit ms-epoch string → compact relative / date label.
   function fmtWhen(ms: string): string {
-    const t = Number(ms);
-    if (!t) return "";
+    // Current stamps are 13-digit ms-epoch; legacy ones are ISO strings.
+    const t = /^\d+$/.test(ms) ? Number(ms) : Date.parse(ms);
+    if (!t || Number.isNaN(t)) return "";
     const diff = Date.now() - t;
     if (diff < 60_000) return "刚刚";
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;

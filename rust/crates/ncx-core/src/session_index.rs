@@ -131,7 +131,10 @@ impl SessionIndex {
 
     pub fn entries(&self) -> Vec<SessionSummary> {
         let mut out = self.by_id.values().cloned().collect::<Vec<_>>();
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        // Sort by parsed epoch-ms, not raw string: the index mixes 13-digit
+        // ms-epoch timestamps with legacy ISO strings, and comparing those as
+        // strings mis-sorted the (older) ISO entries to the top.
+        out.sort_by(|a, b| parse_ts_ms(&b.updated_at).cmp(&parse_ts_ms(&a.updated_at)));
         out
     }
 
@@ -396,9 +399,52 @@ fn now_stamp() -> String {
         .unwrap_or_else(|_| "0000000000000".into())
 }
 
+/// Parse a stored timestamp to epoch milliseconds for ordering. Handles the
+/// current 13-digit ms-epoch strings AND legacy ISO `YYYY-MM-DDTHH:MM:SS` values
+/// (comparing the two as raw strings mis-sorted the ISO entries to the top).
+fn parse_ts_ms(s: &str) -> i64 {
+    let s = s.trim();
+    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+        return s.parse::<i64>().unwrap_or(0);
+    }
+    // Legacy ISO: pull out the numeric fields (Y M D [H M S]).
+    let f: Vec<i64> = s
+        .split(|c: char| !c.is_ascii_digit())
+        .filter_map(|p| (!p.is_empty()).then(|| p.parse::<i64>().ok()).flatten())
+        .collect();
+    if f.len() < 3 {
+        return 0;
+    }
+    let (y, mo, d) = (f[0], f[1], f[2]);
+    let (h, mi, sec) = (
+        f.get(3).copied().unwrap_or(0),
+        f.get(4).copied().unwrap_or(0),
+        f.get(5).copied().unwrap_or(0),
+    );
+    // days_from_civil (Howard Hinnant), proleptic Gregorian, epoch 1970-01-01.
+    let yy = if mo <= 2 { y - 1 } else { y };
+    let era = (if yy >= 0 { yy } else { yy - 399 }) / 400;
+    let yoe = yy - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    (days * 86400 + h * 3600 + mi * 60 + sec) * 1000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_ts_ms_orders_legacy_iso_before_ms_epoch() {
+        let iso = parse_ts_ms("2026-06-08T20:08:39"); // legacy ISO (older)
+        let ms = parse_ts_ms("1783184340626"); // ms-epoch ~2026-07 (newer)
+        assert!(iso > 0 && ms > 0);
+        assert!(iso < ms, "ISO {iso} should sort older than ms {ms}");
+        // 2026-06-08 is ~1.78e12 ms since epoch.
+        assert!((1_700_000_000_000..1_800_000_000_000).contains(&iso), "{iso}");
+        assert_eq!(parse_ts_ms(""), 0);
+    }
 
     fn tmp_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("ncx_session_index_{name}_{}", now_stamp()))
