@@ -31,6 +31,12 @@ pub fn stream_open_timeout_s() -> u64 {
     )
 }
 
+/// Exponential backoff between retries: 0.5s, 1s, 2s, … capped (matches `chat`).
+async fn backoff_sleep(attempt: u32) {
+    let ms = 500u64 << attempt.saturating_sub(1).min(5);
+    tokio::time::sleep(Duration::from_millis(ms)).await;
+}
+
 /// Pure inner helper — injectable for tests (mirrors `_stream_open_timeout_s`).
 fn stream_open_timeout_from(raw: Option<&str>) -> u64 {
     let Some(raw) = raw.filter(|s| !s.is_empty()) else {
@@ -176,34 +182,72 @@ impl DeepSeekProvider {
         let payload = to_request_json(&kwargs);
 
         let open_to = Duration::from_secs(stream_open_timeout_s());
-        let send_fut = self
-            .client
-            .post(&self.endpoint)
-            .bearer_auth(&self.api_key)
-            .json(&payload)
-            .send();
+        // Retry transient failures with backoff, matching the non-streaming path:
+        // send/connect errors, header timeout, 408/409/429/5xx, and a mid-stream
+        // body error that happened BEFORE any text was shown (retrying after text
+        // was emitted would duplicate the visible output, so we don't).
+        let mut attempt = 0u32;
+        loop {
+            let send_fut = self
+                .client
+                .post(&self.endpoint)
+                .bearer_auth(&self.api_key)
+                .json(&payload)
+                .send();
 
-        let resp = match timeout(open_to, send_fut).await {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(ProviderError(format!("RequestError: {e}"))),
-            Err(_) => {
-                return Err(ProviderError(format!(
-                    "TimeoutError: no streaming response headers after {}s. On Windows or \
-                     proxy networks, try a larger NANOCODEX_STREAM_OPEN_TIMEOUT_S or check \
-                     connectivity.",
-                    open_to.as_secs()
-                )))
+            let resp = match timeout(open_to, send_fut).await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    if attempt < self.max_retries {
+                        attempt += 1;
+                        backoff_sleep(attempt).await;
+                        continue;
+                    }
+                    return Err(ProviderError(format!("RequestError: {e}")));
+                }
+                Err(_) => {
+                    if attempt < self.max_retries {
+                        attempt += 1;
+                        backoff_sleep(attempt).await;
+                        continue;
+                    }
+                    return Err(ProviderError(format!(
+                        "TimeoutError: no streaming response headers after {}s. On Windows or \
+                         proxy networks, try a larger NANOCODEX_STREAM_OPEN_TIMEOUT_S or check \
+                         connectivity.",
+                        open_to.as_secs()
+                    )));
+                }
+            };
+
+            if !resp.status().is_success() {
+                let code = resp.status().as_u16();
+                let transient = matches!(code, 408 | 409 | 429) || (500..600).contains(&code);
+                let text = resp.text().await.unwrap_or_default();
+                if transient && attempt < self.max_retries {
+                    attempt += 1;
+                    backoff_sleep(attempt).await;
+                    continue;
+                }
+                return Err(ProviderError(format!("HTTP {code}: {text}")));
             }
-        };
 
-        if !resp.status().is_success() {
-            let code = resp.status().as_u16();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ProviderError(format!("HTTP {code}: {text}")));
+            let mut emitted = false;
+            match self
+                .consume_sse(resp, &mut on_content, &mut on_reasoning, &mut emitted)
+                .await
+            {
+                Ok(r) => return Ok(r),
+                Err(e) => {
+                    if !emitted && attempt < self.max_retries {
+                        attempt += 1;
+                        backoff_sleep(attempt).await;
+                        continue;
+                    }
+                    return Err(e);
+                }
+            }
         }
-
-        self.consume_sse(resp, &mut on_content, &mut on_reasoning)
-            .await
     }
 
     async fn consume_sse<C, R>(
@@ -211,6 +255,7 @@ impl DeepSeekProvider {
         resp: reqwest::Response,
         on_content: &mut C,
         on_reasoning: &mut R,
+        emitted: &mut bool,
     ) -> Result<ModelResponse, ProviderError>
     where
         C: FnMut(&str),
@@ -221,7 +266,16 @@ impl DeepSeekProvider {
         let mut stream = resp.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
-            let bytes = chunk.map_err(|e| ProviderError(format!("StreamError: {e}")))?;
+            let bytes = match chunk {
+                Ok(b) => b,
+                Err(e) => {
+                    // Tell the caller whether any text already reached the UI, so
+                    // it only retries a stream that emitted nothing (otherwise a
+                    // retry would duplicate the visible output).
+                    *emitted = !agg.content.is_empty() || !agg.reasoning.is_empty();
+                    return Err(ProviderError(format!("StreamError: {e}")));
+                }
+            };
             buf.push_str(&String::from_utf8_lossy(&bytes));
             // SSE events are separated by blank lines; data lines begin "data:".
             while let Some(nl) = buf.find('\n') {
