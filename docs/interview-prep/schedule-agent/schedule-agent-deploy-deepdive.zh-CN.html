@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排产 Agent 部署版深挖 · 四段治理 + 评测体系</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--accent:#1f6feb;--accent2:#0e7a52;--danger:#c0392b;--danger-soft:#fdecec;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;}
+  .wrap{max-width:940px;margin:0 auto;padding:0 20px 70px;}
+  header.hero{padding:38px 0 18px;border-bottom:1px solid var(--border);}
+  header.hero h1{font-size:24px;margin:0 0 8px;} header.hero p{font-size:14px;color:var(--text2);margin:0;max-width:760px;}
+  header.hero b{color:var(--accent);}
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.93);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;gap:8px;padding:10px 0;margin-bottom:6px;}
+  nav.toc a{font-size:12.5px;text-decoration:none;color:var(--text2);padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav.toc a:hover{border-color:var(--accent);color:var(--accent);}
+  section{padding:26px 0 4px;scroll-margin-top:52px;} h3{font-size:17px;margin:6px 0 2px;}
+  .lead{color:var(--text2);font-size:13.5px;margin:6px 0 12px;max-width:840px;}
+  figure{margin:6px 0;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:10px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  .pts{background:var(--surface);border-left:4px solid var(--accent);border-radius:0 12px 12px 0;padding:11px 16px;margin:8px 0;}
+  .pts b{color:var(--accent);} .pts ul{margin:6px 0 0;padding-left:18px;} .pts li{font-size:12.5px;line-height:1.5;margin:3px 0;}
+  .warn{background:#fff6e9;border-left:4px solid #b8860b;border-radius:0 12px 12px 0;padding:11px 16px;margin:8px 0;}
+  .warn b{color:#8a6100;} .warn ul{margin:6px 0 0;padding-left:18px;} .warn li{font-size:12.5px;margin:3px 0;}
+  code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:1px 5px;border-radius:5px;}
+  footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <h1>🏭 排产 Agent 部署版深挖 · 四段治理 + 评测体系</h1>
+  <p><b>确定性 workflow 包住 LLM，写操作全过治理链，质量靠评测门禁 + 数据飞轮兜住。</b>
+  这两块（写治理、评测）最容易被追问——本页按真实代码逐节点画流程，配「面试要点」和「易错点」。</p>
+</header>
+<nav class="toc"><a href="#gov">🛡 四段治理链</a><a href="#eval">🧪 评测体系</a></nav>
+
+<!-- ============ 四段治理 ============ -->
+<section id="gov">
+  <h3>🛡 流程图 A · 写操作四段治理链（governance → preview → execute → verify）</h3>
+  <p class="lead">节点顺序 <code>rewrite→route→…→governance→preview→execute→verify→respond</code>。核心信条：<b>确定性 workflow，只有 node 内需推理才让 LLM 决策；写操作永远不直接落库。</b></p>
+  <figure>
+  <svg viewBox="0 0 660 800" role="img" aria-label="四段治理流程图" font-family="system-ui">
+    <rect x="0" y="0" width="660" height="42" rx="10" fill="#1f6feb"/><text x="330" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">🛡 写操作四段治理链</text>
+    <g font-size="11" font-weight="800" fill="#1f6feb" text-anchor="middle"><text x="30" y="90" transform="rotate(-90 30 90)">路由</text><text x="30" y="220" transform="rotate(-90 30 220)">①治理</text><text x="30" y="350" transform="rotate(-90 30 350)">②预览</text><text x="30" y="480" transform="rotate(-90 30 480)">③执行</text><text x="30" y="600" transform="rotate(-90 30 600)">④验证</text></g>
+    <line x1="58" y1="56" x2="58" y2="770" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="ga" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#ga)"><line x1="330" y1="96" x2="330" y2="118"/><line x1="330" y1="186" x2="330" y2="230"/><line x1="330" y1="300" x2="330" y2="344"/><line x1="330" y1="416" x2="330" y2="458"/><line x1="330" y1="536" x2="330" y2="578"/><line x1="330" y1="654" x2="330" y2="690"/></g>
+    <g text-anchor="middle">
+      <rect x="200" y="58" width="260" height="38" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="330" y="76" font-size="12" font-weight="600" fill="#1f1d1a">👤 用户请求 → rewrite → route</text><text x="330" y="90" font-size="9.5" fill="#8a857a">意图识别(规则打分,零 LLM) + 实体提取</text>
+      <!-- route decision -->
+      <rect x="200" y="118" width="260" height="68" rx="10" fill="#f3f1ea" stroke="#1f6feb" stroke-width="2"/><text x="330" y="138" font-size="12" font-weight="800" fill="#1f6feb">after_route 三路分流</text><text x="330" y="155" font-size="9.5" fill="#8a857a">歧义 / conf&lt;0.5 / 缺实体 → need_clarify</text><text x="330" y="169" font-size="9.5" fill="#8a857a">readonly → query·rag ｜ is_write → ↓ 治理</text><text x="330" y="182" font-size="9.5" fill="#8a857a">WRITE_INTENTS 决定 is_write</text>
+      <!-- governance -->
+      <rect x="200" y="230" width="260" height="70" rx="10" fill="#f3f1ea" stroke="#1f6feb"/><text x="330" y="250" font-size="12" font-weight="700" fill="#1f1d1a">① governance_node 角色层级</text><text x="330" y="266" font-size="9.5" fill="#8a857a">业务员0&lt;工艺员1&lt;主任2&lt;厂长3</text><text x="330" y="279" font-size="9.5" fill="#8a857a">user_level ≥ required(minimum_role)?</text><text x="330" y="292" font-size="9.5" fill="#8a857a">blocked: 未知意图/权限不足/高危缺机台号</text>
+      <!-- preview -->
+      <rect x="200" y="344" width="260" height="72" rx="10" fill="#f3f1ea" stroke="#1f6feb"/><text x="330" y="364" font-size="12" font-weight="700" fill="#1f1d1a">② preview_node 干跑(只读)</text><text x="330" y="380" font-size="9.5" fill="#8a857a">产 preview_result{action,summary,impact}</text><text x="330" y="393" font-size="9.5" fill="#8a857a">after_preview: confirmed is True?</text><text x="330" y="406" font-size="9.5" fill="#8a857a">否 → await_confirm（人在回路）</text>
+      <!-- execute -->
+      <rect x="200" y="458" width="260" height="78" rx="10" fill="#f3f1ea" stroke="#1f6feb"/><text x="330" y="478" font-size="12" font-weight="700" fill="#1f1d1a">③ execute_node 真实落库</text><text x="330" y="494" font-size="9.5" fill="#8a857a">SQLite INSERT/UPDATE · uuid 单号</text><text x="330" y="507" font-size="9.5" fill="#8a857a">machine_failure LIMIT 50 防误伤</text><text x="330" y="520" font-size="9.5" fill="#8a857a">出 tool_result{success} · 本节点不写审计</text>
+      <!-- verify -->
+      <rect x="200" y="578" width="260" height="76" rx="10" fill="#f3f1ea" stroke="#1f6feb" stroke-width="2"/><text x="330" y="598" font-size="12" font-weight="800" fill="#1f6feb">④ verify_node 回读验证</text><text x="330" y="614" font-size="9.5" fill="#8a857a">按 intent 回读 DB → checks[]</text><text x="330" y="627" font-size="9.5" fill="#8a857a">all_passed? passed : needs_review</text><text x="330" y="640" font-size="9.5" fill="#8a857a">不一致不回滚·标复核 + log_audit</text>
+      <rect x="230" y="690" width="200" height="40" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="330" y="715" font-size="12" font-weight="600" fill="#1f1d1a">respond → END</text>
+    </g>
+    <!-- right exits to respond -->
+    <g stroke="#c0392b" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#ga)"><path d="M460,152 H560 V708 H430"/><path d="M460,270 H540 V708"/><path d="M460,392 H520 V708"/></g>
+    <g text-anchor="middle" font-size="9" fill="#c0392b"><text x="512" y="146">need_clarify / readonly</text><text x="500" y="264">blocked → log_audit</text><text x="490" y="386">await_confirm</text></g>
+    <text x="330" y="220" font-size="9.5" fill="#57534a" text-anchor="middle">write ↓</text><text x="330" y="330" font-size="9.5" fill="#57534a" text-anchor="middle">passed ↓</text><text x="330" y="444" font-size="9.5" fill="#57534a" text-anchor="middle">confirmed=True ↓</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点（四段各一句 + 信号字段）</b>
+    <ul>
+      <li><b>①治理 governance</b>：角色层级 <code>业务员0&lt;工艺员1&lt;主任2&lt;厂长3</code>（层级在代码 <code>ROLE_HIERARCHY</code>，per-intent 的 minimum_role/risk 在 <code>intents.json</code>）；blocked 三因：未知意图 / 权限不足(<code>user_level&lt;required</code>) / 高危缺机台号。信号字段 <code>governance_passed</code> 布尔一票。</li>
+      <li><b>②预览 preview</b>：<b>纯 dry-run 只读</b>，产 <code>preview_result{impact}</code> 给人看；<code>after_preview</code> 用严格 <code>confirmed is True</code> 才放行——<b>人在回路</b>，未确认的写操作只出预览不落库。</li>
+      <li><b>③执行 execute</b>：真实 SQLite 落库；<code>machine_failure</code> 批量改带 <code>LIMIT 50</code> 防误伤；<b>本节点不写审计</b>。</li>
+      <li><b>④验证 verify</b>：按 intent 回读 DB 生成 <code>checks[]</code>；不一致<b>不回滚</b>，降级 <code>needs_review</code> 标人工复核 + 写审计（审计只在 governance-blocked 和 verify 两处写）。</li>
+      <li>一句话：<b>提案→预览→执行→回读</b>四段闭环 + 角色权限 + 人在回路——把数据库事务的思路搬到 agent 写操作上。</li>
+    </ul>
+  </div>
+  <div class="warn"><b>易错点（面试官爱挖，别答错）</b>
+    <ul>
+      <li>角色层级<b>不在</b> <code>permissions.json</code>（那只有 role_hierarchy），per-intent 权限在 <code>intents.json</code>；governance 读的是后者。</li>
+      <li>preview 节点<b>不设</b> <code>confirmed</code>——由入口/人工注入；这是 human-in-the-loop 的落点。</li>
+      <li>verify 不一致<b>不自动回滚</b>，是标 <code>needs_review</code> 转人工——"宁可标复核不可静默生效"。</li>
+      <li>写意图共 <b>19 个</b>（category=="write"）；破坏性操作(machine_failure/discard_order)要 <b>主任(2)</b>，无操作要求厂长(3)。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 评测体系 ============ -->
+<section id="eval">
+  <h3>🧪 流程图 B · 评测体系（audit + golden + judge + 数据飞轮）</h3>
+  <p class="lead">CI 三 job：<code>audit</code> 先跑（防退化）→ <code>eval-rule</code>（无 LLM，每次）∥ <code>eval-full</code>（含 judge，定时/手动）。门禁 <code>rule_pass_rate ≥ 1.0</code> 才 exit 0。</p>
+  <figure>
+  <svg viewBox="0 0 660 760" role="img" aria-label="评测体系流程图" font-family="system-ui">
+    <rect x="0" y="0" width="660" height="42" rx="10" fill="#0e7a52"/><text x="330" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">🧪 评测体系 + 数据飞轮</text>
+    <g font-size="11" font-weight="800" fill="#0e7a52" text-anchor="middle"><text x="30" y="95" transform="rotate(-90 30 95)">CI 门禁</text><text x="30" y="250" transform="rotate(-90 30 250)">跑用例</text><text x="30" y="430" transform="rotate(-90 30 430)">打分门禁</text><text x="30" y="620" transform="rotate(-90 30 620)">数据飞轮</text></g>
+    <line x1="58" y1="56" x2="58" y2="730" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="ea" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#ea)"><line x1="330" y1="120" x2="330" y2="150"/><line x1="330" y1="222" x2="330" y2="252"/><line x1="330" y1="336" x2="330" y2="366"/><line x1="330" y1="430" x2="330" y2="460"/><line x1="330" y1="520" x2="330" y2="560"/></g>
+    <g text-anchor="middle">
+      <rect x="150" y="58" width="360" height="62" rx="10" fill="#f3f1ea" stroke="#0e7a52" stroke-width="2"/><text x="330" y="78" font-size="12" font-weight="800" fill="#0e7a52">audit（skill 健康度·最先跑·--strict）</text><text x="330" y="94" font-size="9.5" fill="#8a857a">5 检查：dark / conflict(warn) / self_recog&lt;0.5 / coverage / orphan</text><text x="330" y="107" font-size="9.5" fill="#8a857a">blocking 项任一失败 → exit 1，挡住后续</text>
+      <rect x="150" y="150" width="360" height="72" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="330" y="170" font-size="12" font-weight="700" fill="#1f1d1a">runner：隔离 DB → 加载 golden_cases</text><text x="330" y="186" font-size="9.5" fill="#8a857a">44 用例 / 11 类 · compile_graph + tracing</text><text x="330" y="199" font-size="9.5" fill="#8a857a">PathCapture 逐节点捕获 最终 state + 执行路径</text><text x="330" y="212" font-size="9.5" fill="#8a857a">(setup_eval_database 临时库,跑完还原)</text>
+      <rect x="150" y="252" width="360" height="84" rx="10" fill="#f3f1ea" stroke="#0e7a52"/><text x="330" y="272" font-size="12" font-weight="700" fill="#1f1d1a">check_expected 规则断言（~16 类）</text><text x="330" y="288" font-size="9.5" fill="#8a857a">intent_code / path_exact / governance_passed</text><text x="330" y="301" font-size="9.5" fill="#8a857a">max_retrieval_steps(防 RAG 无限检索)</text><text x="330" y="314" font-size="9.5" fill="#8a857a">answer_grounded / response_must_not_contain(防幻觉)</text><text x="330" y="328" font-size="9.5" fill="#8a857a">→ 确定性判据，先于 LLM judge</text>
+      <rect x="150" y="366" width="360" height="64" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="330" y="386" font-size="12" font-weight="700" fill="#1f1d1a">judge_response（LLM-as-judge，可选）</text><text x="330" y="402" font-size="9.5" fill="#8a857a">3 维(相关/准确/完整) 1–5 分 · temp=0</text><text x="330" y="415" font-size="9.5" fill="#8a857a">异常降级 _judge_with_rules(关键词命中率)</text>
+      <rect x="150" y="460" width="360" height="60" rx="10" fill="#f3f1ea" stroke="#0e7a52" stroke-width="2"/><text x="330" y="480" font-size="12" font-weight="800" fill="#0e7a52">compute_summary → 门禁</text><text x="330" y="496" font-size="9.5" fill="#8a857a">rule_pass_rate ≥ min_pass_rate(1.0) ? exit 0 : 1</text><text x="330" y="509" font-size="9.5" fill="#8a857a">by_category / p50 / p95 / 失败 trace · 出 HTML+JSON</text>
+    </g>
+    <!-- 飞轮 -->
+    <g text-anchor="middle">
+      <rect x="120" y="560" width="420" height="86" rx="12" fill="#eef6f1" stroke="#0e7a52" stroke-dasharray="6 4"/><text x="330" y="580" font-size="12" font-weight="800" fill="#0e7a52">🔄 数据飞轮（线上失败 → 金标扩充）</text>
+      <text x="330" y="600" font-size="10" fill="#57534a">线上 audit_log → mine_eval_candidates 挖掘</text>
+      <text x="330" y="616" font-size="10" fill="#57534a">→ 人工 review → 晋级 online_hard_cases.json(10)</text>
+      <text x="330" y="632" font-size="10" fill="#57534a">→ run_scheduled_eval（audit→golden→online 全绿）</text>
+    </g>
+    <text x="330" y="700" font-size="10.5" fill="#8a857a" text-anchor="middle">指标即风险：确定性断言压倒 judge，judge 只补语义维度且可降级</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b>
+    <ul>
+      <li><b>三层防护</b>：<code>audit</code>(防 skill 退化，5 检查) → <code>check_expected</code>(~16 类<b>确定性</b>断言) → <code>judge</code>(LLM 补 3 维语义，可降级为规则)。</li>
+      <li><b>门禁硬</b>：<code>rule_pass_rate ≥ 1.0</code> 才 exit 0；CI 里 <code>audit</code> 先过才跑评测（<code>needs: audit</code>）。</li>
+      <li><b>防幻觉断言</b>：<code>max_retrieval_steps</code>(防 agentic RAG 无限检索)、<code>response_must_not_contain</code>(订单不存在时禁止编字段)、<code>answer_grounded/evidence_source</code>。</li>
+      <li><b>数据飞轮</b>：线上 <code>audit_log</code> → 挖候选 → 人工审 → 晋级 <code>online_hard_cases.json</code> → 定时回归——评测集从真实失败长出来，不是拍脑袋造的。</li>
+      <li>一句话：<b>有确定性判据就用确定性断言，judge 只留给语义维度且必须能降级</b>——呼应"确定性优先于 LLM judge"。</li>
+    </ul>
+  </div>
+  <div class="warn"><b>易错点</b>
+    <ul>
+      <li>实际是 <b>44 用例 / 11 类</b>（README 表 + JSON 自述"5 路径×4 场景"），别说"8 类"。</li>
+      <li><code>audit</code> 的 <code>conflict</code> 项是 <b>warning 不阻断</b>（passed 恒 True），只有 blocking 项计入门禁。</li>
+      <li><code>bench_chunking</code> / <code>lab_dpo_demo</code> 是<b>离线 lab</b>，不进 CI 门禁；主线门禁是 <code>eval.runner</code>(golden+online) + <code>eval.audit</code>。</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  排产 Agent 部署版深挖 · <code>agentbot/schedule-agent-langgraph</code> · 配套：写治理(graph/nodes/governance·preview·execute·verify) + 评测(eval/runner·judge·audit + .github/workflows/eval.yml)
+</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,146 @@
+{
+ "key": "tool-use",
+ "name": "工具使用工程化 / Function Calling",
+ "data": {
+  "category": "工具使用工程化 / Function Calling",
+  "definition": {
+   "statement": "Function calling(工具调用/tool use)的工程标准定义可从 Anthropic 与 Model Context Protocol(MCP)的官方规范中提炼:每个工具被声明为一份显式契约——name、description、以 JSON Schema 表达的 input_schema(parameters),模型(非确定性一侧)只产出结构化的 tool_use 请求并选择何时调用、传何参数,实际执行永远发生在调用方的确定性代码里,执行结果以 tool_result 块(可带 is_error: true 及可读错误文本)回灌对话,形成'定义 schema → 模型选择/填参 → 应用执行 → 结果回灌'的闭环(Anthropic, 'Tool use with Claude')。为了给客户端提供风险/安全提示(而非用于工具发现或选择路由),MCP 在 Tool 之上定义了 ToolAnnotations(readOnlyHint / destructiveHint / idempotentHint / openWorldHint),但规范与官方博客明确指出这些字段只是'hint'、不保证真实描述工具行为,客户端不能把未受信 server 报的 annotation 当作安全决策依据,真正的安全保证必须落在确定性的 client 侧控制上(MCP Schema Reference 2025-06-18; MCP Blog 'Tool Annotations as Risk Vocabulary')。当工具数量从个位数扩展到几十/上百个(如 MCP 生态、企业 API 网关)时,把全部 schema 一次性喂给模型会稀释工具选择准确率——Gorilla 论文实测显示,用质量欠佳的检索器(BM25/GPT-Index)做工具候选收窄反而使准确率出现两位数百分点的下降,而 ToolLLM 则通过专门训练的 API retriever 在 16000+ 真实 API 规模上做动态候选收窄并对比 oracle retriever 与 zero-shot 设置;这说明'动态暴露/路由'不是可选优化,而是工具规模超出模型有效选择窗口后的必要工程手段,收窄检索器本身的质量会成为新的准确率瓶颈(Gorilla, arXiv:2305.15334;ToolLLM, arXiv:2307.16789)。在执行侧,OpenAI 的 Function calling 指南明确模型单轮可能产出零个、一个或多个(parallel)工具调用,调用方必须假设并发/重复调用会发生;OpenAI 的 Using GPT-5.5 指南进一步建议把'副作用(side effects)'与'重试安全(retry safety)'写进工具描述本身,业界也普遍认为有副作用的写工具应被设计为对重复调用安全,并将只读、无副作用的调用与有状态写操作在并发与顺序保证上区别对待,这与 Anthropic 建议的错误处理范式(用 is_error + 具体可读的错误文本让模型能够重试或改变策略,而非用泛化的 'Failed' 中断)共同构成了工具调用结果的错误处理与恢复、以及只读/写并发安全的工程基础(OpenAI, 'Function calling' | OpenAI API;OpenAI, 'Using GPT-5.5' | OpenAI API;Anthropic, 'Tool use with Claude')。",
+   "sources": [
+    {
+     "title": "Schema Reference - Model Context Protocol (2025-06-18, ToolAnnotations)",
+     "url": "https://modelcontextprotocol.io/specification/2025-06-18/schema"
+    },
+    {
+     "title": "Tool Annotations as Risk Vocabulary: What Hints Can and Can't Do | Model Context Protocol Blog",
+     "url": "https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/"
+    },
+    {
+     "title": "Tool use with Claude - Claude Platform Docs (Anthropic)",
+     "url": "https://docs.anthropic.com/en/docs/build-with-claude/tool-use"
+    },
+    {
+     "title": "Writing effective tools for AI agents—using AI agents (Anthropic Engineering)",
+     "url": "https://www.anthropic.com/engineering/writing-tools-for-agents"
+    },
+    {
+     "title": "Introducing advanced tool use on the Claude Developer Platform (Anthropic Engineering, tool_search/defer_loading)",
+     "url": "https://www.anthropic.com/engineering/advanced-tool-use"
+    },
+    {
+     "title": "Gorilla: Large Language Model Connected with Massive APIs",
+     "url": "https://arxiv.org/abs/2305.15334"
+    },
+    {
+     "title": "ToolLLM: Facilitating Large Language Models to Master 16000+ Real-world APIs",
+     "url": "https://arxiv.org/abs/2307.16789"
+    },
+    {
+     "title": "Function calling | OpenAI API",
+     "url": "https://developers.openai.com/api/docs/guides/function-calling"
+    },
+    {
+     "title": "Using GPT-5.5 | OpenAI API",
+     "url": "https://developers.openai.com/api/docs/guides/latest-model"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "工具的 JSON Schema(input_schema/parameters)设计应该遵循什么原则?为什么给 agent 设计工具不能照搬给人类开发者写 REST API 的思路(比如把 list_users/list_events/create_event 拆成三个细粒度工具)?",
+    "tier": "L1",
+    "why_asked": "考察是否理解 function calling 的契约模型本质——schema 是模型与执行环境之间唯一的接口约定,以及为什么工具设计需要'为 agent 而非为开发者'重新思考。",
+    "key_points": [
+     "Anthropic 文档明确 tool use 是契约模型:JSON Schema 定义参数结构,模型据此填参,调用方执行并回传结果",
+     "Anthropic 工程博客建议 consolidate functionality——把频繁链式调用的多步操作合并成一个工具(如 schedule_event 取代 list_users+list_events+create_event),减少模型需要编排的调用轮数和出错点",
+     "每个工具应有清晰、单一、不重叠的目的;工具集越大越需要 namespacing(前缀/后缀分组)防止相似功能的工具互相混淆",
+     "JSON Schema 只能表达结构合法性,表达不了'什么时候该填可选参数'等使用模式,因此 Anthropic 新增 input_examples 作为 schema 的补充"
+    ],
+    "follow_ups": [
+     "如果一个工具的参数是深层嵌套结构,你会怎么降低模型生成错误 JSON 的概率?",
+     "你会用什么指标(而不是纯准确率)评估一次 schema 重构是否真的改善了 agent 表现?"
+    ],
+    "nanocodex_link": "工具系统 — tools.rs 的 Tool trait 声明 name/description/parameters(即 JSON Schema)/read_only/execute 字段契约,parameters 字段是 schema 设计原则的直接落地点"
+   },
+   {
+    "question": "当可用工具从几个扩展到几十/上百个时,为什么直接把所有工具 schema 都塞进 context 反而会让模型的工具选择准确率下降?你会用哪些工程手段解决这个问题?",
+    "tier": "L2",
+    "why_asked": "这是该类别的核心权衡题,考察是否理解'工具过多稀释选择准确率'这一实证现象,以及是否知道业界几种应对路线(检索收窄 vs 分层暴露 vs namespacing)及各自代价。",
+    "key_points": [
+     "Gorilla 论文实测:用 BM25/GPT-Index 这类质量一般的检索器做工具候选收窄,反而使准确率下降两位数百分点,说明'收窄'本身不是免费的,劣质检索器比不检索更confuse模型",
+     "ToolLLM 在 16000+ API 规模上专门训练 API retriever 做动态候选收窄,并对比 oracle retriever 与 zero-shot,证明检索质量直接决定下游任务完成率",
+     "Anthropic 提出的应对手段:namespacing 分组、tool_search + defer_loading(按需加载工具定义而非一次性全部声明)、以及持续用 tool-call 错误率/token 消耗等指标做评估驱动的迭代",
+     "本质上是候选集大小与检索精度之间的权衡:候选集越小越省 token、选择越准,但可能漏掉正确工具;候选集越大越不容易漏,但稀释选择"
+    ],
+    "follow_ups": [
+     "如果你的检索器召回率高但精确率低(召回了很多不相关工具),这比全量暴露更差还是更好?",
+     "你会如何设计'核心工具常驻 + 长尾工具按需发现'的两层结构来兼顾稳定性和可扩展性?"
+    ],
+    "nanocodex_link": "工具系统 动态暴露 — tools.rs 的 schemas_for_query 每回合把工具裁剪到 DEFAULT_VISIBLE_TOOL_LIMIT=9,用 catalog_score 词法打分(100/50/20)在核心集∪tool_hints 之外竞争填位,tool_search 把命中写入 tool_hints 供下一轮暴露"
+   },
+   {
+    "question": "工具调用失败(参数错误、下游 API 超时/503、权限被拒)时,你会如何设计错误从执行层回传给模型的机制,让 agent 能理解错误并自我恢复,而不是让整个 turn 崩溃或陷入无意义重试?",
+    "tier": "L2",
+    "why_asked": "考察对 tool_result 错误契约设计的理解,以及'把错误变成可恢复信号'与'防止无限重试'之间的工程权衡。",
+    "key_points": [
+     "Anthropic 的做法是在 tool_result 上设置 is_error: true 并附具体、可读的错误文本(如指出具体不存在的实体),而不是泛化的 'Failed',这样模型才能判断是重试、换参数还是放弃",
+     "错误必须被表达成'模型可读的普通消息'而不是抛异常中断 agent loop,否则一次工具失败会让整个多步任务崩溃",
+     "需要用外部预算(如最大工具调用次数/最大回合数)兜底,防止模型对同一错误无休止地重试同一工具",
+     "应区分可恢复错误(参数格式错误、瞬时超时——值得重试或改参数)与不可恢复错误(权限拒绝、资源不存在——应该终止该路径或询问用户)"
+    ],
+    "follow_ups": [
+     "如果工具超时,你怎么区分'确实执行慢'和'已经卡死需要杀掉'?",
+     "如果同一个工具调用带同样参数连续失败 3 次,你会在系统层面加什么熔断逻辑?"
+    ],
+    "nanocodex_link": "工具系统 — tools.rs 的 execute() 恒定返回 String 而非 Result,未知工具名、pre-hook 阻断等失败一律变成模型可读的 Error 字符串(如 'Error: unknown tool ...');另见 Harness 工程管理 — 双预算 max_model_calls/max_tool_calls 防止无限重试"
+   },
+   {
+    "question": "生产环境里发现 agent 并发执行了两个工具调用,其中一个只读调用读到了另一个并发写操作的中间状态,导致结果不一致。你怎么定位根因、怎么修?",
+    "tier": "L3",
+    "why_asked": "考察只读并发批处理的故障排查能力——是否知道'read_only 标记'的本质是信任声明而非运行时验证,以及并发调度器的正确边界条件应该是什么。",
+    "key_points": [
+     "先确认并发调度器的分段逻辑本身是否正确:是否只在连续调用都被标记为 read_only 时才并发执行,写调用/未知调用是否正确打断了并发段并转入串行",
+     "再确认结果是否按原始调用顺序缝回给模型,而不是按并发完成顺序,否则即使执行正确,模型看到的调用-结果对应关系也会错乱",
+     "关键怀疑点是 read_only 标志本身的可信度——它通常是工具的静态声明或名字启发式(如按前缀猜测),不是运行时验证;一个谎报只读实则有副作用的工具会被调度器错误地并发调度而产生 race",
+     "MCP 规范里对应的 readOnlyHint 也被官方明确定义为'hint,不保证真实行为',印证了'不能把只读标记当作安全验证依据'这一通用原则"
+    ],
+    "follow_ups": [
+     "如果一个第三方 MCP 工具名字看起来只读(如 fetch_status)但底层触发了副作用,你的系统怎么防御?",
+     "你会给'只读'加运行时验证机制(比如沙箱内先探测一次)吗,还是接受这是一个必须靠声明约定的信任边界?"
+    ],
+    "nanocodex_link": "Harness 工程管理 — parallel_run 仅当连续调用都 is_read_only 时才用 join_all 并发,写工具打断成串行段,并发结果按 batch.iter().zip(results) 按原始调用序缝回;read_only 是信任边界而非验证,工具谎报只读会被并发调度而 race"
+   },
+   {
+    "question": "任务链中第 3 个工具调用返回的结果字段被下游 API 静默改名(比如 user_id 变成 userId),导致后续依赖该字段的调用全部失败。这是 schema 设计缺陷还是错误处理缺陷?你会怎么修?",
+    "tier": "L3",
+    "why_asked": "考察是否能区分'设计期契约漂移'与'运行时错误处理'这两类不同性质的问题,以及是否有 fail-fast 而非让错误静默传导到模型推理层的工程习惯。",
+    "key_points": [
+     "根因是工具的 output 契约漂移——下游 API 变更未同步更新工具侧的输出结构或文档,这属于 schema/契约维护问题而不是运行时错误处理问题",
+     "理想做法是给工具的输出也做结构校验(不只是输入 input_schema),一旦发现字段缺失/改名应在工具执行层就近报错,而不是让格式错误的结果流入模型上下文让模型自己去'猜'并产生连锁误判",
+     "这与 OpenAI strict mode/structured outputs 的思路一致:用更强的 schema 约束尽早暴露契约不一致,而不是依赖模型的鲁棒性去兜底不可靠的数据形状",
+     "工程上应考虑给第三方工具(尤其 MCP server)的输出加版本号或做防御性字段兼容,减少'静默改名'类故障的爆炸半径"
+    ],
+    "follow_ups": [
+     "如果这个改名是第三方 MCP server 自行升级导致的、你无法控制其发版节奏,你会在自己系统里加哪一层防护?",
+     "你会考虑在 tool_result 里附加 schema version 字段吗?这样做的成本和收益是什么?"
+    ],
+    "nanocodex_link": "(无对应卡:工具输出契约/schema 漂移校验不在当前 8 张 nanocodex 卡片覆盖范围内,属通用工程契约维护问题,非项目特定机制)"
+   },
+   {
+    "question": "请设计一个能安全支持数百个工具(含不受信任的第三方 MCP servers)的 agent 工具系统。'决定哪些工具暴露给模型看'和'决定某个工具能不能被执行/是否需要审批'这两个决策,你会不会用同一套逻辑处理?为什么?",
+    "tier": "L4",
+    "why_asked": "开放设计题,考察系统级思维——能否把'工具路由/选择准确率'这个 UX/性能问题和'工具执行安全'这个信任/安全问题识别为两条正交关注点并分层设计,避免用同一个信号(如 read_only 标记)同时驱动两件事而产生安全漏洞。",
+    "key_points": [
+     "动态暴露/路由关心的是'如何缩小候选集提升模型选择准确率',本质是 UX 与性能问题,可以用词法/embedding 检索、namespacing、核心集常驻+按需发现等手段解决,判断错了代价是选错工具、多绕一轮",
+     "执行安全关心的是'这个工具调用会不会产生不可逆的真实副作用',本质是信任与安全问题,需要独立的一层——先判定物理上是否允许(如目标路径是否在可写目录内),再判定越界时如何处置(自动批准/询问用户/自动拒绝)",
+     "两者绝不能共用同一个信号做决策:如果把'是否只读'这个暴露/并发用的标志同时当作沙箱写权限的依据,一个谎报只读的第三方工具就能绕过审批直接执行破坏性操作",
+     "MCP 官方立场与此一致:ToolAnnotations 只用于 UX 提示与客户端展示,规范明确要求客户端不能把未受信 server 报告的 hint 当作安全决策依据,真正的安全保证必须落在客户端侧的确定性控制上"
+    ],
+    "follow_ups": [
+     "如果一个 MCP server 完全不受信任,你会不会采信它自报的 readOnlyHint 做任何自动化决策?",
+     "审批粒度你会做成工具级(整个工具需要审批)还是参数级(比如允许读任意文件但只能写指定目录)?为什么?"
+    ],
+    "nanocodex_link": "沙箱 审批状态机 — policy.rs(纯函数判物理可写性 can_write)+ approval.rs(Approver::classify 判 AutoApprove/Ask/AutoDeny)与 工具系统 动态暴露 的 read_only 标志相互正交:read_only 只驱动并发批处理,不 gate 沙箱写,沙箱写完全由 SandboxPolicy 与 Approver 独立决定"
+   }
+  ]
+ }
+}

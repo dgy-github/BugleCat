@@ -1,0 +1,183 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>nanocodex 定时器 · 实现方案设计</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:1000px;margin:0 auto;padding:26px 20px 80px}
+  h1{font-size:25px;margin:.2em 0}
+  h2{font-size:18px;margin:1.5em 0 .6em;border-left:4px solid var(--acc);padding-left:10px}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .facts{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13.5px}
+  .facts b{color:var(--q)}
+  .grid{display:grid;gap:12px;grid-template-columns:1fr}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .star{border-color:#8957e5;box-shadow:0 0 0 1px #8957e5 inset}
+  .body{padding:12px 16px}
+  .body p{margin:.5em 0}
+  .k{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:4px;margin-right:6px;background:#21262d;color:var(--mut)}
+  .k.q{color:#0d1117;background:var(--q)} .k.l{color:#0d1117;background:var(--l)} .k.r{color:#fff;background:var(--r)}
+  .btns{margin:10px 0 4px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:5px 12px;font-size:13px;cursor:pointer;margin-right:8px}
+  svg{width:100%;height:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;margin:6px 0}
+  .n-def{fill:#12233b;stroke:#1f4b7a} .n-run{fill:#132a1a;stroke:#238636} .n-gate{fill:#2a2312;stroke:#9e7318}
+  .n-key{fill:#241833;stroke:#8957e5} .n-out{fill:#161b22;stroke:#30363d}
+  .n-t{fill:#e6edf3;font:600 13px sans-serif} .n-s{fill:#8a919c;font:11px sans-serif} .ar{stroke:#8a919c;stroke-width:1.5;marker-end:url(#a)} .al{fill:#8a919c;font:11px sans-serif}
+</style>
+
+<h1>🕒 nanocodex 定时器 · 实现方案设计</h1>
+<p class="hint">选型=实现方案设计文档。定位：nanocodex 当前<b style="color:#f85149">没有</b>定时器；这份是"我会怎么给一个单文件 CLI agent 加调度"的可落地设计，同时是面试深答。折叠扫图，点卡看全。所有"事实"锚在真实代码，"取舍/推断"单独标。</p>
+
+<div class="thesis"><b>一句话论点</b>：定时器的难点<b>不是计时</b>（那是 OS 的事），是<b>"没人在场时 <code>Decision::Ask</code> 怎么办"</b>。答案：<b>fail-closed 到 Deny，复用现成双层门，不发明新权限</b>——安全建在代码不建在措辞。</div>
+
+<div class="facts">
+<b>已核实事实（来自代码）</b>
+· <code>ncx [PROMPT]</code> 位置参数 = 跑一轮打印退出（<b>无头单发已存在</b>，args.rs USAGE）
+· 4 审批档 <code>untrusted/on-failure/on-request(默认)/never</code>，<code>Decision=AutoApprove/Ask/AutoDeny</code>（approval.rs）
+· approval.rs 注释：<b>"Ask 的弹窗是上层 CLI/GUI 的事"</b>——sandbox crate 不含人机交互
+· <code>~/.nanocodex/config.toml</code>·<code>mcp.toml</code> 既有约定；会话可 <code>--resume/--history</code>
+· 无 clap（手写 parser，为启动快/二进制小）；<code>--history/--memory-merge/--dump-genome</code> = 现成"做一件事即退出"范式
+· 视频子 crate 已依赖 Temporal（自带 Schedules）
+<br><span style="color:var(--mut)">推断/记忆（未逐条复验）：核心 agent 冷启动 ~5.5ms（~199× 于 Python 版）——正是"每次触发新起一个进程"廉价的前提。</span>
+</div>
+
+<h2>🔁 触发到执行的流水（推荐方案：委托 OS 调度器）</h2>
+<svg viewBox="0 0 720 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="定时器流程图">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8a919c"/></marker></defs>
+  <!-- 1 def -->
+  <rect class="n-def" x="200" y="16" width="320" height="52" rx="9"/>
+  <text class="n-t" x="360" y="38" text-anchor="middle">① schedules.toml（声明式）</text>
+  <text class="n-s" x="360" y="56" text-anchor="middle">cron + prompt + workspace + sandbox/approval + 上限</text>
+  <line class="ar" x1="360" y1="68" x2="360" y2="96"/>
+  <text class="al" x="372" y="86">ncx --schedule-sync 注册到 OS</text>
+  <!-- 2 os -->
+  <rect class="n-def" x="210" y="98" width="300" height="52" rx="9"/>
+  <text class="n-t" x="360" y="120" text-anchor="middle">② OS 调度器</text>
+  <text class="n-s" x="360" y="138" text-anchor="middle">Win Task Scheduler / cron / launchd —— 到点</text>
+  <line class="ar" x1="360" y1="150" x2="360" y2="178"/>
+  <text class="al" x="372" y="168">spawn 一次性进程</text>
+  <!-- 3 spawn -->
+  <rect class="n-run" x="150" y="180" width="420" height="54" rx="9"/>
+  <text class="n-t" x="360" y="202" text-anchor="middle">③ 无头单发：ncx -w ws -s sb -a policy "prompt"</text>
+  <text class="n-s" x="360" y="220" text-anchor="middle">复用既有单发路径 · ~5.5ms 冷启动 · 无常驻 daemon</text>
+  <line class="ar" x1="360" y1="234" x2="360" y2="262"/>
+  <!-- 4 gate -->
+  <rect class="n-gate" x="170" y="264" width="380" height="54" rx="9"/>
+  <text class="n-t" x="360" y="286" text-anchor="middle">④ 现成双层门（不改）</text>
+  <text class="n-s" x="360" y="304" text-anchor="middle">SandboxPolicy.can_write　⊥　Approver.classify</text>
+  <line class="ar" x1="360" y1="318" x2="360" y2="346"/>
+  <!-- 5 key -->
+  <rect class="n-key" x="140" y="348" width="440" height="58" rx="9"/>
+  <text class="n-t" x="360" y="371" text-anchor="middle">🔑 ⑤ 无人值守解析器（新增的唯一权限逻辑）</text>
+  <text class="n-s" x="360" y="390" text-anchor="middle">Decision::Ask → Deny（fail-closed）· AutoDeny 不软化 · 仅 AutoApprove 放行</text>
+  <line class="ar" x1="300" y1="406" x2="240" y2="446"/>
+  <line class="ar" x1="420" y1="406" x2="480" y2="446"/>
+  <text class="al" x="205" y="430">AutoApprove</text>
+  <text class="al" x="470" y="430">Ask/AutoDeny</text>
+  <!-- 6 run / deny -->
+  <rect class="n-run" x="90" y="448" width="230" height="48" rx="9"/>
+  <text class="n-t" x="205" y="470" text-anchor="middle">执行（沙箱内）</text>
+  <text class="n-s" x="205" y="486" text-anchor="middle">只做能自动批的活</text>
+  <rect class="n-out" x="410" y="448" width="230" height="48" rx="9"/>
+  <text class="n-t" x="525" y="470" text-anchor="middle">拒绝并记录</text>
+  <text class="n-s" x="525" y="486" text-anchor="middle">留痕 needs_review</text>
+  <line class="ar" x1="205" y1="496" x2="205" y2="522"/>
+  <line class="ar" x1="525" y1="496" x2="525" y2="522"/>
+  <!-- 7 out -->
+  <rect class="n-out" x="150" y="524" width="420" height="32" rx="8"/>
+  <text class="n-s" x="360" y="544" text-anchor="middle">⑥ 落 session log + run-history（exit/末条回复）· 重叠触发→锁跳过</text>
+</svg>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<h2>🧩 设计决策（点开看全）</h2>
+<div class="grid">
+
+  <details class="c star"><summary><span class="t">🔑 ① 承重点：没人在场时 Ask 怎么办</span><div class="peek">fail-closed → Deny，复用双层门不造新权限</div></summary>
+    <div class="body">
+    <p><span class="k l">问题</span>approval.rs 注释明写：<code>Decision::Ask</code> 的真正弹窗"是上层 CLI/GUI 的事"。交互模式下人来点 yes/no；<b>定时器无人值守，没人回答</b>。这是任何"自主/后台 agent"的真正命门，不是计时。</p>
+    <p><span class="k q">答案</span>调度器是一个<b>新的"上层"</b>，它给出的 Ask 解析器是纯粹的 <b>fail-closed</b>：<code>Ask → Deny</code>；<code>AutoDeny</code> 绝不软化；<b>只有 <code>AutoApprove</code> 放行</b>。即定时任务<b>天然只能做"能自动批"的活</b>（<code>untrusted</code> 下的只读白名单 / <code>on-request</code> 下的非越界操作）。</p>
+    <p><span class="k q">为什么优雅</span>不发明任何新权限——<code>classify()</code> 一行不改，双层门（<code>can_write</code> ⊥ <code>classify</code>）原样复用。这正是 nanocodex 既有的<b>"能力剥夺"</b>范式：read-only 让 <code>can_write</code> 恒 false；unattended 让 <code>Ask</code> 恒 Deny。<b>安全建在代码不建在措辞。</b></p>
+    <p><span class="k r">诚实边界</span>代价=定时任务能力受限（默认干不了需要人批的写）。想让它跑写操作，必须在 <code>schedules.toml</code> 里<b>显式预授权</b>一个不会产生 Ask 的组合（如 <code>approval=never</code> + <code>sandbox=workspace-write</code>：越界 auto-deny、界内自动跑），把授权决定<b>前移到人写配置那一刻</b>，而不是运行时。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">⚙️ ② 触发机制三选一</span><div class="peek">推荐委托 OS 调度器（回扣 5.5ms 冷启动）</div></summary>
+    <div class="body">
+    <p><span class="k q">A. 委托 OS 调度器（推荐）</span>把 <code>ncx -w … "prompt"</code> 注册进 Win Task Scheduler / cron / launchd。<b>零 daemon、随开机存活、错过的触发 OS 能补跑</b>。关键理由：agent <b>~5.5ms 冷启动</b>让"每次触发新起一个进程"几乎免费——单发 CLI 的快启动<b>本就是</b>让 per-fire spawn 成立的前提，单文件仍是单文件。代价=要写一层跨平台注册抽象（三个后端）。</p>
+    <p><span class="k l">B. 自带常驻 daemon</span><code>ncx schedule daemon</code> 里跑 tokio 定时轮。跨平台统一，但<b>违背"单发快启动"气质</b>、进程得一直活着（谁拉起/重启？）、等于重造 cron。<b>不推荐</b>作默认。</p>
+    <p><span class="k l">C. 复用 Temporal Schedules</span>视频子 crate 已依赖 Temporal，它自带 durable、崩溃恢复、exactly-once 的 Schedules。<b>只在视频那种长时/贵/须恢复的作业上用</b>；给"每晚跑一次测试"这种轻任务上 Temporal 是杀鸡用牛刀（要跑 Temporal server）。</p>
+    <p><span class="k q">结论</span>核心 CLI 走 A；视频/长作业走 C；B 明确不做。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🏃 ③ 无头执行：复用既有单发路径</span><div class="peek">不造新执行入口</div></summary>
+    <div class="body">
+    <p><span class="k">现成</span><code>ncx [OPTIONS] [PROMPT]</code> 已是"跑一轮→打印→退出"。定时任务触发时<b>就是拼一条这样的命令</b>，可带 <code>-r</code>(接续会话) 或 <code>-o</code>(走编排)。执行路径、上下文压缩、双预算(<code>--max-iterations/--max-tool-calls</code>)全部复用。</p>
+    <p><span class="k">输出去向</span>无人看 stdout → 结果落<b>既有 session log</b> + 一份 <b>run-history</b>（记 exit code / 末条回复 / 触发时间）。这份 run-history 就是排产 <code>audit_log</code> 的同构物——留痕可回溯。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🗂 ④ 数据模型：schedules.toml</span><div class="peek">跟 config.toml/mcp.toml 一个规矩</div></summary>
+    <div class="body">
+    <p><span class="k">位置</span><code>~/.nanocodex/schedules.toml</code>（沿用既有 <code>config.toml</code>/<code>mcp.toml</code> 约定，不新造目录）。</p>
+    <p><span class="k">字段（每条一个 [[schedule]]）</span><code>id</code>(稳定键，OS 任务名/锁名) · <code>cron</code>(表达式) 或 <code>at</code>(一次性) · <code>tz</code>(时区，别踩 UTC/本地混用) · <code>workspace</code> · <code>prompt</code>(或 <code>resume=true</code>/<code>orchestrate=true</code>) · <code>model</code>/<code>profile</code> · <code>sandbox</code>/<code>approval</code>(默认 read-only + on-request，最保守) · <code>max_iterations</code>/<code>max_tool_calls</code> · <code>on_missed</code>(skip|run-once) · <code>overlap</code>(skip|queue，默认 skip)。</p>
+    <p><span class="k">解析</span>沿用 config 层的 toml 加载；<b>纯数据、零 I/O 校验</b>（cron 表达式合法性、policy 合法性在 sync 时一次性查，坏配置早失败）。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">⌨️ ⑤ CLI 形态：管理 flag（不引 clap）</span><div class="peek">照 --history/--memory-merge 范式</div></summary>
+    <div class="body">
+    <p>手写 parser 已有一批"做一件事即退出"的 flag。定时器加同款、<b>不引 clap</b>（守住启动快/二进制小）：</p>
+    <p><span class="k">新增 flag</span><code>--schedule-sync</code>(读 toml → 注册/更新 OS 任务，然后退出) · <code>--schedule-list</code>(列已注册) · <code>--schedule-run &lt;id&gt;</code>(手动触发一次，测试用) · <code>--schedule-remove &lt;id&gt;</code>。触发时 OS 实际调用的仍是普通 <code>ncx -w … "prompt"</code>，<b>无需新执行子命令</b>。</p>
+    <p><span class="k l">取舍</span>不做交互式 <code>schedule</code> 子命令树（那会把手写 parser 推向 clap）；声明式 toml + 少量管理 flag 更贴 nanocodex 气质。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🔒 ⑥ 重叠触发 / 幂等（回扣排产并发）</span><div class="peek">per-id 锁跳过 —— 同一把锁的思路</div></summary>
+    <div class="body">
+    <p><span class="k">问题</span>上一次还没跑完，下一次触发到了（长任务）。</p>
+    <p><span class="k q">做法</span>每个 <code>id</code> 一把<b>轻量锁文件</b>（<code>~/.nanocodex/locks/&lt;id&gt;.lock</code>，含 pid+起始时间）：拿不到锁 → <code>overlap=skip</code> 直接跳过并记一条 "skipped: still running"。这正是<b>排产订单级写锁的同构</b>——"有在跑就别重入"。锁要带 <b>TTL/陈旧 pid 检测</b>（进程崩了不能永久锁死），和排产那个坑一模一样。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🚧 ⑦ 分阶段实现计划</span><div class="peek">MVP 一周内 → 再加固</div></summary>
+    <div class="body">
+    <p><span class="k q">MVP</span>①新 crate <code>ncx-schedule</code>（或 ncx-cli 下一个模块）：toml 模型 + 无人值守解析器(<code>Ask→Deny</code>) + 锁。②只做一个后端（先 Windows Task Scheduler，因你在 win）。③管理 flag <code>--schedule-sync/list/run</code>。④触发命令 = 现成单发。⑤run-history 落盘。</p>
+    <p><span class="k l">加固</span>cron/launchd 后端 + <code>on_missed</code> 补跑 + 结果通知（写文件/webhook）+ 预授权写任务的显式校验 + 单测（解析器 Ask→Deny 的属性测试是重点）。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🧭 ⑧ 不做的边界（诚实）</span><div class="peek">明确划掉的范围</div></summary>
+    <div class="body">
+    <p>· <b>不做自带调度守护进程</b>（重造 cron，违背单发气质）。</p>
+    <p>· <b>不做运行时人审兜底</b>（无人值守本就没人审；要写操作就配置期预授权，别指望运行时）。</p>
+    <p>· <b>不把定时器塞进沙箱 crate</b>（它是"上层"，approval.rs 的分层边界要守住）。</p>
+    <p>· <b>轻任务不用 Temporal</b>（依赖太重）；<b>重/长/须恢复作业才上 Temporal</b>。</p>
+    <p>· MVP <b>不做分布式/多机</b>（单机 OS 调度足够；多机再谈共享锁）。</p>
+    </div>
+  </details>
+
+  <details class="c star"><summary><span class="t">🎤 ⑨ 面试话术</span><div class="peek">30 秒总纲 + 被追问</div></summary>
+    <div class="body">
+    <p><span class="k q">30 秒</span>"给 agent 加定时器，我不会去写一个调度守护进程——我的 agent 冷启动 ~5.5ms，直接把无头单发命令委托给 OS 调度器，每次触发新起一个进程就行，单文件还是单文件。<b>真正的难点不是计时，是'没人在场时 approval 的 Ask 怎么办'</b>：我让调度器这个上层给出一个 fail-closed 的解析器——<code>Ask 一律 Deny</code>、<code>AutoDeny</code> 不软化、只有 <code>AutoApprove</code> 放行，<code>classify()</code> 一行不改。定时任务因此天然只能干能自动批的活；要跑写操作，必须在配置里显式预授权一个不产生 Ask 的策略组合，把授权决定前移到写配置那一刻。"</p>
+    <p><span class="k l">被追问"为什么不自带 daemon"</span>daemon 得一直活着、谁拉起谁重启、等于重造 cron，还违背单发快启动的气质；OS 调度器还免费给我"错过补跑"和"开机存活"。</p>
+    <p><span class="k l">被追问"重叠触发/机器关机"</span>per-id 锁文件跳过重入（跟我排产订单锁同构，锁要带 TTL 防崩溃锁死）；关机错过的触发靠 OS 的 run-once-after-missed。</p>
+    <p><span class="k l">被追问"这算不算引入新攻击面"</span>没有新权限逻辑——双层门原样复用，新增的唯一决策是"无人时 Ask→Deny"，是<b>收紧</b>不是放宽；能演化/被配置的最多是"跑哪条 prompt"，执行始终过沙箱。呼应 ncx-forge"训练接缝即安全边界"的同一信条。</p>
+    </div>
+  </details>
+
+</div>
+
+<h2>🧾 一句话总纲</h2>
+<div class="thesis">nanocodex 加定时器 = <b>委托 OS 调度器 spawn 无头单发</b>（5.5ms 冷启动让 per-fire 进程免费）+ <b>声明式 schedules.toml</b>（沿用既有约定）+ <b>无人值守解析器 Ask→Deny 的 fail-closed</b>（复用双层门、零新权限、把授权前移到配置期）+ <b>per-id 锁</b>（同排产并发思路）。难点从来不是计时，是"没人在场时的审批语义"。</div>

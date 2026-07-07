@@ -1,0 +1,208 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex 视频口播版</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;
+    --q:#3fb950;--l:#d29922;--r:#f85149;--p:#8957e5}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    max-width:900px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:17px;margin:1.2em 0 .4em}
+  h3{font-size:15px;color:#cbd3db;margin:1.1em 0 .3em}
+  blockquote{color:var(--mut);font-size:13.5px;border-left:3px solid var(--line);margin:.6em 0;padding:2px 14px;
+    background:var(--card);border-radius:0 8px 8px 0}
+  blockquote p{margin:.4em 0}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  pre{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow-x:auto}
+  a{color:#58a6ff}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;margin:12px 0}
+  .toc a{margin:2px 10px 2px 0;display:inline-block}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:.6em 0}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  th{background:#1b2129}
+  ul,ol{padding-left:1.4em}
+  li{margin:.25em 0}
+  hr{border:none;border-top:1px solid var(--line);margin:1.1em 0}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;margin:10px 0}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .body{padding:2px 18px 14px}
+  .btns{margin:10px 0 16px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 14px;
+    font-size:13px;cursor:pointer;margin-right:8px}
+</style>
+
+<h1>nanocodex 视频口播版</h1>
+<blockquote>
+<p>用途：基于 <code>nanocodex-interview-project-intro.zh-CN.md</code> 派生的口播稿版本。<br />
+适用场景：项目介绍视频、面试作品集视频、主页介绍视频、个人品牌短视频。<br />
+口径要求：不夸大、不虚构、强调工程边界与本地交付。</p>
+</blockquote>
+
+<div class="toc"><b>目录：</b><br><a href="#1-口播标题">1. 口播标题</a>
+<a href="#2-视频简介文案">2. 视频简介文案</a>
+<a href="#3-30-秒口播版">3. 30 秒口播版</a>
+<a href="#4-60-秒口播版">4. 60 秒口播版</a>
+<a href="#5-90-秒口播版">5. 90 秒口播版</a>
+<a href="#6-适合字幕版的短句拆分">6. 适合字幕版的短句拆分</a>
+<a href="#7-适合视频首屏的-3-句-Hook">7. 适合视频首屏的 3 句 Hook</a>
+<a href="#8-适合视频结尾的-3-句收束">8. 适合视频结尾的 3 句收束</a>
+<a href="#9-可直接喂视频生成器的口播输入">9. 可直接喂视频生成器的口播输入</a></div>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<details class="c" id="1-口播标题">
+<summary><span class="t">1. 口播标题</span><div class="peek">我做了一个从零自研的 Coding Agent：nanocodex</div></summary>
+<div class="body">
+<ul>
+<li>我做了一个从零自研的 Coding Agent：<code>nanocodex</code></li>
+<li>一个真正能本地跑起来的 AI Coding Agent 项目</li>
+<li>不只是接模型，我把 Coding Agent 做成了工程系统</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="2-视频简介文案">
+<summary><span class="t">2. 视频简介文案</span><div class="peek">项目名：nanocodex</div></summary>
+<div class="body">
+<p>项目名：<code>nanocodex</code><br />
+GitHub：<a href="https://github.com/dgy-github/nanocodex">https://github.com/dgy-github/nanocodex</a></p>
+<p>这是一个从零自研的、本地可部署的 Codex 风格 coding agent。它不只是让模型回答代码问题，而是让模型在受控边界内调用文件、shell、补丁、搜索、MCP 等工具，完成真实的软件开发任务。项目重点放在权限控制、工具工程、上下文压缩、项目记忆和本地可交付。</p>
+</div>
+</details>
+
+<details class="c" id="3-30-秒口播版">
+<summary><span class="t">3. 30 秒口播版</span><div class="peek">大家好，我做过一个从零自研的 coding agent，项目叫 nanocodex。</div></summary>
+<div class="body">
+<p>大家好，我做过一个从零自研的 coding agent，项目叫 <code>nanocodex</code>。<br />
+它不是普通的代码聊天机器人，而是一个真正能在本地开发环境里工作的 AI agent。<br />
+模型可以在受控边界里调用文件、shell、补丁、搜索和 MCP 工具，完成真实开发任务。<br />
+我重点做了权限双层控制、工具系统、上下文压缩、项目记忆，还有本地 GUI 和 CLI 的交付。<br />
+这个项目我先用 Python 跑通原型，后面又用 Rust 和 Tauri 重构成更适合长期维护和分发的版本。<br />
+如果你关心 AI Infra、Agent Runtime 或 Developer Tools，这个项目会很有代表性。</p>
+</div>
+</details>
+
+<details class="c" id="4-60-秒口播版">
+<summary><span class="t">4. 60 秒口播版</span><div class="peek">我做过一个从零自研的 coding agent，名字叫 nanocodex，GitHub 也已经开源了。</div></summary>
+<div class="body">
+<p>我做过一个从零自研的 coding agent，名字叫 <code>nanocodex</code>，GitHub 也已经开源了。<br />
+这个项目想解决的，不是“怎么让模型会说代码”，而是“怎么把模型真正接进开发环境，而且还能控得住”。  </p>
+<p>所以我做的不是一个普通聊天工具，而是一个本地可运行的 Codex 风格 agent。<br />
+它可以在受控边界里调用文件、shell、补丁、搜索、MCP 和技能文档，去完成真实的软件开发任务。  </p>
+<p>这个项目里我重点处理了几件事。<br />
+第一，是 sandbox 和 approval 组成的双层权限控制。<br />
+第二，是工具系统怎么动态暴露给模型，而不是一次把所有能力全塞进去。<br />
+第三，是长任务里的上下文压缩和项目记忆，避免 agent 越跑越糊。<br />
+第四，是本地 GUI、CLI 和原生分发，让它更像一个真正能交付的开发工具。  </p>
+<p>整个项目经历了两个阶段：前期我用 Python 快速验证产品原型，后面再用 Rust 重写运行时，用 Tauri 做桌面端，把它收紧成更适合长期维护的工程系统。<br />
+我觉得这个项目最能代表我的一件事，是我不是只会接模型，而是会把模型放进一个真正可控、可追责、可交付的工程边界里。</p>
+</div>
+</details>
+
+<details class="c" id="5-90-秒口播版">
+<summary><span class="t">5. 90 秒口播版</span><div class="peek">我做过一个从零自研的 coding agent，项目叫 nanocodex，现在已经开源在 GitHub 上。</div></summary>
+<div class="body">
+<p>我做过一个从零自研的 coding agent，项目叫 <code>nanocodex</code>，现在已经开源在 GitHub 上。<br />
+这个项目的核心，不是做一个“会聊天的代码助手”，而是把 AI coding agent 真正做成一个工程系统。  </p>
+<p>它本质上是一个本地可部署的 Codex 风格 agent。<br />
+模型不是只负责回答问题，而是可以在受控边界里调用文件、shell、补丁、搜索、MCP 和其他工具，去完成真实的软件开发任务。  </p>
+<p>但我一开始就不想把高风险控制交给模型自己判断。<br />
+所以项目里最重要的设计之一，就是把安全和执行边界尽量收回代码侧。<br />
+比如写操作不是直接放行，而是经过 sandbox 和 approval 两层正交控制。<br />
+工具也不是全量暴露，而是按回合动态裁剪。<br />
+上下文也不是满了就暴力总结，而是先做非破坏式编辑，再做更高成本的压缩。  </p>
+<p>这个项目还有一个我自己很看重的点，就是它不是停在原型。<br />
+我前期先用 Python 跑通 agent loop、工具调用、审批和桌面交互，确认产品面成立；<br />
+后面再用 Rust 把运行时拆成更清晰的 crate 边界，再配上 Tauri 桌面壳，解决类型契约、启动性能和原生分发的问题。  </p>
+<p>所以 <code>nanocodex</code> 对我来说，不只是一个 AI demo，<br />
+而是一套关于工具工程、权限控制、上下文工程、本地交付和 agent runtime 的完整实践。<br />
+如果岗位偏 AI Infra、Agent Platform 或 Developer Tools，这个项目会非常适合作为主讲项目。</p>
+</div>
+</details>
+
+<details class="c" id="6-适合字幕版的短句拆分">
+<summary><span class="t">6. 适合字幕版的短句拆分</span><div class="peek">1. 我做过一个从零自研的 coding agent。</div></summary>
+<div class="body">
+<ol>
+<li>我做过一个从零自研的 coding agent。  </li>
+<li>项目名字叫 <code>nanocodex</code>。  </li>
+<li>它不是普通的代码聊天机器人。  </li>
+<li>它是一个本地可部署的 Codex 风格 agent。  </li>
+<li>模型可以在受控边界里调用真实工具。  </li>
+<li>比如文件、shell、补丁、搜索、MCP。  </li>
+<li>我重点做了权限双层控制。  </li>
+<li>也做了工具系统、上下文压缩和项目记忆。  </li>
+<li>前期我用 Python 验证原型。  </li>
+<li>后期我用 Rust 和 Tauri 做了工程化重构。  </li>
+<li>这个项目更像一个可交付的开发工具。  </li>
+<li>而不只是一个接上模型的 demo。</li>
+</ol>
+</div>
+</details>
+
+<details class="c" id="7-适合视频首屏的-3-句-Hook">
+<summary><span class="t">7. 适合视频首屏的 3 句 Hook</span><div class="peek">我不是只接了一个模型，我做了一套真正能跑在本地的 coding agent 系统。</div></summary>
+<div class="body">
+<ul>
+<li>我不是只接了一个模型，我做了一套真正能跑在本地的 coding agent 系统。</li>
+<li>大多数 AI 编码项目停在 demo，我把它做到了权限控制、工具系统和桌面交付。</li>
+<li>如果你想知道 AI coding agent 怎么从原型走到工程系统，这个项目就是我的答案。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="8-适合视频结尾的-3-句收束">
+<summary><span class="t">8. 适合视频结尾的 3 句收束</span><div class="peek">这个项目现在已经开源，GitHub 上可以直接看到完整实现。</div></summary>
+<div class="body">
+<ul>
+<li>这个项目现在已经开源，GitHub 上可以直接看到完整实现。</li>
+<li>对我来说，AI agent 最重要的不是“会说”，而是“能在边界里真正做事”。</li>
+<li>如果岗位偏 AI Infra、Agent Platform 或 Developer Tools，<code>nanocodex</code> 会是我最想展开讲的项目之一。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="9-可直接喂视频生成器的口播输入">
+<summary><span class="t">9. 可直接喂视频生成器的口播输入</span><div class="peek">```yaml</div></summary>
+<div class="body">
+<pre><code class="language-yaml">video_topic: nanocodex 项目介绍
+language: zh-CN
+tone:
+  - 专业
+  - 稳定
+  - 可信
+  - 工程感强
+target_audience:
+  - 面试官
+  - 技术同行
+  - AI Infra 招聘方
+core_message: &gt;
+  nanocodex 不是普通代码聊天机器人，而是一个从零自研、本地可部署、
+  强调权限边界、工具工程、上下文压缩和工程交付的 coding agent 系统。
+must_mention:
+  - 项目名 nanocodex
+  - GitHub 链接 https://github.com/dgy-github/nanocodex
+  - Python 原型 -&gt; Rust 重构 -&gt; Tauri 桌面端
+  - sandbox / approval 双层控制
+  - tool calling / MCP / context compaction / project memory
+avoid:
+  - 夸大成通用 AGI
+  - 说成纯聊天机器人
+  - 虚构没有实现的机制
+recommended_duration:
+  - 30s
+  - 60s
+  - 90s
+</code></pre>
+</div>
+</details>
+

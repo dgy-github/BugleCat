@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>作品集优势总图 · 4 旗舰 × 驾驭工程环</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;
+    --load:#c2410c;--load-soft:#fbe4d6;--sub:#f0d9c8;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;}
+  .wrap{max-width:1040px;margin:0 auto;padding:26px 20px 60px;}
+  h1{font-size:23px;margin:0 0 4px;} .sub{font-size:13.5px;color:var(--text2);margin:0 0 16px;}
+  /* 信条 banner */
+  .creed{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px;}
+  .creed span{font-size:12px;font-weight:700;background:var(--surface);border:1px solid var(--border2);border-radius:20px;padding:5px 12px;color:var(--text);}
+  .creed span b{color:var(--load);}
+  /* matrix */
+  table{width:100%;border-collapse:separate;border-spacing:3px;font-size:11.5px;}
+  th,td{padding:7px 6px;border-radius:8px;text-align:center;vertical-align:middle;}
+  thead th{background:var(--surface2);color:var(--text2);font-size:11px;font-weight:700;}
+  thead th.ring{min-width:70px;}
+  tbody th{background:var(--surface);text-align:left;padding:8px 10px;min-width:150px;}
+  tbody th .p{font-size:13.5px;font-weight:800;display:block;}
+  tbody th .id{font-size:10px;color:var(--muted);font-weight:500;}
+  td{background:#fff;border:1px solid var(--border);color:var(--text2);}
+  td.load{background:var(--load);color:#fff;font-weight:800;border-color:var(--load);}
+  td.sub{background:var(--load-soft);color:#7a2e08;font-weight:600;border-color:var(--sub);}
+  td.dim{color:#bdb8ad;background:var(--surface);border-color:var(--border);}
+  .legend{display:flex;gap:16px;margin:10px 0 22px;font-size:12px;color:var(--text2);flex-wrap:wrap;}
+  .legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px;}
+  /* 承重方式 cards */
+  .rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:6px 0 20px;}
+  .card{background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:13px;border-left:4px solid var(--load);}
+  .card h3{margin:0 0 6px;font-size:15px;}
+  .card .line{font-size:12px;color:var(--text2);margin:3px 0;}
+  .card .line b{color:var(--load);}
+  .talk{background:#fbe4d6;border-left:4px solid var(--load);border-radius:0 12px 12px 0;padding:14px 18px;font-size:14px;}
+  .talk b{color:var(--load);}
+  footer{margin-top:28px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+  code{font-family:var(--mono);font-size:11px;background:var(--surface2);padding:1px 4px;border-radius:4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🎯 作品集优势总图 · 4 旗舰 × 驾驭工程环</h1>
+<p class="sub">面试前 30 秒扫一眼定位：橙格 = 该项目<b>主承重环</b>，浅橙 = 次承重。骨架相同，承重随业务。</p>
+
+<div class="creed">
+  <span>共同信条①　<b>LLM 原始输出不直接落地</b></span>
+  <span>②　<b>安全建在代码不建在措辞</b></span>
+  <span>③　<b>有确定性判据就别用 LLM judge</b></span>
+  <span>④　<b>数据不出域</b></span>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align:left">项目 ＼ 驾驭工程环</th>
+      <th class="ring">Prompt</th><th class="ring">Context</th><th class="ring">Tools</th><th class="ring">Workflow</th>
+      <th class="ring">Guardrails</th><th class="ring">Memory</th><th class="ring">Evals</th><th class="ring">Feedback</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th><span class="p">🦀 nanocodex</span><span class="id">Rust 编码 agent</span></th>
+      <td class="dim">·</td>
+      <td class="sub">非破坏压缩</td>
+      <td class="sub">渐进暴露</td>
+      <td>run_turn 不变式</td>
+      <td class="load">★ 权限双门</td>
+      <td>recall 线索</td>
+      <td class="dim">·</td>
+      <td class="load">★ 离线演化=边界</td>
+    </tr>
+    <tr>
+      <th><span class="p">🏭 排产</span><span class="id">LangGraph 部署版</span></th>
+      <td>角色边界</td>
+      <td class="sub">RAG 双模</td>
+      <td>读写分离</td>
+      <td class="load">★ 确定性 workflow</td>
+      <td class="load">★ 四段治理</td>
+      <td class="dim">·</td>
+      <td class="load">★ 三层+飞轮</td>
+      <td>online 回流</td>
+    </tr>
+    <tr>
+      <th><span class="p">🔐 网关</span><span class="id">privacy-gateway</span></th>
+      <td class="dim">·</td>
+      <td class="sub">prefix 缓存</td>
+      <td>两级路由</td>
+      <td>短路→路由</td>
+      <td class="load">★ 脱敏+block</td>
+      <td>后台压缩</td>
+      <td class="dim">·</td>
+      <td class="dim">·</td>
+    </tr>
+    <tr>
+      <th><span class="p">🎖 campaign</span><span class="id">多 agent 编排</span></th>
+      <td>角色分离</td>
+      <td class="sub">事件派生</td>
+      <td>PolicyGate</td>
+      <td class="load">★ 编排+A2A</td>
+      <td class="sub">PolicyGate 治理</td>
+      <td class="load">★ 事件溯源</td>
+      <td>chaos 演练</td>
+      <td>HITL resume</td>
+    </tr>
+  </tbody>
+</table>
+<div class="legend">
+  <span><i style="background:#c2410c"></i>主承重环（面试主攻）</span>
+  <span><i style="background:#fbe4d6;border:1px solid #f0d9c8"></i>次承重</span>
+  <span><i style="background:#fff;border:1px solid #d9d6cc"></i>有做</span>
+  <span><i style="background:#f3f1ea"></i>· 轻</span>
+</div>
+
+<div class="rows">
+  <div class="card"><h3>🦀 nanocodex</h3>
+    <div class="line">角色：<b>LLM=执行者</b>（沙箱托底）</div>
+    <div class="line">最怕：假阳性（乱改文件/删库）</div>
+    <div class="line">承重：<b>权限双门 + 离线演化即边界</b></div>
+  </div>
+  <div class="card"><h3>🏭 排产</h3>
+    <div class="line">角色：<b>LLM=翻译官</b>（LLM-as-interface）</div>
+    <div class="line">最怕：假阳性（幻觉方案落地）</div>
+    <div class="line">承重：<b>确定性 workflow + 四段治理 + 评测飞轮</b></div>
+  </div>
+  <div class="card"><h3>🔐 网关</h3>
+    <div class="line">角色：<b>LLM=本地优先</b>（local-first）</div>
+    <div class="line">最怕：数据外泄</div>
+    <div class="line">承重：<b>脱敏 + 命中密钥硬 block</b></div>
+  </div>
+  <div class="card"><h3>🎖 campaign</h3>
+    <div class="line">角色：<b>LLM=被编排者</b>（多 agent）</div>
+    <div class="line">最怕：状态不一致 / 雪崩</div>
+    <div class="line">承重：<b>事件溯源 + 编排/A2A + 治理</b></div>
+  </div>
+</div>
+
+<div class="talk">
+  <b>30 秒开场话术：</b>「我用<b>同一套驾驭工程</b>打了 4 个不同承重的实体——<b>编码押权限</b>（沙箱+审批+能力剥夺）、<b>排产押确定性治理</b>（workflow+四段治理+评测飞轮）、<b>网关押隐私</b>（脱敏+硬 block+local-first）、<b>多 agent 押事件源编排</b>。骨架相同：LLM 原始输出不直接落地、安全建在代码上、有确定性判据就不用 LLM judge、数据不出域。<b>承重随业务变，方法论不变。</b>」
+</div>
+
+<footer>
+  作品集优势总图 · 面试定位用 · 深挖材料：nanocodex(6图+7题) · 排产(2图深挖+7题) · 网关(6图+6题) · campaign(对话深挖)
+</footer>
+</div>
+</body>
+</html>

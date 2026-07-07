@@ -1,0 +1,137 @@
+{
+ "key": "context-memory",
+ "name": "上下文工程与记忆系统",
+ "data": {
+  "category": "上下文工程与记忆系统 (Context Engineering & Memory Systems)",
+  "definition": {
+   "statement": "上下文工程(context engineering)是围绕LLM推理时那个有限的、由system prompt、tools、few-shot examples、message history等token组成的context window,系统性地决定'该放入什么、该省略什么、该外部化到哪里'的工程学科。Anthropic在其工程博客《Effective context engineering for AI agents》(2025-09-29)中将其定义为'the set of strategies for curating and maintaining the optimal set of tokens (information) during LLM inference, including all the other information that may land there outside of the prompts',并指出其必要性源于'context rot':needle-in-a-haystack类基准显示,随着context window中token数增加,模型准确召回信息的能力会下降,这是一种精度梯度而非硬崖式失效,根源在于Transformer架构下每个token都要attend to每一个其他token所形成的O(n²) pairwise关系在长序列上被稀释,加上训练数据里长序列样本本身更少。为应对这一有限的'attention budget',该文给出三类互补的long-horizon手段:compaction(把接近上限的对话历史交给模型摘要后重新起一个context,如Claude Code保留架构决策/未解决bug/实现细节,同时丢弃冗余tool原始输出)、structured note-taking/agentic memory(agent主动把状态写到context之外的持久存储如NOTES.md或Claude的memory tool,按需读回)、以及sub-agent architectures(子agent在独立干净context里做数万token的深度探索,只把1000-2000 token的蒸馏摘要返回给主agent)。在记忆的时间维度上,MemGPT(Packer et al., arXiv:2310.08560,《MemGPT: Towards LLMs as Operating Systems》)提出的OS式分层记忆模型被广泛借鉴:main context(相当于内存)容纳system instruction、working context和FIFO消息队列,是模型直接可见的短期记忆;外部的recall storage(全部历史消息的可检索库)与archival storage(向量化长期知识库)构成长期记忆,二者通过LLM自主调用的函数(如archival_memory_search、core_memory_append)做类比OS virtual memory paging的换入换出。检索增强生成(RAG)是让长期记忆'非参数化'地外置于模型权重之外的经典范式,源自Lewis et al.(2020, arXiv:2005.11401, NeurIPS,《Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks》),核心是把预训练的parametric memory(模型权重里的知识)与可检索的non-parametric memory(外部文档索引)结合,靠检索器返回的段落约束生成,以提升事实性、可追溯性并支持知识更新而无需重新训练。在记忆的写入去重与遗忘策略上,Generative Agents(Park et al., 2023, arXiv:2304.03442, UIST,《Generative Agents: Interactive Simulacra of Human Behavior》)给出了被广泛引用的检索打分公式——score = 归一化后的recency(指数衰减)+ importance(LLM打1-10分)+ relevance(embedding余弦相似度)的加权和,并引入'reflection'机制,定期让LLM在近百条原始记忆上归纳出更高层抽象并写回记忆流;MemoryBank(Zhong et al., arXiv:2305.10250)则显式借鉴心理学中的Ebbinghaus forgetting curve,用随时间指数衰减的记忆强度分数做选择性遗忘与强化,避免记忆库无限增长带来的检索噪声。Prompt caching是服务于同一工程目标的推理层优化:据Anthropic官方文档(platform.claude.com/docs/en/build-with-claude/prompt-caching,原docs.anthropic.com同路径为其legacy别名),其机制是对prompt按tools→system→messages固定顺序做前缀哈希,cache write只发生在cache_control breakpoint处、写入'截止该断点的整条前缀'对应的一条entry;下一次请求在breakpoint处及其之前最多回溯20个block(20-block lookback window)寻找此前写入过的匹配entry,断点之前任意内容变化(时间戳、工具集变化等)都会使该断点及之后全部cache miss;5分钟TTL下cache write price是base input token的1.25倍,cache read只需0.1倍,因此要求把静态、跨请求不变的内容放在prompt最前且保持字节级稳定。",
+   "sources": [
+    {
+     "title": "Effective context engineering for AI agents (Anthropic Engineering Blog, 2025-09-29)",
+     "url": "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+    },
+    {
+     "title": "Prompt caching - Claude Platform Docs (Anthropic)",
+     "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+    },
+    {
+     "title": "MemGPT: Towards LLMs as Operating Systems (Packer et al., arXiv:2310.08560)",
+     "url": "https://arxiv.org/abs/2310.08560"
+    },
+    {
+     "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (Lewis et al., arXiv:2005.11401, NeurIPS 2020)",
+     "url": "https://arxiv.org/abs/2005.11401"
+    },
+    {
+     "title": "Generative Agents: Interactive Simulacra of Human Behavior (Park et al., arXiv:2304.03442, UIST 2023)",
+     "url": "https://arxiv.org/abs/2304.03442"
+    },
+    {
+     "title": "MemoryBank: Enhancing Large Language Models with Long-Term Memory (Zhong et al., arXiv:2305.10250)",
+     "url": "https://arxiv.org/abs/2305.10250"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "Context window 为什么是agent工程里的核心瓶颈?什么是'context rot',工程上该怎么系统性应对,而不是简单指望'更大的context window'?",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解context是有限、有衰减效应的资源而非无限缓存,是判断候选人有没有做过真实长会话agent的基础问题。",
+    "key_points": [
+     "Anthropic定义context engineering为'curating and maintaining the optimal set of tokens...during LLM inference'(《Effective context engineering for AI agents》,2025-09-29)",
+     "'context rot':needle-in-a-haystack类基准显示随context中token数增加,模型准确召回信息的能力下降,是精度梯度而非硬崖式失效",
+     "根因是Transformer里每个token都要attend所有其他token,形成O(n²) pairwise关系,长度增长使关系被稀释,训练数据里长序列样本本身也更少",
+     "工程应对不是等更大context window,而是主动裁剪出'能最大化期望行为的最小高信号token集合'"
+    ],
+    "follow_ups": [
+     "如果模型支持1M甚至10M context,是否还需要context compaction?",
+     "怎么量化衡量你的agent在生产里有没有出现context rot?"
+    ],
+    "nanocodex_link": "02_context_compression — session.rs 的 edited_body 两趟压缩算法(压缩旧 tool 结果 max_tool_result_chars=4k、超预算 max_chars=120k 丢最老前缀)正是应对 context rot 的具体工程实现"
+   },
+   {
+    "question": "Compaction(摘要重置)、structured note-taking(agentic memory)、sub-agent架构(context隔离)是应对long-horizon任务的三种context管理手段,它们分别适合什么场景?怎么取舍?",
+    "tier": "L2",
+    "why_asked": "长程coding/research agent工程里最常被问到的架构权衡题,考察候选人是否知道'一刀切用摘要压缩'并非最优解。",
+    "key_points": [
+     "Compaction:把接近context上限的历史交给模型摘要后重新起窗口,保留架构决策/未解决bug/实现细节,丢弃冗余tool原始输出;适合需要保持强连续对话流的高频来回任务",
+     "Structured note-taking:agent主动把状态写到context之外的持久文件(如NOTES.md、Claude的memory tool),按需读回;持久化开销最小,适合有清晰milestone的迭代任务",
+     "Sub-agent架构:子agent在独立干净context里做数万token的深度探索,只把1000-2000 token的蒸馏摘要返回给主agent,把细节探索的token消耗与主线决策的context占用解耦;适合可并行探索的复杂研究/搜索任务",
+     "三者不互斥,可组合使用"
+    ],
+    "follow_ups": [
+     "子agent摘要过度压缩导致主agent决策错误时怎么排查?",
+     "note-taking写的内容算短期记忆还是长期记忆,由谁决定何时读回?"
+    ],
+    "nanocodex_link": "05_orchestrator_comm — nanocodex的orchestrator确实把每个worker放进全新无状态AgentRunner会话、配独立workspace拷贝(真实IPC靠promote_worker),这是与sub-agent context隔离结构上相似的一点;但驱动这个设计的是修复并行worker apply_patch写同一文件的撞车(isolate.rs:4-8)、并支持verifier的best-of-N裁决,而不是token预算式的摘要蒸馏——build_verify_task实际上是把每个worker的完整原始输出'--- worker i --- {r}'原样拼接给verifier,没有任何摘要/压缩步骤,与Anthropic所述'子agent只返回1000-2000 token蒸馏摘要给主agent'正好相反。只能当作部分/结构性类比,不要当成同一技术的实现"
+   },
+   {
+    "question": "什么时候该用RAG(向量检索)、什么时候该把资料直接放进long context、什么时候该用agentic的'just-in-time'检索(现查现用)?三者的工程权衡是什么?",
+    "tier": "L2",
+    "why_asked": "RAG是这个类目里最高频的基础考点,真正区分候选人水平的是能否讲清它跟长上下文、agentic检索的边界,而不是背诵RAG流程。",
+    "key_points": [
+     "RAG(Lewis et al., 2020, arXiv:2005.11401)本质是把预训练的parametric memory(模型权重)与可检索的non-parametric memory(外部文档索引)结合,靠检索段落约束生成,提升事实性、可追溯性,知识更新无需重新训练",
+     "预计算embedding+向量检索速度快、成本可控,但存在index过期、embedding语义与查询语义不对齐的风险",
+     "Agentic just-in-time检索(如用文件路径/查询等轻量标识符运行时动态加载)更贴近人类用文件系统/书签做外部索引的方式,能做渐进式披露(progressive disclosure),但比预取慢,依赖模型自主导航、不走死胡同的能力",
+     "工程上常见混合策略:高置信度稳定资料预取进context,长尾/易变资料留给运行时探索"
+    ],
+    "follow_ups": [
+     "chunk size怎么选,过大过小分别有什么后果?",
+     "怎么评估RAG系统的召回率和精确率,分别对下游生成质量的影响是什么?"
+    ],
+    "nanocodex_link": "03_tools — tools.rs 的 tool_search 打分整个工具catalog(词法打分器,无需embedding)、把命中名写入共享 ctx.tool_hints 供下一轮暴露,是'agentic just-in-time检索'(运行时按需动态发现资源而非一次性全量预置)这一设计哲学在工具发现场景下的具体落地"
+   },
+   {
+    "question": "Agent长期运行后,记忆库里出现重复、过时甚至互相矛盾的记忆片段,检索结果被这些噪声污染,拖累了决策质量——你怎么诊断根因、怎么修?",
+    "tier": "L3",
+    "why_asked": "记忆系统在生产环境里最常见的故障模式,考察候选人有没有真正跑过'越用越乱'的记忆系统,能否给出可落地的修复路径而不是空泛地说'加个清理任务'。",
+    "key_points": [
+     "先定位写入路径:是否每次相似经历都不做判断地新建一条记录(没有去重),导致同一事实在库里出现N份且都被检索打分函数排到高位",
+     "再看retrieval打分公式:如果只看relevance(embedding相似度)不看recency/importance,旧的、已被后续事实覆盖的记忆会持续被检索到并与新记忆冲突",
+     "Generative Agents(Park et al., arXiv:2304.03442)方案:retrieval score = 归一化后的recency+importance+relevance加权和,并引入独立的reflection步骤定期把近百条原始记忆归纳成高层结论回写",
+     "MemoryBank(Zhong et al., arXiv:2305.10250)方案:借鉴Ebbinghaus forgetting curve,给每条记忆维护随时间指数衰减的记忆强度分数,对强度过低的做选择性遗忘",
+     "修复路径:引入定期consolidation对高相似度记忆做折叠去重;检索打分加入时间衰减项;对长期未被访问且重要性低的记忆做显式降权或删除"
+    ],
+    "follow_ups": [
+     "去重相似度阈值设太低/太高分别会造成什么后果?",
+     "怎么区分'该被遗忘的噪音'和'低频但关键的记忆'(比如一年一次的重要偏好)?"
+    ],
+    "nanocodex_link": "06_memory — memory.rs 的 consolidate() 用 Jaccard 阈值去重折叠,正是解决这个具体故障模式(记忆冗余污染recall)的工程手段"
+   },
+   {
+    "question": "Anthropic的prompt caching底层是怎么工作的?为什么prompt里'哪部分放前面、哪部分放后面'会直接决定缓存命中率和成本?",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解prompt caching不是'语义缓存'而是严格的前缀匹配机制,这直接决定了agent的system prompt/tool定义该怎么组织。",
+    "key_points": [
+     "据Anthropic官方文档(platform.claude.com/docs/en/build-with-claude/prompt-caching):prompt按tools→system→messages固定顺序做前缀哈希;cache write只发生在cache_control breakpoint处,写入'截止该断点的整条前缀'对应的一条entry",
+     "读取时在breakpoint处及其之前最多回溯20个block(20-block lookback window)寻找此前写入过的匹配entry,本质是'找之前写过的prefix'而非'识别哪部分内容没变'",
+     "断点之前任意一个block变化(时间戳、工具集变化、图片增减)都会让该断点及其后的哈希失效,导致缓存未命中",
+     "成本结构:5分钟TTL下cache write是base input token价格的1.25倍,cache read只要0.1倍,只有足够高的复用次数才能覆盖写入溢价",
+     "工程含义:必须把静态、跨请求不变的内容(tool定义、system instruction)放在prompt最前面且保持字节级稳定,把易变内容放在最后"
+    ],
+    "follow_ups": [
+     "automatic caching和explicit breakpoint该怎么选?",
+     "如果一定要在system prompt里加时间戳,怎么设计能不破坏缓存?"
+    ],
+    "nanocodex_link": ""
+   },
+   {
+    "question": "如果agent每回合都动态裁剪、只暴露最相关的一小部分工具schema(而不是固定工具集),这跟prompt caching依赖'稳定前缀'的机制是不是冲突?工程上怎么调和?",
+    "tier": "L4",
+    "why_asked": "把'工具动态暴露'和'prompt caching'两个真实机制放在一起做设计权衡的开放题,考察候选人能否预见两个独立优化目标之间的相互作用,而不是孤立看待每个机制。",
+    "key_points": [
+     "根据prompt caching机制,tools字段排在prefix最前面且要求跨请求字节级一致才能命中缓存",
+     "如果每回合根据query动态裁剪到TopN个工具,tools块内容逐回合变化,会导致从tools往后的所有内容(system、历史消息)在该breakpoint处全部miss,退化成每轮全量付费",
+     "调和思路一:分层——把高频稳定的少数工具放在prompt最前参与缓存,按需检索到的长尾工具作为不改变前缀的追加上下文放在后面",
+     "调和思路二:接受一定缓存命中率损失换取token效率与决策清晰度,按实际turn数/费用结构核算哪个更划算",
+     "本质是'context精简'与'prompt稳定性'两个工程目标的直接冲突,没有免费的解"
+    ],
+    "follow_ups": [
+     "如果你的产品turn数很多(如长程coding agent),你会偏向哪种设计?",
+     "怎么用数据而不是直觉去决定该不该做动态工具暴露?"
+    ],
+    "nanocodex_link": "03_tools — tools.rs 的 schemas_limited_for_query 每回合把工具裁剪到 DEFAULT_VISIBLE_TOOL_LIMIT=9 个,正是与 prompt caching 前缀稳定性直接冲突的具体机制"
+   }
+  ]
+ }
+}

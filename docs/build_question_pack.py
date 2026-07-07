@@ -11,7 +11,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "design_data.zh.json" if (HERE / "design_data.zh.json").exists() else HERE / "design_data.json"
-OUT = HERE / "nanocodex-interview-pack.zh.md"
+OUT = HERE / "interview-prep" / "nanocodex-interview-pack.zh.md"
 
 TITLES = [
     ("harness", "Harness · Agent 回合循环"),

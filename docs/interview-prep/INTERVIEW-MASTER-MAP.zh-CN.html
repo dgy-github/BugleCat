@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 开发面试 · 作战总图</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;
+    --proj:#1f6feb;--topic:#c2410c;--creed:#0e7a52;--gap:#b8860b;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;}
+  .wrap{max-width:1060px;margin:0 auto;padding:26px 20px 70px;}
+  h1{font-size:24px;margin:0 0 4px;} .sub{font-size:13.5px;color:var(--text2);margin:0 0 6px;}
+  .master{font-size:14.5px;font-weight:700;background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:12px 16px;margin:12px 0;}
+  .master b{color:var(--topic);}
+  .creed{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 20px;}
+  .creed span{font-size:12px;font-weight:700;background:#eef6f1;border:1px solid #bfe0cf;border-radius:20px;padding:5px 12px;color:#0e5a3c;}
+  nav{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;gap:8px;padding:9px 0;margin-bottom:12px;flex-wrap:wrap;}
+  nav a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 11px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav a:hover{border-color:var(--proj);color:var(--proj);}
+  section{padding:20px 0 4px;scroll-margin-top:52px;} h2{font-size:18px;margin:0 0 8px;}
+  .lead{font-size:13px;color:var(--text2);margin:2px 0 12px;}
+  .zones{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:720px){.zones{grid-template-columns:1fr;}}
+  .zone{border:1px solid var(--border2);border-radius:14px;padding:14px;}
+  .zone.p{border-top:4px solid var(--proj);} .zone.t{border-top:4px solid var(--topic);}
+  .zone h3{margin:0 0 8px;font-size:14px;}
+  .item{background:var(--surface);border-radius:10px;padding:9px 11px;margin:7px 0;}
+  .item .nm{font-weight:800;font-size:13px;} .item .nm .ic{font-weight:500;font-size:11px;color:var(--muted);}
+  .item .bear{font-size:11px;color:var(--proj);font-weight:700;margin-top:2px;}
+  .zone.t .item .bear{color:var(--topic);}
+  .item .docs{font-size:11px;color:var(--text2);margin-top:3px;}
+  .item .docs code{font-family:var(--mono);font-size:10px;background:var(--surface2);padding:0 3px;border-radius:3px;}
+  table{width:100%;border-collapse:separate;border-spacing:3px;font-size:12px;margin:6px 0;}
+  th,td{padding:7px 9px;border-radius:7px;text-align:left;vertical-align:top;}
+  th{background:var(--surface2);color:var(--text2);font-size:11.5px;} td{background:#fff;border:1px solid var(--border);}
+  td.env{font-weight:700;white-space:nowrap;background:var(--surface);}
+  .thin{color:var(--gap);font-weight:700;}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:6px 0;}
+  .step{flex:1;min-width:150px;background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:11px;}
+  .step .n{font-size:11px;font-weight:800;color:var(--proj);} .step p{margin:4px 0 0;font-size:11.5px;color:var(--text2);}
+  .step code{font-family:var(--mono);font-size:10px;}
+  .arrow{align-self:center;color:var(--muted);font-size:16px;}
+  footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+  a.doc{color:var(--proj);text-decoration:none;} a.doc:hover{text-decoration:underline;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🗺 Agent 开发面试 · 作战总图</h1>
+<p class="sub">单一入口。面试前扫这张定位 → 往下钻到项目流程图 → 刷题卡录音 → 被追问翻备弹。</p>
+
+<div class="master">主叙事:<b>同一套「驾驭工程」，我打了 4 个不同承重的实体 + 吃透 3 个横切主题;骨架相同，承重随业务变。</b></div>
+<div class="creed">
+  <span>信条① LLM 原始输出不直接落地</span>
+  <span>② 安全建在代码不建在措辞</span>
+  <span>③ 有确定性判据就别用 LLM judge</span>
+  <span>④ 数据不出域</span>
+</div>
+
+<nav>
+  <a href="#zones">🧭 全景</a><a href="#index">📁 资产索引</a><a href="#env">🎯 驾驭工程环覆盖</a><a href="#flow">🎤 刷题作战流程</a>
+</nav>
+
+<!-- ===== 全景 ===== -->
+<section id="zones">
+  <h2>🧭 全景:4 旗舰(承重实体) + 3 横切(通用能力)</h2>
+  <div class="zones">
+    <div class="zone p">
+      <h3>🔵 4 旗舰项目(不同承重)</h3>
+      <div class="item"><div class="nm">🦀 nanocodex <span class="ic">Rust 编码 agent</span></div><div class="bear">承重:权限双门 · 离线演化=安全边界</div><div class="docs">6 图 + 7 题 + 模块备弹</div></div>
+      <div class="item"><div class="nm">🏭 排产 <span class="ic">LangGraph 部署版·核心</span></div><div class="bear">承重:确定性 workflow · 四段治理 · 评测飞轮</div><div class="docs">2 图深挖 + 7 题</div></div>
+      <div class="item"><div class="nm">🔐 网关 <span class="ic">privacy-gateway</span></div><div class="bear">承重:脱敏 + 命中密钥硬 block · local-first</div><div class="docs">6 图 + 6 题</div></div>
+      <div class="item"><div class="nm">🎖 campaign <span class="ic">多 agent 编排</span></div><div class="bear">承重:事件溯源 · 编排+A2A · PolicyGate 治理</div><div class="docs">6 图 + 7 题</div></div>
+    </div>
+    <div class="zone t">
+      <h3>🟠 3 横切主题(跨项目通用)</h3>
+      <div class="item"><div class="nm">🎯 模型选型</div><div class="bear">漏斗:硬过滤→样本+质量→成本→护栏</div><div class="docs">决策图 + 7 题 + 7 备弹</div></div>
+      <div class="item"><div class="nm">🛠 服务架构</div><div class="bear">私有部署/并发兜底/限流/网关多路降级</div><div class="docs">决策矩阵 + 6 题 + 9 备弹</div></div>
+      <div class="item"><div class="nm">🔎 RAG 优化</div><div class="bear">分层 + query 决策流(先判该不该查)</div><div class="docs">分层图+query流 + 6 题 + 8 备弹</div></div>
+      <div class="item"><div class="nm">🔧 工具工程 + ReAct</div><div class="bear">收窄能做什么 + 约束做多久/失败怎么办</div><div class="docs">决策流图+ReAct vs Plan+四选一 + 6 题 + 8 备弹</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 资产索引 ===== -->
+<section id="index">
+  <h2>📁 资产索引(哪份文档管什么)</h2>
+  <p class="lead">流程图/决策图 = 图先行建画面;刷题卡 = 录音自检;备弹 = 被追到墙角的第二发。</p>
+  <table>
+    <thead><tr><th style="width:130px">主题</th><th>流程图 / 决策图</th><th>刷题卡 / 备弹</th></tr></thead>
+    <tbody>
+      <tr><td class="env">总图</td><td><a class="doc" href="portfolio-strengths-map.zh-CN.html">portfolio-strengths-map</a>(4旗舰×环 热力矩阵)</td><td>本页 = 作战总入口</td></tr>
+      <tr><td class="env">🦀 nanocodex</td><td><a class="doc" href="nanocodex-codex-permission-evolution.zh-CN.html">codex-permission-evolution</a>(6图) · <code>portrait_parts/*</code></td><td><a class="doc" href="nanocodex-interview-project-intro.zh-CN.md">项目介绍前置</a> · <a class="doc" href="nanocodex-interview-video-script.zh-CN.md">视频口播版</a> · <a class="doc" href="nanocodex-drive-engineering-interview-drills.zh.md">drive-engineering-drills</a>(7题) · <a class="doc" href="nanocodex-module-followups.zh.md">module-followups</a>(备弹)</td></tr>
+      <tr><td class="env">🏭 排产</td><td><a class="doc" href="schedule-agent/schedule-agent-interview-plan.zh-CN.html">排产总入口</a>(计划+全部文件目录) · <a class="doc" href="schedule-agent/schedule-agent-interview-final-map.zh-CN.html">图谱</a> · <a class="doc" href="schedule-agent/schedule-agent-deploy-deepdive.zh-CN.html">deploy-deepdive</a></td><td><a class="doc" href="schedule-agent/schedule-agent-eval-deep-dive.zh-CN.html">评测详解</a> · <a class="doc" href="schedule-agent/schedule-agent-number-drills.zh-CN.html">数字闪卡</a> · <a class="doc" href="schedule-agent/agent-case-compliance-vs-scheduling.zh.md">合规vs排产双案例</a></td></tr>
+      <tr><td class="env">🔐 网关</td><td><a class="doc" href="privacy-gateway-flowcharts.zh-CN.html">gateway-flowcharts</a>(6图)</td><td><a class="doc" href="privacy-gateway-interview-drills.zh.md">gateway-drills</a>(6题)</td></tr>
+      <tr><td class="env">🎖 campaign</td><td><a class="doc" href="campaign-flowcharts.zh-CN.html">campaign-flowcharts</a>(6图)</td><td><a class="doc" href="campaign-interview-drills.zh.md">campaign-drills</a>(7题)</td></tr>
+      <tr><td class="env">🎯🛠 选型+服务</td><td><a class="doc" href="model-selection-rag-visuals.zh-CN.html">selection-rag-visuals</a>(漏斗+矩阵)</td><td><a class="doc" href="model-selection-serving-drills.zh.md">selection-serving-drills</a>(14题+17备弹，含 few-shot 实证核验)</td></tr>
+      <tr><td class="env">🔎 RAG</td><td>同上(分层塔+query流)</td><td><a class="doc" href="rag-optimization-drills.zh.md">rag-optimization-drills</a>(6题+8备弹)</td></tr>
+      <tr><td class="env">🔧 工具+ReAct</td><td><a class="doc" href="tool-engineering-react-flowcharts.zh-CN.html">tool-engineering-react-flowcharts</a>(决策流+ReAct vs Plan+四选一)</td><td><a class="doc" href="tool-engineering-react-drills.zh.md">tool-engineering-react-drills</a>(6题+8备弹)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 驾驭工程环覆盖 ===== -->
+<section id="env">
+  <h2>🎯 驾驭工程环 × 覆盖情况(查漏用)</h2>
+  <p class="lead">每一环在哪个项目/主题里被承重讲透。<span class="thin">橙字</span>=还偏薄、可补。</p>
+  <table>
+    <thead><tr><th style="width:110px">环</th><th>主要承重处</th><th style="width:30%">最强证据</th></tr></thead>
+    <tbody>
+      <tr><td class="env">Prompt</td><td>nanocodex(genome 演化文字) · 排产(角色边界)</td><td>genome 只演化文字不动行为</td></tr>
+      <tr><td class="env">Context</td><td>nanocodex(非破坏压缩) · 网关(prefix 缓存) · 排产(RAG)</td><td>发送时视图 · 切点禁落 tool_result</td></tr>
+      <tr><td class="env">Tools</td><td>nanocodex(渐进暴露) · <b>横切:工具工程</b>(读写分离/结构化输出四段流水线)</td><td>schemas_for_query ≤9 + tool_search 回路 · JSON mode≠schema合法</td></tr>
+      <tr><td class="env">Workflow</td><td>排产(确定性 workflow) · campaign(编排+A2A) · nanocodex(best-of-N) · <b>横切:ReAct vs Plan</b></td><td>确定性 workflow 只在 node 内推理 · 异常四选一+三条硬边界</td></tr>
+      <tr><td class="env">Memory</td><td>campaign(事件溯源) · nanocodex(recall 线索) · 网关(分层)</td><td>derive_state 纯折叠 · RAG≠记忆</td></tr>
+      <tr><td class="env">Guardrails</td><td>nanocodex(权限双门) · 排产(四段治理) · 网关(脱敏+block) · campaign(PolicyGate)</td><td>两层正交纯函数 · 安全建在代码</td></tr>
+      <tr><td class="env">Evals</td><td>排产(golden+judge+audit+CI) · nanocodex(ncx-forge Pareto)</td><td>三层防护 + 数据飞轮</td></tr>
+      <tr><td class="env">Feedback</td><td>nanocodex(离线演化=边界) · 排产(线上回流) · campaign(HITL resume)</td><td>训练接缝即安全边界</td></tr>
+      <tr><td class="env" style="color:var(--topic)">模型选型</td><td>横切:漏斗(硬过滤→样本→成本→护栏)</td><td>0 分乘权重还是 0 · eval 驱动加权</td></tr>
+      <tr><td class="env" style="color:var(--topic)">服务架构</td><td>横切:私有部署/并发/限流/网关降级</td><td>轮转≠熔断 · 降级不冒充正常</td></tr>
+      <tr><td class="env" style="color:var(--topic)">RAG</td><td>横切:分层 + query 决策流</td><td>先判该不该查 · grounding 在模型外</td></tr>
+      <tr><td class="env" style="color:var(--topic)">工具+ReAct</td><td>横切:决策权不给模型 · 异常四选一</td><td>ok()只判进程层非语义 · backfill保历史合法</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 刷题作战流程 ===== -->
+<section id="flow">
+  <h2>🎤 刷题作战流程(讲到 L3 才容易过)</h2>
+  <div class="flow">
+    <div class="step"><div class="n">① 定位(面试前)</div><p>扫本页 + portfolio 总图,记住每项目的<b>承重环</b>和主叙事那一句。</p></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">② 建画面</div><p>过对应<b>流程图/决策图</b>(L1 30秒定位 → L2 2分钟架构),用图记不用背文字。</p></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">③ 录音自检</div><p>刷题卡:只看题录一段 → 对<b>答题骨架</b>逐条自检漏了哪条 → 背【一句话】。</p></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="n">④ 备弹(被钻)</div><p>翻 <code>module-followups</code> / 各卡★备弹,能说出<b>函数名/常量/取舍/诚实边界</b>=L3。</p></div>
+  </div>
+  <p class="lead" style="margin-top:10px">过关三硬标准:<b>能主动降级(先 L1 开场)</b> · <b>被钻能到 L3(说得出函数名/分支)</b> · <b>会讲取舍和没做的边界</b>。</p>
+</section>
+
+<footer>
+  Agent 开发面试作战总图 · 4 旗舰(nanocodex/排产/网关/campaign) + 3 横切(选型/服务架构/RAG) · 全部挂钩本地 GitLab 真项目 · 一切收敛于"同一套驾驭工程、不同承重"
+</footer>
+</div>
+</body>
+</html>

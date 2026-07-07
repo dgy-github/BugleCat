@@ -1,0 +1,210 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>排产面试口播终版 · 念稿</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15.5px/1.72 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:920px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:24px;margin:.2em 0}
+  h2{font-size:19px;margin:1.7em 0 .5em;padding-bottom:5px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:1.2em 0 .4em;color:var(--l)}
+  .sub{color:var(--mut);font-weight:400;font-size:13px}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.88em;color:#e6edf3}
+  a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}
+  b{color:#fff3d6}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0;font-size:14.5px}
+  .facts{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 16px;margin:12px 0}
+  .facts li{margin:6px 0;font-size:14px}
+  .facts b{color:var(--q)}
+  .blk{border-left:3px solid var(--line);border-radius:0 8px 8px 0;background:var(--card);padding:9px 14px;margin:8px 0}
+  .blk.n{border-left-color:var(--acc)} .blk.l3{border-left-color:var(--l)} .blk.q{border-left-color:var(--r)}
+  .blk ul{margin:.4em 0;padding-left:20px} .blk li{margin:4px 0}
+  .lab{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:4px;margin-right:8px;vertical-align:middle}
+  .lab.n{background:var(--acc);color:#fff} .lab.l3{background:var(--l);color:#0d1117} .lab.q{background:var(--r);color:#fff}
+  table{width:100%;border-collapse:collapse;margin:.6em 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#1b2129;color:var(--l)}
+  .nav{font-size:13px;color:var(--mut);margin:2px 0 10px}
+  .note{color:var(--mut);font-size:13px;font-style:italic;margin:.4em 0}
+</style>
+
+<h1>🎤 排产 Agent · 面试口播终版（念稿）</h1>
+<p class="nav">配套：<a href="schedule-agent-interview-plan.zh-CN.html">作战计划页</a> · <a href="schedule-agent-interview-final-map.zh-CN.html">可展开图谱（扫图/追问）</a> · <a href="schedule-agent-deploy-deepdive.zh-CN.html">链路深挖图</a></p>
+
+<div class="thesis">
+合并两层：<b>叙事骨架</b>(L1/L2，口播顺) + <b>L3 血肉</b>(真实函数名/常量/数字/易错点，被钻时用)。<br>
+用法：先背 <span class="lab n" style="margin:0 4px">叙事</span> 开口，被追问翻 <span class="lab l3" style="margin:0 4px">L3</span>，卡壳看 <span class="lab q" style="margin:0 4px">被追问</span>。<br>
+定位诚实：<b>已上线的制造业排产 1.0 最小可行闭环</b>；半途接手后用 AI 改造，深层原系统设计非我从零做——被钻到原系统内部用"如果重新设计我会…"兜。
+</div>
+
+<h2>🔢 数字速记（先记这几个）</h2>
+<div class="facts"><ul>
+  <li>数据：<b>49,981 条</b>真实生产订单，纺织/化纤行业，SQLite。</li>
+  <li>意图：<b>19 类写意图</b>（configs/intents.json），四级角色权限。</li>
+  <li>评测：<b>golden 44 用例 / 11 类</b>，CI 门禁 <code>rule_pass_rate ≥ 1.0</code> 才 exit0。</li>
+  <li>DB 关键字段：<code>ctsalebid</code>(销售订单编号=业务主键) / <code>jt</code>(机台) / <code>gg</code>(规格,如 545dtex/72f) / <code>pcrq</code>(排产日期) / <code>ddsl</code>(数量,吨)。</li>
+  <li>术语更正：链路 ID 是 <b><code>trace_id</code></b> 不是 chain_id。</li>
+  <li><b>RAG 实测</b>(challenge/bench 跑出)：Hybrid+RRF <b>Recall@3=0.83 / Precision@3=0.40</b>；切块 <b>markdown 一规则一块 MRR=0.956</b>(优于 fixed_200=0.935 / fixed_500=0.917 / recursive_300=0.907)。</li>
+  <li><b>可观测实测</b>：端到端 <b>P50=941ms / P95=4702ms / avg=1480ms</b>；节点级 <b>LLM P95=4588ms vs Route P95=15ms</b>(慢节点=LLM)；成功率 90%；50 请求总成本 <b>¥0.0774</b>(≈¥0.0015/请求)。</li>
+</ul></div>
+
+<h2>① 定位 <span class="sub">叙事强，保留</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>已上线的制造业排产 <b>1.0 最小可行闭环</b>——不是完整覆盖全部工厂规则的全量系统，但已验证 Agent 在复杂制造业里做"自然语言理解→规则匹配→流程编排→DryRun→结果解释"的可行性。覆盖订单状态/交期/规格/机台能力/负载/就近/切换/故障/插单等典型高频场景。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>数据 49981 条真实订单；19 类写意图；已 systemd 部署 + 公网隧道。</div>
+<div class="blk q"><span class="lab q">被追问"为什么叫最小可行"</span>规则覆盖不完整（全量工厂规则没做完）、调度优化能力弱（当前是规则+查询不是 solver）——但写操作全链路治理已闭环、已上线验证。</div>
+
+<h2>② 为什么用 Agent / 规则在前模型在后 <span class="sub">叙事强</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>排产是多角色、多步骤、多约束的调度系统，需求动态（急单/临时调整/参数不全/表达不标准）。<b>规则和算法做确定性判断，Agent 做流程编排+人机交互，模型做语义理解+结果解释</b>——不是"大模型替代算法"。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>架构是 <code>业务规则/数据查询/执行链路在前，模型在后</code>。核心判断（订单状态/机台负载/规格匹配/权限/能否停排/能否故障转移）走规则+SQL+确定性逻辑；模型只做后置增强（信息补充/格式优化/规则说明/澄清/解释）。</div>
+<div class="blk q"><span class="lab q">被追问"哪些给模型哪些不给"</span><b>判断/分类一律不给模型</b>。①安全相关分类（权限/是否可写/风险）不给；②<b>意图识别本身也不给模型</b>——是规则+关键词打分（<code>route.py</code> 的 <code>_calculate_intent_score</code> 遍历 <code>configs/intents.json</code>：trigger_phrases 命中 +12、各意图关键词 +16/18/40、冲突信号 −30/−36，<b>零 LLM</b>）；<code>confidence</code> 由 <code>_score_to_confidence</code> 把<b>规则分数</b>阶梯映射（score≥30→0.95 / ≥24→0.90…），<b>不是模型概率</b>。消歧看 <b>top1/top2 分差过小</b> 或 <b>写操作 confidence &lt; 阈值</b> → <code>need_clarify</code>，低置信不猜。<b>给模型的只有后置</b>：语义理解补充/格式优化/规则说明/澄清话术/结果解释——模型在"理解与表达"层，不在"判断与分类"层。</div>
+
+<h2>③ 执行链路：四段治理 <span class="sub">承重 ★</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>写操作不是让 Agent 直接执行，而是 <code>意图识别→参数抽取→权限管控→DryRun→用户确认/审批→Execute→Verify 回读→结果解释</code>。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>真实节点/机制：
+  <ul>
+  <li>真实拓扑：<code>rewrite→route→query→rag→answer_verify→governance→preview→execute→verify→respond</code>。</li>
+  <li>三条件边：<code>after_route</code>(歧义/<code>confidence&lt;0.5</code>/缺实体→need_clarify；<code>is_write</code>→write；else readonly)；<code>after_governance</code>(看布尔 <code>governance_passed</code>)；<code>after_preview</code>(<b>严格 <code>confirmed is True</code></b> 才 execute，否则 await_confirm)。</li>
+  <li><b>preview 是纯 dry-run 只读</b>，产 <code>preview_result{action,summary,impact}</code>；preview 节点<b>不设 confirmed</b>，由人工/入口注入——这是 human-in-the-loop 落点。</li>
+  <li><b>verify 回读生成 <code>checks[]</code>；不一致不回滚，降 <code>needs_review</code> 标人工复核</b>。</li>
+  <li>写链信号字段串：<code>is_write → governance_passed → confirmed → verify_result.status</code>。</li>
+  </ul>
+</div>
+<div class="blk q"><span class="lab q">被追问"verify 不一致为什么不自动回滚"</span>宁可标复核转人工，也不静默回滚——制造业写操作可逆性和影响面复杂，自动回滚可能造成二次扰动，让人判更稳。</div>
+
+<h2>④ 安全边界 / 权限 / DryRun <span class="sub">补 L3 常量</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>Dry Run 不是普通预览，是写操作前的安全防守层，和权限管控、审批、回读一起保证写操作可控可追踪可回滚。查询灵活、写操作保守。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>
+  <ul>
+  <li>角色层级在代码：<code>ROLE_HIERARCHY = [业务员0, 工艺员1, 主任2, 厂长3]</code>；<code>user_level &lt; required_level → blocked</code>（required 来自 intents.json 的 minimum_role）。</li>
+  <li>blocked 三因：<b>未知意图 / 权限不足 / 高危缺实体</b>（机台故障缺 machine_id → block）。</li>
+  <li>故障转移批量改带 <b><code>LIMIT 50</code></b> 防误伤。</li>
+  <li>网关审批流：<code>/agent/approval/create → confirm/reject</code>。</li>
+  </ul>
+</div>
+<div class="blk q"><span class="lab q">被追问"高危操作怎么防"</span>物理隔离 + 分级——不可逆写强制走审批，缺关键实体直接 block，不靠 prompt 劝模型别乱来。</div>
+
+<h2>⑤ 审计 <span class="sub">L3 是大加分</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>写操作全程留痕，可回链、可追责。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>
+  <ul>
+  <li><code>audit_log</code> 表 <b>append-only</b>，字段：<code>trace_id / intent / action / actor_role / status / success / need_approval / before_state_json / after_state_json / verify_checks_json / metadata_json</code>。</li>
+  <li><b>只在两处写</b>：governance-blocked（拦截时）和 verify（执行后）；<b>execute 本身不写审计</b>。</li>
+  <li><code>before</code> = preview_result（改前预估），<code>after</code> = tool_result（改后实况）——可比对"批准的 vs 执行的"。</li>
+  <li>查询：<code>/agent/audit/{trace_id}</code>；管理台 <code>recent_audit_rows()</code>。</li>
+  </ul>
+</div>
+<div class="blk q"><span class="lab q">被追问"success 怎么判"</span>verify 全通过才 <code>success=true</code>；回读不一致降 false + <code>status=needs_review</code>。</div>
+
+<h2>⑥ RAG / 检索 <span class="sub">重点补</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>RAG 不是一条链打所有问题，而是<b>按场景路由</b>——不同问题走不同 Retriever。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>5 种 Retriever：
+  <table>
+    <tr><th>Retriever</th><th>场景</th><th>数据源</th></tr>
+    <tr><td>SQLRetriever</td><td>订单号/机台号/规格历史</td><td>SQLite（精确快）</td></tr>
+    <tr><td>VectorRetriever</td><td>规则语义查询</td><td>Qdrant + bge-small-zh</td></tr>
+    <tr><td>HybridRetriever</td><td>规格/颜色强约束</td><td>向量+关键词</td></tr>
+    <tr><td>CaseRetriever</td><td>历史排产案例</td><td>SQLite（可解释）</td></tr>
+    <tr><td>CompositeRetriever</td><td>"为什么排不下"诊断</td><td>SQL + RAG</td></tr>
+  </table>
+  <ul>
+  <li><b>query_plan 先判该不该检索</b>：<code>mode=structured_sql</code>(订单/机台直查，<code>requires_rag=false</code>) vs <code>rag</code>；<b>写操作跳过 RAG</b> 避免无意义检索。</li>
+  <li>防幻觉断言：<code>answer_grounded</code> + <code>evidence_source=sqlite</code> + <code>response_must_not_contain</code>(订单不存在禁编机台/日期) + <code>max_retrieval_steps</code>(防无限检索)。</li>
+  <li>Rerank：做过实验，<b>生产暂不默认开</b>（小规则库易被标题权重带偏，1000+条再引入）——诚实取舍点。</li>
+  <li><b>实测数字</b>(跑 <code>bench_chunking</code> / <code>challenge_03</code> 得到，可复现)：Hybrid+RRF <b>Recall@3=0.83</b>；切块 <b>markdown MRR=0.956</b> 最优。<b>诚实短板</b>：所有切块策略 Negative Precision=0%——BM25 不会说"无匹配"，这正是要叠向量/阈值/<code>response_must_not_contain</code> 的理由。</li>
+  </ul>
+</div>
+<div class="blk q"><span class="lab q">被追问"为什么不纯向量"</span>订单号/机台/规格是强约束字段，纯向量把"语义相似"误当"业务正确"；所以精确走 SQL、规则走 Hybrid、诊断走 Composite。</div>
+<div class="blk q"><span class="lab q">被追问"给个 RAG 数字"</span>Recall@3=0.83、markdown 切块 MRR=0.956；复现命令 <code>python -X utf8 eval/bench_chunking.py</code>（BM25 基线，不依赖向量服务）。</div>
+
+<h3>🔎 RAG 刷题（排产版·30–45min·含实测数字）</h3>
+<p class="note">深挖版(Agentic/Graph/RRF/父子块/间接注入)在 <code>rag-optimization-drills.zh.md</code>，可选、别挤必刷。</p>
+<div class="blk l3">
+  <ul>
+  <li><b>【必刷】你的 RAG 怎么设计的？</b> → 不是一条链打所有问题，<b>按场景路由 5 种 Retriever</b>；<code>query_plan</code> <b>先判该不该检索</b>，<b>写操作跳过 RAG</b>。数字：Recall@3=<b>0.83</b>。</li>
+  <li><b>【必刷】为什么不纯向量一把梭？</b> → 订单号/机台/规格是<b>强约束字段</b>，纯向量把"语义相似"误当"业务正确"。</li>
+  <li><b>【必刷】怎么防 RAG 幻觉 / 订单不存在还编出机台日期？</b> → grounding <b>做在模型外</b>：<code>answer_grounded</code> + <code>evidence_source=sqlite</code> + <code>response_must_not_contain</code> + <code>max_retrieval_steps</code>。</li>
+  <li><b>【数字题】切块策略怎么选？</b> → bench 对比 4 种，<b>markdown 一规则一块 MRR=0.956 最优</b>；<b>诚实短板</b>：全策略 Neg-Precision=0%，BM25 不会说"无匹配"。</li>
+  <li><b>【备弹】Rerank 为什么生产没默认开？</b> → 小规则库易被标题权重带偏；扩到 1000+ 条再引入 Rerank/Compress。</li>
+  </ul>
+</div>
+
+<h2>⑦ 可观测 / Tracing</h2>
+<div class="blk n"><span class="lab n">叙事</span>每次请求一个 <code>trace_id</code>，从输入→意图→抽参→路由→查询→RAG→模型→工具→执行→回读→输出做节点级日志；出问题按 trace_id 还原链路定位是哪个节点。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>
+  <ul>
+  <li>三层数据模型：<code>Span</code>(name/trace_id/start·end/status[OK·ERROR·TIMEOUT]/attributes/error) → <code>Trace</code>(spans[]/is_success=all OK) → MetricsCollector/AnomalyDetector。</li>
+  <li><b>P95 不用 avg</b>：avg 掩盖长尾，P95 反映尾延迟=体感命门；<b>节点级 P95</b> 才能定位慢节点。</li>
+  <li>异常检测三类：延迟(节点历史 P95×2)、错误率(最近 window 错误率≥阈值)、成本(单请求超预算)。</li>
+  <li><b>诚实坑</b>：延迟基线用了含异常样本的全量数据→自指污染，生产要滑动基线；扁平 span 无 OTel 父子树。</li>
+  <li><b>实测数字</b>(跑 <code>challenge_08</code>)：端到端 <b>P50=941 / P95=4702 / avg=1480ms</b>；<b>节点级 LLM P95=4588 vs Route P95=15</b>——一眼定位慢节点是 LLM；成功率 90%、50 请求 ¥0.0774。</li>
+  </ul>
+</div>
+<div class="blk q"><span class="lab q">被追问"给个数字/怎么定位慢节点"</span>端到端 P95=4702ms，拆到节点级 LLM P95=4588ms 就知道锅在 LLM；复现 <code>python -X utf8 interview_challenges/solutions/solution_08.py</code>。</div>
+
+<h2>⑧ 评估体系 <span class="sub">承重 ★</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>不能只看一个准确率，要<b>自动化指标 + 人工指标</b>双建。自动指标定位链路问题，人工指标判断业务价值。人工指标拆细（对交期满意还是对机台推荐满意）。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>
+  <ul>
+  <li>三层防护：<code>audit</code>(skill 健康，<b>5 检查</b>：dark/conflict/self_recog/coverage/orphan) → <code>check_expected</code>(<b>~16 类确定性断言</b>：intent_code/path/governance_passed/max_retrieval_steps/response_must_not_contain) → <code>judge</code>(LLM <b>3 维 1-5</b>，可降级规则)。</li>
+  <li>CI 三 job：audit → rule-eval(无 LLM,每次) ∥ full-eval(含 judge,定时)；门禁 <code>rule_pass_rate≥1.0</code>。</li>
+  <li><b>数据飞轮</b>：线上 <code>audit_log</code> → <code>mine_eval_candidates</code> → 人审 → <code>online_hard_cases.json</code> → <code>run_scheduled_eval</code>。</li>
+  </ul>
+</div>
+<div class="blk q"><span class="lab q">被追问"judge 打不准怎么办"</span>留人工校准子集验 judge-human 一致率，&lt;0.9 先修 judge；能转确定性断言的不用 judge。</div>
+
+<h2>⑨ 记忆 / 上下文</h2>
+<div class="blk n"><span class="lab n">叙事</span>维护多轮任务状态（订单号/机台号/目标机台/规格/DryRun 结果/确认状态），用任务级摘要 + 结构化状态压缩上下文。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>指代消解靠"最近 N 轮原文"不靠 RAG（时序邻近 ≠ 语义相似）；历史压缩=滑窗 + 摘要；结构化事实走 DB 现查不进向量库。</div>
+<div class="blk q"><span class="lab q">被追问"'把它排到101'怎么知道'它'是谁"</span>靠会话记忆里最近 N 轮的原文做指代消解，不靠向量召回（会把语义像但时间无关的历史块拉进来误导）。</div>
+
+<h2>⑩ 驾驭工程（元）+ 长期治理 <span class="sub">叙事很强</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>Agent 工程核心是<b>驾驭大模型的概率性输出</b>，放进可执行/可观测/可评估/可测试的系统。控制手段：结构化输出、关键参数过规则校验、写操作五段(权限/DryRun/确认/Execute/Verify)、低置信澄清不猜。长期治理才是真难点：规则沉淀/边界 case 收集/人工标注/评估集扩展/线上回流/多角色协作，周期长。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>这条对应四信条——LLM 原始输出不直接落地 / 安全建在代码不建在措辞 / 有确定性判据就别用 LLM judge / 数据不出厂(本地 Qwen)。</div>
+
+<h2>⑪ 并发处理 <span class="sub">真做了，不是缺口</span></h2>
+<div class="blk n"><span class="lab n">叙事</span>同一订单可能多人同时改，我用<b>读写分离 + 订单级写锁</b>兜——读多不锁，只锁同订单的写。</div>
+<div class="blk l3"><span class="lab l3">L3 血肉</span>①路由前查询阶段加锁；②意图澄清后判读写——<b>读操作直接放过(不锁)</b>；③<b>写操作</b>先查该订单当前有没有 <code>trace_id</code> 日志在写；④有在写→返回"<b>有其他人正在操作该订单，请稍后重试</b>"。本质=用 audit/trace 日志做<b>订单级悲观写锁</b>：读多不锁、只锁同订单写、不同订单不互斥。系统压力另叠令牌桶限流 + 队列削峰 + 本地模型 Semaphore 上限。</div>
+<div class="blk q"><span class="lab q">被追问"这个锁的坑"</span>①check"有没有在写"与"标记我在写"要<b>原子</b>，否则 TOCTOU——单实例 asyncio 临界区内安全，跨实例要 DB 唯一约束 / Redis SETNX；②写崩溃/超时要 <b>TTL/超时释放</b> 否则订单锁死；③多实例把锁移到<b>共享存储</b>；④叠幂等键防重试双写。</div>
+
+<h2>⑫ 意图扩展 / 为什么 LangGraph / 1.0 新特性 <span class="sub">高频硬追问</span></h2>
+<div class="blk q"><span class="lab q">意图类型超 10 个怎么扩展</span>意图是 <b>config-driven</b>（<code>configs/intents.json</code> 加一类=加配置不改核心代码），扩展靠 <code>audit</code> 的 <b>5 检查</b>防退化（dark/conflict/self_recog/coverage/orphan）。优化方向：规则低置信时才调<b>大模型前置兜底</b> + embedding 语义匹配 + 对未命中样本<b>聚类挖新意图</b>。</div>
+<div class="blk q"><span class="lab q">为什么用 LangGraph（不只是节点编排）</span>不是"只能画工作流"——用的是 <b>① 图状态</b>(TypedDict State 贯穿节点) <b>② 条件边</b>(after_route/after_governance/after_preview 做确定性分支) <b>③ interrupt/HITL</b>(confirmed 落点) <b>④ cycles</b>(need_clarify 回环) <b>⑤ 可加 checkpointer</b> 做 durable/time-travel。确定性 workflow 骨架正好压制 LLM 的不确定。</div>
+<div class="blk q"><span class="lab q">LangGraph 1.0 新特性</span>durable execution + 多后端 checkpointer（InMemory/Postgres/SQLite/<b>DynamoDB+S3</b>）+ Store(跨会话长期记忆) + <b>node caching</b>(CachePolicy ttl 缓存检索) + <b>deferred nodes</b>(等多分支到齐再跑，做 best-of-N 聚合) + pre/post model hooks。</div>
+
+<h2>⑬ 下一步优化：Bad-case 回流飞轮 + 优化速查</h2>
+<div class="blk n"><span class="lab n">飞轮</span>①从线上可观测日志提取 <b>Bad Request</b> 抽成待评估用例 → ②<b>分类</b>：响应请求异常 vs 业务理解异常 → ③业务理解异常由<b>业务人员人工标注</b> → 确定下一轮需求 → ④深化成<b>新 golden Case</b>。<b>关键</b>：响应异常有确定性信号(超时/500/schema失败/工具error/needs_review)→<b>自动走工程线修</b>、不麻烦业务；<b>只把业务理解异常送人标</b>（省标注成本）；业务理解异常再分"<b>模型理解错</b>(→工程修) vs <b>规则缺失过时</b>(→下一轮需求)"。映射真实代码：audit_log <code>reason_codes</code>→<code>mine_eval_candidates</code>→<code>eval_candidate_case</code>→人审→<code>online_hard_cases.json</code>→<code>run_scheduled_eval</code>(min_pass_rate=1.0)。</div>
+<div class="blk l3"><span class="lab l3">优化速查</span>答法=现状能用 + 有 X 局限 + 方向 Y + 当前不做因为 Z：
+  <ul>
+  <li><b>调度优化能力</b>（1.0 最大缺口）：现规则+查询无 solver → 接排程 solver/OR-Tools 做最优化，LLM 退成 NL→约束翻译官。</li>
+  <li><b>RAG 准确性</b>：Recall@3=0.83 → 规则库 1000+ 开 Rerank + 父子块 + 诊断类 Graph RAG 多跳 + 垂域 embedding 微调。</li>
+  <li><b>可观测</b>：扁平 span + 自指基线 → OTel 父子树 + 滑动基线 + SLO error budget burn rate 告警。</li>
+  <li><b>评估</b>：golden+judge → 线上人审改判率反哺离线维度权重 + held-out 防过拟合 + 端到端多轮回放。</li>
+  <li><b>记忆</b>：滑窗+摘要 → 三层记忆(DB/事件源/向量) + 长期偏好 + 租户隔离。</li>
+  </ul>
+</div>
+
+<h2>🧪 8 个技术硬挑战 <span class="sub">证明"真做过"·各配一句+数字</span></h2>
+<table>
+  <tr><th>模块</th><th>挑战</th><th>一句话</th></tr>
+  <tr><td>RAG</td><td>PDF 分块</td><td>layout 分区 + 跨页表格合并 + 语义切块</td></tr>
+  <tr><td>RAG</td><td>脏 Excel 解析</td><td>启发式表头检测 + 合并单元格 + 列名映射</td></tr>
+  <tr><td>RAG</td><td>Hybrid+Rerank</td><td>BM25 + 向量 + <b>RRF 融合</b>（rank 融合免量纲不可比）</td></tr>
+  <tr><td>LM</td><td>熔断+多模型降级</td><td>熔断三态机 + 指数退避 + 降级链</td></tr>
+  <tr><td>LM</td><td>输出格式保障</td><td>JSON 鲁棒解析 + schema 校验 + 重试</td></tr>
+  <tr><td>记忆</td><td>多轮指代消解</td><td>实体提取 + 指代类型分类 + 消解策略</td></tr>
+  <tr><td>记忆</td><td>历史压缩</td><td>Token 估算 + 滑窗 + 摘要压缩</td></tr>
+  <tr><td>可观测</td><td>Tracing</td><td>Span/Trace 模型 + P50/P95 + 慢节点/异常检测</td></tr>
+</table>
+<p class="note">面试策略：每个能拿出 ①能跑代码 ②设计权衡 ③指标数字（Recall=0.83 / P95=4702ms）。</p>
+
+<h2>🎯 与 nanocodex 的定位 <span class="sub">选主讲用</span></h2>
+<div class="blk l3">
+  <ul>
+  <li><b>排产</b>（业务/治理复杂度高，已上线，接手改造）→ 偏企业 AI 落地/业务系统/安全治理岗位主讲。</li>
+  <li><b>nanocodex</b>（工程/系统复杂度高，从零自研）→ 偏基建/框架/平台岗位主讲。</li>
+  <li>串讲主叙事：<b>同一套驾驭工程，一个长成"确定性 workflow + 四段治理 + 评测飞轮"(排产)，一个长成"沙箱 + best-of-N + 离线演化"(nanocodex)；骨架同，承重随业务。</b></li>
+  </ul>
+</div>
+
+<h2>🧾 一句话总纲（背这句）</h2>
+<div class="thesis">已上线的制造业排产 1.0 最小可行闭环：不覆盖全量工厂规则，但验证了 Agent 在复杂制造业场景里做自然语言理解、规则匹配、流程编排、权限管控、DryRun、安全防控、结果反馈、可观测和评估治理的可行性；核心是<b>规则在前模型在后、写操作四段治理、评测飞轮长期治理</b>；难点不是换模型，是规则沉淀/边界数据/人工标注/线上回流/多角色协作的体系化建设。</div>

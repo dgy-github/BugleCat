@@ -1,0 +1,149 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 框架横向对比 · 全景</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;
+    --nc:#e8823a;--cx:#58a6ff;--cl:#a371f7;--pi:#3fb950;--warn:#d29922}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:1000px;margin:0 auto;padding:22px 16px 70px}
+  h1{font-size:23px;margin:.2em 0;text-align:center}
+  .sub{text-align:center;color:var(--mut);font-size:13px;margin:.2em 0 1em}
+  h2{font-size:16px;margin:1.5em 0 .5em;border-left:4px solid var(--nc);padding-left:9px}
+  code{background:#21262d;padding:0 5px;border-radius:4px;font-size:.85em}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin:10px 0;font-size:12.5px}
+  .lg{padding:3px 10px;border-radius:20px;font-weight:700;color:#0d1117}
+  .lg.nc{background:var(--nc)} .lg.cx{background:var(--cx)} .lg.cl{background:var(--cl)} .lg.pi{background:var(--pi)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin:.5em 0}
+  th,td{border:1px solid var(--line);padding:7px 8px;vertical-align:top}
+  th.dim,td.dim{background:#1b2129;font-weight:700;white-space:nowrap;color:var(--fg)}
+  th.nc{background:var(--nc);color:#0d1117} th.cx{background:var(--cx);color:#0d1117}
+  th.cl{background:var(--cl);color:#0d1117} th.pi{background:var(--pi);color:#0d1117}
+  td b{color:#fff3d6}
+  .w{color:var(--warn);font-weight:700}
+  details{background:var(--card);border:1px solid var(--line);border-radius:9px;margin:6px 0}
+  summary{cursor:pointer;padding:10px 14px;list-style:none;font-weight:700;font-size:14.5px}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ ";color:var(--mut)}
+  details[open] summary::before{content:"▾ "}
+  .row{padding:4px 14px 12px;font-size:13.5px}
+  .row div{margin:5px 0;padding-left:16px;position:relative}
+  .row div::before{content:"";position:absolute;left:0;top:7px;width:8px;height:8px;border-radius:50%}
+  .row .r-nc::before{background:var(--nc)} .row .r-cx::before{background:var(--cx)}
+  .row .r-cl::before{background:var(--cl)} .row .r-pi::before{background:var(--pi)}
+  .row b{color:#fff}
+  .foot{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 14px;font-size:12.5px;color:var(--mut);margin-top:14px}
+  .foot .w{color:var(--warn)}
+</style>
+
+<h1>🧩 Agent 框架横向对比 · 全景</h1>
+<p class="sub">少字看定位 · 点开钻细节 · <span class="w">⚠️=不确定,别当定论</span></p>
+<div class="legend">
+  <span class="lg nc">nanocodex(你的)</span>
+  <span class="lg cx">codex</span>
+  <span class="lg cl">claude-code</span>
+  <span class="lg pi">pi</span>
+</div>
+
+<h2>📊 全景对比（一眼定位）</h2>
+<table>
+  <tr><th class="dim">维度</th><th class="nc">nanocodex</th><th class="cx">codex</th><th class="cl">claude-code</th><th class="pi">pi</th></tr>
+  <tr><td class="dim">主循环 / 终止</td><td>run_turn·双预算·5退出点</td><td>agent loop(nanocodex 源)</td><td>turn·可中断/steering</td><td>agentLoop·steering/followUp</td></tr>
+  <tr><td class="dim">短期/会话记忆</td><td>messages+结构化 State</td><td>会话历史</td><td>会话上下文·自动</td><td>AgentMessage(与 LLM msg 分层)</td></tr>
+  <tr><td class="dim">会话压缩</td><td><b>非破坏</b>·两趟·字符截断</td><td>截断 <span class="w">⚠️</span></td><td><b>分层缓存驱逐</b>:micro清tool(不调模型)→auto摘要→再水合</td><td>compact()·reserveTokens</td></tr>
+  <tr><td class="dim">长期记忆</td><td>项目记忆·<b>线索非事实</b></td><td>AGENTS.md <span class="w">⚠️</span></td><td>CLAUDE.md·记忆文件</td><td>交扩展/包</td></tr>
+  <tr><td class="dim">工具处理</td><td>shell/apply_patch·可见≤9</td><td>shell/apply_patch</td><td>丰富(Bash/Edit/Task…)</td><td>工具·并行/串行</td></tr>
+  <tr><td class="dim">技能 / skills</td><td>Skills 子系统</td><td><span class="w">⚠️</span></td><td>SKILL.md</td><td>skills/packages</td></tr>
+  <tr><td class="dim">MCP</td><td>支持(<code>--mcp</code>默认关)</td><td>支持</td><td>支持(核心)</td><td><b>刻意不做</b>(哲学)</td></tr>
+  <tr><td class="dim">权限 / 沙箱 ★</td><td><b>双层正交门</b>+能力剥夺</td><td>审批档4+沙箱3</td><td>permission 4 模式</td><td><b>不做</b>(交宿主)</td></tr>
+  <tr><td class="dim">模型切换(任务中)</td><td><b>flash/pro 分层</b>(按成本)</td><td><span class="w">⚠️</span></td><td>/model·fast</td><td><b>prepareNextTurn 热换</b></td></tr>
+  <tr><td class="dim">成本控制</td><td>双预算(model/tool)+分层</td><td><span class="w">⚠️</span></td><td>上下文/compact 省 token</td><td>reserveTokens</td></tr>
+  <tr><td class="dim">任务处理 / 编排</td><td>分层路由(best-of-N <span class="w">⚠️待核</span>)</td><td>单 agent</td><td>主循环+子 agent(Task)</td><td><b>不做子 agent</b>(哲学)</td></tr>
+</table>
+
+<h2>🔎 细节下沉（点开某维度看四家全文）</h2>
+
+<details><summary>主循环 / 终止条件</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：<code>run_turn</code> 有界循环(组装→调模型→执行工具→喂回→循环);双预算(model/tool)+ backfill 历史合法性;5 退出点(无工具/error/cancel/预算/max)。</div>
+  <div class="r-cx"><b>codex</b>：agent loop——nanocodex 的循环就是从它移植的(同源)。</div>
+  <div class="r-cl"><b>claude-code</b>：turn 循环,用户可随时打断/插话(steering)。</div>
+  <div class="r-pi"><b>pi</b>：<code>agentLoop/runLoop</code>;steering + followUp;turn 之间可热换模型(见"模型切换")。</div>
+</div></details>
+
+<details><summary>短期 / 会话记忆</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：messages 历史 + 结构化 State(任务状态)。</div>
+  <div class="r-cx"><b>codex</b>：会话历史(同源)。</div>
+  <div class="r-cl"><b>claude-code</b>：会话上下文自动管理。</div>
+  <div class="r-pi"><b>pi</b>：<b>AgentMessage 与 LLM Message 分层</b>(convertToLlm 转换)——这是 pi 的一个特色边界。</div>
+</div></details>
+
+<details><summary>会话压缩</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：<b>非破坏</b>(<code>for_model_edited</code> 发送视图,原始不动);两趟=旧 tool 结果<b>字符截断</b>+user 边界丢最旧前缀;切点绝不落 tool_result。<span class="w">(LLM 摘要是优化方向,当前是截断)</span></div>
+  <div class="r-cx"><b>codex</b>：截断式压缩 <span class="w">⚠️ 具体机制待核</span>。</div>
+  <div class="r-cl"><b>claude-code</b>：<b>分层缓存驱逐</b>(不是"满了就摘要",是 cache eviction,越往后越贵越有损)：① <b>microcompaction</b>(最便宜·<b>不调模型</b>)——大 tool 结果(Read/Bash/Grep/Web…)offload 到磁盘,只留路径引用(热尾 inline / 冷存储可回读);含 cache-aware 变体(用 API cache editing 删旧结果不破坏 prefix)。② <b>auto-compact</b>(≈167K/200K 触发,reserve 20K,连续 3 次熔断)——spawn LLM 后台出<b>结构化摘要</b>(意图/文件+代码/错误+修复/反馈/待办/当前态)。③ <b>session-memory compact</b>(用预抽取 notes <b>跳过</b>摘要调用)。+ <b>rehydration</b>(重读最近 5 文件≤50K + todos + 续跑指令)。<b>核心:机械可回读压缩在前、LLM 有损摘要在后。</b></div>
+  <div class="r-pi"><b>pi</b>：<code>compact()</code> + <code>reserveTokens</code>(压缩时预留 token 余量)——本会话拆过。</div>
+</div></details>
+
+<details><summary>长期记忆</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：项目记忆,<b>"线索非事实"</b>(recall 注入标 header;remember 仅 CONFIRMED+去重;consolidate 0.85)。</div>
+  <div class="r-cx"><b>codex</b>：靠 AGENTS.md 项目指令 <span class="w">⚠️ 无独立长期记忆层?待核</span>。</div>
+  <div class="r-cl"><b>claude-code</b>：CLAUDE.md + 记忆文件(跨会话持久)。</div>
+  <div class="r-pi"><b>pi</b>：核心不做,交 packages/扩展。</div>
+</div></details>
+
+<details><summary>工具处理</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：shell/apply_patch;<b>工具可见上限 9</b>;apply_patch 工具描述逐字移植 codex。</div>
+  <div class="r-cx"><b>codex</b>：shell/apply_patch(nanocodex 源)。</div>
+  <div class="r-cl"><b>claude-code</b>：丰富工具集(Bash/Edit/Read/Grep/Task/…)。</div>
+  <div class="r-pi"><b>pi</b>：工具执行支持并行/串行(本会话拆过 tool execution)。</div>
+</div></details>
+
+<details><summary>技能 / skills</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：Skills 子系统(8 子系统之一)。</div>
+  <div class="r-cx"><b>codex</b>：<span class="w">⚠️ 是否有独立 skills 待核</span>。</div>
+  <div class="r-cl"><b>claude-code</b>：SKILL.md,可被调用的能力模块。</div>
+  <div class="r-pi"><b>pi</b>：靠 skills/packages 扩展能力(设计哲学:扩展而非内置)。</div>
+</div></details>
+
+<details><summary>MCP</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：支持(<code>--mcp</code> 连 <code>~/.nanocodex/mcp.toml</code>,<b>默认关</b>,跑在沙箱外)。</div>
+  <div class="r-cx"><b>codex</b>：支持 MCP。</div>
+  <div class="r-cl"><b>claude-code</b>：支持 MCP(核心能力,可连多 server)。</div>
+  <div class="r-pi"><b>pi</b>：<b>刻意不做 MCP</b>(设计哲学:交给宿主/扩展)。</div>
+</div></details>
+
+<details open><summary>权限 / 沙箱 ★（差异最大·你的承重）</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：<b>双层正交门</b>——<code>SandboxPolicy.can_write</code>(3 模式,词法路径) ⊥ <code>Approver.classify</code>(4 档→AutoApprove/Ask/AutoDeny);untrusted 三筛(7 危险正则→29 白名单→15 git 写);<b>能力剥夺</b>(read-only 恒不可写)。</div>
+  <div class="r-cx"><b>codex</b>：审批档 4(untrusted/on-failure/on-request/never)+ 沙箱 3 模式——nanocodex 移植自它。</div>
+  <div class="r-cl"><b>claude-code</b>：permission 模式(plan / default / accept-edits / bypass)。</div>
+  <div class="r-pi"><b>pi</b>：<b>不做权限</b>(设计哲学:安全交给宿主)。</div>
+</div></details>
+
+<details><summary>模型切换(任务中)</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：<b>flash/pro 分层路由</b>(按任务成本:简单走 flash 省钱、复杂走 pro)——<b>你主导开发的原创</b>,live-verified,<code>-o</code> flag。</div>
+  <div class="r-cx"><b>codex</b>：<span class="w">⚠️ 任务中切换机制待核</span>。</div>
+  <div class="r-cl"><b>claude-code</b>：<code>/model</code> 手动切;fast 模式(Opus 快速输出)。</div>
+  <div class="r-pi"><b>pi</b>：<code>prepareNextTurn</code> <b>回合之间热换模型</b>(检查是否切换→注入新值,不重开 loop)——本会话拆过。</div>
+</div></details>
+
+<details><summary>成本控制</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：双预算(<code>max_model_calls</code>/<code>max_tool_calls</code>)+ flash/pro 分层省钱。</div>
+  <div class="r-cx"><b>codex</b>：<span class="w">⚠️ 无显式预算?待核</span>。</div>
+  <div class="r-cl"><b>claude-code</b>：靠上下文管理 + auto-compact 省 token(无硬预算)。</div>
+  <div class="r-pi"><b>pi</b>：reserveTokens(压缩时预留余量,间接控成本)。</div>
+</div></details>
+
+<details><summary>任务处理 / 编排</summary><div class="row">
+  <div class="r-nc"><b>nanocodex</b>：分层路由(classify→flash/pro);<b>best-of-N</b>(N worker 并行→verify 选优→重试)<span class="w"> ⚠️ 你我说法未对齐,明天读 rust 代码确证是 best-of-N 还是任务分解</span>。</div>
+  <div class="r-cx"><b>codex</b>：单 agent 循环。</div>
+  <div class="r-cl"><b>claude-code</b>：主循环 + 子 agent(Task 工具派生 subagent)。</div>
+  <div class="r-pi"><b>pi</b>：<b>单 agent,刻意不做子 agent</b>(设计哲学:靠 extensions 扩展,不靠拆 agent)。</div>
+</div></details>
+
+<div class="foot">
+<b>置信度(诚实说清,别把 ⚠️ 当定论去讲):</b><br>
+· <b>pi</b> —— 本会话逐块拆过(agentLoop/prepareNextTurn/compact),较实。<br>
+· <b>nanocodex</b> —— 读码(approval.rs/args.rs)+ 你自述;<span class="w">编排(best-of-N vs 分层)明天读 rust 代码确证</span>。<br>
+· <b>codex / claude-code</b> —— 公开行为观察,<b>内部实现未逐一确证</b>;<span class="w">⚠️ 格为不确定,面试别硬讲细节,点到"我了解它大致这样"即可</span>。<br>
+· 用法:图=一眼定位,点开=钻细节,<b>细节下沉不塞满</b>。
+</div>

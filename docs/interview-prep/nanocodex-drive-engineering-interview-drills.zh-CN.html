@@ -1,0 +1,186 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex 驾驭工程 · 精炼刷题卡（口播自检版）</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;
+    --q:#3fb950;--l:#d29922;--r:#f85149;--p:#8957e5}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    max-width:900px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:17px;margin:1.2em 0 .4em}
+  h3{font-size:15px;color:#cbd3db;margin:1.1em 0 .3em}
+  blockquote{color:var(--mut);font-size:13.5px;border-left:3px solid var(--line);margin:.6em 0;padding:2px 14px;
+    background:var(--card);border-radius:0 8px 8px 0}
+  blockquote p{margin:.4em 0}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  pre{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow-x:auto}
+  a{color:#58a6ff}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;margin:12px 0}
+  .toc a{margin:2px 10px 2px 0;display:inline-block}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:.6em 0}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  th{background:#1b2129}
+  ul,ol{padding-left:1.4em}
+  li{margin:.25em 0}
+  hr{border:none;border-top:1px solid var(--line);margin:1.1em 0}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;margin:10px 0}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .body{padding:2px 18px 14px}
+  .btns{margin:10px 0 16px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 14px;
+    font-size:13px;cursor:pointer;margin-right:8px}
+</style>
+
+<h1>nanocodex 驾驭工程 · 精炼刷题卡（口播自检版）</h1>
+<blockquote>
+<p>用途：对 nanocodex 这套 coding agent 的驾驭工程细节刷题、录语音。<strong>少而尖</strong>——1 道总纲 + 3 道必刷（最差异化）+ 2 道补充 + 1 道选刷。
+刷法：① 只看【题目】录一段语音 → ② 对【答题骨架】逐条自检漏了哪条 → ③ 背【一句话】做收尾 → ④ 想一遍【换业务】那一环怎么变。
+风格参考 <code>agent-case-compliance-vs-scheduling.zh.md</code>：骨架相同、承重随业务变。真做过的照实讲，超出的用「如果重新设计我会…」句式。</p>
+</blockquote>
+<hr />
+
+<div class="toc"><b>目录：</b><br><a href="#Q0-总纲-场景迁移">Q0 · 总纲（场景迁移）</a>
+<a href="#Q1-权限-必刷">Q1 · 权限 【必刷】</a>
+<a href="#Q2-编排-多-agent-通讯-必刷">Q2 · 编排 / 多 agent 通讯 【必刷】</a>
+<a href="#Q3-离线演化-安全边界-必刷">Q3 · 离线演化 / 安全边界 【必刷】</a>
+<a href="#Q4-上下文压缩-补充">Q4 · 上下文压缩 【补充】</a>
+<a href="#Q5-确定性校验-vs-LLM-judge-补充-跨场景元原则">Q5 · 确定性校验 vs LLM judge 【补充 · 跨场景元原则】</a>
+<a href="#Q6-记忆-选刷">Q6 · 记忆 【选刷】</a></div>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<details class="c" id="Q0-总纲-场景迁移">
+<summary><span class="t">Q0 · 总纲（场景迁移）</span><div class="peek">题目：** 同一套 agent harness 换一个业务场景，哪些环不变、哪些环要重新「承重」？拿你的 coding agent 举例。</div></summary>
+<div class="body">
+<p><strong>题目：</strong> 同一套 agent harness 换一个业务场景，哪些环不变、哪些环要重新「承重」？拿你的 coding agent 举例。</p>
+<ul>
+<li><strong>考点：</strong> 驾驭工程的可迁移性 + 「场景决定承重」的判断力。</li>
+<li><strong>答题骨架：</strong>
+  1. <strong>不变的骨架</strong>：prompt 钉角色边界 / context 供可信数据 / 工具面收窄副作用 / ground-truth 校验 + 人审兜出口 / <strong>LLM 原始输出不直接落地</strong>。
+  2. <strong>变的是承重</strong>：任务是 <em>LLM-native</em>（语义比对本身是主活）还是 <em>LLM-as-interface</em>（主活外包给确定性系统）？→ 决定 LLM 是主判断者还是翻译官。
+  3. <strong>风险形态</strong>：最怕假阴性（合规漏判）还是假阳性（排产/编码幻觉方案）？→ 决定保守方向。
+  4. <strong>nanocodex 落点</strong>：编码 agent 副作用大（改文件/跑命令），所以<strong>权限环承重</strong>；若换成只读分析 agent，权限退居次要、<strong>检索/上下文环承重</strong>。</li>
+<li><strong>一句话：</strong> 同一套方法论——合规长成 RAG+judge、排产长成 NL2建模+solver、编码长成「沙箱+审批+压缩+best-of-N」；<strong>骨架同，承重随业务。</strong></li>
+</ul>
+<hr />
+</div>
+</details>
+
+<details class="c" id="Q1-权限-必刷">
+<summary><span class="t">Q1 · 权限 【必刷】</span><div class="peek">题目：** 你的 coding agent 怎么控制权限？为什么不能靠 prompt 写一句「不许删库」就完事？</div></summary>
+<div class="body">
+<p><strong>题目：</strong> 你的 coding agent 怎么控制权限？为什么不能靠 prompt 写一句「不许删库」就完事？</p>
+<ul>
+<li><strong>考点：</strong> Guardrails 环 · 安全建在代码不建在措辞。</li>
+<li><strong>答题骨架：</strong>
+  1. <strong>两道正交纯函数</strong>：<code>SandboxPolicy</code> 判「物理能不能写」（三档模式 + 词法路径包含）⊥ <code>Approver::classify</code> 判「越界了怎么办」（四档策略 → 三态 AutoApprove/Ask/AutoDeny）。
+  2. <strong>三层解耦</strong>：policy（物理）/ approval（越界）/ prompt（人类提示，住 ncx-core 不在 sandbox crate，保持沙箱纯决策）。
+  3. <strong>危险命令</strong>：untrusted 三重过滤，<strong>7 条危险正则先跑</strong>——<code>rm -rf</code> 即使被可信命令引导也当场拦。
+  4. <strong>为什么不靠 prompt</strong>：prompt 是软约束，注入/抽风能绕；不可逆写操作<strong>物理隔离</strong>——<code>release</code> 类工具 agent 根本没有（能力剥夺，不是劝阻）。<code>PolicyExecutor</code> 只做容器（Job Object + 超时），决策到它之前已定死。</li>
+<li><strong>一句话：</strong> 安全边界永远建在代码上，不建在措辞上；codex 给了词汇（3 沙箱/4 审批），我把它做成可单测、可回放的纯函数系统。</li>
+<li><strong>换业务：</strong> 只读分析 → 权限退次要；金额/退款/下达类业务 → 补「提案权 / 下达权物理分离」（agent 只能 <code>submit_for_approval</code>，<code>release</code> 由审批系统触发）。</li>
+</ul>
+<hr />
+</div>
+</details>
+
+<details class="c" id="Q2-编排-多-agent-通讯-必刷">
+<summary><span class="t">Q2 · 编排 / 多 agent 通讯 【必刷】</span><div class="peek">题目：** 你的父 agent 和子 agent 之间怎么通讯？有没有消息总线？</div></summary>
+<div class="body">
+<p><strong>题目：</strong> 你的父 agent 和子 agent 之间怎么通讯？有没有消息总线？</p>
+<ul>
+<li><strong>考点：</strong> Workflow 环（多节点）· 通讯设计的第一性。</li>
+<li><strong>答题骨架：</strong>
+  1. <strong>没有消息总线、没有 peer 对话。</strong> 三条真实通道：① <strong>prompt 下发</strong>（状态按值序列化进每个全新无状态子会话）；② <strong>文件系统隔离-提升</strong>（代码改动的真 IPC：每个 worker 改私有拷贝，verifier 选 winner 后 <code>promote</code> 回真 workspace）；③ <strong><code>PASS/FAIL/BEST</code> 裁决文本回灌</strong>闭环。
+  2. <strong>能力剥夺</strong>：<code>reason()</code> 节点（classify/plan/verify）走空 registry，<strong>代码级物理拿不到工具</strong>。
+  3. <strong>为什么这样</strong>：无状态子会话可并行、可重跑；「隔离-然后-提升」恰好解决并行 <code>apply_patch</code> 撞同一文件的真实 bug。</li>
+<li><strong>一句话：</strong> 子 agent 不「对话」——<strong>文本是下行通道，磁盘才是代码的真 IPC，裁决文本是回路。</strong></li>
+<li><strong>换业务：</strong> 需要 peer 协商的业务（售后：决策↔供应链↔风控）→ 补 A2A 的 <code>query</code> 消息类型，但保留「父节点唯一中枢」防协商环路/死锁。</li>
+</ul>
+<hr />
+</div>
+</details>
+
+<details class="c" id="Q3-离线演化-安全边界-必刷">
+<summary><span class="t">Q3 · 离线演化 / 安全边界 【必刷】</span><div class="peek">题目：** 你让 agent 离线自动优化自己，怎么保证这个过程不会引入安全风险？</div></summary>
+<div class="body">
+<p><strong>题目：</strong> 你让 agent 离线自动优化自己，怎么保证这个过程不会引入安全风险？</p>
+<ul>
+<li><strong>考点：</strong> Feedback 环 + 训练接缝即安全边界。</li>
+<li><strong>答题骨架：</strong>
+  1. 离线只演化 <strong>genome = system prompt + 工具描述（纯文本）</strong>，绝不动行为/权限。
+  2. <code>NCX_GENOME</code> 是训练与运行<strong>唯一接缝</strong>；<strong>可证明 no-op</strong>（空/格式错 → 字节级回退默认脚手架）。
+  3. 执行始终过沙箱 → 一个被<strong>不可信失败轨迹</strong>喂养的 teacher 也无法注入新能力：<strong>训练接缝与安全边界是同一条线</strong>。
+  4. <strong>sentinel 暗号门</strong>：无法证明注入确实生效前拒绝训练——防「离线全绿是假象」。</li>
+<li><strong>一句话：</strong> 能演化的只有文字，执行永远过沙箱——<strong>离线训练改不动安全边界。</strong></li>
+</ul>
+<hr />
+</div>
+</details>
+
+<details class="c" id="Q4-上下文压缩-补充">
+<summary><span class="t">Q4 · 上下文压缩 【补充】</span><div class="peek">题目：** 长任务把上下文撑爆了怎么办？为什么你的压缩是「非破坏性发送时视图」？</div></summary>
+<div class="body">
+<p><strong>题目：</strong> 长任务把上下文撑爆了怎么办？为什么你的压缩是「非破坏性发送时视图」？</p>
+<ul>
+<li><strong>考点：</strong> Context 环。</li>
+<li><strong>答题骨架：</strong>
+  1. <code>for_model_edited</code> 构建<strong>发送时视图</strong>，<code>self.messages</code> 原始历史<strong>不动</strong>（非破坏）。
+  2. <strong>两趟</strong>：先把旧 tool 结果压到上限 → 仍超限则在 <strong>user 边界</strong>丢最旧前缀。
+  3. <strong>硬规则</strong>：切点<strong>绝不落在 tool_result</strong>——否则历史以孤立 tool 消息开头，下一次请求 400。
+  4. <strong>为什么非破坏</strong>：压缩是有损猜测，保留原始才敢激进压——resume / 回放 / 换模型重算都要原始。</li>
+<li><strong>一句话：</strong> 压缩是「发送时的一次性视图」，不是把历史真删了——<strong>原始不可变，才敢激进压。</strong></li>
+<li><strong>换业务：</strong> 编码 → keep 最近代码 diff；客服/售后 → keep 用户原始诉求 + 订单号（不同的「保留优先级」）。</li>
+</ul>
+<hr />
+</div>
+</details>
+
+<details class="c" id="Q5-确定性校验-vs-LLM-judge-补充-跨场景元原则">
+<summary><span class="t">Q5 · 确定性校验 vs LLM judge 【补充 · 跨场景元原则】</span><div class="peek">题目：** critic / 校验这一环，什么时候用确定性校验、什么时候才上 LLM judge？</div></summary>
+<div class="body">
+<p><strong>题目：</strong> critic / 校验这一环，什么时候用确定性校验、什么时候才上 LLM judge？</p>
+<ul>
+<li><strong>考点：</strong> Guardrails/Evals 的通用判据（面试高频，能体现判断力）。</li>
+<li><strong>答题骨架：</strong>
+  1. <strong>有数学/可程序化判据 → 永远优先确定性</strong>：排产的 <code>validate_schedule</code>、权限的 <code>can_write</code>、编码的 verify <code>PASS/FAIL</code>。
+  2. <strong>只有语义判据 → 才上 LLM judge</strong>：如合规「该条款是否支持该结论」，且 judge 必须用人工校准集对齐（agreement ≥ 0.9 才可信）。
+  3. nanocodex 的 verify 是<strong>确定性裁决文本</strong>（PASS/FAIL/BEST），不再挂一个大模型评审。</li>
+<li><strong>一句话：</strong> 有确定性判据就别用 LLM judge；judge 只留给纯语义场景，且必须校准。</li>
+</ul>
+<hr />
+</div>
+</details>
+
+<details class="c" id="Q6-记忆-选刷">
+<summary><span class="t">Q6 · 记忆 【选刷】</span><div class="peek">题目：** agent 的记忆怎么设计，才不会用过期经验污染当前判断？</div></summary>
+<div class="body">
+<p><strong>题目：</strong> agent 的记忆怎么设计，才不会用过期经验污染当前判断？</p>
+<ul>
+<li><strong>考点：</strong> Memory 环。</li>
+<li><strong>答题骨架：</strong>
+  1. recall 注入时标为<strong>「线索而非事实」</strong>（RECALL_HEADER），不当 ground truth 用。
+  2. 写入只收 <strong>CONFIRMED</strong> + 精确去重 + 上限；<code>consolidate(0.85)</code> 启动即幂等去重防近重复堆积。
+  3. <strong>为什么</strong>：记忆是弱信号，当事实用会把过期经验变成「幽灵约束」。</li>
+<li><strong>一句话：</strong> 记忆进上下文是「线索」不是「事实」，写入只收确认过的——<strong>防幽灵约束。</strong></li>
+<li><strong>换业务：</strong> 编码 → 项目事实/习惯；客服 → 用户偏好 + <strong>租户隔离</strong>（A 的记忆不能泄漏进 B）。</li>
+</ul>
+<hr />
+<h3>刷题优先级</h3>
+<ul>
+<li><strong>先刷 Q1 / Q2 / Q3</strong>（权限双门、编排无总线、离线安全边界）——这三条是 nanocodex 相对 codex 最差异化、最可能被深挖的点。</li>
+<li><strong>Q0 做开场框架</strong>，任何 agent 系统设计题都能用它起手。</li>
+<li><strong>Q5 是跨场景元原则</strong>，合规/排产/编码都能套。</li>
+</ul>
+</div>
+</details>
+

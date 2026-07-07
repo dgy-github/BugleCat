@@ -1,0 +1,138 @@
+{
+ "key": "eval-observability",
+ "name": "评估、可观测性与持续改进",
+ "data": {
+  "category": "评估、可观测性与持续改进",
+  "definition": {
+   "statement": "该类别的核心工程概念可拆成四根互相咬合的支柱:(1) Agent benchmark/任务设计——评测对象是 model+tools+memory+guardrails 组成的 compound system,不能只测 model-level 正确率,任务必须配一个可靠的 verifier/grader;arXiv:2507.02825《Establishing Best Practices for Building Rigorous Agentic Benchmarks》系统盘点了 SWE-bench-Verified、GAIA、τ-bench、WebArena 等 17 个主流 agentic benchmark 里的 verifier 缺陷(例如 SWE-bench-Verified 测试用例覆盖不足、τ-bench 把空响应误判为成功),这类 under-specified reward/verifier 会造成 agent 表现被高估或低估最高达 100% 的相对误差;(2) LLM-as-judge——用强 LLM 替代/辅助人工来评测开放式输出,奠基工作是 arXiv:2306.05685《Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena》(Zheng et al., NeurIPS 2023),它用 MT-Bench(58 位专家多轮问答)和 Chatbot Arena(众包对战)验证强 LLM judge 与人类偏好一致率可达 80%+、接近人类专家间一致率,同时系统刻画了 judge 的 position bias、verbosity bias、self-enhancement bias 及有限推理/数学能力等系统性偏差,并提出交换位置、reference-guided grading 等缓解手段;(3) Trace/可观测性——OpenTelemetry 的 GenAI Semantic Conventions(spec: gen-ai-agent-spans,自 2024 年 4 月 GenAI Observability SIG 成立后持续演进)为 model 调用和 agent 级操作定义标准 span(agent span kind=CLIENT,继承并扩展 base GenAI span 约定,覆盖 token usage、latency、工具调用参数/结果),使工具调用、模型调用、多 agent 交互结构可被跨框架(LangChain/CrewAI/AutoGen 等)一致记录;Anthropic 工程博客《Writing effective tools for AI agents》进一步给出实践做法:trace review(读原始 transcript,含工具调用与返回)是定位 agent 卡住/困惑位置、诊断冗余工具调用(分页/token 限制问题)与频繁工具错误(描述不清)的一手手段;(4) 评测驱动的持续改进(Evaluation-Driven Development, EDD)——arXiv:2411.13768《Evaluation-Driven Development and Operations of LLM Agents: A Process Model and Reference Architecture》指出传统 TDD/BDD 假设确定性系统与固定规约,不能直接套用到开放式、持续自适应的 LLM agent,需要专门的评测驱动流程模型,把评测作为开发生命周期一等公民而非事后检查;Anthropic《Demystifying evals for AI agents》进一步区分 offline evaluation(开发期用固定任务集迭代)与 production observability(线上监控分布漂移)两个互补维度,并指出 Harbor、Braintrust 等工具分别覆盖容器化规模化跑分与评测+生产观测+实验追踪一体化两类典型形态。",
+   "sources": [
+    {
+     "title": "Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (arXiv:2306.05685)",
+     "url": "https://arxiv.org/abs/2306.05685"
+    },
+    {
+     "title": "Establishing Best Practices for Building Rigorous Agentic Benchmarks (arXiv:2507.02825)",
+     "url": "https://arxiv.org/html/2507.02825"
+    },
+    {
+     "title": "Evaluation-Driven Development and Operations of LLM Agents: A Process Model and Reference Architecture (arXiv:2411.13768)",
+     "url": "https://arxiv.org/pdf/2411.13768"
+    },
+    {
+     "title": "Demystifying evals for AI agents — Anthropic Engineering",
+     "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents"
+    },
+    {
+     "title": "Writing effective tools for AI agents—using AI agents — Anthropic Engineering",
+     "url": "https://www.anthropic.com/engineering/writing-tools-for-agents"
+    },
+    {
+     "title": "Semantic Conventions for GenAI agent and framework spans — OpenTelemetry",
+     "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/"
+    },
+    {
+     "title": "τ-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains (arXiv:2406.12045)",
+     "url": "https://arxiv.org/abs/2406.12045"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "什么样的 agent benchmark 任务设计算合格?常见的 verifier/reward 设计缺陷有哪些,会造成什么后果?",
+    "tier": "L1",
+    "why_asked": "检验候选人是否理解“跑得出分数”和“分数可信”的区别,是否知道公开 benchmark 本身也可能有严重设计缺陷,而不是把 published benchmark 当金标准照单全收。",
+    "key_points": [
+     "评测对象是 model+tools+memory+guardrails 组成的 compound system,不能只测 model-level 正确率",
+     "任务需要客观可验证的成功判据(如 SWE-bench 用 fail-to-pass 测试执行,而非模型自评)",
+     "arXiv:2507.02825 指出 SWE-bench-Verified 测试用例覆盖不足、τ-bench 把空响应算通过,这类 verifier 缺陷可致最高 100% 相对误差的高估/低估(reward hacking)",
+     "需要 held-out/frozen 测试集,防止对已知 eval set 过拟合"
+    ],
+    "follow_ups": [
+     "如果你维护的 eval 集通过率一直很高但线上体验差,你会怎么排查?",
+     "如何设计任务防止“空响应/拒绝作答”被误判为成功?"
+    ],
+    "nanocodex_link": "ncx-forge subsystem — evaluator.py/forge.py 里 empty eval → Objectives(passrate=0, cost=+inf) 的映射(forge.py:291),专门防止“零任务/空跑”静默伪装成绿色冠军,正对应 τ-bench 空响应算通过这一类坑的工程应对。"
+   },
+   {
+    "question": "什么时候该用 LLM-as-judge,什么时候该用规则/exact-match grading?LLM judge 本身有哪些系统性偏差,怎么缓解?",
+    "tier": "L2",
+    "why_asked": "权衡题,考察候选人是否只会无脑上强模型当裁判,还是理解 judge 的适用边界、已知偏差以及工程缓解手段。",
+    "key_points": [
+     "exact-match/程序化 grader 适合有唯一正确答案或可执行验证的任务(如 GAIA 精确匹配、SWE-bench 跑测试);LLM-as-judge 适合开放式、多维度、无单一标准答案的输出",
+     "arXiv:2306.05685 验证强 LLM judge 与人类专家一致率可达 80%+,但存在 position bias、verbosity bias(偏爱更长回答)、self-enhancement bias(偏爱同源模型输出)及有限推理/数学能力",
+     "缓解手段:交换回答顺序消偏、reference-guided grading(给 judge 参考答案)、拆成 rubric 维度打分而非整体一次性打分、多 judge 集成",
+     "需要一个人工标注的校准子集持续验证 judge 与人类的一致率,而不是部署后就不再检查"
+    ],
+    "follow_ups": [
+     "如果 judge 打分和人工评分系统性不一致,你会先怀疑 prompt 设计还是模型能力?",
+     "怎么防止 judge 被 agent 输出里的对抗性文本影响、打出虚高分数?"
+    ],
+    "nanocodex_link": ""
+   },
+   {
+    "question": "怎么设计 agent 的 trace/日志,让你能在不复现问题的情况下诊断一次线上失败?",
+    "tier": "L3",
+    "why_asked": "深挖故障场景,考察候选人是否有用 trace 排障的实操经验,以及是否知道该在什么粒度记录哪些字段。",
+    "key_points": [
+     "OpenTelemetry GenAI Semantic Conventions 为 model 调用与 agent 级操作定义标准 span(agent span kind=CLIENT,继承并扩展 base GenAI span 语义,覆盖 token usage、latency、工具调用参数/结果)",
+     "多 agent 场景要抓的不只是单 agent 行为,还要抓 decision pattern 和交互结构,否则协作失败几乎无法定位根因",
+     "Anthropic《Writing effective tools》给出可操作动作:读原始 transcript(含工具调用/返回)找卡住点;高频重复工具调用提示分页/token 限制问题;高频参数错误提示工具描述不清",
+     "失败轨迹进入下游分析/反馈闭环前要做敏感信息脱敏"
+    ],
+    "follow_ups": [
+     "如果 trace 显示 agent 反复调用同一工具却拿到相同错误,你会先怀疑 harness 层还是 prompt 层?",
+     "全量记录 trace 和采样记录 trace 各自的取舍是什么?"
+    ],
+    "nanocodex_link": "ncx-forge subsystem — evaluator.py 的失败轨迹采集(evaluator.py:104-197):从 agent 自己的 session.jsonl 里留最后一条 assistant 消息 + 最后 12 个工具调用当诊断/训练信号,并对含 GRADER_MARKERS 的行做 _redact 脱敏,是 nanocodex 里“trace 驱动迭代”最贴近的具体实现。"
+   },
+   {
+    "question": "如果要在训练/优化流程里加一个“回归自检门”(self-check gate),防止一次改动静默失效却被误判为有效,你会怎么设计这个门?",
+    "tier": "L3",
+    "why_asked": "深挖机制设计题,考察候选人是否理解“确定性探针”与“用真实任务当探针”的本质区别,以及重试策略里的非对称陷阱。",
+    "key_points": [
+     "用确定性、与任务语义无关的探针(如让 agent 回显一个暗号)而不是用真实任务冒烟测试——真实任务里任务指令本身会和“改动是否生效”竞争,产生噪声、难判定",
+     "门至少要双向验证:改动确实注入生效(injected)且未注入时确实不出现(absent_baseline),只查一边无法排除巧合触发或从未生效两类假阳性/假阴性",
+     "重试策略要区分模型偶发噪声导致的漏报和该严格拒绝的情形,两边重试次数不对称本身是需要被复核的设计假设,而非默认安全",
+     "门未通过前,不应把后续基于该改动的评测结果当可信数据消费"
+    ],
+    "follow_ups": [
+     "如果“不该出现”检查偶发触发了一次误报,门要怎么处理才不会误杀一次正常改动?",
+     "这类自检门要跑在每次改动之后,还是可以采样跑?"
+    ],
+    "nanocodex_link": "ncx-forge subsystem — SENTINEL 自检门(forge.py:51-112,493-495):写入让 agent 只回暗号 NCXFORGE_SENTINEL_4242 的基因组,跑通(injected)且基线无暗号(absent_baseline)才 PASS,否则除非 --no-gate 拒绝训练;其已知坑是 injection-check 重试 3 次而 absence-check 只跑一次,是非对称 retry 设计的真实案例。"
+   },
+   {
+    "question": "怎么把 prompt/harness 的迭代,从“改完跑几个 case 看着顺眼就发”变成一个可信的、可持续跑的评测驱动流程?",
+    "tier": "L2",
+    "why_asked": "考察候选人是否理解 Evaluation-Driven Development(EDD)的工程含义而非表面理解成“写几个测试用例”,以及是否知道防止对已知 eval 集过拟合的机制。",
+    "key_points": [
+     "arXiv:2411.13768 指出传统 TDD/BDD 假设确定性系统与固定规约,不能直接套用于开放式、持续自适应的 LLM agent,需要专门的 evaluation-driven 流程模型,把评测当作开发生命周期一等公民",
+     "Anthropic《Demystifying evals for AI agents》区分 offline evaluation(开发期用固定任务集迭代)和 production observability(线上监控真实分布漂移),二者互补缺一不可",
+     "需要 held-out/frozen 测试集机制防止“改 prompt 改到过拟合已知 eval 案例”——开发时用的评测集和最终验收集要分离,验收集只打一次分",
+     "每次 harness/prompt 改动都应跑同一套回归评测集而非每次手挑 case,形成版本可对比、可回滚的迭代记录"
+    ],
+    "follow_ups": [
+     "如果某次 prompt 改动让 eval 分数涨了但线上反馈变差,你会先怀疑评测集本身出了什么问题?",
+     "多大规模的团队/项目值得投入建这样一套评测驱动闭环?"
+    ],
+    "nanocodex_link": "ncx-forge subsystem — train() 的噪声感知爬山机制里 accept_margin 接受规则 + holdout 防过拟合 + frozen test 只打一次分(forge.py:233-237),是“防止对已知 eval 集过拟合、区分训练信号与无偏验收”这套工程原则的具体实现。"
+   },
+   {
+    "question": "从零给一个新的多步 web 调研 agent 设计评测体系:任务集、grader/judge、trace、回归门,你会怎么搭,重点防哪些坑?",
+    "tier": "L4",
+    "why_asked": "开放设计题,综合考察候选人能否把基准设计、LLM-judge、trace、回归门四件事串成一个完整、自洽、能落地演进的评测体系,而不是零散罗列工具名词。",
+    "key_points": [
+     "任务集设计参考 SWE-bench 的 fail-to-pass 思路(客观可执行验证而非模型自评)与 τ-bench 的多轮工具-用户交互结构;显式规避 arXiv:2507.02825 点名的常见坑(verifier 覆盖不足、空/退化响应误判成功、环境非确定性未被察觉)",
+     "开放式产出(如调研报告质量)用 LLM-as-judge,并按 arXiv:2306.05685 的经验加 reference-guided grading、位置交换、多 judge 集成缓解偏差,同时留一个人工校准子集持续验证 judge 一致率",
+     "全链路 trace 按 OpenTelemetry GenAI Semantic Conventions 记录 model/tool/agent span,支撑失败复盘和多步骤归因",
+     "上线前用确定性自检门(而非跑几个真实任务看着顺眼)验证 harness 改动本身未静默破坏,再叠加 held-out/frozen 集合防止对已知任务过拟合,形成可持续回归的评测驱动迭代闭环"
+    ],
+    "follow_ups": [
+     "如果预算有限,这四块你会先砍哪一块、先保哪一块?为什么?",
+     "怎么判断你的评测集本身已经过时,需要换一批任务?"
+    ],
+    "nanocodex_link": "ncx-forge subsystem 整体训练闭环(SENTINEL 自检门 + evaluator.py 失败轨迹采集 + train()/evolve() 的 holdout/frozen/Pareto 机制 + splits.py 的 train/val/test 划分),是 nanocodex 里最完整对应“评测驱动持续改进闭环”的具体子系统,可作该设计题的一个具体参照实现。"
+   }
+  ]
+ }
+}

@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排产数字闪卡 · 自测</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:820px;margin:0 auto;padding:22px 16px 70px}
+  h1{font-size:22px;margin:.2em 0}
+  h2{font-size:16px;margin:1.4em 0 .5em;color:var(--l);border-left:4px solid var(--l);padding-left:9px}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .btns{margin:8px 0 14px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 14px;font-size:14px;cursor:pointer;margin-right:8px}
+  details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:8px 0}
+  summary{cursor:pointer;padding:13px 15px;list-style:none;font-weight:600;font-size:15.5px;display:flex;gap:9px;align-items:baseline}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"❓";font-size:14px}
+  details[open] summary{border-bottom:1px solid var(--line);color:var(--l)}
+  details[open] summary::before{content:"✅"}
+  .a{padding:12px 15px;font-size:16px}
+  .a b{color:var(--q);font-size:1.05em}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.85em;color:#e6edf3}
+  .tip{color:var(--mut);font-size:13px;margin-top:5px}
+</style>
+
+<h1>🔢 排产数字闪卡 · 自测</h1>
+<p class="hint">用法：<b>先盖住答案，自己出声报数</b>，再点卡片核对(❓→✅)。报不出的做记号，就是今天要焊死的。</p>
+<div class="btns">
+  <button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">全部揭开</button>
+  <button onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">全部盖住</button>
+</div>
+
+<h2>📦 数据规模</h2>
+<details><summary>用了多少条真实订单？什么行业、什么库？</summary><div class="a"><b>49,981 条</b>真实生产订单，<b>纺织/化纤</b>行业，<b>SQLite</b>。</div></details>
+<details><summary>支持多少类写意图？配在哪？</summary><div class="a"><b>19 类</b>写意图，配在 <code>configs/intents.json</code>。</div></details>
+<details><summary>角色分几级？从低到高是哪四个？</summary><div class="a"><b>4 级</b>：业务员0 &lt; 工艺员1 &lt; 主任2 &lt; 厂长3（<code>ROLE_HIERARCHY</code>）。</div></details>
+
+<h2>✅ 评测门禁 <a href="schedule-agent-eval-deep-dive.zh-CN.html" style="font-size:12px;font-weight:400">→ 不懂点这里看详解</a></h2>
+<details><summary>golden 评测集多少用例、几类？</summary><div class="a"><b>44 用例 / 11 类</b>。</div></details>
+<details><summary>11 类分别是哪些？（按主题）</summary><div class="a">读查 <code>readonly_query</code>(5)；写治理 <code>write_blocked</code>(2)/<code>write_full</code>(3)；交互 <code>clarify</code>(2)/<code>template_response</code>(1)；NLU <code>entity_extraction</code>(3)/<code>intent_disambiguation</code>(4)；健壮安全 <code>robustness</code>(3)/<b><code>agentic_rag_guard</code>(5)</b>/<b><code>hallucination_guard</code>(5)</b>；管理 <code>admin_ops</code>(11)。合计 <b>44</b>。亮点=两道 RAG 护栏类(防无限检索 + 防编造)。</div></details>
+<details><summary>CI 上线门禁的阈值是什么？</summary><div class="a"><b><code>rule_pass_rate ≥ 1.0</code></b> 才 exit0（规则用例必须全过）。</div></details>
+<details><summary>skill audit 有几项检查？哪几项？</summary><div class="a"><b>5 项</b>：dark / conflict / self_recog / coverage / orphan。</div></details>
+<details><summary>check_expected 有多少类确定性断言？</summary><div class="a"><b>~16 类</b>（intent_code / path / governance_passed / max_retrieval_steps / response_must_not_contain…）。</div></details>
+<details><summary>LLM judge 打分几维、几分制？</summary><div class="a"><b>3 维、1–5 分</b>（可降级为规则）。</div></details>
+
+<h2>🔎 RAG 检索</h2>
+<details><summary>Hybrid+RRF 的 Recall@3 和 Precision@3？</summary><div class="a"><b>Recall@3 = 0.83</b> / Precision@3 = 0.40。</div></details>
+<details><summary>最优切块策略是哪种？MRR 多少？</summary><div class="a"><b>markdown 一规则一块，MRR = 0.956</b>（语义边界干净）。</div></details>
+<details><summary>其他切块策略的 MRR 对比？</summary><div class="a">fixed_200=<b>0.935</b> / fixed_500=<b>0.917</b> / recursive_300=<b>0.907</b>（都不如 markdown 0.956）。</div></details>
+<details><summary>切块策略的诚实短板数字？为什么？</summary><div class="a"><b>Negative Precision = 0%</b>——2 个"本不该命中"的 query 全被误召回，因为 <b>BM25 不会说"无匹配"</b>。</div></details>
+<details><summary>几种 Retriever？分别是？</summary><div class="a"><b>5 种</b>：SQL / Vector / Hybrid / Case / Composite。</div></details>
+<details><summary>向量用什么 embedding、什么库？</summary><div class="a"><b>bge-small-zh</b> + <b>Qdrant</b>（VectorRetriever）。</div></details>
+
+<h2>⏱ 可观测 / 延迟</h2>
+<details><summary>端到端 P50 / P95 / avg？</summary><div class="a"><b>P50=941ms / P95=4702ms / avg=1480ms</b>。</div></details>
+<details><summary>节点级 LLM vs Route 的 P95？说明什么？</summary><div class="a"><b>LLM P95=4588ms vs Route P95=15ms</b>——一眼看出<b>慢在 LLM</b>不是路由。</div></details>
+<details><summary>成功率？</summary><div class="a"><b>90%</b>。</div></details>
+<details><summary>50 请求总成本 / 单请求成本？</summary><div class="a"><b>¥0.0774</b> / ≈<b>¥0.0015</b> 每请求。</div></details>
+
+<h2>🛡 审计 / 治理</h2>
+<details><summary>audit_log 在哪几处写？execute 写不写？</summary><div class="a"><b>只两处</b>：governance-blocked(拦截时) + verify(执行后)；<b>execute 本身不写审计</b>。</div></details>
+<details><summary>success=true 怎么判？</summary><div class="a">verify <b>全通过</b>才 success=true；回读不一致降 false + <code>status=needs_review</code>。</div></details>
+<details><summary>故障转移批量改的防误伤上限？</summary><div class="a"><b><code>LIMIT 50</code></b>。</div></details>
+
+<h2>🎯 意图打分（⚠️ 易错，别答成"给模型"）</h2>
+<details><summary>意图识别用模型还是规则？</summary><div class="a"><b>规则 + 关键词打分，零 LLM</b>（<code>route.py</code> 的 <code>_calculate_intent_score</code>）。</div></details>
+<details><summary>打分规则大概怎么加减分？</summary><div class="a">命中 trigger_phrases <b>+12</b> / 各意图关键词 <b>+16~40</b> / 冲突信号 <b>−30~−40</b>。</div></details>
+<details><summary>confidence 是怎么来的？是模型概率吗？</summary><div class="a"><code>_score_to_confidence</code> 把<b>规则分数</b>阶梯映射（score≥30→0.95 / ≥24→0.90…），<b>不是模型概率</b>。</div></details>
+<details><summary>什么时候触发 need_clarify？</summary><div class="a"><b>confidence&lt;0.5</b> 或 <b>top1/top2 分差过小</b> 或 <b>写操作置信度&lt;阈值</b>。</div></details>
+
+<h2>🧬 拓扑 / 字段</h2>
+<details><summary>完整节点拓扑（10 个，默写）？</summary><div class="a"><b>rewrite→route→query→rag→answer_verify→governance→preview→execute→verify→respond</b>。</div></details>
+<details><summary>三条件边？execute 的严格条件？</summary><div class="a">after_route / after_governance / after_preview；<b>严格 <code>confirmed is True</code></b> 才 execute。</div></details>
+<details><summary>DB 5 个关键字段及含义？</summary><div class="a"><code>ctsalebid</code>(订单主键) / <code>jt</code>(机台) / <code>gg</code>(规格,如545dtex/72f) / <code>pcrq</code>(排产日期) / <code>ddsl</code>(数量,吨)。</div></details>
+<details><summary>链路 ID 叫什么？（别说错）</summary><div class="a"><b><code>trace_id</code></b>，不是 chain_id。</div></details>
+
+<h2>▶️ 复现命令（被要"能复现吗"）</h2>
+<details><summary>RAG 数字怎么复现？</summary><div class="a"><code>python -X utf8 eval/bench_chunking.py</code>（BM25 基线，不依赖向量服务）。</div></details>
+<details><summary>Tracing / P95 数字怎么复现？</summary><div class="a"><code>python -X utf8 interview_challenges/solutions/solution_08.py</code>。</div></details>
+
+<p class="tip">全报得出=骨架焊死，可以上承重维度了。报不出的记下来，晚上串讲时重点补。</p>

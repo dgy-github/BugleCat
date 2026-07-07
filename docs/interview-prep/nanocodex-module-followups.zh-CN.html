@@ -1,0 +1,165 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex · 驾驭模块深挖追问题库（被追问时的备弹）</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;
+    --q:#3fb950;--l:#d29922;--r:#f85149;--p:#8957e5}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    max-width:900px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:17px;margin:1.2em 0 .4em}
+  h3{font-size:15px;color:#cbd3db;margin:1.1em 0 .3em}
+  blockquote{color:var(--mut);font-size:13.5px;border-left:3px solid var(--line);margin:.6em 0;padding:2px 14px;
+    background:var(--card);border-radius:0 8px 8px 0}
+  blockquote p{margin:.4em 0}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  pre{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow-x:auto}
+  a{color:#58a6ff}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;margin:12px 0}
+  .toc a{margin:2px 10px 2px 0;display:inline-block}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:.6em 0}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  th{background:#1b2129}
+  ul,ol{padding-left:1.4em}
+  li{margin:.25em 0}
+  hr{border:none;border-top:1px solid var(--line);margin:1.1em 0}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;margin:10px 0}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .body{padding:2px 18px 14px}
+  .btns{margin:10px 0 16px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 14px;
+    font-size:13px;cursor:pointer;margin-right:8px}
+</style>
+
+<h1>nanocodex · 驾驭模块深挖追问题库（被追问时的备弹）</h1>
+<blockquote>
+<p>定位：现有刷题卡是「承重环」顶层题；本文件是<strong>面试官往下钻时的备弹</strong>——按驾驭工程每个模块列细节追问，每题给 1–2 行答题点（不是完整 STAR，是"能对答如流"的要点）。
+用法：录音刷完承重题后，逐模块过一遍这些追问，卡住的标记出来重点背。全部基于真实代码（<code>ncx-cli/main.rs</code>、<code>ncx-core</code>、<code>ncx-sandbox</code>、<code>ncx-tools</code>、<code>train/</code>）。</p>
+</blockquote>
+<hr />
+
+<div class="toc"><b>目录：</b><br><a href="#模块-Prompt-genome-Prompt-Feedback-接缝">模块 · Prompt / genome（Prompt + Feedback 接缝）</a>
+<a href="#模块-Context-上下文压缩">模块 · Context 上下文压缩</a>
+<a href="#模块-Tools-工具系统">模块 · Tools 工具系统</a>
+<a href="#模块-Guardrails-权限-最重-追问最多">模块 · Guardrails 权限（最重，追问最多）</a>
+<a href="#模块-Memory-记忆">模块 · Memory 记忆</a>
+<a href="#模块-Workflow-Harness-run_turn">模块 · Workflow / Harness（run_turn）</a>
+<a href="#模块-Orchestration-best-of-N-多节点-Workflow">模块 · Orchestration best-of-N（多节点 Workflow）</a>
+<a href="#模块-Evals-Feedback-ncx-forge-离线">模块 · Evals / Feedback（ncx-forge 离线）</a></div>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<details class="c" id="模块-Prompt-genome-Prompt-Feedback-接缝">
+<summary><span class="t">模块 · Prompt / genome（Prompt + Feedback 接缝）</span><div class="peek">追问：genome 到底能改什么、不能改什么？ → 只能改 system_prompt + 每个工具的 description（纯文本**）…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：genome 到底能改什么、不能改什么？</strong> → 只能改 <code>system_prompt</code> + 每个工具的 <code>description</code>（<strong>纯文本</strong>）；绝不改工具行为/权限/执行。</li>
+<li><strong>追问：<code>NCX_GENOME</code> 没设置或格式错会怎样？</strong> → <code>Genome::default()</code>，与硬编码脚手架<strong>字节级一致</strong>（可证明 no-op）；正因如此离线"全绿"才不是假象。</li>
+<li><strong>追问：最终 system prompt 怎么拼出来的？</strong> → <code>compose_system_prompt(base ⊕ instructions ⊕ skills_index ⊕ plan_note)</code>，<code>base = genome.base_system_prompt(SYSTEM_PROMPT)</code>。</li>
+<li><strong>追问：genome 覆盖在哪一步生效？</strong> → 注册工具时 <code>genome.describe(name, default)</code> 烘焙进 tool_catalog；每回合 <code>schemas_for_query</code> 后再应用一次覆盖。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Context-上下文压缩">
+<summary><span class="t">模块 · Context 上下文压缩</span><div class="peek">追问：两趟压缩各压什么？ → ① 旧 tool 结果压到 max_tool_result_chars；② 仍超 max_chars 则在 u…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：两趟压缩各压什么？</strong> → ① 旧 <code>tool</code> 结果压到 <code>max_tool_result_chars</code>；② 仍超 <code>max_chars</code> 则在 <strong>user 边界</strong>丢最旧前缀。</li>
+<li><strong>追问：为什么切点绝不能落在 tool_result？</strong> → 否则历史以孤立 <code>tool</code> 消息开头 → 下次请求 <strong>400</strong>。</li>
+<li><strong>追问：压缩是破坏性的吗？resume 怎么办？</strong> → 非破坏：<code>for_model_edited</code> 是<strong>发送时视图</strong>，<code>self.messages</code> 原始不动 → resume/回放/换模型重算都用原始。</li>
+<li><strong>追问：token 怎么估的？</strong> → <code>chars/4</code> 保守高估；图片按固定字符数（<code>ESTIMATED_IMAGE_CHARS</code>）折算。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Tools-工具系统">
+<summary><span class="t">模块 · Tools 工具系统</span><div class="peek">追问：工具太多模型选不过来怎么办？ → schemas_for_query 渐进暴露：tools≤9 全暴露，否则 ALWAYS_VISIB…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：工具太多模型选不过来怎么办？</strong> → <code>schemas_for_query</code> 渐进暴露：<code>tools≤9</code> 全暴露，否则 <code>ALWAYS_VISIBLE_TOOLS</code> + 上回合 <code>tool_hints</code> + <code>catalog_score</code> 词法打分，<strong>上限 9</strong>。</li>
+<li><strong>追问：tool_search 怎么形成反馈回路？</strong> → 它重写 <code>ctx.tool_hints</code>，命中工具的 schema <strong>下一回合</strong>浮现。</li>
+<li><strong>追问：什么时候并行执行工具？</strong> → 当前 + 下一个调用<strong>都 read_only</strong> 才 <code>join_all</code> 并发；写/未知一律串行。</li>
+<li><strong>追问：MCP 工具怎么接、怎么保证不乱序？</strong> → <code>Rc&lt;Mutex&lt;McpClient&gt;&gt;</code> 串行化 stdio RPC；调用前过 <code>Approver</code> 门控。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Guardrails-权限-最重-追问最多">
+<summary><span class="t">模块 · Guardrails 权限（最重，追问最多）</span><div class="peek">追问：两道门分别判什么？** → SandboxPolicy.can_write 判&quot;物理能不能写&quot;（3 档 + 词法路径包含）⊥ Appr…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：两道门分别判什么？</strong> → <code>SandboxPolicy.can_write</code> 判"物理能不能写"（3 档 + 词法路径包含）⊥ <code>Approver::classify</code> 判"越界怎么办"（4 档 → 3 态）。</li>
+<li><strong>追问：can_write 解符号链接吗？</strong> → <code>can_write</code> 本身纯词法（转绝对 + normalize，不碰 FS）；但调用前 shell 先 canonicalize workdir、apply_patch 先 canonicalize 每个目标——符号链接在两条路上都已解析。真正不对称：shell 只查 <code>can_write(WORKDIR)</code>，apply_patch 逐目标查。</li>
+<li><strong>追问：untrusted 三筛顺序？为什么正则第一？</strong> → ① 7 条危险正则扫全串（任意位置命中即 false）② <code>first_token</code> 查 29 白名单 ③ <code>base==git</code> 查 15 写子命令。正则第一是 fail-safe——<code>rm -rf</code> 即使被可信 token 引导也先拦。</li>
+<li><strong>追问：SessionGrants 精确到什么程度？</strong> → 精确字符串匹配：<code>ls -la</code> ≠ <code>ls -l</code>；session 级 <code>Rc&lt;RefCell&gt;</code>，new/fork/resume 即丢。apply_patch 的 Always 仅当无越界目标才设 <code>allow_edits</code>。</li>
+<li><strong>追问：danger-full-access 是不是全放行？</strong> → 否，只清零 escalation bit、不改 approval policy；<code>untrusted + danger</code> 下未知命令<strong>仍 Ask</strong>（classify 的 is_trusted 与 escalation 无关）。</li>
+<li><strong>追问：on-failure 重跑是不是放松了沙箱？</strong> → 没有，重跑<strong>同一条命令</strong>走同一 PolicyExecutor；PolicyExecutor 根本没有第二个非沙箱模式，重跑只是用户 bless 了一次。</li>
+<li><strong>追问：ApprovalHandler 为什么住 ncx-core 不在 sandbox crate？</strong> → 让 sandbox 保持 <strong>prompt-free 纯决策</strong>；体现 policy(物理)/approval(越界)/prompt(人类) 三层解耦。</li>
+<li><strong>追问：PolicyExecutor 参与审批决策吗？</strong> → 完全不参与，只做 Job Object 容器（KILL_ON_JOB_CLOSE 杀进程树）+ timeout（超时 exit 124）；<code>.run()</code> 被调时 auto/ask/deny 已定死。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Memory-记忆">
+<summary><span class="t">模块 · Memory 记忆</span><div class="peek">追问：recall 注入的是&quot;事实&quot;吗？ → 不，标为 「线索而非事实」**（RECALL_HEADER），不当 ground truth …</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：recall 注入的是"事实"吗？</strong> → 不，标为 <strong>「线索而非事实」</strong>（<code>RECALL_HEADER</code>），不当 ground truth 用。</li>
+<li><strong>追问：什么内容才会被 remember？</strong> → 仅 <strong>CONFIRMED</strong> + 精确去重 + 200 上限。</li>
+<li><strong>追问：consolidate 干嘛的？</strong> → 启动即跑的<strong>幂等启发式近重复合并</strong>（阈值 0.85），防近重复堆积。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Workflow-Harness-run_turn">
+<summary><span class="t">模块 · Workflow / Harness（run_turn）</span><div class="peek">追问：循环上限怎么定？** → max_model_calls = max_iterations.min(task_budget.max_m…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：循环上限怎么定？</strong> → <code>max_model_calls = max_iterations.min(task_budget.max_model_calls.max(1))</code>；每步查 cancel + 剩余工具预算。</li>
+<li><strong>追问：cancel / 预算耗尽时历史怎么保持合法？</strong> → <code>backfill_unanswered_tool_calls</code> 为每个未应答 tool_call 合成 <code>[interrupted…]</code> 占位回复，否则历史非法 → 400。</li>
+<li><strong>追问：视觉模型什么时候用？</strong> → <code>use_vision_this_turn = vision_provider.is_some() &amp;&amp; has_image_block(user_input)</code>，按回合切 <code>active_provider()</code>。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Orchestration-best-of-N-多节点-Workflow">
+<summary><span class="t">模块 · Orchestration best-of-N（多节点 Workflow）</span><div class="peek">追问：父子 agent 之间怎么通讯？有总线吗？** → 无总线：① prompt 下发（状态按值序列化进全新无状态子会话）② 文件隔离-提…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：父子 agent 之间怎么通讯？有总线吗？</strong> → 无总线：① prompt 下发（状态按值序列化进全新无状态子会话）② 文件隔离-提升（真 IPC）③ <code>PASS/FAIL/BEST</code> 裁决回灌。</li>
+<li><strong>追问：并行 worker 会不会互相覆盖文件？</strong> → 不会，每个 <code>ncx_worker_{pid}_{n}</code> 私有递归拷贝；真 workspace 只在 verify 后 <code>promote_worker</code> 写一次。</li>
+<li><strong>追问：classify/plan/verify 凭什么拿不到工具？</strong> → <code>reason()</code> 走 <code>ToolRegistry::empty</code>——<strong>代码级剥夺</strong>，不是 prompt 劝阻（verify 的 prompt 甚至没写 "no tools"）。</li>
+<li><strong>追问：verify 输出畸形怎么办？</strong> → <code>verdict_passed = !contains("FAIL")</code>（位置无关）；<code>BEST:</code> 缺失/畸形兜底 index 0——偏向"往前推进"不卡死。</li>
+<li><strong>追问：递归子任务为什么串行？</strong> → 子任务可能依赖，<code>for</code> 循环保证子任务 k 先 <code>promote</code> 落地，k+1 才能 copy_tree 到已含 k 改动的 workspace。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="模块-Evals-Feedback-ncx-forge-离线">
+<summary><span class="t">模块 · Evals / Feedback（ncx-forge 离线）</span><div class="peek">追问：离线自动优化怎么保证不引入安全风险？ → 只演化文字 + 执行永过沙箱 = 训练接缝即安全边界**；被不可信失败轨迹喂养的 teach…</div></summary>
+<div class="body">
+<ul>
+<li><strong>追问：离线自动优化怎么保证不引入安全风险？</strong> → 只演化文字 + 执行永过沙箱 = <strong>训练接缝即安全边界</strong>；被不可信失败轨迹喂养的 teacher 也注入不了新能力。</li>
+<li><strong>追问：teacher 怎么变异、怎么接受？</strong> → <code>reflective mutation → TOML 覆盖</code>；evaluator = bench + <strong>隐藏 check.py</strong>；accept 要 TRAIN margin &amp; VAL 无回归；pareto 择优 passrate↑ / cost↓。</li>
+<li><strong>追问：sentinel 门是干嘛的？</strong> → 无法证明注入确实生效前<strong>拒绝训练</strong>——防"离线全绿是假象"。</li>
+</ul>
+<hr />
+<h3>追问命中率自检</h3>
+<p>按模块过一遍，卡住的标 ✗：
+<code>[ ] Prompt/genome  [ ] Context 压缩  [ ] Tools 渐进暴露  [ ] Guardrails 权限(重)  [ ] Memory  [ ] Workflow  [ ] best-of-N  [ ] ncx-forge</code></p>
+<blockquote>
+<p>Guardrails 那栏追问最密（8 条），面试被钻的概率最高，优先刷到全绿。</p>
+</blockquote>
+</div>
+</details>
+

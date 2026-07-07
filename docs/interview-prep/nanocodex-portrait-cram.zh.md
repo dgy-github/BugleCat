@@ -1,6 +1,6 @@
 # nanocodex 速记页（考前快速过）
 
-> 配套 `nanocodex-portrait.zh.md` 使用。考前 3-4 分钟扫一遍：先全局连接图，再 8 子系统的「主线 + 支柱名 + 必背数字 + 最易被追问」。
+> 配套 `nanocodex-portrait.zh.md` 使用。考前 3-4 分钟扫一遍：先全局连接图，再 9 子系统的「主线 + 支柱名 + 必背数字 + 最易被追问」。
 
 ## 全局连接图（30 秒）
 - **一回合端到端**：`main.rs::run` 启动装配（load_config → SandboxPolicy 纯决策 → MemoryStore+consolidate → discover_skills → Genome::from_env → compose_system_prompt → ToolContext 能力袋 → ToolRegistry → AgentLoop）→ `AgentLoop::run_turn`：`for 0..max_model_calls` 交替 `call_model`（先 `for_model_edited` 压缩视图，再 `active_provider().chat`）→ `run_tools`（`ToolRegistry::execute`，连续 read_only 走 `join_all` 并发、写/未知串行）→ 无 tool_call 即 `completed`。
@@ -8,7 +8,7 @@
 - **5 是 1 的外层调度器**：`--orchestrate` 时 `Orchestrator::handle` 把每个 worker/子任务节点变成一次全新 `AgentLoop` run（plan/verify 用空工具集）。
 - **三条贯穿不变式**：① `?Send` / current-thread runtime + `Rc<RefCell>`（全 trait `#[async_trait(?Send)]`）；② OpenAI 历史合法性（每个 tool_call 必有配对 reply，由 Harness backfill + 压缩前缀丢弃 + resume sanitize 三处共守）；③「模型是第一杠杆、harness 是第二杠杆」（5 靠结构、8 只进化文本、4 托底执行）。
 
-## 8 子系统速记
+## 9 子系统速记
 
 ### 1. Harness 工程管理
 - **主线**：一个有预算上限、可取消、永远让对话保持 API 合法的单一回合循环（`call_model→run_tools` 交替，无 tool_call 即结束、双预算触顶强制终止）。
@@ -42,7 +42,7 @@
 
 ### 6. 项目记忆 · 自进化
 - **主线**：两个正交层——MEMORY（机器写、可演化、按 query 每轮临时注入）vs INSTRUCTIONS（人写、静态、启动整块注入）；「自进化」只指 MEMORY 侧 `remember` 写入 + `consolidate`/`summarize_consolidate` 去重折叠。
-- **支柱**：单文件 markdown 存储、写+精确去重+newest-N 截断、混合词法语义召回、启发式近重折叠 consolidate、LLM 折叠 summarize_consolidate、INSTRUCTIONS 层。
+- **支柱**：单文件 markdown 存储、写+精确去重+newest-N 截断、词法+硬编码同义词表召回（非 embedding）、启发式近重折叠 consolidate、LLM 折叠 summarize_consolidate、INSTRUCTIONS 层。
 - **必背数字**：`MAX_ENTRIES=200`、召回 `8`/`4_000` chars、Jaccard 阈值 `0.85`、打分 tag `+8`/substr `+4`（else-if 互斥）/phrase `+6`/jaccard `×20`、keyword 最短 `3`、phrase 窗口 `2`、排序键 `overlap*1_000_000+min(ts,999_999)`、instructions 封顶 `16_000`。
 - **最易被追问**：recency tie-break 对真实 epoch（~1.7e9）饱和到 999_999 基本失效；召回无最低分下限——空/离题 query 也按 recency 填满 8 条最新 note。
 
@@ -57,3 +57,10 @@
 - **支柱**：Genome=system_prompt+tool_desc、no-op-on-failure 硬保证、--dump-genome 基线真相源、SENTINEL 自检门、train() 单冠军噪声感知爬山、evolve() Pareto 小种群、Evaluator 失败轨迹收割+token 成本解析、Teacher 面板 3 后端。
 - **必背数字**：`SENTINEL='NCXFORGE_SENTINEL_4242'`、self_check `timeout=90,attempts=3`、train 默认 `rounds=3/repeats=1/timeout=120s/budget=1800s/accept_margin=1`、`pop_cap=4`、`SIZE_CAP_MULTIPLIER=3`/`FLOOR=12000`、top-`3` 失败轨迹、`MAX_TRAJECTORY_CHARS=2000`/arg≤120/留 12 个工具调用、empty eval→`(passrate=0,cost=+inf)`、splits `[train,train,train,val,train,train,test,val]`、taskgen reference 跑 2 次/`-n=3`/6 DIMENSIONS。
 - **最易被追问**：加载失败为何 no-op 而非报错——优化器按通过率 delta 当梯度，silent-no-op 会把基线分误归给坏候选，故 SENTINEL 门在烧预算前先证明注入真生效。
+
+### 9. 定时器设计 · 离线调度（🆕 设计方案，非既成实现）
+- **诚实边界**：nanocodex 当前**没有**定时器，这是"我会怎么设计"的方案文档，讲述时先亮明这一点。
+- **主线**：难点不是计时（OS 的事），是"没人在场时 `Decision::Ask` 怎么办"——委托 OS 调度器 spawn 无头单发（~5.5ms 冷启动让每次起新进程免费）+ 无人值守解析器 `Ask→Deny` fail-closed，复用现成双层门、`classify()` 一行不改。
+- **支柱**：无人值守解析器（唯一新权限逻辑）、委托 OS 调度器（非自建 daemon）、无头单发路径复用、schedules.toml 声明式模型、CLI 管理 flag 不引 clap、per-id 锁防重入。
+- **必背数字**：冷启动 ~5.5ms（推断未复验）；复用既有 4 档 approval+3 态 Decision（不新增）；默认 sandbox=read-only+approval=on-request；overlap 默认 skip；流水 6 步；MVP 先做 1 个后端(Windows Task Scheduler)。
+- **最易被追问**：想跑写操作要在 `schedules.toml` 配置期显式预授权不产生 Ask 的组合（如 approval=never+限定 workspace-write），不能指望运行时兜底——无人值守时根本没人能回答 Ask。重叠触发用 per-id 锁文件（同排产订单锁思路），关机错过触发靠 OS 自带 run-once-after-missed，两者不是同一套机制。

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>campaign 多 Agent 编排 · 流程图详解</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--accent:#4338ca;--danger:#c0392b;--ok:#0e7a52;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px 70px;}
+  header.hero{padding:38px 0 18px;border-bottom:1px solid var(--border);}
+  header.hero h1{font-size:24px;margin:0 0 8px;} header.hero p{font-size:14px;color:var(--text2);margin:0;max-width:780px;} header.hero b{color:var(--accent);}
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.93);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;padding:10px 0;margin-bottom:6px;}
+  nav.toc a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 11px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav.toc a:hover{border-color:var(--accent);color:var(--accent);}
+  section{padding:24px 0 4px;scroll-margin-top:52px;} h3{font-size:16px;margin:6px 0 2px;}
+  .lead{color:var(--text2);font-size:13px;margin:6px 0 12px;max-width:840px;}
+  figure{margin:6px 0;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:10px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  .pts{background:var(--surface);border-left:4px solid var(--accent);border-radius:0 12px 12px 0;padding:11px 16px;margin:8px 0;}
+  .pts b{color:var(--accent);} .pts ul{margin:6px 0 0;padding-left:18px;} .pts li{font-size:12.5px;line-height:1.5;margin:3px 0;}
+  .warn{background:#fff6e9;border-left:4px solid #b8860b;border-radius:0 12px 12px 0;padding:11px 16px;margin:14px 0;}
+  .warn b{color:#8a6100;} .warn ul{margin:6px 0 0;padding-left:18px;} .warn li{font-size:12.5px;margin:3px 0;}
+  code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:1px 5px;border-radius:5px;}
+  footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <h1>🎖 campaign 多 Agent 编排 · 流程图详解</h1>
+  <p><b>不是更多 Agent，而是更好的指挥系统。</b>核心：事件溯源(状态由回放派生) + 确定性编排(DAG) + 全链路治理(PolicyGate) + 抗毁(熔断/减员) + A2A 可换传输。按真实代码逐块画流程，每图配面试要点。</p>
+</header>
+<nav class="toc">
+  <a href="#f1">① 事件溯源</a><a href="#f2">② run 编排</a><a href="#f3">③ 单任务链</a><a href="#f4">④ PolicyGate</a><a href="#f5">⑤ A2A 传输</a><a href="#f6">⑥ 韧性/减员</a>
+</nav>
+
+<!-- F1 事件溯源 -->
+<section id="f1">
+  <h3>① 事件溯源 + derive_state（状态由回放派生，无可变共享态）</h3>
+  <figure>
+  <svg viewBox="0 0 560 470" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#4338ca"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">① 事件溯源：状态 = 回放派生</text>
+    <defs><marker id="c1" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#c1)"><line x1="150" y1="98" x2="150" y2="122"/><line x1="150" y1="196" x2="150" y2="240"/><line x1="410" y1="150" x2="410" y2="240"/></g>
+    <g text-anchor="middle">
+      <rect x="40" y="58" width="220" height="40" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="150" y="76" font-size="11.5" font-weight="600" fill="#1f1d1a">动作发生 → append 事件</text><text x="150" y="90" font-size="9" fill="#8a857a">Event{seq,ts,type,actor,payload}</text>
+      <rect x="30" y="122" width="240" height="74" rx="9" fill="#f3f1ea" stroke="#4338ca" stroke-width="2"/><text x="150" y="142" font-size="11.5" font-weight="800" fill="#4338ca">EventLog（append-only）</text><text x="150" y="158" font-size="9.5" fill="#8a857a">SqliteEventLog · ThreadPool 序列化 seq</text><text x="150" y="171" font-size="9.5" fill="#8a857a">广播订阅者(队列满→dropped 计数不静默)</text><text x="150" y="184" font-size="9.5" fill="#8a857a">truncate_after(seq) = 真回滚/分叉</text>
+      <rect x="300" y="58" width="220" height="92" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="410" y="78" font-size="11.5" font-weight="700" fill="#1f1d1a">derive_state(events, run_id)</text><text x="410" y="94" font-size="9.5" fill="#8a857a">纯函数折叠 · run_id 过滤隔离</text><text x="410" y="107" font-size="9.5" fill="#8a857a">match type: assigned→pending</text><text x="410" y="120" font-size="9.5" fill="#8a857a">done/failed/frozen/awaiting/skipped</text><text x="410" y="133" font-size="9.5" fill="#8a857a">相同事件序列 → 相同 State</text>
+      <rect x="120" y="240" width="320" height="52" rx="9" fill="#ebe8df" stroke="#4338ca"/><text x="280" y="260" font-size="11.5" font-weight="700" fill="#4338ca">State 视图（只读派生快照）</text><text x="280" y="276" font-size="9.5" fill="#8a857a">从不存可变共享态 → 可回放/可审计/并发安全</text>
+    </g>
+    <text x="280" y="330" font-size="10.5" fill="#8a857a" text-anchor="middle">收益：跨进程/换设备 durable resume（同一事件库 replay 即恢复）· run_id 多运行不混流</text>
+    <text x="280" y="350" font-size="10" fill="#8a857a" text-anchor="middle">把"状态一致性"问题转成"事件顺序"问题</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>状态永远由回放派生</b>：<code>derive_state(events, run_id)</code> 纯折叠，<b>不存可变共享态</b>——取代黑板架构。</li>
+    <li><b>run_id 隔离</b>多运行不混流；<code>truncate_after(seq)</code> 是真回滚/分叉。</li>
+    <li><b>白得 durable resume</b>：换进程/设备读同一事件库 replay 即恢复。事件总线队列满时 <code>dropped_events</code> 计数不静默丢。</li>
+  </ul></div>
+</section>
+
+<!-- F2 run 编排 -->
+<section id="f2">
+  <h3>② run() 编排主链路（DAG 拓扑分层 + 并发）</h3>
+  <figure>
+  <svg viewBox="0 0 560 560" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#4338ca"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">② run(order) 编排主链路</text>
+    <defs><marker id="c2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#c2)"><line x1="280" y1="86" x2="280" y2="108"/><line x1="280" y1="156" x2="280" y2="178"/><line x1="280" y1="226" x2="280" y2="248"/><line x1="280" y1="386" x2="280" y2="408"/><line x1="280" y1="456" x2="280" y2="478"/></g>
+    <g text-anchor="middle">
+      <rect x="160" y="50" width="240" height="36" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="73" font-size="11.5" font-weight="600" fill="#1f1d1a">run(order) → run_id · run.started</text>
+      <rect x="150" y="108" width="260" height="48" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="128" font-size="11.5" font-weight="700" fill="#1f1d1a">Coordinator.decompose</text><text x="280" y="144" font-size="9.5" fill="#8a857a">LLM 拆解 或 直接用 order.tasks · run.decomposed</text>
+      <rect x="150" y="178" width="260" height="48" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="198" font-size="11.5" font-weight="700" fill="#1f1d1a">mobilizer.assess → respond</text><text x="280" y="214" font-size="9.5" fill="#8a857a">开跑前先评减员等级</text>
+      <rect x="130" y="248" width="300" height="138" rx="10" fill="none" stroke="#4338ca" stroke-dasharray="6 4"/><text x="280" y="266" font-size="10.5" font-weight="800" fill="#4338ca">topological_layers(tasks) 逐层</text>
+      <rect x="150" y="276" width="260" height="40" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="280" y="293" font-size="10.5" font-weight="600" fill="#1f1d1a">本层 runnable(deps 已 done)</text><text x="280" y="308" font-size="9" fill="#c0392b">deps 未完 → task.skipped</text>
+      <rect x="150" y="326" width="260" height="52" rx="8" fill="#fff" stroke="#4338ca"/><text x="280" y="345" font-size="10.5" font-weight="700" fill="#4338ca">Semaphore(concurrency) gather</text><text x="280" y="360" font-size="9" fill="#8a857a">并发跑 _execute_one_task（图③）</text><text x="280" y="372" font-size="9" fill="#8a857a">done 加入 completed → 下一层</text>
+      <rect x="150" y="408" width="260" height="46" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="428" font-size="11" font-weight="700" fill="#1f1d1a">mobilizer 按真实结果重评</text><text x="280" y="443" font-size="9.5" fill="#8a857a">medium/severe → respond 动员</text>
+      <rect x="180" y="478" width="200" height="40" rx="9" fill="#ebe8df" stroke="#4338ca"/><text x="280" y="503" font-size="11.5" font-weight="700" fill="#4338ca">run.completed → 汇总结果</text>
+    </g>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>DAG 拓扑分层调度</b>：<code>topological_layers</code> 按 <code>depends_on</code> 分层；层内 <code>Semaphore</code> 限流并发，依赖未完的 <code>task.skipped</code>。</li>
+    <li><b>裁判/运动员分离</b>：Coordinator 只拆解+调度，Reviewer 独立验收（在单任务链里）。</li>
+    <li>全程事件落 <code>run_id</code> 隔离的 EventLog，可 replay。</li>
+  </ul></div>
+</section>
+
+<!-- F3 单任务链 -->
+<section id="f3">
+  <h3>③ _execute_one_task 单任务链（制动→审批→治理→执行→验收）</h3>
+  <figure>
+  <svg viewBox="0 0 560 620" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#4338ca"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">③ 单任务执行链</text>
+    <defs><marker id="c3" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#c3)"><line x1="280" y1="84" x2="280" y2="106"/><line x1="280" y1="160" x2="280" y2="182"/><line x1="280" y1="236" x2="280" y2="258"/><line x1="280" y1="330" x2="280" y2="352"/><line x1="280" y1="424" x2="280" y2="446"/><line x1="280" y1="514" x2="280" y2="536"/></g>
+    <g text-anchor="middle">
+      <rect x="160" y="50" width="240" height="34" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="72" font-size="11.5" font-weight="600" fill="#1f1d1a">任务进入</text>
+      <rect x="150" y="106" width="260" height="54" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="126" font-size="11.5" font-weight="700" fill="#1f1d1a">协同制动检查</text><text x="280" y="142" font-size="9.5" fill="#c0392b">breaker.is_braking(link) → task.frozen</text><text x="280" y="154" font-size="9" fill="#8a857a">背压：上游停派活防雪崩</text>
+      <rect x="150" y="182" width="260" height="54" rx="9" fill="#f3f1ea" stroke="#4338ca"/><text x="280" y="202" font-size="11.5" font-weight="700" fill="#4338ca">审批门(HITL)</text><text x="280" y="218" font-size="9.5" fill="#8a857a">needs_approval &amp; !approved → task.input_required</text><text x="280" y="230" font-size="9" fill="#8a857a">停 · 事件持久 · resume 跨进程恢复</text>
+      <rect x="150" y="258" width="260" height="48" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="278" font-size="11.5" font-weight="700" fill="#1f1d1a">选 agent（router.pick / can_do）</text><text x="280" y="294" font-size="9.5" fill="#8a857a">跳过 breaker.is_tripped 的 · 无则 frozen</text>
+      <rect x="150" y="352" width="260" height="60" rx="9" fill="#f3f1ea" stroke="#4338ca" stroke-width="2"/><text x="280" y="372" font-size="11.5" font-weight="800" fill="#4338ca">PolicyGate.check(图④)</text><text x="280" y="388" font-size="9.5" fill="#8a857a">按 tier 估价入账 spend + 越权检查</text><text x="280" y="401" font-size="9.5" fill="#c0392b">违规 → governance.violation → blocked</text>
+      <rect x="150" y="446" width="260" height="56" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="466" font-size="11.5" font-weight="700" fill="#1f1d1a">transport.send(Message) + 超时</text><text x="280" y="482" font-size="9.5" fill="#8a857a">真实 token 用量再过一次 gate</text><text x="280" y="494" font-size="9" fill="#8a857a">失败/超时 → _after_failure(熔断+降 health)</text>
+      <rect x="150" y="536" width="260" height="52" rx="9" fill="#ebe8df" stroke="#4338ca"/><text x="280" y="556" font-size="11.5" font-weight="700" fill="#4338ca">Reviewer 独立验收 → task.done/failed</text><text x="280" y="572" font-size="9.5" fill="#8a857a">裁判≠运动员 · 无 reviewer 可 fail-closed</text>
+    </g>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>写操作前多道闸</b>：协同制动 → HITL 审批 → 选 agent(跳熔断) → PolicyGate → 超时执行 → 独立验收。</li>
+    <li><b>治理用真实信号驱动</b>：按 tier 估价入账、执行后按真实 token 再过 gate（否则 cost 恒 0 = 形同虚设）。</li>
+    <li><b>失败联动</b>：<code>_after_failure</code> → 熔断计数 + 降 health（喂给减员评估）。</li>
+  </ul></div>
+</section>
+
+<!-- F4 PolicyGate -->
+<section id="f4">
+  <h3>④ PolicyGate 全链路治理（Policy-as-Code + 并发安全）</h3>
+  <figure>
+  <svg viewBox="0 0 560 470" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#4338ca"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">④ PolicyGate（对所有角色一视同仁）</text>
+    <defs><marker id="c4" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#c4)"><line x1="280" y1="82" x2="280" y2="104"/><line x1="280" y1="152" x2="280" y2="174"/></g>
+    <g text-anchor="middle">
+      <rect x="150" y="48" width="260" height="34" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="70" font-size="11" font-weight="600" fill="#1f1d1a">Action{actor, kind, cost, sensitive}</text>
+      <rect x="150" y="104" width="260" height="48" rx="9" fill="#f3f1ea" stroke="#4338ca" stroke-width="2"/><text x="280" y="124" font-size="11.5" font-weight="800" fill="#4338ca">PolicyGate.check（asyncio.Lock）</text><text x="280" y="140" font-size="9.5" fill="#8a857a">序列化关键段 → Governor.vet → 规则链</text>
+    </g>
+    <g text-anchor="middle" font-size="10">
+      <rect x="30" y="174" width="120" height="60" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="90" y="194" font-weight="700" fill="#1f1d1a">BudgetRule</text><text x="90" y="210" font-size="9" fill="#8a857a">累计+cost&gt;limit</text><text x="90" y="222" font-size="9" fill="#8a857a">→ 拦</text>
+      <rect x="162" y="174" width="120" height="60" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="222" y="194" font-weight="700" fill="#1f1d1a">DataEgress</text><text x="222" y="210" font-size="9" fill="#8a857a">sensitive &amp; egress</text><text x="222" y="222" font-size="9" fill="#8a857a">&amp; !local → 拦</text>
+      <rect x="294" y="174" width="120" height="60" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="354" y="194" font-weight="700" fill="#1f1d1a">Authority</text><text x="354" y="210" font-size="9" fill="#8a857a">角色→允许动作集</text><text x="354" y="222" font-size="9" fill="#8a857a">越权 → 拦</text>
+      <rect x="426" y="174" width="120" height="60" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="486" y="194" font-weight="700" fill="#1f1d1a">Injection</text><text x="486" y="210" font-size="9" fill="#8a857a">ingest/a2a_recv</text><text x="486" y="222" font-size="9" fill="#8a857a">注入正则 → 拦</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.3" fill="none" marker-end="url(#c4)"><path d="M280,152 V162 H90 V174"/><path d="M280,162 H222 V174"/><path d="M280,162 H354 V174"/><path d="M280,162 H486 V174"/></g>
+    <g text-anchor="middle">
+      <rect x="140" y="256" width="280" height="46" rx="9" fill="#fdecec" stroke="#c0392b"/><text x="280" y="276" font-size="11" font-weight="700" fill="#c0392b">任一违规 → governance.violation 事件</text><text x="280" y="291" font-size="9.5" fill="#a03024">拦截并独立上报，不受 Coordinator 节制</text>
+    </g>
+    <line x1="90" y1="234" x2="90" y2="256" stroke="#57534a" stroke-width="1.3" marker-end="url(#c4)"/>
+    <text x="280" y="340" font-size="10.5" fill="#8a857a" text-anchor="middle">被 Runtime(每任务) + LLMClient(每次调用) 共享同一把锁/账本 → 全链路 vet</text>
+    <text x="280" y="360" font-size="10" fill="#8a857a" text-anchor="middle">洞察：安全机制"接了线但没被真实信号驱动"=形同虚设，要顺数据流验证</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>Policy-as-Code 四规则</b>：预算 / 数据出域 / 越权 / 注入扫描；<b>对所有角色一视同仁</b>（Coordinator 自己也受约束）。</li>
+    <li><b>并发安全</b>：<code>asyncio.Lock</code> 序列化预算读改写——asyncio 单线程也有跨 <code>await</code> 竞态。</li>
+    <li><b>全链路 vet</b>：Runtime 每任务 + LLMClient 每次调用共享同一闸；违规写 <code>governance.violation</code> 独立上报。</li>
+  </ul></div>
+</section>
+
+<!-- F5 A2A 传输 -->
+<section id="f5">
+  <h3>⑤ A2A 协议 + 可换传输（依赖倒置 · 幂等是重试前提）</h3>
+  <figure>
+  <svg viewBox="0 0 560 500" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#4338ca"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">⑤ A2A：换传输不动编排</text>
+    <defs><marker id="c5" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g text-anchor="middle">
+      <rect x="150" y="50" width="260" height="48" rx="9" fill="#f3f1ea" stroke="#4338ca" stroke-width="2"/><text x="280" y="70" font-size="11.5" font-weight="800" fill="#4338ca">Transport ABC（依赖倒置）</text><text x="280" y="86" font-size="9.5" fill="#8a857a">send / discover / send_stream · 编排只依赖抽象</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.5" fill="none" marker-end="url(#c5)"><path d="M200,98 V116 H150 V134"/><path d="M360,98 V116 H410 V134"/></g>
+    <g text-anchor="middle">
+      <rect x="30" y="134" width="240" height="96" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="150" y="154" font-size="11" font-weight="700" fill="#1f1d1a">InProcessTransport（本地）</text><text x="150" y="171" font-size="9.5" fill="#8a857a">发送方 allowlist 防伪</text><text x="150" y="184" font-size="9.5" fill="#8a857a">_scan_untrusted 注入扫描</text><text x="150" y="197" font-size="9.5" fill="#8a857a">路由 on_message → 语义同远程</text><text x="150" y="210" font-size="9.5" fill="#8a857a">_audit 落审计 · a2a.rejected</text>
+      <rect x="290" y="134" width="240" height="96" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="410" y="154" font-size="11" font-weight="700" fill="#1f1d1a">HttpJsonRpcTransport（远程）</text><text x="410" y="171" font-size="9.5" fill="#8a857a">_post_rpc: 重试+指数退避</text><text x="410" y="184" font-size="9.5" fill="#8a857a">(仅瞬时错误 502/503/504/429)</text><text x="410" y="197" font-size="9.5" fill="#8a857a">send / send_stream(SSE) / discover</text><text x="410" y="210" font-size="9.5" fill="#8a857a">RemoteAgentProxy 选远端</text>
+      <rect x="150" y="256" width="260" height="60" rx="9" fill="#fdecec" stroke="#c0392b"/><text x="280" y="276" font-size="11.5" font-weight="800" fill="#c0392b">JsonRpcAgentServer：幂等去重</text><text x="280" y="292" font-size="9.5" fill="#a03024">按 message_id 缓存 → 重复投递不重复执行</text><text x="280" y="305" font-size="9.5" fill="#a03024">+ 可选 Bearer 鉴权</text>
+    </g>
+    <line x1="280" y1="230" x2="280" y2="256" stroke="#57534a" stroke-width="1.5" marker-end="url(#c5)"/>
+    <g text-anchor="middle" font-size="10.5" fill="#8a857a">
+      <text x="280" y="356">两节点共享同一 SQLite 事件库 → 统一 derive_state 还原状态（分布式 MVP）</text>
+      <text x="280" y="376">铁律：编排依赖抽象传输（DIP）+ 幂等是重试的前提</text>
+    </g>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>依赖倒置</b>：编排只依赖 <code>Transport</code> 抽象，换 <code>InProcess ↔ HTTP/JSON-RPC ↔ SSE</code> 实现即 单机→分布式，不动编排。</li>
+    <li><b>幂等是重试的前提</b>：HTTP 加重试+退避后必须配 <code>message_id</code> 幂等去重，否则 worker 重复执行/重复扣预算。</li>
+    <li><b>信任边界</b>：发送方 allowlist 防伪 + <code>untrusted</code> 标记 + 注入扫描——外部内容一律当数据不当指令。</li>
+  </ul></div>
+</section>
+
+<!-- F6 韧性 -->
+<section id="f6">
+  <h3>⑥ 抗毁性：熔断 + 协同制动 + 三级减员 + 混沌演练</h3>
+  <figure>
+  <svg viewBox="0 0 560 500" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#4338ca"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">⑥ 抗毁性：熔断 → 减员 → 演练</text>
+    <defs><marker id="c6" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g text-anchor="middle">
+      <rect x="30" y="52" width="240" height="92" rx="9" fill="#f3f1ea" stroke="#4338ca"/><text x="150" y="72" font-size="11.5" font-weight="800" fill="#4338ca">CircuitBreaker</text><text x="150" y="89" font-size="9.5" fill="#8a857a">record_failure ≥3 → tripped</text><text x="150" y="102" font-size="9.5" fill="#8a857a">cooldown 过自动恢复</text><text x="150" y="115" font-size="9.5" fill="#c0392b">broadcast_brake → brake.signal</text><text x="150" y="128" font-size="9.5" fill="#8a857a">= 协同制动，上游背压停派</text>
+      <rect x="290" y="52" width="240" height="92" rx="9" fill="#f3f1ea" stroke="#4338ca"/><text x="410" y="72" font-size="11.5" font-weight="800" fill="#4338ca">Mobilizer + CapacityLedger</text><text x="410" y="89" font-size="9.5" fill="#8a857a">assess: 按 unhealthy 比例定级</text><text x="410" y="102" font-size="9.5" fill="#8a857a">none / light / medium / severe</text><text x="410" y="115" font-size="9.5" fill="#8a857a">health 由真实失败驱动</text><text x="410" y="128" font-size="9.5" fill="#8a857a">预备队小模型只接 simple/medium</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.4" fill="none" marker-end="url(#c6)"><line x1="410" y1="144" x2="410" y2="166"/></g>
+    <g text-anchor="middle" font-size="9.5">
+      <rect x="300" y="166" width="240" height="118" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="420" y="184" font-weight="700" fill="#1f1d1a" font-size="10.5">三级响应 respond(level)</text>
+      <text x="420" y="202" fill="#57534a">LIGHT：预备役替补</text>
+      <text x="420" y="218" fill="#57534a">MEDIUM：checkpoint + 弱模型顶</text>
+      <text x="420" y="231" fill="#57534a">　　　　+ Reviewer 加严</text>
+      <text x="420" y="247" fill="#57534a">SEVERE：全动员 + 优先级重排</text>
+      <text x="420" y="260" fill="#c0392b">　　　　+ human 升级</text>
+      <text x="420" y="276" fill="#8a857a">执行可降级·把关不降级·高难宁冻结</text>
+    </g>
+    <g text-anchor="middle">
+      <rect x="30" y="200" width="240" height="80" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="150" y="220" font-size="11.5" font-weight="700" fill="#1f1d1a">ChaosDrill（演练）</text><text x="150" y="237" font-size="9.5" fill="#8a857a">kill_random / kill_by_role</text><text x="150" y="250" font-size="9.5" fill="#8a857a">inject_latency / inject_error</text><text x="150" y="266" font-size="9.5" fill="#8a857a">验证：制动及时? 补位对? 不崩?</text>
+    </g>
+    <text x="280" y="330" font-size="10.5" fill="#8a857a" text-anchor="middle">熔断停单点 · 制动防链路雪崩 · 减员补兵力 · 演练把上线准备度变成可衡量门禁</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>两层抗毁</b>：单点<b>熔断</b>(≥3 失败,cooldown 自愈) + 链路<b>协同制动</b>(brake.signal 背压防雪崩)。</li>
+    <li><b>三级减员</b>：按 health 真实驱动评级 → 替补 / 降级(checkpoint+弱模型+Reviewer 加严) / 战时动员(+human 升级)；<b>执行可降级、把关不降级、高难宁冻结</b>。</li>
+    <li><b>混沌演练</b>：随机杀 agent 验证制动/补位——把上线准备度变成可衡量门禁，不靠感觉。</li>
+  </ul></div>
+</section>
+
+<div class="warn"><b>诚实边界（面试判断力加分）</b><ul>
+  <li>分布式是<b>可运行 MVP</b>（HTTP + 共享 SQLite + remote proxy）；生产级一致性仍需共享预算/health/breaker/leader——<b>没有就不假装做</b>，写进 SCALING.md。</li>
+  <li>长期知识默认词法 TF-IDF，非神经 embedding（留 adapter 缝）。</li>
+  <li>制动状态在内存维护（不每次全量 replay，避免 O(N) 随日志无界增长）。</li>
+</ul></div>
+
+<footer>campaign 多 Agent 编排 · <code>agentbot/campaign</code> · 6 图：事件溯源 / run 编排 / 单任务链 / PolicyGate / A2A 传输 / 抗毁性 · 配套刷题卡 <code>campaign-interview-drills.zh.md</code></footer>
+</div>
+</body>
+</html>

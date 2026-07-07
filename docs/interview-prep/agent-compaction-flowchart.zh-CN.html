@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话压缩 · 机制流程图（样板）</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;
+    --g:#238636;--a:#9e7318;--p:#8957e5;--b:#1f6feb;--mut2:#6e7681}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;max-width:860px;margin:0 auto;padding:22px 16px 60px}
+  h1{font-size:21px;margin:.2em 0}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  svg{width:100%;height:auto;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .box{fill:#12233b;stroke:#1f4b7a} .t1{fill:#132a1a;stroke:var(--g)} .t2{fill:#2a2312;stroke:var(--a)}
+  .t3{fill:#241833;stroke:var(--p)} .t4{fill:#12233b;stroke:var(--b)} .cov{fill:#161b22;stroke:var(--line)}
+  .nt{fill:#e6edf3;font:700 13.5px sans-serif} .ns{fill:#b9c2cc;font:11px sans-serif}
+  .tag{fill:#0d1117;font:700 10.5px sans-serif}
+  .ar{stroke:#8a919c;stroke-width:1.6;fill:none;marker-end:url(#a)} .al{fill:#8a919c;font:11px sans-serif}
+  .ask{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0;font-size:14px}
+</style>
+
+<h1>🗜 会话压缩 · 机制流程图（样板）</h1>
+<p class="hint">"每维度一张流程图"的第一张样板。渐进式:越往下越贵越有损。右侧标四家覆盖到哪层。</p>
+
+<svg viewBox="0 0 780 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="会话压缩流程">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8a919c"/></marker></defs>
+
+  <!-- flow spine (left) -->
+  <rect class="box" x="30" y="16" width="440" height="46" rx="9"/>
+  <text class="nt" x="250" y="37" text-anchor="middle">① 会话变长 → context 窗口将满</text>
+  <text class="ns" x="250" y="53" text-anchor="middle">不是"满了才处理",是缓存驱逐(cache eviction)</text>
+  <line class="ar" x1="250" y1="62" x2="250" y2="86"/>
+
+  <rect class="box" x="30" y="88" width="440" height="44" rx="9"/>
+  <text class="nt" x="250" y="108" text-anchor="middle">② 触发(阈值)</text>
+  <text class="ns" x="250" y="124" text-anchor="middle">claude ≈167K/200K · reserve 20K 给摘要 · 3 次熔断</text>
+  <line class="ar" x1="250" y1="132" x2="250" y2="156"/>
+
+  <rect class="t1" x="30" y="158" width="440" height="62" rx="9"/>
+  <text class="tag" x="46" y="176" transform="translate(0,0)"><tspan style="fill:#3fb950;font-weight:700">Tier 1</tspan></text>
+  <text class="nt" x="250" y="180" text-anchor="middle">Tier 1 · 机械清理（不调模型·便宜·可回读）</text>
+  <text class="ns" x="250" y="199" text-anchor="middle">micro:大 tool 结果→磁盘,只留路径引用(热尾inline/冷存储)</text>
+  <text class="ns" x="250" y="214" text-anchor="middle">+ 字符截断 · cache-aware 删旧结果不破坏 prompt cache</text>
+  <line class="ar" x1="250" y1="220" x2="250" y2="248"/>
+  <text class="al" x="262" y="240">还不够 ↓</text>
+
+  <rect class="t2" x="30" y="250" width="440" height="62" rx="9"/>
+  <text class="nt" x="250" y="273" text-anchor="middle">Tier 2 · LLM 摘要（调模型·有损）</text>
+  <text class="ns" x="250" y="292" text-anchor="middle">auto-compact:spawn LLM 出结构化摘要</text>
+  <text class="ns" x="250" y="307" text-anchor="middle">意图/文件+代码/错误+修复/反馈/待办/当前态</text>
+  <line class="ar" x1="250" y1="312" x2="250" y2="336"/>
+
+  <rect class="t3" x="30" y="338" width="440" height="46" rx="9"/>
+  <text class="nt" x="250" y="358" text-anchor="middle">Tier 3 · session-memory compact</text>
+  <text class="ns" x="250" y="374" text-anchor="middle">用预抽 notes 跳过摘要调用(更省)</text>
+  <line class="ar" x1="250" y1="384" x2="250" y2="408"/>
+
+  <rect class="t4" x="30" y="410" width="440" height="46" rx="9"/>
+  <text class="nt" x="250" y="430" text-anchor="middle">④ Rehydrate 再水合</text>
+  <text class="ns" x="250" y="446" text-anchor="middle">重读最近 5 文件 ≤50K + todos + 续跑指令</text>
+
+  <!-- coverage matrix (right) -->
+  <rect class="cov" x="500" y="158" width="252" height="298" rx="9"/>
+  <text class="nt" x="626" y="180" text-anchor="middle">谁做到哪层</text>
+  <text class="ns" x="512" y="205">Tier1 机械: <tspan style="fill:#3fb950">cl✓ nc✓</tspan> <tspan style="fill:#8a919c">pi~ cx⚠</tspan></text>
+  <text class="ns" x="512" y="230">Tier2 摘要: <tspan style="fill:#3fb950">cl✓ pi✓</tspan> <tspan style="fill:#d29922">nc✗(优化)</tspan> <tspan style="fill:#8a919c">cx⚠</tspan></text>
+  <text class="ns" x="512" y="255">Tier3 mem: <tspan style="fill:#3fb950">cl✓</tspan> <tspan style="fill:#8a919c">其余✗</tspan></text>
+  <text class="ns" x="512" y="280">Rehydrate: <tspan style="fill:#3fb950">cl✓</tspan> <tspan style="fill:#8a919c">其余✗</tspan></text>
+  <line x1="512" y1="298" x2="740" y2="298" stroke="#30363d"/>
+  <text class="ns" x="512" y="322" style="fill:#e8823a">nanocodex</text>
+  <text class="ns" x="512" y="340">机械两趟·非破坏</text>
+  <text class="ns" x="512" y="356">(原始不动),摘要</text>
+  <text class="ns" x="512" y="372">留作优化方向</text>
+  <text class="ns" x="512" y="398" style="fill:#3fb950">claude-code</text>
+  <text class="ns" x="512" y="416">最精细:四层全 +</text>
+  <text class="ns" x="512" y="432">rehydrate 再水合</text>
+</svg>
+
+<div class="ask">
+<b>这就是"每维度一张机制流程图"的样子。</b>形式对吗?<br>
+· 一张图 = 一个机制怎么跑(渐进流程)+ 四家覆盖到哪层<br>
+· 对的话,我把 <b>11 个维度逐张做</b>(权限双门/run_turn/best-of-N/RAG路由/意图打分…),一张一张验证不裁剪。<br>
+· 想调什么(布局/信息量/要不要四家各画一条线),你说,我按这个改。
+</div>

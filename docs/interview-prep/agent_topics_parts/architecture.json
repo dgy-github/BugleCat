@@ -1,0 +1,137 @@
+{
+ "key": "architecture",
+ "name": "Agent 架构范式与控制流",
+ "data": {
+  "category": "Agent 架构范式与控制流(ReAct / Plan-and-Execute / Reflexion / Single-Agent vs Multi-Agent / Anthropic Workflows vs Agents)",
+  "definition": {
+   "statement": "Agent 的『控制流』本质上是在回答同一个问题的不同侧面——每一步该谁来决定『下一步做什么』、决定依据是什么、什么时候停。ReAct(Yao et al., arXiv:2210.03629, ICLR 2023)给出了最基础的单步控制流原语:把 Thought(推理)、Action(工具调用)、Observation(环境反馈)交替串成一个循环,让模型在每一步都能被外部世界的真实观察修正,而不是像纯 Chain-of-Thought 那样完全依赖内部知识连续推理;论文在 HotpotQA/FEVER 上验证了这能抑制幻觉累积,并在 ALFWorld/WebShop 两个交互式决策基准上分别以 34%/10% 的绝对成功率优势超过模仿学习与强化学习基线。Plan-and-Execute 把这个单一循环拆成两个角色:一个 Planner 一次性/阶段性产出有序的步骤列表,一个 Executor(通常本身是一个 ReAct 风格的子循环)逐步执行——其学术源头是 Plan-and-Solve Prompting(Wang et al., ACL 2023, arXiv:2305.04091),该论文把 zero-shot CoT 的触发语从『Let's think step by step』换成『先制定计划再按计划执行』以消除 missing-step 错误;LangChain 在 2023 年将其工程化为 Plan-and-Execute Agents,并在官方博客中说明该设计同时受 BabyAGI 与 Plan-and-Solve 论文启发,代价是调用次数显著增加,换来的是规划与执行的解耦(可用不同能力/成本的模型分别承担两个角色)。Reflexion(Shinn et al., NeurIPS 2023, arXiv:2303.11366)解决的是跨试次(trial)的控制流:它不更新模型权重,而是让 agent 对失败信号生成自然语言自我反思,写入一个持续积累的 episodic memory 缓冲区并在下次尝试时注入上下文——这是一种『verbal reinforcement learning』;论文的消融实验显示,收益主要来自『自我反思』这一结构化归纳步骤本身,而不只是保留更多原始历史,在 HumanEval 上达到 91% pass@1(同期 GPT-4 直接推理为 80%),在 AlfWorld/HotPotQA 上相比基线分别提升约 22%/20%。在架构层面,Anthropic 的《Building effective agents》(Erik Schluntz、Barry Zhang,2024 年 12 月)把上述控制流统一归入『agentic systems』大类下的两个子类:workflow 指 LLM 与工具按预先写死的代码路径被编排(prompt chaining、routing、parallelization、orchestrator-workers、evaluator-optimizer 五种模式均属此类),agent 指 LLM 在运行时动态决定自己的执行路径与工具使用、每一步都从环境获取 ground truth 来评估进展,建议优先用最简单的 workflow,只有任务步骤数无法预先枚举时才升级为开放式 agent 循环。在『单 agent vs 多 agent』的选型上,Anthropic 的《How we built our multi-agent research system》(2025 年 6 月)给出的实测是:以 Claude Opus 4 为 lead agent、Claude Sonnet 4 为 subagent 的多 agent 系统在其内部研究评测(internal research eval)上比单一 Opus 4 agent 的任务表现高出 90.2%——这是准确率/完成质量的提升而非耗时的缩短;文章进一步用 BrowseComp 评测做归因,token 用量、工具调用次数与模型选择三者共同解释约 95% 的表现方差,其中 token 用量单独就能解释约 80%,说明多 agent 的收益很大程度上来自更大的并行探索预算而非架构本身的额外智能;但代价同样明确——agent 通常消耗约 4 倍于普通 chat 的 token,multi-agent 系统约消耗 15 倍,且在紧耦合、依赖共享上下文连续性的任务(文章明确举例 coding)上,多 agent 因子 agent 间上下文隔离反而表现更差。",
+   "sources": [
+    {
+     "title": "[2210.03629] ReAct: Synergizing Reasoning and Acting in Language Models",
+     "url": "https://arxiv.org/abs/2210.03629"
+    },
+    {
+     "title": "[2305.04091] Plan-and-Solve Prompting: Improving Zero-Shot Chain-of-Thought Reasoning by Large Language Models",
+     "url": "https://arxiv.org/abs/2305.04091"
+    },
+    {
+     "title": "Plan-and-Execute Agents - LangChain Blog",
+     "url": "https://www.langchain.com/blog/plan-and-execute-agents"
+    },
+    {
+     "title": "[2303.11366] Reflexion: Language Agents with Verbal Reinforcement Learning",
+     "url": "https://arxiv.org/abs/2303.11366"
+    },
+    {
+     "title": "Building effective agents \\ Anthropic",
+     "url": "https://www.anthropic.com/research/building-effective-agents"
+    },
+    {
+     "title": "How we built our multi-agent research system \\ Anthropic",
+     "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "ReAct 范式的核心控制流是什么?它相比纯 Chain-of-Thought 解决了什么问题?",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解几乎所有现代 agent 工具调用循环的理论起点,而不是把'能调用工具'和'ReAct'画等号。",
+    "key_points": [
+     "Thought→Action→Observation 交替循环:模型先推理、再产生一个 Action(如调用外部工具/检索),把真实的 Observation 喂回下一步推理,直到产生 finish 动作终止(Yao et al. 2022, arXiv:2210.03629, ICLR 2023)",
+     "纯 CoT 的推理链完全依赖模型内部知识连续展开,容易产生幻觉且无法自我纠正;ReAct 把每一步的真实环境反馈接入推理链,用外部 ground truth 打断幻觉累积",
+     "论文在 HotpotQA/FEVER 上 ReAct 与 CoT 表现相当但更少幻觉,且在 ALFWorld/WebShop 两个交互式决策任务上分别以 34%/10% 的绝对成功率超过模仿学习和强化学习基线",
+     "关键工程含义:控制流不是'一次性想完再做',而是'边想边做、每步都被环境校正'"
+    ],
+    "follow_ups": [
+     "ReAct 在长任务里容易出现什么退化模式(如重复调用同一工具却不终止)?你会怎么在工程上抑制?",
+     "如果去掉显式 Thought、只保留 Action→Observation,会丢失什么能力?"
+    ],
+    "nanocodex_link": "Harness 工程管理 — AgentLoop::run_turn 的回合循环(call-model 产出下一步意图 → run-tools 得到 Observation → 进入下一回合)是 ReAct 循环在生产 harness 里的具体化,并用双预算 max_model_calls=60/max_tool_calls=120 给这个本可无限循环的控制流加终止保证。卡:01_harness.md"
+   },
+   {
+    "question": "Anthropic 在《Building effective agents》里怎么区分 workflow 和 agent?这个区分对架构选型有什么指导意义?",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解'workflow'和'agent'不是营销词而是有清晰工程边界的两类系统,避免把任何带循环的代码都笼统称为'agent'。",
+    "key_points": [
+     "agentic systems 是总称;workflow 指 LLM 与工具按预定义、硬编码的代码路径被编排(prompt chaining、routing、parallelization、orchestrator-workers、evaluator-optimizer 五种模式);agent 指 LLM 在运行时动态决定自己的执行路径与工具使用,循环从环境获取 ground truth(工具结果/代码执行)评估进展,直到任务完成或需要人工介入",
+     "核心建议是'从最简单方案开始':很多时候单次 LLM 调用或固定 workflow 就足够,只有任务步骤数无法预先枚举、需要模型自主决策路径时才值得升级到开放式 agent 循环",
+     "权衡:workflow 更可预测、可测、成本可控;agent 自主性更强但意味着更高成本、更难预测的行为和错误累积风险,需要建立可信的执行环境",
+     "该文章(Erik Schluntz、Barry Zhang,2024 年 12 月)也警告不要把框架当作起点,框架会遮蔽底层真实的 prompt 和 response,建议先用底层 API 理解清楚控制流再决定是否引入框架"
+    ],
+    "follow_ups": [
+     "orchestrator-workers 这个 workflow 模式和'多 agent 系统'有什么本质区别,还是只是叫法不同?",
+     "如果一个系统的'agent 循环'其实每次都严格按固定步骤执行,它还能被称为 agent 吗?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) — orchestrator.rs 的 classify/plan/decompose/workers/verify 节点图本身是一个'预定义代码路径编排 LLM 调用'的 workflow,但它编排的每个 worker 节点内部又是一个完整的开放式 AgentLoop——是 workflow 套 agent 的具体分层实现。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "对比 Plan-and-Execute 和 ReAct 两种控制流架构,说明各自的优劣和适用场景。",
+    "tier": "L2",
+    "why_asked": "考察候选人能否区分'隐式逐步展开的规划'和'显式全局计划'两种范式,而不是把所有带循环的 agent 都当成同一种东西。",
+    "key_points": [
+     "ReAct('Action agent'):单个模型在一个循环里交替做推理和行动,规划是隐式的、逐步展开的,没有独立的全局计划",
+     "Plan-and-Execute:显式拆成 Planner(一次性/阶段性产出有序步骤列表)与 Executor(逐步执行,通常本身是一个 ReAct/Action 风格的子 agent)两个角色;学术源头是 Plan-and-Solve Prompting(Wang et al., ACL 2023, arXiv:2305.04091);LangChain 2023 年将其工程化为 Plan-and-Execute Agents,并声明设计明确受 BabyAGI 和 Plan-and-Solve 论文启发",
+     "优势权衡:Plan-and-Execute 把'规划'和'执行'解耦,规划可用更强模型、执行可用更小更快模型,且全局计划更易审计/中途修改;代价是调用次数显著增多(LangChain 原博客明确指出这是主要缺点)",
+     "适用场景:任务步骤在开始时大致可预见、需要可解释/可审核的全局计划时选 Plan-and-Execute;任务需要频繁根据环境反馈调整策略、步骤数无法预知时 ReAct 的逐步交替更合适;两者也可叠加(先 Plan-and-Execute 定框架,每个子步骤内部再跑 ReAct)"
+    ],
+    "follow_ups": [
+     "如果 Planner 一开始制定的计划中途被环境证伪(某一步的前提不成立),Plan-and-Execute 架构要如何重新规划?",
+     "LangChain 后来用 LangGraph 图结构重做了 Plan-and-Execute,相比最初的链式实现解决了什么问题?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) — orchestrator.rs 对 Complexity::Medium/High 任务先跑 plan 阶段产出子任务列表,再 fan-out 给多个 worker(Executor)执行、由 verify 节点裁决,是 Plan-and-Execute 范式在生产编排器里的具体实现,而每个 worker 内部的 AgentRunner 会话仍是逐步交替的 ReAct 式循环。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "Reflexion 是怎么让 agent'从失败中学习'的?它和单纯把历史对话/日志拼接进 context 有什么本质区别?",
+    "tier": "L2",
+    "why_asked": "考察候选人是否理解 Reflexion 的核心机制是'结构化自我反思'而非'更长的记忆窗口',这是区分'真正学习型 agent'与'只是塞更多上下文'的关键点。",
+    "key_points": [
+     "Reflexion(Shinn et al., NeurIPS 2023, arXiv:2303.11366)不更新模型权重,而是让 agent 对失败信号(如单元测试报错、环境反馈)生成一段自然语言自我反思,写入一个持续积累的 episodic memory 缓冲区,在下一次尝试时作为额外上下文注入——本质是用语言而非梯度做强化学习('verbal reinforcement learning')",
+     "关键消融实验:论文证明收益主要来自'自我反思'这一步本身,而不只是'保留了更多历史记录';去掉反思生成、只让模型看原始失败轨迹重试时效果没有提升,说明单纯拼接日志/history 和 Reflexion 的结构化反思+归纳是两回事",
+     "效果数据:HumanEval pass@1 达到 91%(同期 GPT-4 直接推理为 80%);在 AlfWorld、HotPotQA 上相比基线分别提升约 22%、20%",
+     "工程含义:要复刻 Reflexion,不能只是'把上一轮输出塞进 prompt',而要有一个显式步骤让模型对失败做归因/总结,并且这个总结要被结构化沉淀(而非原始日志)供后续复用"
+    ],
+    "follow_ups": [
+     "Reflexion 的 episodic memory 缓冲区如果无限增长,会带来什么问题?你会怎么设计淘汰/压缩策略?",
+     "Reflexion 依赖外部可验证的反馈信号(如单元测试),如果任务没有这种明确的对错判据,这个机制还成立吗?"
+    ],
+    "nanocodex_link": "项目记忆 自进化 — memory.rs 的 remember/recall(混合词法语义打分的写入与召回)与 consolidate(Jaccard 阈值去重折叠旧条目)是'把经验结构化沉淀+后续复用'这一思想在长期项目记忆而非单次任务内的对应实现,但 consolidate 做的是相似条目合并,并非 Reflexion 论文里针对失败原因的语言归因总结,两者不能等同。卡:06_memory.md"
+   },
+   {
+    "question": "Anthropic 的 orchestrator-worker 研究系统实测比单 agent 效果提升明显,但也提到 token 消耗更高。你会依据什么标准判断一个任务该用多 agent 还是单 agent?",
+    "tier": "L3",
+    "why_asked": "考察成本/收益权衡意识,防止候选人一味'堆 agent'而不考虑代价与适用边界——是面试官区分'纸上谈兵'与'真正上过生产'候选人的常见问法。",
+    "key_points": [
+     "Anthropic 内部研究评测(internal research eval)显示,以 Claude Opus 4 为 lead agent、Claude Sonnet 4 为 subagent 的多 agent 系统,比单一 Opus 4 agent 的任务表现(评测得分)高出 90.2%——这是准确率/完成质量的提升,不是耗时的缩短(《How we built our multi-agent research system》, Anthropic, 2025)",
+     "文章同时用 BrowseComp 评测做归因分析:token 用量、工具调用次数、模型选择三个因子共同解释约 95% 的表现方差,其中仅 token 用量一项就能解释约 80%——多 agent 的收益很大程度上来自更大的并行探索预算,而非架构本身带来额外智能",
+     "成本代价:文章给出的经验数字是 agent(单 agent 工具循环)通常消耗约 4 倍于一次普通 chat 的 token,multi-agent 系统约消耗 15 倍——多 agent 不是免费的性能提升",
+     "明确的反例:文章指出多 agent 编排在紧耦合、依赖共享上下文连续性的任务(原文举例 coding)上效果反而更差,因为子 agent 间上下文隔离带来协调开销和信息丢失;早期版本还出现了为简单查询派生过多 subagent、无限抓取网页等失控行为,靠 prompt engineering 才收敛",
+     "决策依据:任务能否拆成可并行、弱耦合的独立子任务 + 结果价值能否覆盖 4x~15x 的 token 成本 + 是否需要跨子任务的强状态一致性(强一致性/紧耦合场景优先单 agent)"
+    ],
+    "follow_ups": [
+     "如果一个任务看起来可以并行分解,但子任务之间其实存在隐藏的隐式依赖,盲目上多 agent 会引入什么新故障模式?",
+     "'token usage 解释约 80% 方差'这个结论,除了判断'要不要多 agent',还能怎么用来做资源分配决策?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) — orchestrator.rs 用 best-of-N worker fanout(join_all 并行)在 Complexity::High 场景放大探索路径以换取质量,同时用 tool-stripped reason() 节点和固定 worker Tier::Fast 控制成本,是同一条'质量 vs token 成本'权衡曲线在真实代码里的取舍点。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "如果要为一个开放式 agent 循环设计'控制流的工程化护栏'(不依赖模型自己决定何时停),你会围绕哪些机制展开?",
+    "tier": "L4",
+    "why_asked": "综合考察候选人能否跳出'选哪种推理范式(ReAct/Plan-and-Execute/Reflexion)'这一层,进入'循环本身会不会跑飞、卡死、永久挂起'这一更底层的 harness 工程问题——是本主题'控制流是怎么被工程化管理的'这一母题的压轴题。",
+    "key_points": [
+     "终止保证:双维度预算(如上限模型调用次数、上限工具调用次数)而非单一维度,因为模型可能'多想少做'或'多做少想',单一预算容易被绕过",
+     "取消与中断:协作式取消而非强杀进程,在关键节流点做低延迟轮询,保证用户中断能在可预期时间内生效,同时不破坏已产生的对话历史完整性",
+     "历史一致性:模型 API 对'工具调用后必须有对应工具结果'这类历史合法性有硬性要求,当预算耗尽或被取消导致工具调用没跑完时,必须有回填(backfill)机制补齐占位结果,否则下一次请求会被 API 直接拒绝",
+     "成本/延迟优化而不牺牲正确性:对只读、无副作用的工具做并发批量执行,对有副作用的工具保持串行,这是控制流工程里'安全的并行化边界'判断",
+     "上下文/工具可见性动态裁剪:回合内根据当前查询动态选择一个小而相关的工具子集暴露给模型,而不是把全部工具 schema 都塞进 prompt,既降低成本又降低模型选错工具的概率,这本身也是控制流的一部分——决定模型在每一步能看到、能做什么",
+     "这套护栏与'选 ReAct/Plan-and-Execute/Reflexion 哪种推理范式'是正交的两层问题:上层选范式解决'怎么想、怎么规划',下层护栏解决'循环会不会跑飞、会不会因为一次异常而永久挂起'"
+    ],
+    "follow_ups": [
+     "如果双预算里工具调用次数先耗尽但模型还想继续推理,你会让循环立刻终止,还是允许'只想不做'再跑几轮?为什么?",
+     "动态工具可见性裁剪如果裁剪错了(该在的工具没露出来),要怎么在 trace/日志里快速定位到是裁剪逻辑的问题而不是模型的问题?"
+    ],
+    "nanocodex_link": "Harness 工程管理 — AgentLoop::run_turn 的回合循环(call-model/run-tools 交替)、双预算(max_model_calls=60/max_tool_calls=120)保证终止、两层协作式取消(100ms select!)、只读并发批量(parallel_run)、每回合动态 tool-schema 选择(DEFAULT_VISIBLE_TOOL_LIMIT=9)、API 历史合法性 backfill(backfill_unanswered_tool_calls)——这些正是这道设计题里'护栏机制'的真实落地实现。卡:01_harness.md"
+   }
+  ]
+ }
+}

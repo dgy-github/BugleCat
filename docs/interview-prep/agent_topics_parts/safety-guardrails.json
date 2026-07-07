@@ -1,0 +1,142 @@
+{
+ "key": "safety-guardrails",
+ "name": "安全护栏与执行沙箱",
+ "data": {
+  "category": "安全护栏与执行沙箱",
+  "definition": {
+   "statement": "\"安全护栏与执行沙箱\"这一工程领域的核心，是在 Agent 能够自主调用工具、执行代码、访问外部数据的前提下，把\"模型的意图判断\"与\"系统能否物理执行该操作\"解耦成两个互相独立、可分别验证的机制。其理论基础是 least privilege 原则——NIST SP 800-53(Rev.5) 的官方 glossary 将其定义为 \"an entity is granted the minimum system authorizations and resources needed to perform its function\"，对应到 Agent 系统即每次工具调用只应获得完成该次任务所必需的最小权限，而非账号级/进程级的一次性授权。工程上通常拆成两条正交边界：(1) permission/审批模型——如 Claude Code 官方文档所述，用 allow/ask/deny 三态规则、并按固定的 deny > ask > allow 顺序求值，决定\"要不要问人\"；(2) execution sandbox——OS 级隔离（Anthropic 用 macOS Seatbelt / Linux bubblewrap 实现 filesystem isolation 与 network isolation），决定\"就算批准了，进程物理上能不能碰到这个资源\"。Anthropic 明确把二者定义为互补而非替代的 defense-in-depth 层：permission 覆盖全部工具的访问决策，sandbox 只在 OS 层兜底 Bash 子进程的文件/网络边界。但\"即便 prompt injection 绕过模型决策、边界依然拦得住\"这一保证并非在所有产品形态下都同等成立：Anthropic 后续的《How we contain Claude across products》一文明确区分——在采用完整 VM 隔离、不存在\"sandbox 外逃生舱\"进程的 Claude Cowork 里，这个保证是干净成立的；而在本地运行的 Claude Code 里，仍有一个位于 sandbox 之外、负责逐条命令决定是否强制沙箱化的特权进程，一段有说服力的注入提示或一次审批疲劳下的误点，仍可能诱使这个特权进程放行未被沙箱化的命令——也就是说，对 Claude Code 而言 sandbox 边界是\"大幅收窄攻击面\"，而不是无条件的绝对兜底。这套体系存在的根本诱因是 prompt injection——OWASP Top 10 for LLM Applications 2025 将其列为 LLM01，定义为 \"user prompts alter the LLM's behavior or output in unintended ways\"，并指出根源是模型把 instruction 与 data 放在同一 token 流里处理、缺乏可靠通道分离，因此 RAG、微调等手段只能 ground 模型、并不能 secure 模型，唯有 privilege restriction 与 human-in-the-loop 才是相对确定性的第二道防线。Anthropic 的工程博客也印证了纯人工审批模式会随审批次数增多而失效（据《How we built Claude Code auto mode》，即便已有 sandbox 与 --dangerously-skip-permissions 可选，用户对手动 permission prompt 仍约 93% 直接批准），因此实践进一步演化出\"危险操作分级拦截\"：按风险把工具调用分层（只读自动放行、可逆写入每步确认、外发/删除/资金类操作强制人审并留痕），LangChain/LangGraph 的 human-in-the-loop middleware（用 interrupt_on 按 tool/参数配置 allowed_decisions）与 Claude Code auto mode 的分级 classifier 都是这一思想的具体实现。在协议层，针对 Model Context Protocol 的安全分析进一步指出，工具描述本身也必须被当作不可信输入处理，因为 capability 声明是 self-asserted、缺乏验证机制的，这既违反 least privilege（允许运行时任意扩权），也违反 origin authenticity（用户无法区分 server 注入的指令与用户原始指令）。",
+   "sources": [
+    {
+     "title": "least privilege - Glossary | CSRC (NIST SP 800-53 Rev. 5)",
+     "url": "https://csrc.nist.gov/glossary/term/least_privilege"
+    },
+    {
+     "title": "OWASP Top 10 for LLM Applications 2025 (v2025 PDF)",
+     "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/assets/PDF/OWASP-Top-10-for-LLMs-v2025.pdf"
+    },
+    {
+     "title": "Configure permissions - Claude Code Docs",
+     "url": "https://code.claude.com/docs/en/permissions"
+    },
+    {
+     "title": "Making Claude Code more secure and autonomous with sandboxing \\ Anthropic",
+     "url": "https://www.anthropic.com/engineering/claude-code-sandboxing"
+    },
+    {
+     "title": "How we built Claude Code auto mode: a safer way to skip permissions \\ Anthropic",
+     "url": "https://www.anthropic.com/engineering/claude-code-auto-mode"
+    },
+    {
+     "title": "How we contain Claude across products \\ Anthropic",
+     "url": "https://www.anthropic.com/engineering/how-we-contain-claude"
+    },
+    {
+     "title": "Enterprise-Grade Security for the Model Context Protocol (MCP): Frameworks and Mitigation Strategies",
+     "url": "https://arxiv.org/pdf/2504.08623"
+    },
+    {
+     "title": "Human-in-the-loop - Docs by LangChain (deepagents)",
+     "url": "https://docs.langchain.com/oss/python/deepagents/human-in-the-loop"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "什么是 least privilege 原则？在一个 Agent 工具调用链路里，这个原则具体是通过哪些机制落地的（比如 permission rule 和 sandbox 的分工）？",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解安全护栏不是一句口号，而要落到具体、可验证的系统边界上；能否区分'决策层（要不要做）'和'执行层（能不能做）'。",
+    "key_points": [
+     "NIST SP 800-53 官方定义：entity 只获得完成当前任务所必需的最小授权（https://csrc.nist.gov/glossary/term/least_privilege）",
+     "落地成两条正交边界：permission/审批规则（allow/ask/deny，决定要不要问人）+ OS 级 execution sandbox（filesystem/network isolation，决定进程物理上能不能碰到资源）",
+     "Claude Code 官方文档：permission 规则按 deny > ask > allow 固定优先级求值，规则粒度不改变优先级",
+     "覆盖面不同：permission 覆盖所有 tool（Bash/Read/Edit/WebFetch/MCP），sandbox 只兜底 Bash 子进程的 fs/network 边界"
+    ],
+    "follow_ups": [
+     "如果一个 deny 规则和一个更具体的 allow 规则同时匹配同一次调用，最终结果是什么？为什么这样设计？",
+     "permission rule 的判断是谁在执行——模型自己决定要不要问，还是有独立的执行层？"
+    ],
+    "nanocodex_link": "沙箱 审批状态机 — ncx-sandbox 的 policy.rs 用 read-only/workspace-write/danger-full-access 三态模式做纯函数式的物理可写性判断，对应的是 OpenAI Codex CLI 的 sandbox_mode/approval_policy 设计（read-only/workspace-write/danger-full-access 与 untrusted/on-failure/on-request/never 都是 Codex CLI 的原生术语，源码 docstring 也自称是 Codex 的 Rust port）；Claude Code 用的是不同的 allow/ask/deny + allowRead/denyRead/allowWrite/denyWrite 语义，命名和机制都不相同，二者不应被并列为同一种设计"
+   },
+   {
+    "question": "Anthropic 的两篇工程博客分别提到过两个不同阶段的数字：《Making Claude Code more secure and autonomous with sandboxing》报告说，上线 OS-level sandbox 之后，permission prompt 数量减少了约 84%；而更晚近的《How we built Claude Code auto mode》里又提到，即便已经有 sandbox 和 --dangerously-skip-permissions 两个选项可用，用户对手动 permission prompt 的批准率依然高达约 93%。为什么纯粹依赖'每次操作都问用户'的 permission-prompt 模式会失效？sandbox 和 permission prompt 应该分别放在防御体系的哪一层，为什么说它们是互补而非替代关系？",
+    "tier": "L2",
+    "why_asked": "考察是否理解'人类审批'是有限资源（会疲劳、会习惯性放行），以及为什么要把安全边界从'用户注意力'转移到'系统机制'；同时考察候选人能否分清两个不同时间点、不同产品机制下的统计数字各自的因果指向，而不是把它们串成一条虚假的时间线（例如误以为'早期测得 93% 被无脑批准，所以后来才引入了 sandbox'）。",
+    "key_points": [
+     "《Making Claude Code more secure and autonomous with sandboxing》：上线 OS-level sandbox（macOS Seatbelt / Linux bubblewrap）后，permission prompt 减少约 84%，动机是缓解一般性的 approval fatigue",
+     "更晚近的《How we built Claude Code auto mode》：即便已经有 sandbox 和 --dangerously-skip-permissions 两个选项，用户对手动 permission prompt 依然批准约 93%——这是'sandbox 已经存在之后'对现状的观察，用来论证还需要第三层机制（基于模型的 classifier，即 auto mode），而不是'sandbox 建成之前'促成 sandbox 立项的动机数据；不能把两者接成'早期 93% 被无脑批准 → 因此后来引入了 sandbox'的假因果链",
+     "官方文档明确二者互补：permission deny rule 阻止 Claude 尝试访问受限资源；sandbox 边界确保即便 prompt injection 绕过 Claude 的决策，Bash 子进程仍碰不到边界外资源——但这一'绕过仍拦得住'的保证在 Claude Code 里并非绝对，据《How we contain Claude across products》，sandbox 外还有一个逐条命令做放行决定的特权进程，可能被有说服力的注入提示或审批疲劳下的误点绕过",
+     "sandbox 覆盖面窄（只管 Bash 及其子进程），permission rule 覆盖全部工具类型，因此必须叠加而非二选一"
+    ],
+    "follow_ups": [
+     "sandbox 覆盖不到的工具（比如 Edit、WebFetch）要靠什么机制兜底？",
+     "如果去掉 OS 级 sandbox，只靠更严格的 system prompt 能不能达到同等安全性？为什么？"
+    ],
+    "nanocodex_link": "沙箱 审批状态机 — ncx-sandbox 的 policy.rs 判物理可写性、approval.rs 判要不要问人，加上另一个 crate ncx-tools 的 executor.rs（PolicyExecutor，只做进程容器/超时，不碰审批），三者职责分离正对应'审批疲劳'与'系统边界'要分层处理的设计动机"
+   },
+   {
+    "question": "假设 ncx-sandbox 的 SandboxPolicy.network_access 是一个全局布尔开关（不区分域名），如果一次间接 prompt injection（比如工具读到的网页/文件里藏了指令）诱导 agent 在 network_access=true 时执行一条 curl 命令，把 workspace 里的密钥外泄到攻击者控制的域名——policy.rs 和 approval.rs 这套机制能拦住吗？为什么？你会怎么加固？",
+    "tier": "L3",
+    "why_asked": "这是本类别里最能问出真实工程深度的问题：考察是否理解 isolation sandboxing（控制 agent 能在哪跑）和 behavioral sandboxing（控制 agent 做什么）之间的 gap——即便所有边界检查都通过，攻击也可能发生在'被允许的操作'内部，而且要能看穿'文档写的意图'和'代码实际接线'之间可能存在的落差。",
+    "key_points": [
+     "policy.rs 只回答'这个路径能不能写、网络开不开'这类物理层问题，是不关心语义/调用意图的纯函数；network_access 一旦为 true，会对所有域名一视同仁地放行",
+     "实际调用链路里，approval.rs 的 Approver::classify(command, needs_escalation) 是否检查命令首 token（TRUSTED_COMMANDS 里是否含 curl，答案是不含）取决于当前 approval policy：只有 untrusted 策略会同时看 is_trusted(command) 与 needs_escalation；默认的 on-request 策略只看 needs_escalation 这一个布尔值，完全不管命令是什么。而 needs_escalation 由 ncx-core/src/tools.rs 的 ShellTool::needs_escalation 计算，在 workspace-write 模式下目前只判断 workdir 是否可写，并不读取 ctx.policy.network_access——也就是说在默认 on-request + workspace-write + network_access=true 的组合下，这条 curl 命令很可能被直接 AutoApprove，既不看命令内容也不因为要发网络请求而升级审批",
+     "这正是 isolation sandboxing（控制运行边界）与 behavioral sandboxing（控制行为语义）之间的 gap，而且比'语法层判断粗糙'更严重：approval.rs 文档注释里写的'needs_escalation 覆盖 network access'的设计意图，在 shell 工具这条调用链上目前并未真正接线；即便 agent 拥有的凭证/权限都'合法'，prompt injection 仍可能诱导它在权限范围内做恶意的事",
+     "加固方向：把 network_access 真正接入 needs_escalation 的判断逻辑（让'即将访问网络'本身触发升级审批，而不只判断 workdir 可写性）；引入域名级 allowlist（类比 Claude Code 的 WebFetch(domain:...) 或 MCP 场景下按 data classification zone 分组工具）；在 tool 输出进入上下文前做 prompt-injection 内容扫描"
+    ],
+    "follow_ups": [
+     "如果要在 nanocodex 里加一层 domain allowlist，你会加在 ncx-sandbox 的 policy.rs 还是 ncx-tools 的 executor.rs？为什么？",
+     "如果 escalation 请求本身就是一次网络请求，谁来判断这个目标域名到底安不安全？"
+    ],
+    "nanocodex_link": "沙箱 审批状态机 — ncx-sandbox 的 policy.rs（network_access 全局开关，无域名粒度）+ approval.rs（Approver::classify 基于命令首 token 与 needs_escalation 的语法层分类），但实际调用点 ncx-core/src/tools.rs 的 ShellTool::needs_escalation 在 workspace-write 模式下目前只判断 workdir 是否可写、并未读取 network_access，approval.rs 文档注释里'覆盖 network access'的设计意图尚未在这条链路接线，二者共同构成了'物理边界够但行为语义/接线都不够'的真实 gap"
+   },
+   {
+    "question": "如果要给一个 Agent 系统设计'危险操作分级拦截'——低风险只读操作自动放行、可逆写入每步确认、外发/删除/资金类操作强制人审并留痕——你会把'判断这次操作属于哪一级风险'和'该不该问人'这两件事拆成几个模块？为什么不能写成一个大 if-else？",
+    "tier": "L4",
+    "why_asked": "考察系统设计能力：能否把一个模糊的产品需求（分级拦截）拆解成职责清晰、可独立测试、可替换策略的模块；是否理解为什么'纯判定'和'审批策略'必须解耦。",
+    "key_points": [
+     "参考设计：把'这个操作物理上能不能做'（纯函数，不依赖 IO/会话状态）与'这个操作要不要经过审批'（依赖 policy 名称如 untrusted/on-failure/on-request/never 的状态机）拆成两个正交模块，各自独立可测；执行侧再单独做一个只管进程隔离、完全不掺和审批逻辑的第三模块",
+     "这种 separation of concerns 让'改风险分级策略'不需要碰隔离逻辑，'改隔离边界'不需要碰审批逻辑，两者可独立演进、独立单测",
+     "对应业界实践：LangGraph/LangChain 的 human-in-the-loop middleware 用 interrupt_on 按 tool（甚至按参数用 when 谓词）配置 allowed_decisions，本质也是把'风险分级'做成声明式配置而非代码里的 if-else",
+     "OWASP 建议把 privilege restriction（沙箱/最小权限）和 human-in-the-loop 作为两条独立防线叠加，而非合并成一层"
+    ],
+    "follow_ups": [
+     "'这次操作需要 escalation'这个信号应该由谁计算——是纯判定层算出来，还是审批层自己判断？",
+     "如果要支持'按每步 vs 按整个会话'两种确认粒度，这个状态机要怎么改？"
+    ],
+    "nanocodex_link": "沙箱 审批状态机 — 这个设计的真实实现横跨两个 crate：ncx-sandbox 的 policy.rs 是纯函数判物理可写性，approval.rs 的 Approver::classify 判 AutoApprove/Ask/AutoDeny；ncx-tools 的 executor.rs（PolicyExecutor）只做进程容器/超时，完全不碰审批。approval.rs 里的 step_decision 函数专门处理'per-step 确认'这一分级需求，把 AutoApprove 在特定条件下升级为 Ask"
+   },
+   {
+    "question": "OWASP 认为 prompt injection 目前没有'彻底修复'的方法，只能做 defense-in-depth：input validation、output filtering、privilege restriction、human-in-the-loop 这几层里，为什么说 privilege restriction（也就是 sandbox/least-privilege）是相对'确定性'的一层，而'在 system prompt 里让模型不要听信外部指令'这种防御被认为是不可靠的？",
+    "tier": "L2",
+    "why_asked": "考察是否理解 LLM 层面的防御（system prompt 约束、指令过滤）本质上是概率性、可被绕过的，而系统层面的边界（权限/沙箱）是确定性的、和模型是否'听话'无关；能否讲清楚为什么工程上要把安全边界建在模型能力之外。",
+    "key_points": [
+     "OWASP Top 10 for LLM Applications 2025 LLM01：prompt injection 源于模型把 instruction 和 data 放在同一 channel 里处理，模型无法可靠区分'这是系统指令'还是'这是需要处理的数据'；RAG、微调等手段只是 ground 模型、不能 secure 模型",
+     "system prompt 层的防御（'忽略外部内容里的指令'）本质上仍是喂给同一模型的另一段文本，是否遵守取决于模型自身对齐水平、上下文长度/位置等因素，是概率性的",
+     "privilege restriction（sandbox 强制的 fs/network 边界、permission rule 的 deny 规则）不依赖模型'愿不愿意听话'——即便模型被注入指令完全接管，只要没有权限，操作在系统层面就执行不了，这是相对确定性的边界（但也要注意：如果决定'要不要强制这层边界'的判断本身是由 sandbox 外的某个进程/流程做出的，这个判断点仍可能被说服，边界本身是确定的，但是否触发边界不总是确定的）",
+     "工程实践上永远是'prompt 层面的提示 + 系统层面的强制边界'叠加，而非只依赖前者"
+    ],
+    "follow_ups": [
+     "如果 sandbox 本身的网络开关是一个全局布尔（不区分域名），这条'确定性边界'还够'确定'吗？",
+     "有没有办法把 output filtering 也做成确定性的，而不是再叫一个模型来分类？"
+    ],
+    "nanocodex_link": ""
+   },
+   {
+    "question": "如果一个 MCP server 返回的 tool description 里藏了一段隐藏指令（工具描述投毒），client 把这段描述原样塞进模型的 system context，这是什么性质的攻击？MCP 协议目前在规范层面能提供什么防御，责任最终落在谁身上？",
+    "tier": "L3",
+    "why_asked": "考察候选人对'工具生态'这个新攻击面的认识——不仅用户输入和网页内容可能被注入，连协议本身声明的元数据（工具描述、capability 声明）也可能是攻击载体；是否了解 MCP 生态目前的安全现状和局限。",
+    "key_points": [
+     "安全分析（arxiv 2504.08623 等）与 NSA/CISA 的 MCP 安全指南指出：MCP server 的 capability 声明是 self-asserted、无验证机制的，恶意 server 可在初始化后任意扩权，直接违反 least privilege",
+     "tool description 本身必须被当作不可信输入处理：用户/模型无法区分'server 注入的指令'和'用户原始指令'，这违反了 origin authenticity 这一安全属性",
+     "当前 MCP 规范优先保证 interoperability 而非安全，没有强制的安全机制，防御责任被下放给 host application（如按数据分类 zone 把公共工具与涉敏工具分开授权）",
+     "本质上与'间接 prompt injection'是同一大类问题（不可信内容进入模型上下文），只是载体从网页/文档内容换成了协议层元数据"
+    ],
+    "follow_ups": [
+     "这和典型的间接 prompt injection（通过网页/文档内容注入）相比，防御手段有什么不同？",
+     "如果要在 nanocodex 的 MCP bridge 里加一层防御，你会加在哪个环节？"
+    ],
+    "nanocodex_link": "Skills · MCP · 视觉 — mcp_tool.rs（ncx-core/src/mcp_tool.rs）+ ncx-mcp 的 stdio JSON-RPC bridge(Rc<Mutex<McpClient>>) 是 nanocodex 里唯一从外部 MCP server 拉取 tool description 并注入模型上下文的入口，也就是这里讨论的需要加防御的具体位置"
+   }
+  ]
+ }
+}

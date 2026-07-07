@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Gateway 流程图详解 · 数据不出域</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--accent:#6d28d9;--danger:#c0392b;--danger-soft:#fdecec;--ok:#0e7a52;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px 70px;}
+  header.hero{padding:38px 0 18px;border-bottom:1px solid var(--border);}
+  header.hero h1{font-size:24px;margin:0 0 8px;} header.hero p{font-size:14px;color:var(--text2);margin:0;max-width:780px;} header.hero b{color:var(--accent);}
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.93);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;padding:10px 0;margin-bottom:6px;}
+  nav.toc a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 11px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav.toc a:hover{border-color:var(--accent);color:var(--accent);}
+  section{padding:24px 0 4px;scroll-margin-top:52px;} h3{font-size:16px;margin:6px 0 2px;}
+  .lead{color:var(--text2);font-size:13px;margin:6px 0 12px;max-width:840px;}
+  figure{margin:6px 0;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:10px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  .pts{background:var(--surface);border-left:4px solid var(--accent);border-radius:0 12px 12px 0;padding:11px 16px;margin:8px 0;}
+  .pts b{color:var(--accent);} .pts ul{margin:6px 0 0;padding-left:18px;} .pts li{font-size:12.5px;line-height:1.5;margin:3px 0;}
+  .warn{background:#fff6e9;border-left:4px solid #b8860b;border-radius:0 12px 12px 0;padding:11px 16px;margin:14px 0;}
+  .warn b{color:#8a6100;} .warn ul{margin:6px 0 0;padding-left:18px;} .warn li{font-size:12.5px;margin:3px 0;}
+  code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:1px 5px;border-radius:5px;}
+  footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <h1>🔐 Privacy Gateway 流程图详解 · 数据不出域</h1>
+  <p><b>local-first 隐私网关：先本地、命中密钥硬 block、要外发先脱敏。</b>
+  差异化亮点是把"数据不出域"落成工程——脱敏做在模型外、隐私等级 lattice 合并、复核失败有 guard。按真实代码逐块画流程，每图配面试要点。</p>
+</header>
+<nav class="toc">
+  <a href="#f1">① /ask·chat 主控</a><a href="#f2">② 隐私脱敏</a><a href="#f3">③ 风险路由</a><a href="#f4">④ 本地→复核</a><a href="#f5">⑤ 上下文</a><a href="#f6">⑥ 意图路由</a>
+</nav>
+
+<!-- F1 -->
+<section id="f1">
+  <h3>① chat 主控制流（/ask 恒以 mode=review 进入）</h3>
+  <figure>
+  <svg viewBox="0 0 560 680" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#6d28d9"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">① chat 主控制流（先短路→路由→模型→出口）</text>
+    <g font-size="11" font-weight="800" fill="#6d28d9" text-anchor="middle"><text x="28" y="95" transform="rotate(-90 28 95)">入口</text><text x="28" y="230" transform="rotate(-90 28 230)">短路层</text><text x="28" y="360" transform="rotate(-90 28 360)">路由</text><text x="28" y="500" transform="rotate(-90 28 500)">模型/出口</text></g>
+    <line x1="54" y1="52" x2="54" y2="650" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="m1" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#m1)"><line x1="300" y1="90" x2="300" y2="112"/><line x1="300" y1="176" x2="300" y2="198"/><line x1="300" y1="278" x2="300" y2="300"/><line x1="300" y1="372" x2="300" y2="394"/><line x1="300" y1="468" x2="300" y2="490"/></g>
+    <g text-anchor="middle">
+      <rect x="170" y="52" width="260" height="38" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="70" font-size="11.5" font-weight="600" fill="#1f1d1a">server /ask → GATEWAY.ask</text><text x="300" y="84" font-size="9.5" fill="#8a857a">get_or_create(session) · 恒 mode="review"</text>
+      <rect x="170" y="112" width="260" height="64" rx="9" fill="#f3f1ea" stroke="#6d28d9"/><text x="300" y="131" font-size="11.5" font-weight="700" fill="#1f1d1a">短路层（不进模型 reviewed=False）</text><text x="300" y="147" font-size="9.5" fill="#8a857a">greeting / empty / 危险执行 block</text><text x="300" y="160" font-size="9.5" fill="#8a857a">天气无地点 need_location / tool_result 汇总</text><text x="300" y="172" font-size="9.5" fill="#8a857a">槽位补全(天气 location)</text>
+      <rect x="170" y="198" width="260" height="80" rx="9" fill="#f3f1ea" stroke="#6d28d9"/><text x="300" y="217" font-size="11.5" font-weight="700" fill="#1f1d1a">action 路由（见图⑥）</text><text x="300" y="233" font-size="9.5" fill="#8a857a">ActionClassifier 召回收窄</text><text x="300" y="246" font-size="9.5" fill="#8a857a">→ 强召回直连 / IntentRouter LLM</text><text x="300" y="259" font-size="9.5" fill="#8a857a">→ ActionRouter.execute_planned</text><text x="300" y="272" font-size="9.5" fill="#8a857a">命中 tool/clarify 即返回</text>
+      <rect x="170" y="300" width="260" height="52" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="320" font-size="11.5" font-weight="700" fill="#1f1d1a">local.chat（本地模型）</text><text x="300" y="336" font-size="9.5" fill="#8a857a">_repair_bad_delegation 修"我不能执行"</text>
+      <rect x="170" y="394" width="260" height="46" rx="9" fill="#f3f1ea" stroke="#6d28d9" stroke-width="2"/><text x="300" y="413" font-size="12" font-weight="800" fill="#6d28d9">mode == "local" ?</text><text x="300" y="429" font-size="9.5" fill="#8a857a">唯一硬分支（pro 无独立路径）</text>
+      <rect x="150" y="490" width="300" height="46" rx="9" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="510" font-size="11.5" font-weight="600" fill="#1f1d1a">出口 {output, session_id}</text><text x="300" y="526" font-size="9.5" fill="#8a857a">append: 写 turn+memory+入 compaction 队列</text>
+    </g>
+    <path d="M430,417 H510 V512 H450" fill="none" stroke="#57534a" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#m1)"/><text x="500" y="465" font-size="9" fill="#57534a" transform="rotate(-90 500 465)">local→直接返回</text>
+    <text x="300" y="384" font-size="9.5" fill="#57534a" text-anchor="middle">非 local ↓ 复核(图④)</text>
+    <line x1="300" y1="440" x2="300" y2="490" stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#m1)"/>
+    <text x="280" y="580" font-size="10" fill="#8a857a" text-anchor="middle">mode 只写进返回体 gateway.mode；真实分支只有 local vs 非local</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>先短路、后路由、再模型</b>：一堆确定性短路（问候/空/危险执行/天气）不进模型；再走 action 路由；都不中才调本地模型。</li>
+    <li><b>mode 只有 <code>local</code> vs 非<code>local</code> 两个真实分支</b>，<code>pro</code> 无独立代码路径；<code>/ask</code> 恒以 <code>review</code> 进入。</li>
+    <li><b>出口统一 append</b>：写 turn + 抽记忆 + 入后台压缩队列（见图⑤）。</li>
+  </ul></div>
+</section>
+
+<!-- F2 -->
+<section id="f2">
+  <h3>② 隐私分级 + 脱敏（policies/privacy.py）</h3>
+  <figure>
+  <svg viewBox="0 0 560 520" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#6d28d9"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">② 隐私分级 + 脱敏（脱敏做在模型外）</text>
+    <defs><marker id="m2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#m2)"><line x1="150" y1="98" x2="150" y2="120"/><line x1="410" y1="98" x2="410" y2="120"/><line x1="150" y1="214" x2="150" y2="240"/><line x1="410" y1="222" x2="410" y2="240"/><line x1="280" y1="300" x2="280" y2="322"/></g>
+    <g text-anchor="middle">
+      <rect x="200" y="52" width="160" height="42" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="77" font-size="12" font-weight="600" fill="#1f1d1a">📥 文本 text</text>
+      <!-- classify -->
+      <rect x="60" y="120" width="180" height="92" rx="9" fill="#f3f1ea" stroke="#6d28d9"/><text x="150" y="140" font-size="11.5" font-weight="700" fill="#1f1d1a">classify_privacy</text><text x="150" y="157" font-size="9.5" fill="#8a857a">SECRET(3条)→ secret</text><text x="150" y="170" font-size="9.5" fill="#8a857a">PII(4条)→ internal</text><text x="150" y="183" font-size="9.5" fill="#8a857a">内部标记词→ internal</text><text x="150" y="196" font-size="9.5" fill="#8a857a">else → public</text><text x="150" y="208" font-size="9" fill="#6d28d9">分级</text>
+      <!-- redact -->
+      <rect x="320" y="120" width="180" height="100" rx="9" fill="#f3f1ea" stroke="#6d28d9" stroke-width="2"/><text x="410" y="140" font-size="11.5" font-weight="800" fill="#6d28d9">redact_text</text><text x="410" y="157" font-size="9.5" fill="#8a857a">SECRET→[REDACTED_SECRET]</text><text x="410" y="170" font-size="9.5" fill="#c0392b">+ blocked = True</text><text x="410" y="183" font-size="9.5" fill="#8a857a">PII→[REDACTED_PII]</text><text x="410" y="196" font-size="9.5" fill="#8a857a">（PII 不触发 blocked）</text><text x="410" y="210" font-size="9" fill="#6d28d9">脱敏</text>
+      <rect x="60" y="240" width="180" height="56" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="150" y="260" font-size="11" font-weight="700" fill="#1f1d1a">merge_privacy</text><text x="150" y="276" font-size="9.5" fill="#8a857a">多源取最高密级</text><text x="150" y="289" font-size="9.5" fill="#8a857a">public0/internal1/secret2</text>
+      <rect x="320" y="240" width="180" height="56" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="410" y="260" font-size="11" font-weight="700" fill="#1f1d1a">summarize_for_online</text><text x="410" y="276" font-size="9.5" fill="#8a857a">脱敏 user+answer</text><text x="410" y="289" font-size="9.5" fill="#8a857a">截 6000/9000</text>
+      <rect x="170" y="322" width="220" height="56" rx="9" fill="#ebe8df" stroke="#6d28d9"/><text x="280" y="342" font-size="11.5" font-weight="800" fill="#6d28d9">blocked ?</text><text x="280" y="358" font-size="9.5" fill="#8a857a">是 → 原文占位"禁止外发"</text><text x="280" y="371" font-size="9.5" fill="#8a857a">否 → 送脱敏摘要给线上复核</text>
+    </g>
+    <text x="280" y="410" font-size="10.5" fill="#c0392b" text-anchor="middle">关键：blocked 只由 3 条 SECRET 触发，PII 只脱敏不 block</text>
+    <text x="280" y="430" font-size="10" fill="#8a857a" text-anchor="middle">SECRET：sk-key / api_key·token·secret·password / PEM 私钥　PII：邮箱·IPv4·手机号·身份证</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>三级分级</b> public/internal/secret；<b>SECRET 3 条、PII 4 条</b>正则。</li>
+    <li><b>blocked 只由 SECRET 触发</b>（PII 只替换不 block）——命中密钥则原文占位、绝不外发。</li>
+    <li><b>merge_privacy 是 lattice</b>：多源取最高密级；<b>脱敏在模型外做</b>，不赌模型自觉。</li>
+  </ul></div>
+</section>
+
+<!-- F3 -->
+<section id="f3">
+  <h3>③ 风险路由 review_requirement（7 分支优先级）</h3>
+  <figure>
+  <svg viewBox="0 0 560 560" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#6d28d9"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">③ review_requirement（先命中先返回）</text>
+    <defs><marker id="m3" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <line x1="280" y1="50" x2="280" y2="470" stroke="#c7c2b5" stroke-width="1.5"/>
+    <g text-anchor="middle" font-size="10.5">
+      <rect x="150" y="52" width="260" height="28" rx="8" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="70" font-weight="600" fill="#1f1d1a">输入：user + local_answer</text>
+      <rect x="120" y="92" width="320" height="30" rx="8" fill="#fdecec" stroke="#c0392b"/><text x="280" y="111" fill="#1f1d1a">① privacy != public → high（privacy）</text>
+      <rect x="120" y="130" width="320" height="30" rx="8" fill="#fdecec" stroke="#c0392b"/><text x="280" y="149" fill="#1f1d1a">② HIGH_RISK_MARKERS(44) → high</text>
+      <rect x="120" y="168" width="320" height="30" rx="8" fill="#fdecec" stroke="#c0392b"/><text x="280" y="187" fill="#1f1d1a">③ BUSINESS_RULE_MARKERS(19) → high</text>
+      <rect x="120" y="206" width="320" height="30" rx="8" fill="#fff6e9" stroke="#b8860b"/><text x="280" y="225" fill="#1f1d1a">④ COUNTERINTUITIVE_MARKERS(15) → medium</text>
+      <rect x="120" y="244" width="320" height="30" rx="8" fill="#fff6e9" stroke="#b8860b"/><text x="280" y="263" fill="#1f1d1a">⑤ len(user) > 80 → medium</text>
+      <rect x="120" y="282" width="320" height="30" rx="8" fill="#fff6e9" stroke="#b8860b"/><text x="280" y="301" fill="#1f1d1a">⑥ len(answer) > 120 → medium</text>
+      <rect x="120" y="320" width="320" height="30" rx="8" fill="#eef6f1" stroke="#0e7a52"/><text x="280" y="339" fill="#1f1d1a">⑦ 都不中 → required=False（low_risk）</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.4" fill="none" marker-end="url(#m3)"><line x1="280" y1="80" x2="280" y2="92"/></g>
+    <text x="280" y="392" font-size="11" font-weight="700" fill="#6d28d9" text-anchor="middle">risk 不决定 mode</text>
+    <text x="280" y="412" font-size="10" fill="#8a857a" text-anchor="middle">mode 由调用方传；review_requirement 只决定"非 local 时是否真发线上复核"</text>
+    <text x="280" y="432" font-size="10" fill="#8a857a" text-anchor="middle">low_risk_fast_path_allowed：required 时挡住快路径，否则放行跳过复核</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>7 分支优先级</b>：隐私 &gt; 高危词(44) &gt; 业务规则词(19) &gt; 反直觉词(15) &gt; 输入过长 &gt; 回答过长 &gt; low_risk。</li>
+    <li><b>职责分离</b>：<code>review_requirement</code> 只判"要不要复核"，<b>不决定 mode</b>；mode 由调用方传。</li>
+    <li>大小写不敏感；隐私优先级最高——有敏感必复核。</li>
+  </ul></div>
+</section>
+
+<!-- F4 -->
+<section id="f4">
+  <h3>④ 本地 → 线上复核链路（含 key 轮转 / 回退 / 失败 guard）</h3>
+  <figure>
+  <svg viewBox="0 0 560 660" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#6d28d9"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">④ 本地→复核（脱敏后才外发）</text>
+    <defs><marker id="m4" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#m4)"><line x1="280" y1="88" x2="280" y2="110"/><line x1="280" y1="158" x2="280" y2="180"/><line x1="280" y1="234" x2="280" y2="256"/><line x1="280" y1="330" x2="280" y2="352"/><line x1="280" y1="420" x2="280" y2="442"/></g>
+    <g text-anchor="middle">
+      <rect x="160" y="52" width="240" height="36" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="75" font-size="11.5" font-weight="600" fill="#1f1d1a">local.chat → local_answer</text>
+      <rect x="160" y="110" width="240" height="48" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="130" font-size="11" font-weight="700" fill="#1f1d1a">review_requirement（图③）</text><text x="280" y="146" font-size="9.5" fill="#8a857a">+ summarize_for_online 脱敏（图②）</text>
+      <rect x="140" y="180" width="280" height="54" rx="9" fill="#f3f1ea" stroke="#6d28d9"/><text x="280" y="200" font-size="11.5" font-weight="700" fill="#6d28d9">跳过复核?（两条快路径）</text><text x="280" y="216" font-size="9.5" fill="#8a857a">A 业务讨论 public+无 review 词 → 返回 local</text><text x="280" y="229" font-size="9.5" fill="#8a857a">B low_risk_skip_review 且 low_risk → 返回 local</text>
+      <rect x="140" y="256" width="280" height="74" rx="9" fill="#f3f1ea" stroke="#6d28d9" stroke-width="2"/><text x="280" y="276" font-size="11.5" font-weight="800" fill="#6d28d9">codex.review → /responses</text><text x="280" y="292" font-size="9.5" fill="#8a857a">gpt-5.4 · reasoning.effort · store=False</text><text x="280" y="305" font-size="9.5" fill="#8a857a">key 轮转（401/429/5xx 可重试）</text><text x="280" y="318" font-size="9.5" fill="#8a857a">主 key 全败 → deepseek 回退</text>
+      <rect x="140" y="352" width="280" height="68" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="372" font-size="11.5" font-weight="700" fill="#1f1d1a">复核结果</text><text x="280" y="388" font-size="9.5" fill="#8a857a">成功 → reviewed=True（返回复核答案）</text><text x="280" y="401" font-size="9.5" fill="#c0392b">异常 → guard 判定 ↓</text><text x="280" y="414" font-size="9.5" fill="#8a857a">required &amp;&amp; (policy≠allow_local ‖ blocked)?</text>
+      <rect x="90" y="442" width="180" height="56" rx="9" fill="#fdecec" stroke="#c0392b"/><text x="180" y="462" font-size="10.5" font-weight="700" fill="#c0392b">是 → guarded-fallback</text><text x="180" y="478" font-size="9" fill="#a03024">拒绝把本地结论当最终答</text><text x="180" y="490" font-size="9" fill="#a03024">reviewed=False,fallback=True</text>
+      <rect x="290" y="442" width="180" height="56" rx="9" fill="#eef6f1" stroke="#0e7a52"/><text x="380" y="462" font-size="10.5" font-weight="700" fill="#0e7a52">否 → 返回 local</text><text x="380" y="478" font-size="9" fill="#57534a">allow_local 默认策略</text><text x="380" y="490" font-size="9" fill="#57534a">fallback=True</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.5" fill="none" marker-end="url(#m4)"><path d="M280,420 V430 H180 V442"/><path d="M280,430 H380 V442"/></g>
+    <text x="280" y="540" font-size="10" fill="#8a857a" text-anchor="middle">复核挂了不是简单放本地：命中隐私/需复核时走 guarded-fallback 拒绝本地结论当最终答</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>顺序</b>：本地答 → 判是否需复核 → <b>脱敏</b> → 两条跳过快路径 → codex <code>/responses</code>(gpt-5.4) 复核。</li>
+    <li><b>多 key 轮转 + deepseek 回退</b>：可重试错误(401/429/5xx)轮换 key，主 key 全败降级 deepseek。</li>
+    <li><b>失败 guard</b>：复核挂了时若"需复核 &amp; (策略非 allow_local 或已 blocked)" → <b>guarded-fallback 拒绝本地当最终答</b>，不是无脑放本地。</li>
+  </ul></div>
+</section>
+
+<!-- F5 -->
+<section id="f5">
+  <h3>⑤ 上下文工程（前缀缓存 + 后台压缩 + 检索 + 记忆）</h3>
+  <figure>
+  <svg viewBox="0 0 560 520" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#6d28d9"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">⑤ 上下文工程（ContextStore/sqlite）</text>
+    <defs><marker id="m5" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g text-anchor="middle">
+      <rect x="30" y="60" width="240" height="96" rx="10" fill="#f3f1ea" stroke="#6d28d9"/><text x="150" y="80" font-size="11.5" font-weight="800" fill="#6d28d9">prefix_cache（发送前整形）</text><text x="150" y="97" font-size="9.5" fill="#8a857a">system 合并成 STABLE_SYSTEM_PREFIX</text><text x="150" y="110" font-size="9.5" fill="#8a857a">剥每轮变化的元数据头</text><text x="150" y="123" font-size="9.5" fill="#8a857a">长消息中截 · 只留最后 16 条</text><text x="150" y="138" font-size="9.5" fill="#0e7a52">→ 前缀字节稳定 → llama.cpp KV 命中</text><text x="150" y="151" font-size="9" fill="#8a857a">（整形非语义压缩）</text>
+      <rect x="300" y="60" width="240" height="96" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="420" y="80" font-size="11.5" font-weight="700" fill="#1f1d1a">context_messages（喂本地）</text><text x="420" y="97" font-size="9.5" fill="#8a857a">滚动摘要 + recall 检索 + 最近 4 轮</text><text x="420" y="110" font-size="9.5" fill="#8a857a">recall: FTS5 bm25 + reranker 重排</text><text x="420" y="127" font-size="11" font-weight="700" fill="#6d28d9">review_summary（喂线上）</text><text x="420" y="143" font-size="9.5" fill="#c0392b">全程 redact · secret turn 跳过</text>
+      <rect x="30" y="180" width="240" height="86" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="150" y="200" font-size="11.5" font-weight="700" fill="#1f1d1a">append（每轮）</text><text x="150" y="217" font-size="9.5" fill="#8a857a">写 turn（privacy_level=merge_privacy）</text><text x="150" y="230" font-size="9.5" fill="#8a857a">+ FTS 索引</text><text x="150" y="243" font-size="9.5" fill="#8a857a">extract_memories 抽记忆（去重/升权）</text><text x="150" y="256" font-size="9.5" fill="#8a857a">enqueue_compaction 入队</text>
+      <rect x="300" y="180" width="240" height="86" rx="10" fill="#f3f1ea" stroke="#6d28d9"/><text x="420" y="200" font-size="11.5" font-weight="800" fill="#6d28d9">compaction_worker（后台线程）</text><text x="420" y="217" font-size="9.5" fill="#8a857a">队列 pending → compact_session</text><text x="420" y="230" font-size="9.5" fill="#8a857a">跳最近 4 轮，取旧 ≤8 条</text><text x="420" y="243" font-size="9.5" fill="#c0392b">secret 轮次只写"禁止外发"占位</text><text x="420" y="256" font-size="9.5" fill="#8a857a">合并进 sessions.summary</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.5" fill="none" marker-end="url(#m5)"><line x1="270" y1="108" x2="300" y2="108"/><line x1="150" y1="266" x2="150" y2="288"/><line x1="270" y1="223" x2="300" y2="223"/></g>
+    <text x="150" y="302" font-size="9" fill="#57534a" text-anchor="middle">入队 →</text>
+    <text x="280" y="340" font-size="10.5" fill="#8a857a" text-anchor="middle">两条上下文分开：喂本地(全量) vs 喂线上(全程脱敏、secret 跳过) —— 又一道"不出域"</text>
+    <text x="280" y="360" font-size="10" fill="#8a857a" text-anchor="middle">SessionStore(内存版)未被 gateway 使用，实际用 ContextStore(sqlite+FTS+privacy)</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>prefix_cache 是整形不是压缩</b>：把 system 合并成稳定前缀 + 剥易变元数据 → 前缀字节稳定 → 复用 llama.cpp KV cache（省首 token 计算）。</li>
+    <li><b>后台异步压缩</b>：append 入队，<code>compaction_worker</code> 线程批量压；secret 轮次只留占位。</li>
+    <li><b>喂本地 vs 喂线上两套上下文</b>：<code>review_summary</code> 全程脱敏且跳过 secret turn——上下文层再兜一道"不出域"。</li>
+  </ul></div>
+</section>
+
+<!-- F6 -->
+<section id="f6">
+  <h3>⑥ 意图 / action 路由（两级：召回收窄 → LLM 定夺）</h3>
+  <figure>
+  <svg viewBox="0 0 560 560" role="img" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="40" rx="10" fill="#6d28d9"/><text x="280" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">⑥ 意图/action 路由</text>
+    <defs><marker id="m6" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#m6)"><line x1="280" y1="88" x2="280" y2="110"/><line x1="280" y1="182" x2="280" y2="204"/><line x1="280" y1="276" x2="280" y2="298"/><line x1="280" y1="368" x2="280" y2="390"/></g>
+    <g text-anchor="middle">
+      <rect x="160" y="52" width="240" height="36" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="75" font-size="11.5" font-weight="600" fill="#1f1d1a">action_catalog（含 chat.answer 兜底）</text>
+      <rect x="130" y="110" width="300" height="72" rx="9" fill="#f3f1ea" stroke="#6d28d9" stroke-width="2"/><text x="280" y="130" font-size="11.5" font-weight="800" fill="#6d28d9">ActionClassifier（本地召回器）</text><text x="280" y="146" font-size="9.5" fill="#8a857a">lexical + embedding·4.0 打分</text><text x="280" y="159" font-size="9.5" fill="#8a857a">&lt;0.55 → None（无候选）</text><text x="280" y="172" font-size="9.5" fill="#8a857a">取 top5 收窄 catalog</text>
+      <rect x="130" y="204" width="300" height="72" rx="9" fill="#f3f1ea" stroke="#6d28d9"/><text x="280" y="224" font-size="11.5" font-weight="700" fill="#1f1d1a">强召回直连?</text><text x="280" y="240" font-size="9.5" fill="#8a857a">routing.direct &amp; conf≥0.9 &amp; score≥10</text><text x="280" y="253" font-size="9.5" fill="#8a857a">&amp; margin≥3 → 直接 execute_planned</text><text x="280" y="266" font-size="9.5" fill="#0e7a52">命中即执行(省 LLM)</text>
+      <rect x="130" y="298" width="300" height="70" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="280" y="318" font-size="11.5" font-weight="700" fill="#1f1d1a">IntentRouter（qwen3-router LLM）</text><text x="280" y="334" font-size="9.5" fill="#8a857a">仅当有召回才调（无候选跳过省 LLM）</text><text x="280" y="347" font-size="9.5" fill="#8a857a">{kind,tool,conf} · kind∈chat/tool/summarize/clarify</text><text x="280" y="360" font-size="9.5" fill="#8a857a">tool conf&lt;0.7 → 降 clarify</text>
+      <rect x="130" y="390" width="300" height="56" rx="9" fill="#ebe8df" stroke="#6d28d9"/><text x="280" y="410" font-size="11.5" font-weight="800" fill="#6d28d9">ActionRouter.execute_planned</text><text x="280" y="426" font-size="9.5" fill="#8a857a">唯一执行者(actions.yaml) · 冷却锁</text><text x="280" y="439" font-size="9.5" fill="#8a857a">kind=tool→出 tool_call ｜ clarify→追问</text>
+    </g>
+    <text x="280" y="480" font-size="10" fill="#8a857a" text-anchor="middle">ActionPlanner 已装配但当前 chat 链未调用（classifier + intent_router 是活跃路径）</text>
+    <text x="280" y="500" font-size="10" fill="#8a857a" text-anchor="middle">都不命中 → 落本地模型 + 复核（图①/④）</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>两级路由</b>：<code>ActionClassifier</code>(本地 lexical+embedding 召回，收窄成 top5) → <code>IntentRouter</code>(小 LLM 定 kind/tool) → <code>ActionRouter</code> 执行。</li>
+    <li><b>省 LLM 的两处</b>：强召回(conf≥0.9)直连跳过 LLM；classifier 无候选时<b>跳过 IntentRouter</b>。</li>
+    <li><b>工具路由隔离在主上下文之外</b>——classifier 单独算，不污染 chat 上下文。</li>
+  </ul></div>
+</section>
+
+<div class="warn"><b>全局易错点（面试官爱挖）</b><ul>
+  <li><code>mode</code> 只有 <b>local vs 非 local</b> 两个真实分支，<code>pro</code> 无独立代码路径。</li>
+  <li><code>blocked</code> 只由 <b>3 条 SECRET</b> 触发，PII 命中只脱敏不 block。</li>
+  <li><code>review_requirement</code> 只决定"是否复核"，<b>不决定 mode</b>。</li>
+  <li><code>ActionPlanner</code> 已实例化但当前链未调用；<code>SessionStore</code>(内存版)未被使用，实际是 <code>ContextStore</code>(sqlite)。</li>
+</ul></div>
+
+<footer>Privacy Gateway 流程图详解 · <code>root/privacy-gateway</code> · 6 图：chat 主控 / 隐私脱敏 / 风险路由 / 本地→复核 / 上下文 / 意图路由 · 配套刷题卡见 <code>privacy-gateway-interview-drills.zh.md</code></footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排产 Agent · 全景梳理（业务→闭环→技术→治理）</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--biz:#1f6feb;--tech:#0e7a52;--gov:#c2410c;--danger:#c0392b;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;}
+  .wrap{max-width:1040px;margin:0 auto;padding:24px 20px 70px;}
+  h1{font-size:23px;margin:0 0 4px;} .sub{font-size:13.5px;color:var(--text2);margin:0 0 6px;} .sub b{color:var(--biz);}
+  .meta{font-size:12px;color:var(--muted);margin-bottom:8px;}
+  nav{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;gap:6px;padding:9px 0;margin-bottom:10px;flex-wrap:wrap;}
+  nav a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav a:hover{border-color:var(--biz);color:var(--biz);}
+  section{padding:22px 0 4px;scroll-margin-top:52px;} h2{font-size:18px;margin:0 0 8px;display:flex;align-items:center;gap:8px;}
+  h2 .n{font-size:12px;font-weight:700;color:#fff;background:var(--biz);border-radius:6px;padding:1px 8px;}
+  .lead{font-size:13px;color:var(--text2);margin:2px 0 12px;max-width:860px;}
+  figure{margin:6px 0;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:12px;overflow-x:auto;} svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  table{width:100%;border-collapse:separate;border-spacing:3px;font-size:12.5px;margin:6px 0;}
+  th,td{padding:7px 9px;border-radius:7px;text-align:left;vertical-align:top;} th{background:var(--surface2);color:var(--text2);font-size:11.5px;} td{background:#fff;border:1px solid var(--border);}
+  td.k{font-weight:700;color:var(--biz);white-space:nowrap;}
+  code{font-family:var(--mono);font-size:11.5px;background:var(--surface2);padding:1px 4px;border-radius:4px;}
+  .note{border-left:4px solid var(--gov);border-radius:0 10px 10px 0;padding:10px 15px;margin:8px 0;background:var(--surface);font-size:12.5px;}
+  .note b{color:var(--gov);}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;}
+  .card{background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:12px;} .card h4{margin:0 0 6px;font-size:13.5px;}
+  .card ul{margin:0;padding-left:16px;} .card li{font-size:12px;line-height:1.45;margin:3px 0;}
+  footer{margin-top:28px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🏭 排产 Agent · 全景梳理</h1>
+<p class="sub"><b>在已有生产排程系统上加一层智能 Agent —— 不让 LLM 控业务，用确定性 workflow 编排，只在必要节点用模型。</b>纺织/化纤行业，49,981 条真实订单，已部署(systemd+公网隧道)。</p>
+<p class="meta">覆盖：业务需求 · 落地闭环 · 执行链路 · 技术细节 · 驾驭工程落地 · 人工干预 · 审计 · 安全边界 · 结果反馈</p>
+<nav>
+  <a href="#biz">①业务需求</a><a href="#loop">②落地闭环</a><a href="#chain">③执行链路</a><a href="#tech">④技术细节</a><a href="#drive">⑤驾驭工程</a><a href="#hitl">⑥人工干预</a><a href="#audit">⑦审计</a><a href="#sec">⑧安全边界</a><a href="#fb">⑨结果反馈</a><a href="#hard">⑩硬挑战</a>
+</nav>
+
+<!-- ① 业务需求 -->
+<section id="biz">
+  <h2><span class="n">①</span> 业务需求</h2>
+  <p class="lead">目标：让工厂计划员用自然语言驱动排程系统，既能查、也能改，但改必须受控可审。</p>
+  <table>
+    <tr><td class="k">谁用</td><td>工厂计划员，四级角色：<b>业务员(0) &lt; 工艺员(1) &lt; 主任(2) &lt; 厂长(3)</b></td></tr>
+    <tr><td class="k">只读查询</td><td>某订单排到哪了 / 某机台排了多少单 / 300D·红色300D 能排哪些机台 / <b>为什么某订单排不下</b>(诊断)</td></tr>
+    <tr><td class="k">写操作(19类)</td><td>插单 / 暂停订单 / 切机台 / 改数量 / 故障转移(机台故障) / 改优先级 / 废弃 / 重算日期…</td></tr>
+    <tr><td class="k">核心诉求</td><td>①自然语言接入(降低使用门槛) ②写操作可控(权限+预览+验证) ③结果可解释可追溯 ④敏感数据不出厂</td></tr>
+    <tr><td class="k">刻意不做</td><td><b>不让 LLM 随意控制业务</b>——排程逻辑确定、风险边界明确，用 LangGraph 固定流程，模型只在意图理解/规则检索/回复生成用</td></tr>
+  </table>
+</section>
+
+<!-- ② 落地闭环 -->
+<section id="loop">
+  <h2><span class="n">②</span> 落地闭环</h2>
+  <p class="lead">从自然语言请求 → 分流 → (读/写路径) → 结构化回复 → 线上失败回流金标，形成可持续改进的闭环。</p>
+  <figure>
+  <svg viewBox="0 0 940 470" role="img" aria-label="排产落地闭环" font-family="system-ui">
+    <defs><marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <rect x="20" y="30" width="130" height="44" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="85" y="50" font-size="11.5" font-weight="700" fill="#1f1d1a" text-anchor="middle">👤 计划员</text><text x="85" y="65" font-size="9" fill="#8a857a" text-anchor="middle">自然语言请求</text>
+    <!-- route -->
+    <rect x="190" y="26" width="120" height="52" rx="10" fill="#e8f0fe" stroke="#1f6feb" stroke-width="2"/><text x="250" y="46" font-size="12" font-weight="800" fill="#1f6feb" text-anchor="middle">route 分流</text><text x="250" y="61" font-size="9" fill="#57534a" text-anchor="middle">意图识别(规则,零LLM)+实体</text><text x="250" y="72" font-size="8.5" fill="#8a857a" text-anchor="middle">need_clarify/readonly/write</text>
+    <line x1="150" y1="52" x2="188" y2="52" stroke="#57534a" stroke-width="1.7" marker-end="url(#a)"/>
+    <!-- readonly path -->
+    <rect x="360" y="20" width="240" height="40" rx="9" fill="#eef6f1" stroke="#0e7a52"/><text x="480" y="38" font-size="11" font-weight="700" fill="#0e7a52" text-anchor="middle">只读：query(SQLite) → rag(规则)</text><text x="480" y="52" font-size="8.5" fill="#57534a" text-anchor="middle">query_plan 判 structured_sql vs rag</text>
+    <path d="M310,44 H360" fill="none" stroke="#0e7a52" stroke-width="1.7" marker-end="url(#a)"/><text x="335" y="36" font-size="8.5" fill="#0e7a52" text-anchor="middle">readonly</text>
+    <!-- write path (4-stage) -->
+    <rect x="360" y="80" width="470" height="120" rx="10" fill="none" stroke="#c2410c" stroke-dasharray="6 4"/><text x="595" y="98" font-size="10.5" font-weight="800" fill="#c2410c" text-anchor="middle">写路径 · 四段治理(永不直接落库)</text>
+    <g text-anchor="middle" font-size="10">
+      <rect x="372" y="110" width="100" height="72" rx="8" fill="#fff" stroke="#c2410c"/><text x="422" y="128" font-weight="700" fill="#c2410c">governance</text><text x="422" y="143" font-size="8.5" fill="#57534a">角色层级权限</text><text x="422" y="155" font-size="8.5" fill="#c0392b">blocked 三因</text><text x="422" y="167" font-size="8" fill="#8a857a">未知/越权/缺机台</text>
+      <rect x="486" y="110" width="100" height="72" rx="8" fill="#fff" stroke="#c2410c"/><text x="536" y="128" font-weight="700" fill="#c2410c">preview</text><text x="536" y="143" font-size="8.5" fill="#57534a">dry-run 只读</text><text x="536" y="155" font-size="8.5" fill="#c0392b">confirmed is True</text><text x="536" y="167" font-size="8" fill="#8a857a">人在回路</text>
+      <rect x="600" y="110" width="100" height="72" rx="8" fill="#fff" stroke="#c2410c"/><text x="650" y="128" font-weight="700" fill="#c2410c">execute</text><text x="650" y="143" font-size="8.5" fill="#57534a">真实 SQL 落库</text><text x="650" y="155" font-size="8" fill="#8a857a">故障转移 LIMIT 50</text>
+      <rect x="714" y="110" width="104" height="72" rx="8" fill="#fff" stroke="#c2410c"/><text x="766" y="128" font-weight="700" fill="#c2410c">verify</text><text x="766" y="143" font-size="8.5" fill="#57534a">回读 checks[]</text><text x="766" y="155" font-size="8" fill="#8a857a">不一致→needs_review</text><text x="766" y="167" font-size="8" fill="#8a857a">不回滚·标复核</text>
+    </g>
+    <g stroke="#c2410c" stroke-width="1.6" fill="none" marker-end="url(#a)"><line x1="472" y1="146" x2="484" y2="146"/><line x1="586" y1="146" x2="598" y2="146"/><line x1="700" y1="146" x2="712" y2="146"/></g>
+    <path d="M280,78 V146 H370" fill="none" stroke="#c2410c" stroke-width="1.7" marker-end="url(#a)"/><text x="300" y="120" font-size="8.5" fill="#c2410c" text-anchor="middle">write</text>
+    <!-- respond -->
+    <rect x="620" y="20" width="140" height="40" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="690" y="38" font-size="11" font-weight="700" fill="#1f1d1a" text-anchor="middle">respond → END</text><text x="690" y="52" font-size="8.5" fill="#8a857a" text-anchor="middle">结构化→人话业务回复</text>
+    <path d="M600,40 H618" fill="none" stroke="#0e7a52" stroke-width="1.6" marker-end="url(#a)"/>
+    <path d="M766,110 V70 H762" fill="none" stroke="#c2410c" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a)"/>
+    <!-- 数据飞轮 -->
+    <rect x="120" y="250" width="700" height="120" rx="12" fill="#e8f0fe" stroke="#1f6feb" stroke-dasharray="6 4"/>
+    <text x="470" y="270" font-size="12" font-weight="800" fill="#1f6feb" text-anchor="middle">🔄 结果反馈闭环（评测飞轮 + 可观测）</text>
+    <g text-anchor="middle" font-size="10">
+      <rect x="140" y="288" width="130" height="60" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="205" y="308" font-weight="700" fill="#1f1d1a">线上 audit_log</text><text x="205" y="322" font-size="8.5" fill="#57534a">每次治理/验证留痕</text><text x="205" y="335" font-size="8.5" fill="#8a857a">Langfuse trace</text>
+      <rect x="300" y="288" width="130" height="60" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="365" y="308" font-weight="700" fill="#1f1d1a">挖候选+人审</text><text x="365" y="322" font-size="8.5" fill="#57534a">mine_eval_candidates</text><text x="365" y="335" font-size="8.5" fill="#8a857a">review 晋级</text>
+      <rect x="460" y="288" width="140" height="60" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="530" y="308" font-weight="700" fill="#1f1d1a">online_hard_cases</text><text x="530" y="322" font-size="8.5" fill="#57534a">金标集扩充</text><text x="530" y="335" font-size="8.5" fill="#8a857a">44用例/11类</text>
+      <rect x="630" y="288" width="140" height="60" rx="8" fill="#fff" stroke="#1f6feb"/><text x="700" y="308" font-weight="700" fill="#1f6feb">CI 回归门禁</text><text x="700" y="322" font-size="8.5" fill="#57534a">audit→rule→full</text><text x="700" y="335" font-size="8.5" fill="#c0392b">rule_pass_rate≥1.0</text>
+    </g>
+    <g stroke="#1f6feb" stroke-width="1.6" fill="none" marker-end="url(#a)"><line x1="270" y1="318" x2="298" y2="318"/><line x1="430" y1="318" x2="458" y2="318"/><line x1="600" y1="318" x2="628" y2="318"/></g>
+    <path d="M690,60 V230 H205 V286" fill="none" stroke="#1f6feb" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#a)"/><text x="205" y="245" font-size="8.5" fill="#1f6feb" text-anchor="middle">每次运行落审计</text>
+    <path d="M700,286 V236 H250 V78" fill="none" stroke="#1f6feb" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#a)"/><text x="430" y="232" font-size="8.5" fill="#1f6feb" text-anchor="middle">回归护住不退化 → 反哺线上</text>
+  </svg>
+  </figure>
+</section>
+
+<!-- ③ 执行链路 -->
+<section id="chain">
+  <h2><span class="n">③</span> 执行链路细节</h2>
+  <p class="lead">真实节点顺序：<code>rewrite → route → query → rag → answer_verify → governance → preview → execute → verify → respond</code>。条件边 3 处，信号字段串起写链。</p>
+  <table>
+    <thead><tr><th style="width:130px">条件边</th><th>判定</th></tr></thead>
+    <tbody>
+      <tr><td class="k">after_route</td><td>歧义/`confidence&lt;0.5`/缺实体 → need_clarify；`is_write`(WRITE_INTENTS) → write；else readonly</td></tr>
+      <tr><td class="k">after_governance</td><td>看单个布尔 `governance_passed`：false→blocked→respond；true→preview</td></tr>
+      <tr><td class="k">after_preview</td><td>严格 `confirmed is True` → execute；否则 await_confirm → respond(等人确认)</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><b>写链信号字段串</b>：<code>is_write</code>(进写路径) → <code>governance_passed</code>(过闸) → <code>confirmed</code>(放行 execute) → <code>verify_result.status</code>(passed/needs_review)。每个节点输入输出可单测、可 trace，出错能定位到具体节点。</div>
+</section>
+
+<!-- ④ 技术细节 -->
+<section id="tech">
+  <h2><span class="n">④</span> 技术细节</h2>
+  <div class="cards">
+    <div class="card"><h4>技术栈</h4><ul><li>编排 LangGraph <code>StateGraph</code></li><li>Python 3.12 · UI Streamlit 多页</li><li>数据 SQLite(49,981 orders)</li><li>RAG Qdrant + fastembed <code>bge-small-zh-v1.5</code></li><li>LLM 本地 Qwen3.6 27B(OpenAI 兼容)</li><li>Tracing Langfuse/LangSmith · 评测 Pytest+Golden+E2E</li></ul></div>
+    <div class="card"><h4>数据库 orders(纺织/化纤)</h4><ul><li><code>ctsalebid</code> 销售订单编号(业务主键，Agent 定位用)</li><li><code>jt</code> 机台 · <code>gg</code> 规格(旦尼尔如 545dtex/72f)</li><li><code>pcrq</code> 排产日期 · <code>ddsl</code> 数量(吨) · <code>scts</code> 耗时</li><li>日期 TEXT(ISO)可直接串比较；`status`/`jt` 多为 NULL(历史未回填/未分配)</li></ul></div>
+    <div class="card"><h4>5 种 Retriever(分场景路由)</h4><ul><li><b>SQLRetriever</b> 订单/机台/规格历史 → 精确快</li><li><b>VectorRetriever</b> 规则语义 → Qdrant</li><li><b>HybridRetriever</b> 规格/颜色强约束 → 向量+关键词</li><li><b>CaseRetriever</b> 历史排产案例(可解释)</li><li><b>CompositeRetriever</b> "为什么排不下"→ SQL+RAG</li></ul></div>
+    <div class="card"><h4>部署(已上线)</h4><ul><li>systemd：Qwen 27B(8005)/bge(8007)/router(8008)/gateway(3010)/Streamlit(8501)</li><li>公网隧道 → 5000 入口</li><li>Rerank 做过实验，生产暂不默认开(小规则库易被标题权重带偏，1000+条再引入)</li></ul></div>
+  </div>
+</section>
+
+<!-- ⑤ 驾驭工程 -->
+<section id="drive">
+  <h2><span class="n">⑤</span> 驾驭工程 8 环落地</h2>
+  <table>
+    <thead><tr><th style="width:100px">环</th><th>排产里怎么落地</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Prompt</td><td>角色边界(排产助手非决策者)；输出结构化(意图+实体+引用)</td></tr>
+      <tr><td class="k">Context</td><td>query_plan 先判该不该检索(structured_sql vs rag)；RAG 分 5 场景，写操作跳过 RAG</td></tr>
+      <tr><td class="k">Tools</td><td>读写分离：读免批走查询链，写(19类)一律过治理链</td></tr>
+      <tr><td class="k">Workflow</td><td><b>确定性 StateGraph</b>——LLM 只在 node 内推理，流程/分流/治理是代码固定的</td></tr>
+      <tr><td class="k">Memory</td><td>会话 session、指代消解(最近 N 轮原文)、历史压缩(滑窗+摘要)</td></tr>
+      <tr><td class="k">Guardrails</td><td><b>四段治理 + 四级角色权限 + 防幻觉断言</b>(答案必须 grounded、订单不存在禁编字段)</td></tr>
+      <tr><td class="k">Evals</td><td>audit(5检查防退化)+golden(44/11类)+LLM-judge(3维)+CI 门禁 rule_pass_rate≥1.0</td></tr>
+      <tr><td class="k">Feedback</td><td>数据飞轮(线上 bad case→金标)+Langfuse trace</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ⑥ 人工干预 -->
+<section id="hitl">
+  <h2><span class="n">⑥</span> 业务人员干预(HITL)</h2>
+  <div class="cards">
+    <div class="card"><h4>三个介入点</h4><ul><li><b>预览确认</b>：`after_preview` 严格 `confirmed is True` 才 execute——未确认只出预览不落库</li><li><b>网关审批流</b>：`/agent/approval/create` → `confirm`/`reject`，审批点集中在结论出口</li><li><b>验证转人审</b>：verify 不一致 → `needs_review` 标人工复核(不自动回滚)</li></ul></div>
+    <div class="card"><h4>权限分级驱动干预</h4><ul><li>四级角色：不同 `minimum_role` 决定谁能发起(如故障转移/废弃需主任)</li><li>`need_approval` 标记高风险意图强制走审批</li><li>误报由分级人审消化(资深/初审)，而非牺牲 recall</li></ul></div>
+  </div>
+  <div class="note"><b>本质</b>：把数据库事务的"提案→审批→提交→回读"思路搬到 Agent 写操作——人是最终门，模型只做提案。</div>
+</section>
+
+<!-- ⑦ 审计 -->
+<section id="audit">
+  <h2><span class="n">⑦</span> 审计</h2>
+  <p class="lead"><code>audit_log</code> 表 append-only，只在两处写：<b>governance-blocked</b> 和 <b>verify(执行后)</b>；execute 本身不写审计。</p>
+  <table>
+    <tr><td class="k">字段</td><td><code>trace_id / intent / action / actor_role / status / success / need_approval / before_state_json / after_state_json / verify_checks_json / metadata_json</code></td></tr>
+    <tr><td class="k">before/after</td><td>before = preview_result(改前预估)，after = tool_result(改后实况)——可比对"批准的 vs 执行的"</td></tr>
+    <tr><td class="k">查询</td><td>`/agent/audit/{trace_id}` 按链路查；`recent_audit_rows()` 供管理台读回</td></tr>
+    <tr><td class="k">success 口径</td><td>verify 全通过才 `success=true`；回读不一致降为 false + `status=needs_review`</td></tr>
+  </table>
+</section>
+
+<!-- ⑧ 安全边界 -->
+<section id="sec">
+  <h2><span class="n">⑧</span> 安全边界</h2>
+  <div class="cards">
+    <div class="card"><h4>流程层</h4><ul><li>确定性 workflow 包住 LLM，LLM 只在 node 内</li><li>写操作永不直接落库(preview→confirm→execute→verify)</li><li>故障转移批量改带 `LIMIT 50` 防误伤</li></ul></div>
+    <div class="card"><h4>权限层</h4><ul><li>四级角色层级 `user_level &lt; required → blocked`</li><li>高危缺实体兜底(机台故障缺 machine_id → block)</li><li>未知意图 → block</li></ul></div>
+    <div class="card"><h4>数据层</h4><ul><li>本地 Qwen，<b>敏感数据不出厂</b>(privacy-gateway)</li><li>需外部复核才脱敏后发出</li></ul></div>
+    <div class="card"><h4>防幻觉层</h4><ul><li>`answer_grounded` + `evidence_source=sqlite`</li><li>`response_must_not_contain`(订单不存在禁编机台/日期)</li><li>`max_retrieval_steps` 防 agentic RAG 无限检索</li></ul></div>
+  </div>
+</section>
+
+<!-- ⑨ 结果反馈 -->
+<section id="fb">
+  <h2><span class="n">⑨</span> 结果反馈</h2>
+  <table>
+    <tr><td class="k">即时反馈</td><td>verify 回读 DB 生成 `checks[]`(每项 name/passed/detail)；respond 把结构化结果转人话，带假设与影响面</td></tr>
+    <tr><td class="k">可观测</td><td>Langfuse/LangSmith trace 每节点；eval 指标 rule_pass_rate / p50 / p95 / judge score / escalation rate</td></tr>
+    <tr><td class="k">数据飞轮</td><td>线上 `audit_log` → `mine_eval_candidates` 挖候选 → 人审晋级 `online_hard_cases.json` → `run_scheduled_eval` 回归。评测集从真实失败长出来</td></tr>
+    <tr><td class="k">防退化</td><td>CI 三 job：audit(skill 健康 5检查) → rule-eval(无 LLM,每次) ∥ full-eval(含 judge,定时)；`rule_pass_rate≥1.0` 才 exit0</td></tr>
+  </table>
+</section>
+
+<!-- ⑩ 硬挑战 -->
+<section id="hard">
+  <h2><span class="n">⑩</span> 8 个技术硬挑战(可深挖)</h2>
+  <p class="lead">这些是从项目里抽出的真实难题，每个都有能跑的实现 + 权衡 + 指标(如 Recall=0.83, P95=4702ms)。</p>
+  <table>
+    <thead><tr><th style="width:60px">模块</th><th>挑战</th><th>核心能力</th></tr></thead>
+    <tbody>
+      <tr><td class="k">RAG</td><td>复杂 PDF 分块 / 脏 Excel 解析 / Hybrid+Rerank</td><td>layout 分区+跨页表格合并 · 启发式表头检测 · BM25+向量+RRF 融合</td></tr>
+      <tr><td class="k">LM 层</td><td>熔断器+多模型降级 / LLM 输出格式保障</td><td>熔断三态机+指数退避+降级链 · JSON 鲁棒解析+schema 校验+重试</td></tr>
+      <tr><td class="k">记忆</td><td>多轮指代消解 / 对话历史压缩</td><td>实体提取+指代类型分类 · Token 估算+滑窗+摘要压缩</td></tr>
+      <tr><td class="k">可观测</td><td>Agent Tracing 系统</td><td>Span/Trace 数据模型 · P50/P95 计算 · 慢节点/异常检测</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  排产 Agent 全景梳理 · <code>agentbot/schedule-agent-langgraph</code>(部署版) · 配套：<code>schedule-agent-deploy-deepdive</code>(四段治理+评测深挖) · <code>schedule-agent-interview-drills</code>(刷题) · <code>agent-case-compliance-vs-scheduling</code>(合规vs排产双案例)
+</footer>
+</div>
+</body>
+</html>

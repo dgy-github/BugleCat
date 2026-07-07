@@ -1,0 +1,144 @@
+{
+ "key": "multi-agent-comm",
+ "name": "多 Agent 协作与通讯协议",
+ "data": {
+  "category": "多 Agent 协作与通讯协议(Supervisor-Worker / Blackboard / Peer-to-Peer;MCP vs A2A)",
+  "definition": {
+   "statement": "多 agent 协作系统在工程上通常被归纳为三类拓扑:hierarchical/supervisor-worker(中心 supervisor 节点做路由决策、worker 之间不直接对话——例如 LangGraph 的 create_supervisor 用 handoff tool 把控制权转移与状态更新打包成一个 Command 对象转交给目标 agent)、blackboard(多个 knowledge source 互不寻址,而是通过读写一块共享数据结构——blackboard——间接协作,由独立的 control 组件决定下一个被激活的 knowledge source;该模式最早由 Erman、Hayes-Roth、Lesser、Reddy 在 Hearsay-II 语音理解系统中提出,发表于 ACM Computing Surveys 1980)、以及 peer-to-peer/network(agent 间 many-to-many 直接通信、无固定层级)。要判断某个系统是否具备真正意义上的 agent-to-agent「消息传递」,关键看它是否具备(a)独立可寻址的 agent 身份 (b)去中心化的路由决策 (c)不必经过某个中心可变状态即可直接投递的通道——AutoGen 提出的 conversable agent 抽象(通过 send/receive/generate_reply 做消息传递,复杂场景下用 GroupChatManager 做动态 speaker selection + broadcast)是较接近该定义的实现;而多数生产系统,包括 supervisor-worker 与 blackboard 模式,本质上是「共享/编排状态 + 中心节点决策」被包装出了「agent 对话」的外观,并不满足上述三条中的全部。在协议分层上,MCP(Model Context Protocol,Anthropic 于 2024 年 11 月发布,现由 Linux Foundation 托管)解决的是 agent 到工具/数据源的标准化接入问题:定义 host/client/server 三层架构,一个 client 与一个 server 建立有状态的 JSON-RPC 会话,通过 tools/resources/prompts 三种原语的 list/get/call 方法暴露能力,被调用方在语义上被假定为受控、无状态的「工具」;而 A2A(Agent2Agent Protocol,Google 于 2025 年 4 月发布,同样已转交 Linux Foundation 治理)解决的是 agent 到 agent 的互操作问题:agent 通过 Agent Card(JSON)广播自身能力,client agent 发现并调用 remote agent 去完成一个拥有独立生命周期的 task 对象,基于 HTTP、Server-Sent Events 与 JSON-RPC 2.0 传输。行业共识将二者视为互补而非竞争的两层:MCP 回答『一个 agent 如何调用工具』,A2A 回答『一个 agent 如何发现并委托给另一个具备自主规划能力的 agent』。",
+   "sources": [
+    {
+     "title": "Specification - Model Context Protocol",
+     "url": "https://modelcontextprotocol.io/specification/2025-11-25"
+    },
+    {
+     "title": "Introducing the Model Context Protocol \\ Anthropic",
+     "url": "https://www.anthropic.com/news/model-context-protocol"
+    },
+    {
+     "title": "Announcing the Agent2Agent Protocol (A2A) - Google Developers Blog",
+     "url": "https://developers.googleblog.com/en/a2a-a-new-era-of-agent-interoperability/"
+    },
+    {
+     "title": "How we built our multi-agent research system \\ Anthropic",
+     "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+    },
+    {
+     "title": "AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework (arXiv:2308.08155)",
+     "url": "https://arxiv.org/abs/2308.08155"
+    },
+    {
+     "title": "GitHub - langchain-ai/langgraph-supervisor-py",
+     "url": "https://github.com/langchain-ai/langgraph-supervisor-py"
+    },
+    {
+     "title": "Erman, Hayes-Roth, Lesser, Reddy — The Hearsay-II Speech-Understanding System: Integrating Knowledge to Resolve Uncertainty, ACM Computing Surveys 12(2), 1980",
+     "url": "https://dl.acm.org/doi/10.1145/356810.356816"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "请把 multi-agent 系统的常见拓扑分成 hierarchical(supervisor-worker)、blackboard、peer-to-peer 三类,分别说明它们的信息流向和谁来做路由决策。",
+    "tier": "L1",
+    "why_asked": "考察候选人是否具备清晰的架构分类心智模型,而不是笼统地说'多个 agent 互相调用';这是回答任何'主子 agent 怎么通讯'问题前必须先澄清的坐标系。",
+    "key_points": [
+     "hierarchical/supervisor-worker:中心 supervisor 做路由决策,worker 之间不直接通信,如 LangGraph 的 create_supervisor 用 handoff tool 返回 Command 对象把控制权+状态更新一起转交给目标 agent",
+     "blackboard:没有中心控制流,knowledge source 通过读写共享数据结构间接协作,起源于 1970s 的 Hearsay-II 语音理解系统(Erman et al., ACM Computing Surveys 1980),适合 ill-structured、可增量拼接的问题",
+     "peer-to-peer/network:agent 间 many-to-many 直接通信,无固定层级,LangGraph 里对应 network 模式",
+     "三者的核心区别在于'谁做决策'与'信息通过什么中介传递'——直接寻址消息 vs 共享可变状态"
+    ],
+    "follow_ups": [
+     "现实系统里这三种模式经常混合使用,能举一个具体例子吗?",
+     "为什么生产系统更常采用 supervisor 模式而不是纯 peer-to-peer?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) + 主子agent通讯 — orchestrator.rs 的 classify/plan/decompose/workers/verify 节点图整体就是 hierarchical/supervisor-worker 拓扑的具体实现。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "'agent-to-agent 通讯'到底是真正的消息传递(message passing),还是共享状态+中心编排在伪装成'对话'?请结合具体框架的实现机制回答。",
+    "tier": "L2",
+    "why_asked": "这是'主子 agent 如何通讯'这类问题的母题:考察候选人能否戳穿'多 agent 对话'的表象,理解底层真实的数据流机制,而不是把'调用了另一个 agent'等同于'两个 agent 在通讯'。",
+    "key_points": [
+     "判定标准:是否有独立可寻址的 agent 身份、是否有去中心化的路由决策、信息是否不必经过某个中心可变状态就能直接投递",
+     "AutoGen 的 conversable agent 抽象(send/receive/generate_reply)加 GroupChatManager 的动态 speaker selection + broadcast 是较接近'真消息传递'的实现,但消息仍经由一个中心 manager 广播,并非完全去中心化",
+     "LangGraph supervisor 模式的 handoff 本质是'状态更新+控制流转移'(Command 对象),子 agent 之间看不到彼此私有会话历史,不构成独立寻址的消息通道",
+     "blackboard 模式彻底不是消息传递:agent 互不寻址,只读写共享数据结构,由 control 组件决定谁被激活",
+     "很多所谓'多 agent 对话'系统,底层是父进程把子 agent 输出重新序列化后当 prompt 灌入下一个子 agent——子 agent 没有独立寻址/路由能力,本质是编排,不是通讯",
+     "结论:多数生产系统是'共享/编排状态 + 中心节点决策'被包装成了'通讯'的外观,真正的去中心化 message passing 较少见"
+    ],
+    "follow_ups": [
+     "A2A 协议是否让'真正的' agent 间消息传递成为可能?它和 AutoGen 的 message passing 有什么本质区别?",
+     "如果要设计一个可验证的测试来证明某系统是'真' p2p 而非编排,你会怎么设计?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) + 主子agent通讯 — orchestrator.rs 的 AgentRunner trait 让子节点是全新无状态会话，没有消息总线：下行靠 prompt 文本按值序列化，代码改动的真实 IPC 是文件系统隔离+promote_worker，回路靠 PASS/FAIL/BEST:<n> 裁决文本，是'共享状态+编排'而非真消息传递的具体反例。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "MCP 和 A2A 分别解决什么问题?两者的定位区别是什么,能不能只用其中一个协议搭建完整的多 agent 系统?",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解协议分层定位,而不是把'工具协议'和'agent 间协议'混为一谈——这是围绕多 agent 通讯讨论时最常见的概念混淆点。",
+    "key_points": [
+     "MCP(Model Context Protocol,Anthropic 2024 年 11 月发布,现由 Linux Foundation 托管)解决 agent 到工具/数据源的标准化接入:host/client/server 三层架构,client 与 server 一对一建立 JSON-RPC 会话,通过 tools/resources/prompts 原语的 list/get/call 暴露能力",
+     "A2A(Agent2Agent,Google 2025 年 4 月发布,现由 Linux Foundation 托管)解决 agent 到 agent 的互操作:agent 用 Agent Card(JSON)广播能力,client agent 发现并调用 remote agent 完成一个有生命周期的 task 对象,基于 HTTP+SSE+JSON-RPC 2.0 传输",
+     "两者互补而非竞争:一个 agent 可以同时是 MCP host(调用工具)和 A2A 的 client/remote agent(与其他 agent 协作)",
+     "关键区别:MCP 假设被调用方是受控、无状态、能力单一的'工具';A2A 假设被调用方是有自主规划能力、task 可跨多轮存在的'agent'"
+    ],
+    "follow_ups": [
+     "如果一个'MCP server'内部本身又跑了一整套 LLM agent 循环,这是否破坏了 MCP 的语义假设?",
+     "A2A 的 Agent Card 和 MCP 的 tool schema 在设计目的上有什么本质不同?"
+    ],
+    "nanocodex_link": "Skills · MCP · 视觉 — mcp_tool.rs + ncx-mcp 的 stdio JSON-RPC bridge 实现了 MCP client 侧角色，可以据此对照 A2A 做定位区分。卡:07_skills.md"
+   },
+   {
+    "question": "Anthropic 的 orchestrator-worker 研究系统实测比单 agent 效果提升明显,但也提到 token 消耗约为单 agent 的 15 倍。你会依据什么标准判断一个任务该用多 agent 还是单 agent?",
+    "tier": "L2",
+    "why_asked": "考察成本/收益权衡意识,防止候选人一味'堆 agent'而不考虑代价——这是面试官区分'纸上谈兵'与'真正上过生产'候选人的常见问法。",
+    "key_points": [
+     "Anthropic 实测:Opus lead + Sonnet subagents 的多 agent 系统比单 agent Opus 在其内部研究评测上高出 90.2%,但 token 消耗约为单 agent chat 的 15 倍",
+     "'token usage 本身可以解释 80% 的性能方差'——说明多 agent 的收益很大程度上来自并行探索预算,而非架构本身带来的额外智能",
+     "适用边界:多 agent 更适合能拆成'并行独立研究线程'的任务;对紧耦合、依赖上下文连续性的任务(Anthropic 原文举例 coding)效果反而更差,因为子 agent 上下文隔离会导致协调开销/信息丢失",
+     "工程代价不止 token:还包括 checkpointing、重试逻辑,以及'prompt engineering 成为主要调试杠杆'(早期系统会为简单 query 派生 50 个 subagent、无限爬网等失控行为)",
+     "决策依据:任务是否可并行分解 + 结果价值能否覆盖 token 成本 + 是否需要跨子任务的强状态一致性"
+    ],
+    "follow_ups": [
+     "如果任务恰好是 coding 这种强依赖场景,你会如何改造 orchestrator-worker 模式来降低协调损耗?",
+     "'token usage 解释 80% 方差'这个发现,对你设计 subagent 数量/并行度的策略有什么启发?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) + 主子agent通讯 — orchestrator.rs 用 best-of-N worker fanout(join_all 并行)放大探索路径的同时，用 tool-stripped reason() 节点、固定 worker Tier::Fast 控制成本，是同一权衡在代码里的具体取舍。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "假设你的 supervisor-worker 系统里,多个 worker 并行地对同一份代码仓库做修改,最后阶段频繁出现文件冲突或互相覆盖。可能的根因有哪些?你会按什么顺序排查?",
+    "tier": "L3",
+    "why_asked": "考察对'并发写入共享状态'这一多 agent 系统经典故障模式的诊断能力,考的是排查思路而非背答案——是这个主题下最容易暴露'纸上理解'和'实战理解'差距的问题。",
+    "key_points": [
+     "根因假设 1:worker 共享同一份 workspace/文件系统而未隔离,并行写操作(如 apply_patch 新增同名文件)天然产生竞态覆盖",
+     "根因假设 2:合并/promote 阶段是'整体复制覆盖'而非真正的 diff/merge,导致非 winner 的 worker 改动被静默丢弃",
+     "根因假设 3:裁决(verifier)对畸形输出的兜底策略(如找不到明确胜者时默认选第一个)可能选中了不该被信任的结果",
+     "排查顺序:先确认 worker 是否运行在物理隔离目录;再检查 promote/merge 阶段是编辑合并还是整体覆盖;最后检查裁决解析的健壮性与默认兜底是否合理",
+     "工程原则:任何时刻真实 workspace 只应有'恰好一个写者'——要么串行化写入,要么隔离后再择一提升,不能让多个并行 agent 直接对同一份可变状态做非原子写入"
+    ],
+    "follow_ups": [
+     "如果子任务之间存在依赖(B 依赖 A 的产出),隔离+串行提升方案要如何调整?",
+     "除了文件系统,共享数据库/内存状态的多 agent 写入冲突要如何设计类似的隔离机制?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) + 主子agent通讯 — orchestrator.rs/runner.rs/isolate.rs 的具体实现：run_worker 给每个 worker 分配唯一 scratch 目录做 copy_tree 隔离，verifier 用 BEST:<n> 选 winner 后 promote_worker 覆盖式提升回真 workspace，正是为修复'并行 apply_patch 同名文件撞车'这一真实 bug 而设计。卡:05_orchestrator_comm.md"
+   },
+   {
+    "question": "如果让你设计一个多 agent 系统的通讯协议,支持一个'主规划 agent'调度若干'执行 agent'对同一个代码仓库做协作式修改,且子任务之间存在依赖关系,你会如何设计通讯通道、隔离机制和裁决机制?",
+    "tier": "L4",
+    "why_asked": "综合考察候选人能否把前面几个概念(hierarchical 编排、共享状态 vs 消息传递、隔离与合并)组合成一个可落地的系统设计,是本主题的开放设计压轴题。",
+    "key_points": [
+     "通讯通道:不必维护长会话/消息总线,可用'无状态子会话 + prompt 按值序列化'——每次调用把当前 plan、身份、上一轮反馈重新序列化进子 agent 的 prompt,避免维护复杂的跨会话状态同步",
+     "隔离机制:每个并行执行者应工作在物理隔离的副本(临时目录/分支)而非直接改共享真实状态,应对'多个写者竞争同一份可变资源'这一类通用问题",
+     "裁决与提升:设计独立的 verifier/裁决角色输出结构化或半结构化裁决(如 PASS/FAIL、BEST:<n>),由父节点的确定性代码(而非另一个 agent)执行覆盖式提升;裁决解析必须有兜底策略避免死锁",
+     "依赖处理:有依赖关系的子任务必须串行执行,且每个子任务的产出必须在下一个子任务开始前真正提升到共享状态,后续子任务才能在其之上叠加;无依赖的子任务可并行 fanout",
+     "权衡取舍:prompt 按值序列化的代价是每轮 token 开销更高、无法利用会话记忆增量;隔离复制的代价是磁盘/时间开销,且合并只能是'整体覆盖'而非跨 worker 的语义合并",
+     "可以借鉴 A2A 的 Agent Card/task 生命周期思想作为'agent 间需要长期、可发现协作'时的备选方案,但紧耦合单仓库协作场景下更简单的编排+隔离模型往往更可靠"
+    ],
+    "follow_ups": [
+     "如果要支持'多个子任务同时修改同一文件的不同部分'这种更细粒度协作,方案要如何演进(引导到三方合并/语义 merge)?",
+     "这套设计和 A2A 协议里 task 对象生命周期的设计理念有什么相通或本质差异?"
+    ],
+    "nanocodex_link": "分层编排器(orchestrator flash/pro) + 主子agent通讯 — orchestrator.rs 全套机制(AgentRunner trait 隔离子会话、build_worker_task 的 prompt 序列化、isolate.rs 的 copy_tree 隔离、promote_worker 覆盖提升、串行 decompose_and_recurse 处理依赖子任务)正是这道开放设计题的现实答案。卡:05_orchestrator_comm.md"
+   }
+  ]
+ }
+}

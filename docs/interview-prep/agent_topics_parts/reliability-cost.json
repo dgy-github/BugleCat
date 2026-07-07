@@ -1,0 +1,150 @@
+{
+ "key": "reliability-cost",
+ "name": "可靠性、成本与延迟工程",
+ "data": {
+  "category": "可靠性、成本与延迟工程 (Reliability, Cost & Latency Engineering for LLM Agents)",
+  "definition": {
+   "statement": "在生产级 LLM Agent 系统中，\"可靠性、成本与延迟工程\"是围绕外部依赖不确定性（网络抖动、限流、模型输出的不确定性）与 token 计费模型展开的一组工程实践：(1) 对可重试的瞬态错误（5xx/429/超时）应使用 capped exponential backoff with jitter 而非固定退避——AWS 的研究表明朴素指数退避只降低重试频率、并不打散并发重试的时间聚集（仍会造成 thundering herd），加入随机抖动（Full Jitter / Equal Jitter / Decorrelated Jitter）才能显著降低竞争工作量与恢复时间；(2) 只有被判定为 idempotent（重复执行不改变最终状态、无副作用）的操作才允许被自动重试，Stripe 与 Google Cloud 的通行做法是引入 client-generated idempotency key，服务端缓存首次执行结果并在重放时直接返回，把网络层的 at-least-once 转换为业务语义上的 exactly-once；(3) 在模型选择上，FrugalGPT 提出的 LLM cascade 用 cheap 模型优先响应、按质量估计器（quality estimator）决定是否升级到更贵模型，可在几乎不损失准确率的前提下实现 50%~98% 的成本下降，这是 cheap/strong tiering 的学术源头；(4) 在 token 成本与延迟层面，Anthropic 的 prompt caching 对稳定前缀按 tools→system→messages 的层级设置 cache breakpoint（cache_control），命中的 cache-read token 成本降至约 10%，但任何上游层级的改动都会级联使其后所有层级失效，因此上下文编辑（context editing/compaction）与缓存命中之间存在直接博弈；(5) 在并行度上，Anthropic 的 tool-use API 允许模型在一次 assistant turn 中返回多个 tool_use blocks，但协议本身不规定执行顺序，是否并发执行、如何避免写写冲突需调用方按工具的副作用类别（read-only vs mutating）自行判定；(6) 为保证 agent loop 在有限步内终止，OpenAI Agents SDK 用 max_turns 硬上限 + MaxTurnsExceeded 异常（或更新后的 error_handlers 实现优雅降级）、LangGraph 用 recursion_limit 与 RemainingSteps 做非崩溃式收尾，Model Context Protocol 规范则在协议层面定义了 per-request timeout 与双向 notifications/cancelled 协作式取消，三者共同构成了\"预算（budget）+取消（cancellation）\"的终止保证设计范式。",
+   "sources": [
+    {
+     "title": "Exponential Backoff And Jitter — AWS Architecture Blog",
+     "url": "https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/"
+    },
+    {
+     "title": "Idempotent requests — Stripe API Reference",
+     "url": "https://docs.stripe.com/api/idempotent_requests"
+    },
+    {
+     "title": "What is Idempotency? A guide to API reliability — Google Cloud",
+     "url": "https://cloud.google.com/discover/idempotency"
+    },
+    {
+     "title": "FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance (arXiv:2305.05176)",
+     "url": "https://arxiv.org/abs/2305.05176"
+    },
+    {
+     "title": "Prompt caching — Claude Platform Docs (Anthropic)",
+     "url": "https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching"
+    },
+    {
+     "title": "Parallel tool use — Claude Platform Docs (Anthropic)",
+     "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use"
+    },
+    {
+     "title": "Running agents (max_turns / MaxTurnsExceeded) — OpenAI Agents SDK",
+     "url": "https://openai.github.io/openai-agents-python/running_agents/"
+    },
+    {
+     "title": "GRAPH_RECURSION_LIMIT — LangGraph Docs (LangChain)",
+     "url": "https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT"
+    },
+    {
+     "title": "Cancellation — Model Context Protocol Specification",
+     "url": "https://spec.modelcontextprotocol.io/specification/draft/basic/utilities/cancellation/"
+    }
+   ]
+  },
+  "questions": [
+   {
+    "question": "什么是 exponential backoff with jitter？为什么在重试外部 LLM API 调用或工具调用时，仅做指数退避是不够的，必须再加入随机抖动？",
+    "tier": "L1",
+    "why_asked": "考察候选人是否理解重试机制不是拍脑袋的 sleep(2^n)，而是有明确的分布式系统失败模式（thundering herd）作为动机，这是任何调用外部 LLM/工具 API 的 agent 系统都会遇到的基础问题。",
+    "key_points": [
+     "重试针对瞬态错误：5xx、429 rate limit、连接超时，永久性错误（4xx 参数错误、401 鉴权失败）不应重试",
+     "AWS 的实验结论：纯指数退避只是降低了重试频率，但并未打散并发客户端的重试时间点，集群仍会同步碰撞（thundering herd 未被消除）",
+     "加入 jitter（Full Jitter / Equal Jitter / Decorrelated Jitter）才能让并发客户端的重试时间错开，显著降低竞争工作量和总恢复时间",
+     "必须设置最大重试次数/总超时上限（deadline），否则退避会无界增长导致用户侧超时或成本失控"
+    ],
+    "follow_ups": [
+     "如果一个 LLM API 返回 429 但响应头带了 Retry-After，你的退避策略应该如何调整？",
+     "对于流式（streaming）响应，请求在中途失败重试会遇到什么额外问题？"
+    ],
+    "nanocodex_link": ""
+   },
+   {
+    "question": "在 agent 的工具调用场景中，如何判断一个工具调用是否可以安全重试（idempotent）？请设计一个方案来处理'调用超时但不确定是否已生效'的写操作。",
+    "tier": "L1",
+    "why_asked": "考察对 idempotency 概念本身及其在 agent 工具执行链路中落地方式的理解——这是所有自动重试机制成立的前提条件，也是面试中区分'背过退避算法'和'真正理解为什么要退避'的分水岭问题。",
+    "key_points": [
+     "idempotent 的定义：重复执行不改变最终状态、无累加副作用（Google Cloud：可重复执行且每次都收敛到相同终态）",
+     "读类/只读工具天然幂等，可无条件重试；写类/有副作用工具（发邮件、下单、写文件追加）默认不安全重试",
+     "Stripe 模式：client 生成 idempotency key 随请求下发，服务端缓存首次执行的结果（含错误），重放时直接返回缓存结果而非重新执行",
+     "超时场景的关键矛盾：客户端不知道请求是在到达服务端前失败还是执行后响应丢失，必须由服务端做幂等去重而不能靠客户端猜测",
+     "对 agent 而言：非幂等工具的超时应该先做一次带副作用检查的读操作（如检查订单是否已创建）而非直接重试"
+    ],
+    "follow_ups": [
+     "如果某个第三方工具本身不支持 idempotency key，你会在 agent 侧如何补一层幂等保证？",
+     "只读工具的'幂等'假设在什么情况下会被打破（例如工具背后调用了有状态的搜索索引）？"
+    ],
+    "nanocodex_link": "工具系统 动态暴露（03_tools.md）：tools.rs 中按 read_only 属性分类工具，本质上是把'副作用类别判定'作为并发/重试安全性的前置门槛，与幂等性判断是同一类工程决策，但 nanocodex 目前只用它驱动并发调度，未见显式的 retry/idempotency-key 机制。"
+   },
+   {
+    "question": "cheap/strong 模型分级路由（model tiering / LLM cascade）应该如何设计？在什么信号下应该从便宜模型升级到更贵模型，这种设计与固定的'先分类再路由'方案相比有什么权衡？",
+    "tier": "L2",
+    "why_asked": "这是成本工程里最有'含金量'的设计题，考察候选人是否知道分级路由不是简单的if-else规则表，而是有质量估计和成本-延迟权衡的系统设计问题，也是绝大多数生产 agent 系统（含多档模型定价）必须面对的现实约束。",
+    "key_points": [
+     "FrugalGPT 的 LLM cascade：按序调用 cheap → expensive 模型，用一个 post-query quality estimator 判断当前答案是否'足够好'，不够才升级，实测可在几乎不损失精度下降低 50%~98% 成本",
+     "cascade（先跑后判）vs a priori 路由（先分类任务难度再选模型）的权衡：cascade 对每个 query 都要承担至少一次 cheap 模型调用的延迟开销（多一跳），a priori 路由无额外调用但分类器本身的误判会直接决定整条链路质量",
+     "quality estimator 阈值的校准问题：阈值过松→掉进'虚假自信'陷阱（cheap 模型给出看似合理但错误的答案未被拦截），阈值过紧→cheap 模型形同虚设、成本收益消失",
+     "agent 场景的额外复杂度：不是单轮 QA 而是多轮工具调用循环，'升级'的判断信号可以是工具调用失败次数、模型输出的自我不确定性表达、或任务复杂度分类（如 orchestrator 的 classify 节点）"
+    ],
+    "follow_ups": [
+     "如果 cheap 模型给出的答案'看起来正确'但实际错误（无法通过简单规则识别），你的质量估计器该如何设计？",
+     "分级路由和 prompt caching 同时使用时，为什么频繁切换模型档位可能反而抵消缓存收益？"
+    ],
+    "nanocodex_link": "分层编排器 orchestrator flash/pro（05_orchestrator_comm.md）：orchestrator.rs 的 classify 节点按任务复杂度决定走 flash（cheap）还是 pro（strong）路径，这是一种 a priori 路由而非 FrugalGPT 式的 cascade escalation，二者机制不同但解决的是同一类问题，可作为对比案例。"
+   },
+   {
+    "question": "Anthropic 的 prompt caching 是如何组织 cache breakpoint 和失效层级的？在设计一个多轮 agent 的 system prompt / tool schema / 对话历史布局时，你会如何安排内容顺序来最大化缓存命中率，这与上下文压缩（context editing）之间有什么冲突？",
+    "tier": "L2",
+    "why_asked": "考察候选人是否理解 prompt caching 不是'开个开关就好'，而是有严格的层级失效规则，需要在 prompt 结构设计阶段就考虑，并且要和上下文管理（压缩/裁剪）联合权衡，这是成本优化里最容易被工程师忽略的细节。",
+    "key_points": [
+     "Anthropic 缓存失效层级为 tools → system → messages，任一层级发生改动会级联使其后所有层级的缓存失效，因此工具定义和系统提示应放在最前面且尽量稳定不变",
+     "ephemeral cache 默认 TTL 5 分钟（可扩展到 1 小时），cache-read token 价格约为标准 input 的 10%，但首次写入（cache write）成本略高于标准 input，需要有足够的重复调用次数才能摊平",
+     "并发请求场景下，cache entry 要等第一个请求开始返回响应后才可用，因此并行发出的第一批请求之间不会互相命中缓存",
+     "与 context editing/compaction 的冲突：为了控制 token 预算而对历史 tool 结果做压缩/丢弃最老前缀，会改变 messages 数组内容从而使已建立的 cache 前缀失效，本质是'压缩省的 token' vs '重算 cache 花的 token'之间的权衡，需要按压缩频率和缓存 TTL 联合调参",
+     "exact-prefix caching（KV cache 复用，需要请求内容逐字节相同）与 semantic caching（基于 embedding 相似度的近似缓存）是两种不同机制，后者引入了正确性风险（相似但不等价的问题被误判为缓存命中）"
+    ],
+    "follow_ups": [
+     "如果 agent 的 system prompt 里包含当前时间戳等易变字段，你会如何调整 prompt 结构以避免频繁打破缓存？",
+     "semantic caching 用于 LLM 响应层面时，如何设置相似度阈值来控制'误命中'风险？"
+    ],
+    "nanocodex_link": "上下文压缩 context editing（02_context_compression.md）：session.rs 的 edited_body 两趟压缩算法（压缩旧 tool 结果 + 超预算丢最老前缀）与非破坏发送视图 for_model_edited，恰好是会与 prompt caching 前缀稳定性产生直接博弈的机制——每次压缩都可能使已建立的 cache breakpoint 失效。"
+   },
+   {
+    "question": "当模型在一次响应里返回多个 tool_use blocks 要求并行执行时，可能出现哪些故障模式？请举例说明什么情况下'并行工具调用'会导致数据不一致或竞态问题，以及如何在协议/框架层面规避。",
+    "tier": "L3",
+    "why_asked": "这是一道深挖故障的题，考察候选人是否真正在生产环境里踩过并行工具调用的坑，而不是只知道'Claude/GPT 支持 parallel tool calls'这个表面特性。",
+    "key_points": [
+     "Anthropic tool-use API 明确：协议本身不规定多个 tool_use blocks 的执行顺序，是并发执行还是顺序执行完全是调用方（agent harness）自己的责任",
+     "故障模式一：两个 mutating 工具并发写同一资源（如同时写文件同一行、同时修改同一条数据库记录）导致的写写冲突或后写覆盖前写",
+     "故障模式二：一个工具的输出是另一个工具的隐含前提（顺序依赖），但模型把它们放进了同一批 parallel 调用中，若都并发执行会导致依赖工具读到过期/不存在的状态",
+     "故障模式三：client tool 与 server tool（如 web_search、code_execution 这类在 Anthropic 基础设施上运行的工具）混在同一批 parallel 调用组里时，协议要求在 server tool 真正执行前把控制权交还调用方，如果没处理这个 handoff 会导致状态机卡住",
+     "规避方案：按工具的副作用声明（read_only / mutating）做静态分类，只对声明为 read_only 的工具组自动并发，mutating 工具默认串行或需要显式的依赖图/锁；对不确定依赖关系的场景可用 disable_parallel_tool_use 强制模型一次只给一个 tool_use"
+    ],
+    "follow_ups": [
+     "如果两个只读工具调用了同一个有状态的搜索索引（存在最终一致性延迟），read_only 假设为什么可能失效？",
+     "你会如何设计一个'依赖图'机制，让模型能表达工具调用之间的顺序依赖而不是让 harness 硬编码规则？"
+    ],
+    "nanocodex_link": "Harness 工程管理（01_harness.md）：AgentLoop 中'只读并发批量(parallel_run)'机制正是按 read_only 属性对工具调用做静态分类后再决定是否并发执行，直接对应此题里'如何在框架层面规避并行工具调用故障'的解法。"
+   },
+   {
+    "question": "如果让你从零设计一个 agent loop 的'预算与终止保证'机制（避免死循环、无限重试、无限模型升级），你会如何组合调用预算、超时/取消协议和异常行为检测？请说明单纯设置一个 max_turns 数字上限为什么不够。",
+    "tier": "L4",
+    "why_asked": "这是一道开放设计题，考察候选人能否跳出'加个计数器'的初级思路，综合考虑预算类型的分层设计、优雅降级（而非硬崩溃）、以及模型本身'不愿意停止'这种行为层面的风险，是agent工程里最容易被低估的可靠性问题。",
+    "key_points": [
+     "单一 max_turns/recursion_limit 的局限：LangGraph 社区实践证明，如果 agent 本身陷入死循环，单纯调高上限只是'多付费跑更多轮次直到力竭'，不能解决根因，必须叠加'无进展检测'（如连续 N 轮工具调用结果/参数完全重复则提前终止）",
+     "预算应分层设计而非单一计数：区分 max_model_calls（思考/决策轮次）与 max_tool_calls（实际动作次数）能分别捕捉'模型话痨但不干活'和'狂调工具但不收敛'两类不同的失控模式",
+     "终止时应做优雅降级而非硬异常：OpenAI Agents SDK 的 error_handlers、LangGraph 的 RemainingSteps 都是在预算耗尽前主动收尾返回当前最佳结果，而不是抛出 MaxTurnsExceeded 类异常让上层业务崩溃",
+     "超时与取消应该是协作式的、可组合的：MCP 规范定义了 per-request timeout + notifications/cancelled 双向通知，允许在等待中的请求被主动中断而不是被动等到超时，且允许通过 progress 通知续期非死循环的长任务",
+     "预算耗尽只是'停止执行'的触发条件之一，还需要和'循环/无进展检测'配合，因为陷入死循环的 agent 往往不会自己报告失败，纯计数器无法区分'任务本身很复杂需要很多步'和'卡在同一个逻辑坑里出不来'"
+    ],
+    "follow_ups": [
+     "如果要检测'无进展'（agent 在重复做同一件事），你会用什么信号（工具调用参数相似度？模型输出的语义重复？）来判断，误判率如何控制？",
+     "两层协作式取消（如 100ms 轮询 select）相比同步阻塞式取消，在正确性和延迟上分别有什么代价？"
+    ],
+    "nanocodex_link": "Harness 工程管理（01_harness.md）：AgentLoop::run_turn 的双预算(max_model_calls=60/max_tool_calls=120)保证终止，以及两层协作式取消(100ms select!)，正是此题所要求设计的机制在 nanocodex 里的真实实现，可直接对照讲解分层预算+协作式取消的落地方式。"
+   }
+  ]
+ }
+}

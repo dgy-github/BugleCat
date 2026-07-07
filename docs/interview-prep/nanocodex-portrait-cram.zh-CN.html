@@ -1,0 +1,134 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex 速记页（考前快速过）</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;
+    --q:#3fb950;--l:#d29922;--r:#f85149;--p:#8957e5}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    max-width:900px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:17px;margin:1.2em 0 .4em}
+  h3{font-size:15px;color:#cbd3db;margin:1.1em 0 .3em}
+  blockquote{color:var(--mut);font-size:13.5px;border-left:3px solid var(--line);margin:.6em 0;padding:2px 14px;
+    background:var(--card);border-radius:0 8px 8px 0}
+  blockquote p{margin:.4em 0}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  pre{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow-x:auto}
+  a{color:#58a6ff}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;margin:12px 0}
+  .toc a{margin:2px 10px 2px 0;display:inline-block}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:.6em 0}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  th{background:#1b2129}
+  ul,ol{padding-left:1.4em}
+  li{margin:.25em 0}
+  hr{border:none;border-top:1px solid var(--line);margin:1.1em 0}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;margin:10px 0}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .body{padding:2px 18px 14px}
+  .btns{margin:10px 0 16px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 14px;
+    font-size:13px;cursor:pointer;margin-right:8px}
+</style>
+
+<h1>nanocodex 速记页（考前快速过）</h1>
+<blockquote>
+<p>配套 <code>nanocodex-portrait.zh.md</code> 使用。考前 3-4 分钟扫一遍：先全局连接图，再 9 子系统的「主线 + 支柱名 + 必背数字 + 最易被追问」。</p>
+</blockquote>
+
+<div class="toc"><b>目录：</b><br><a href="#全局连接图-30-秒">全局连接图（30 秒）</a>
+<a href="#9-子系统速记">9 子系统速记</a></div>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<details class="c" id="全局连接图-30-秒">
+<summary><span class="t">全局连接图（30 秒）</span><div class="peek">一回合端到端**：main.rs::run 启动装配（load_config → SandboxPolicy 纯决策 → MemorySto…</div></summary>
+<div class="body">
+<ul>
+<li><strong>一回合端到端</strong>：<code>main.rs::run</code> 启动装配（load_config → SandboxPolicy 纯决策 → MemoryStore+consolidate → discover_skills → Genome::from_env → compose_system_prompt → ToolContext 能力袋 → ToolRegistry → AgentLoop）→ <code>AgentLoop::run_turn</code>：<code>for 0..max_model_calls</code> 交替 <code>call_model</code>（先 <code>for_model_edited</code> 压缩视图，再 <code>active_provider().chat</code>）→ <code>run_tools</code>（<code>ToolRegistry::execute</code>，连续 read_only 走 <code>join_all</code> 并发、写/未知串行）→ 无 tool_call 即 <code>completed</code>。</li>
+<li><strong>训练/运行接缝</strong>：唯一一道是 <code>NCX_GENOME</code>——离线 ncx-forge 写 <code>winner genome.toml</code>，运行时 <code>Genome::from_env()</code> 读它，只覆盖 <code>system_prompt</code>+工具 <code>description</code>（<strong>纯文本不改行为</strong>）；unset/empty/malformed → <code>Genome::default()</code> 可证明 no-op。</li>
+<li><strong>5 是 1 的外层调度器</strong>：<code>--orchestrate</code> 时 <code>Orchestrator::handle</code> 把每个 worker/子任务节点变成一次全新 <code>AgentLoop</code> run（plan/verify 用空工具集）。</li>
+<li><strong>三条贯穿不变式</strong>：① <code>?Send</code> / current-thread runtime + <code>Rc&lt;RefCell&gt;</code>（全 trait <code>#[async_trait(?Send)]</code>）；② OpenAI 历史合法性（每个 tool_call 必有配对 reply，由 Harness backfill + 压缩前缀丢弃 + resume sanitize 三处共守）；③「模型是第一杠杆、harness 是第二杠杆」（5 靠结构、8 只进化文本、4 托底执行）。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="9-子系统速记">
+<summary><span class="t">9 子系统速记</span><div class="peek">主线**：一个有预算上限、可取消、永远让对话保持 API 合法的单一回合循环（call_model→run_tools 交替，无 tool_…</div></summary>
+<div class="body">
+<h3>1. Harness 工程管理</h3>
+<ul>
+<li><strong>主线</strong>：一个有预算上限、可取消、永远让对话保持 API 合法的单一回合循环（<code>call_model→run_tools</code> 交替，无 tool_call 即结束、双预算触顶强制终止）。</li>
+<li><strong>支柱</strong>：TaskBudget 预算有界循环、两层协作式取消、正确性闸门下并发 parallel_run、动态 tool-schema 选择 schemas_for_query、非破坏 context 视图 for_model_edited、API 不变量稳健性 backfill、Hooks 守边界 + vision 路由。</li>
+<li><strong>必背数字</strong>：<code>max_model_calls=60</code>、<code>max_tool_calls=120</code>、取消 tick <code>100ms</code>（biased select!）、<code>DEFAULT_VISIBLE_TOOL_LIMIT=9</code>。</li>
+<li><strong>最易被追问</strong>：<code>with_task_budget(0)</code> 跑一轮（floor <code>.max(1)</code>），<code>with_max_iterations(0)</code> 跑零轮（不 floor，<code>0.min(0.max(1))=0</code>）。</li>
+</ul>
+<h3>2. 上下文压缩 · context editing</h3>
+<ul>
+<li><strong>主线</strong>：<code>edited_body</code> 在发送时算出的非破坏性历史视图，用字符代理预算两步走（先压旧 tool 结果到 <code>max_tool_result_chars</code>，再超 <code>max_chars</code> 丢最老前缀），<code>self.messages</code> 不动，只有 <code>/compact</code> 落盘。</li>
+<li><strong>支柱</strong>：ContextEditPolicy+Stats、字符代理预算 json_chars、Pass 1 压窗外旧 tool、Pass 2 干净边界丢前缀、for_model_edited 非破坏视图、compact 破坏性孪生、call_model 每轮重算。</li>
+<li><strong>必背数字</strong>：<code>max_chars=120_000</code>、<code>keep_recent_messages=30</code>、<code>max_tool_result_chars=4_000</code>、<code>estimate_tokens</code> 2 chars/token+8（仅 UI）、记忆 note <code>8</code>/<code>4_000</code>、干扰项 <code>context_token_budget=512_000</code>/<code>context_window=1_048_576</code>（UI）。</li>
+<li><strong>最易被追问</strong>：Pass 1 函数内本地参数名叫 <code>max_chars</code> 但绑定的是 4k（<code>max_tool_result_chars</code>），不是 120k 预算——同一旋钮管阈值与留头长度。</li>
+</ul>
+<h3>3. 工具系统 · 动态暴露</h3>
+<ul>
+<li><strong>主线</strong>：注册工具 &gt;9 时每轮只把「核心集 ∪ 上次 tool_search 写入的 hints ∪ 本轮 user prompt 词法匹配」裁剪到 9 个 schema 喂模型，确定性词法打分（100/50/20）控 prompt 体积，<code>read_only</code> 驱并发、<code>genome</code> 注册期统一改描述。</li>
+<li><strong>支柱</strong>：Tool trait（?Send + to_schema，execute 返 String）、schemas_limited_for_query 三路并集裁剪、tool_search 写 ctx.tool_hints、catalog_score 词法打分、read_only→并发批、genome 描述覆盖。</li>
+<li><strong>必背数字</strong>：<code>DEFAULT_VISIBLE_TOOL_LIMIT=9</code>、<code>ALWAYS_VISIBLE_TOOLS=6</code>（read_file/apply_patch/update_plan/shell/tool_search/skill，实际 seed 5–6 个）、base 工具 9（+memory=10、+skills=11）、catalog_score <code>+100/+50/+20</code>、tool_words len≥2、tool_search max_results 默认 <code>8</code> clamp <code>1..20</code>。</li>
+<li><strong>最易被追问</strong>：默认裸跑 9 个正好 <code>&lt;=9</code> 不裁剪，但挂 memory/skill/MCP 任一即到 10、立即触发裁剪；<code>read_only</code> 管并发不 gate 沙箱写。</li>
+</ul>
+<h3>4. 沙箱 · 审批状态机</h3>
+<ul>
+<li><strong>主线</strong>：不是状态图而是两层正交纯函数 + 一层进程容器——<code>SandboxPolicy</code> 判「物理是否允许」、<code>Approver::classify</code> 判「越界怎么办」、<code>PolicyExecutor</code> 只做进程容器不碰审批。</li>
+<li><strong>支柱</strong>：三档 sandbox 模式、四档 approval policy→三态 Decision、untrusted 三重过滤、ApprovalHandler trait+SessionGrants、shell 判官顺序、PolicyExecutor 容器。</li>
+<li><strong>必背数字</strong>：approval policy <code>4</code>（默认 on-request）、Decision <code>3</code>、sandbox 模式 <code>3</code>、TRUSTED_COMMANDS <code>29</code>、GIT_WRITE_SUBCMDS <code>15</code>、dangerous_patterns <code>7</code>、WRITE_TOOLS <code>2</code>、<code>timeout_s=120</code>（shell 限 1..600）、<code>active_process_limit=512</code>、timeout→<code>exit 124</code>、<code>MAX_OUTPUT=16000</code>（head/tail 各 8000）。</li>
+<li><strong>最易被追问</strong>：<code>step_decision</code> 是死代码（有定义+单测但活流程未调用）；记住决定靠 <code>ApprovalDecision::Always</code>+<code>require_edit_approval</code>。</li>
+</ul>
+<h3>5. 主子 agent 如何通讯</h3>
+<ul>
+<li><strong>主线</strong>：无消息总线无 peer 对话——三层闭环「单向广播（prompt 按值序列化进全新无状态子会话）+ 文件落地（worker 改隔离拷贝、<code>promote_worker</code> copy winner 回真 workspace）+ 裁决回灌（<code>PASS</code>/<code>FAIL</code>/<code>BEST:&lt;n&gt;</code> 驱动重试与落地）」。</li>
+<li><strong>支柱</strong>：Prompt 线程化文本工件（下行）、文件系统 IPC（隔离-提升）、裁决回路、tool-stripped reason() 节点（代码级 ToolRegistry::empty）。</li>
+<li><strong>必背数字</strong>：默认 <code>max_depth=1</code>、<code>&lt;2</code> 子任务回退 Main 上 best-of-N、<code>verdict_passed = !contains("FAIL")</code>、<code>BEST:&lt;n&gt;</code> 缺失/畸形→index 0、<code>parse_complexity</code> 无法识别→Medium。</li>
+<li><strong>最易被追问</strong>：best-of-N 可 <code>join_all</code> 并行（每 worker 私有 scratch），递归子任务必须 <code>for</code> 串行（先提升再进下一个，因子任务可能依赖）——同一原则「真 workspace 任一时刻恰好一个写者」。</li>
+</ul>
+<h3>6. 项目记忆 · 自进化</h3>
+<ul>
+<li><strong>主线</strong>：两个正交层——MEMORY（机器写、可演化、按 query 每轮临时注入）vs INSTRUCTIONS（人写、静态、启动整块注入）；「自进化」只指 MEMORY 侧 <code>remember</code> 写入 + <code>consolidate</code>/<code>summarize_consolidate</code> 去重折叠。</li>
+<li><strong>支柱</strong>：单文件 markdown 存储、写+精确去重+newest-N 截断、词法+硬编码同义词表召回（非 embedding）、启发式近重折叠 consolidate、LLM 折叠 summarize_consolidate、INSTRUCTIONS 层。</li>
+<li><strong>必背数字</strong>：<code>MAX_ENTRIES=200</code>、召回 <code>8</code>/<code>4_000</code> chars、Jaccard 阈值 <code>0.85</code>、打分 tag <code>+8</code>/substr <code>+4</code>（else-if 互斥）/phrase <code>+6</code>/jaccard <code>×20</code>、keyword 最短 <code>3</code>、phrase 窗口 <code>2</code>、排序键 <code>overlap*1_000_000+min(ts,999_999)</code>、instructions 封顶 <code>16_000</code>。</li>
+<li><strong>最易被追问</strong>：recency tie-break 对真实 epoch（~1.7e9）饱和到 999_999 基本失效；召回无最低分下限——空/离题 query 也按 recency 填满 8 条最新 note。</li>
+</ul>
+<h3>7. Skills · MCP · 视觉</h3>
+<ul>
+<li><strong>主线</strong>：三者都是可选/外部能力插进同一套 Tool+turn 机器，共享「索引常驻便宜、重内容按需拉取」——Skills 渐进披露、MCP 把外部 JSON-RPC server 工具包成本地 <code>Tool</code> 走同一 Approver 路、视觉 per-turn 路由，主循环对 provider 与工具来源无感。</li>
+<li><strong>支柱</strong>：Skills L1 索引块、Skills L2/L3 skill 工具、Skill::load_body 双源、McpClient stdio JSON-RPC、McpTool+共享 client、Per-turn 视觉路由。</li>
+<li><strong>必背数字</strong>：MCP <code>PROTOCOL="2024-11-05"</code>、<code>REQ_TIMEOUT=30s</code>、<code>clientInfo={nanocodex,0.1}</code>、read-only 名字 <code>6</code> 前缀+<code>5</code> 精确词、builtin skill <code>1</code>（commit-message）、skill 发现根 <code>2</code>（~/.ncx/skills &lt; <ws>/.ncx/skills）、<code>DEFAULT_VISIBLE_TOOL_LIMIT=9</code>。</li>
+<li><strong>最易被追问</strong>：一个 server 全部工具共享一个 <code>Rc&lt;Mutex&lt;McpClient&gt;&gt;</code>（Mutex 串行化单管道、Rc 因单线程 !Send）；视觉 flag 一 turn 设一次粘整 turn（后续纯文本跟进仍走 vision provider）。</li>
+</ul>
+<h3>8. ncx-forge · 骨架训练框架</h3>
+<ul>
+<li><strong>主线</strong>：API-only/黑盒训练框架——不碰权重，把 genome（base <code>system_prompt</code> + 每工具 DESCRIPTION）当纯文本替换面进化：shell 调真实 <code>ncx.exe</code>、教师面板提议 TOML 覆盖、以 bench 通过率 delta 当梯度做爬山/Pareto；Rust 侧 <code>unwrap_or_default</code> no-op + SENTINEL 自检门是统计可信前提。</li>
+<li><strong>支柱</strong>：Genome=system_prompt+tool_desc、no-op-on-failure 硬保证、--dump-genome 基线真相源、SENTINEL 自检门、train() 单冠军噪声感知爬山、evolve() Pareto 小种群、Evaluator 失败轨迹收割+token 成本解析、Teacher 面板 3 后端。</li>
+<li><strong>必背数字</strong>：<code>SENTINEL='NCXFORGE_SENTINEL_4242'</code>、self_check <code>timeout=90,attempts=3</code>、train 默认 <code>rounds=3/repeats=1/timeout=120s/budget=1800s/accept_margin=1</code>、<code>pop_cap=4</code>、<code>SIZE_CAP_MULTIPLIER=3</code>/<code>FLOOR=12000</code>、top-<code>3</code> 失败轨迹、<code>MAX_TRAJECTORY_CHARS=2000</code>/arg≤120/留 12 个工具调用、empty eval→<code>(passrate=0,cost=+inf)</code>、splits <code>[train,train,train,val,train,train,test,val]</code>、taskgen reference 跑 2 次/<code>-n=3</code>/6 DIMENSIONS。</li>
+<li><strong>最易被追问</strong>：加载失败为何 no-op 而非报错——优化器按通过率 delta 当梯度，silent-no-op 会把基线分误归给坏候选，故 SENTINEL 门在烧预算前先证明注入真生效。</li>
+</ul>
+<h3>9. 定时器设计 · 离线调度（🆕 设计方案，非既成实现）</h3>
+<ul>
+<li><strong>诚实边界</strong>：nanocodex 当前<strong>没有</strong>定时器，这是"我会怎么设计"的方案文档，讲述时先亮明这一点。</li>
+<li><strong>主线</strong>：难点不是计时（OS 的事），是"没人在场时 <code>Decision::Ask</code> 怎么办"——委托 OS 调度器 spawn 无头单发（~5.5ms 冷启动让每次起新进程免费）+ 无人值守解析器 <code>Ask→Deny</code> fail-closed，复用现成双层门、<code>classify()</code> 一行不改。</li>
+<li><strong>支柱</strong>：无人值守解析器（唯一新权限逻辑）、委托 OS 调度器（非自建 daemon）、无头单发路径复用、schedules.toml 声明式模型、CLI 管理 flag 不引 clap、per-id 锁防重入。</li>
+<li><strong>必背数字</strong>：冷启动 ~5.5ms（推断未复验）；复用既有 4 档 approval+3 态 Decision（不新增）；默认 sandbox=read-only+approval=on-request；overlap 默认 skip；流水 6 步；MVP 先做 1 个后端(Windows Task Scheduler)。</li>
+<li><strong>最易被追问</strong>：想跑写操作要在 <code>schedules.toml</code> 配置期显式预授权不产生 Ask 的组合（如 approval=never+限定 workspace-write），不能指望运行时兜底——无人值守时根本没人能回答 Ask。重叠触发用 per-id 锁文件（同排产订单锁思路），关机错过触发靠 OS 自带 run-once-after-missed，两者不是同一套机制。</li>
+</ul>
+</div>
+</details>
+

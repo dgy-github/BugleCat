@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>排产面试 · 入口 + 作战计划</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:960px;margin:0 auto;padding:26px 20px 80px}
+  h1{font-size:24px;margin:.2em 0}
+  h2{font-size:18px;margin:1.5em 0 .6em;border-left:4px solid var(--acc);padding-left:10px}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em}
+  a{color:#58a6ff;text-decoration:none}
+  a:hover{text-decoration:underline}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0;font-size:15px}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .card b{color:var(--q)}
+  table{width:100%;border-collapse:collapse;margin:.4em 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#1b2129;color:var(--l)}
+  .time td:first-child{white-space:nowrap;color:var(--l);font-weight:700;font-family:ui-monospace,Consolas,monospace}
+  .pri{display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr}
+  .pri>div{border:1px solid var(--line);border-radius:9px;padding:11px 13px;font-size:13.5px}
+  .pri .keep{border-color:#238636} .pri .cut{border-color:#9e6a03} .pri .heavy{border-color:#1f6feb}
+  .pri h4{margin:.1em 0 .5em;font-size:14px}
+  .keep h4{color:var(--q)} .cut h4{color:var(--l)} .heavy h4{color:#58a6ff}
+  .nums{columns:2;font-size:13.5px;margin:.3em 0}
+  .nums div{break-inside:avoid;margin:3px 0}
+  .warn{background:#2a1a12;border:1px solid #7a4218;border-radius:10px;padding:12px 16px}
+  .step{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:var(--acc);color:#fff;font-size:12px;font-weight:700;margin-right:8px}
+  @media(max-width:720px){.pri,.nums{grid-template-columns:1fr;columns:1}}
+</style>
+
+<h1>🏭 排产面试 · 入口 + 作战计划</h1>
+<div class="thesis"><b>核心节奏</b>：<b>5h = 一遍讲得清；讲得顺要第二遍（隔一晚，1.5–2h）</b>。这是你自己的项目（半接手），是"刷新+练熟"不是从零学，所以够用——但<b>别平均用力，按承重点分配，卡着表走</b>。</div>
+
+<h2>🚪 入口 · 全部文件总目录（就看这一页找路，别的都从这跳）</h2>
+<div class="card">
+  <p style="margin-top:0"><b style="color:var(--l)">▶ 主线 · 按顺序用</b></p>
+  <p><span class="step">1</span><b>数字闪卡</b>：<a href="schedule-agent-number-drills.zh-CN.html">number-drills</a> —— 先焊数字，盖住自己报数（对应下方 0:00–0:40）</p>
+  <p><span class="step">2</span><b>主看物·图谱</b>：<a href="schedule-agent-interview-final-map.zh-CN.html">interview-final-map</a> —— 可展开 5 层（数字条/闭环/维度卡/硬追问/优化），扫图 + 点开看全</p>
+  <p><span class="step">3</span><b>念稿</b>：<a href="schedule-agent-interview-final.zh-CN.html">interview-final</a> —— 13 段逐字稿，合上盲讲、卡壳再翻</p>
+  <p style="margin-top:14px"><b style="color:var(--l)">▶ 深度层 · 被钻到底才翻（L3 抗打）</b></p>
+  <p><span class="step">▸</span><b>抗打详解</b>：<a href="schedule-agent-deep-dive.zh-CN.html">deep-dive</a> —— <b>8 承重点全抗打</b>（机制+真代码file:line+数字+诚实边界+被追问链），被钻到 L3 的兜底层</p>
+  <p><span class="step">▸</span><b>评测详解</b>：<a href="schedule-agent-eval-deep-dive.zh-CN.html">eval-deep-dive</a> —— 评测体系抗打版（audit 5 项 / ~16 断言 / judge 3 维 / 门禁）</p>
+  <p><span class="step">▸</span><b>链路图</b>：<a href="schedule-agent-deploy-deepdive.zh-CN.html">deploy-deepdive</a> —— 四段治理 + 评测 两张大 SVG</p>
+  <p><span class="step">▸</span><b>双案例</b>：<a href="agent-case-compliance-vs-scheduling.zh.md">合规 vs 排产</a> —— 同套驾驭工程不同承重（元叙事·加分）</p>
+  <p><span class="step">▸</span><b>RAG 深挖</b>：<a href="../rag-optimization-drills.zh.md">rag-optimization</a> —— Agentic/Graph/RRF（RAG-heavy 岗位才用；横切共享文档·在上级 docs/ 目录）</p>
+  <p class="hint" style="margin-top:12px">🗄 已归档(内容并入图谱，不用看)：full-review、interview-drills → 本目录 <code>_archive/</code>。念稿另有 <code>.zh.md</code> 编辑源，看 HTML 即可。</p>
+</div>
+
+<h2>🎯 过关判据（三条同时满足才算过）</h2>
+<div class="card">
+  ① 能<b>主动降级开场</b>：先 30 秒定位（已上线制造业排产 1.0 最小可行闭环，半接手），不上来堆细节。<br>
+  ② 被钻能到 <b>L3</b>：报得出真实函数名/常量/数字（四段治理拓扑、trace_id、Recall@3=0.83…）。<br>
+  ③ 会讲<b>取舍和没做的边界</b>：verify 为何不回滚、Rerank 为何不默认开、接手部分用"如果重新设计我会…"。
+</div>
+
+<h2>⏱ 拆成两段：下午 3h + 晚上 2h</h2>
+<p class="hint">比一次 5h 好——中间那段休息就是<b>轻度间隔</b>，帮记忆固化。</p>
+
+<h3>🌤 下午 3h · 建骨架 + 讲全承重</h3>
+<table class="time">
+  <tr><th>时段</th><th>干什么</th><th>要点</th></tr>
+  <tr><td>0:00–0:40</td><td>数字硬记 + 闭环图</td><td>骨架焊死：10 个数字 + 拓扑链默写（见下"数字必记"）</td></tr>
+  <tr><td>0:40–2:10</td><td>承重 6 维度<b>出声复述</b></td><td>四段治理·权限·RAG·评估·意图·记忆；看卡→<b>合上讲</b>→对 L3 查漏</td></tr>
+  <tr><td>2:10–3:00</td><td>RAG+可观测数字复现 + 剩余维度快过</td><td>①②⑨⑩ 轻过；<code>bench_chunking</code>/<code>solution_08</code> 复现口径</td></tr>
+</table>
+
+<h3>🌙 晚上 2h · 追问 + 串讲抗打断</h3>
+<table class="time">
+  <tr><th>时段</th><th>干什么</th><th>要点</th></tr>
+  <tr><td>0:00–0:10</td><td><b>热身</b>：默讲下午的骨架</td><td>利用下午→晚上的间隔巩固，<b>别跳过，这步最增值</b></td></tr>
+  <tr><td>0:10–1:00</td><td>7 硬追问 + 优化速查</td><td>并发(订单级 trace 锁)/为什么 LangGraph/Bad-case 飞轮；<b>意图=零 LLM 规则打分，别答成"给模型"</b></td></tr>
+  <tr><td>1:00–1:45</td><td>全程<b>串讲计时 ×2</b></td><td>第一遍找卡壳、第二遍修；30 秒定位→2 分钟架构→被钻 2 处到 L3</td></tr>
+  <tr><td>1:45–2:00</td><td>攻卡壳点 + 列明天补漏清单</td><td>—</td></tr>
+</table>
+
+<h2>🔁 真正的"第二遍" · 明天再滚 1–1.5h（有时间就滚）</h2>
+<div class="card">
+  今天的 3h+2h 是<b>一个完整 pass（带一次休息）</b>——练到"讲得全"。<b>"讲得顺 + 抗打断"最好睡一觉再滚一遍</b>：合上所有卡盲讲、专攻昨天记下的卡壳点、随机抽 3–5 个硬追问即答。<br>
+  明天若真没时间，就把<b>晚上的串讲做够 2 遍</b>顶上。
+</div>
+
+<h2>📊 优先级三档（时间不够时的取舍）</h2>
+<div class="pri">
+  <div class="heavy"><h4>🔵 重仓（花最多时间）</h4>四段治理 · 权限 · RAG · 评估 · 意图 · 记忆——这 6 个是承重点，被问概率最高。</div>
+  <div class="keep"><h4>🟢 永远别砍</h4>数字速记 · 四段治理 · RAG · 一句话总纲。少了这些开不了口。</div>
+  <div class="cut"><h4>🟡 落后先砍</h4>优化卡 · 双案例 · RAG 深挖——都是"被问才用"，第一遍能 retrieve 即可。</div>
+</div>
+
+<h2>🔢 数字必记（"给个数字"直接甩）</h2>
+<div class="card">
+<div class="nums">
+  <div>· <b>49,981</b> 条真实订单（纺织/化纤，SQLite）</div>
+  <div>· <b>19</b> 类写意图（<code>intents.json</code>）· 四级角色 0/1/2/3</div>
+  <div>· golden <b>44</b> 用例/<b>11</b> 类 · CI <code>rule_pass_rate≥1.0</code></div>
+  <div>· 链路 ID = <b><code>trace_id</code></b>（不是 chain_id）</div>
+  <div>· Hybrid+RRF <b>Recall@3=0.83</b> / Precision@3=0.40</div>
+  <div>· markdown 一规则一块 <b>MRR=0.956</b>（最优）</div>
+  <div>· 端到端 <b>P95=4702ms</b>（P50=941/avg=1480）</div>
+  <div>· 节点级 <b>LLM P95=4588</b> vs Route P95=15（慢在 LLM）</div>
+  <div>· audit_log <b>只两处写</b>（governance-blocked + verify）</div>
+  <div>· 审计 <b>5</b> 检查 · check_expected <b>~16</b> 断言 · judge 3 维 1-5</div>
+</div>
+<p class="hint">拓扑背这条：<code>rewrite→route→query→rag→answer_verify→governance→preview→execute→verify→respond</code>；三条件边：after_route / after_governance / after_preview（严格 <code>confirmed is True</code> 才 execute）。</p>
+</div>
+
+<h2>⚠️ 一个不能翻车的提醒</h2>
+<div class="warn">
+排产是<b>半途接手改造</b>，原系统内部设计非你从零做。深层被钻到原系统内部时，<b>别硬背细节（会露怯）</b>，用 <b>"如果重新设计我会…"</b> 的诚实讲法兜——这是接手项目的正确姿势，讲得出"我看懂了它、也知道它该怎么改"比假装全是自己设计强。
+</div>
+
+<p class="hint" style="margin-top:24px">配套：nanocodex 的 <a href="../nanocodex-interview-final-map.zh-CN.html">同款图谱</a> 与录音稿另有一份；串讲主线——同一套驾驭工程，排产长成"确定性 workflow+四段治理+评测飞轮"，nanocodex 长成"沙箱+best-of-N+离线演化"。</p>

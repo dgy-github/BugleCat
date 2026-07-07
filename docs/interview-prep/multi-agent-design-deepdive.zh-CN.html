@@ -1,0 +1,201 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>多 Agent 设计深化 · 交互 / 观测评估 / 业务闭环</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149;--p:#a371f7}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:1000px;margin:0 auto;padding:26px 20px 80px}
+  h1{font-size:24px;margin:.2em 0}
+  h2{font-size:18px;margin:1.5em 0 .6em;border-left:4px solid var(--acc);padding-left:10px}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em}
+  a{color:#58a6ff}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .strip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13.5px;margin:10px 0}
+  .strip b{color:var(--q)}
+  .grid{display:grid;gap:12px;grid-template-columns:1fr}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .sub{color:var(--mut);font-weight:400;font-size:12px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .star{border-color:#8957e5;box-shadow:0 0 0 1px #8957e5 inset}
+  .body{padding:12px 16px}
+  .body p{margin:.5em 0}
+  .k{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:4px;margin-right:6px;background:#21262d;color:var(--mut)}
+  .k.q{color:#0d1117;background:var(--q)} .k.l{color:#0d1117;background:var(--l)} .k.r{color:#fff;background:var(--r)} .k.p{color:#fff;background:var(--p)}
+  table{width:100%;border-collapse:collapse;margin:.5em 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#1b2129;color:var(--l)}
+  .btns{margin:10px 0 4px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:5px 12px;font-size:13px;cursor:pointer;margin-right:8px}
+  svg{width:100%;height:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;margin:6px 0}
+  .n-cmd{fill:#12233b;stroke:#1f4b7a} .n-run{fill:#132a1a;stroke:#238636} .n-gate{fill:#2a2312;stroke:#9e7318}
+  .n-key{fill:#241833;stroke:#8957e5} .n-out{fill:#161b22;stroke:#30363d}
+  .n-t{fill:#e6edf3;font:600 12.5px sans-serif} .n-s{fill:#8a919c;font:10.5px sans-serif}
+  .ar{stroke:#8a919c;stroke-width:1.5;fill:none;marker-end:url(#a)} .ard{stroke:#a371f7;stroke-width:1.4;fill:none;stroke-dasharray:4 3;marker-end:url(#ap)}
+  .al{fill:#8a919c;font:11px sans-serif}
+</style>
+
+<h1>🎖 多 Agent 设计深化 · 交互 / 观测评估 / 业务闭环</h1>
+<p class="hint">建在已有 <b>campaign-multi-agent-design-brief</b>（Command/Formation/A2A/Governance/Rehearsal 军事指挥框架）之上，深化你新提的三点。全部锚在 campaign 真实代码（读源码得，非记忆）。设计级、不写代码。折叠扫图，点开看全。</p>
+
+<div class="thesis"><b>一句话论点</b>：多 Agent 不是"多人聊天"，是<b>可指挥·可治理·可观测·可演练</b>的运行时。三个深化点各有一句钩子——交互=<b>DAG+类型化信封不是对话</b>；观测=<b>进控制环不是仪表盘</b>；业务闭环=<b>和排产同骨架，只是 execute 从单点变编队</b>。</div>
+
+<div class="strip">
+<b>campaign 已核实事实（读源码）</b>
+· <code>Runtime.run</code> 每次 <code>run_id=uuid[:12]</code> 隔离，全程事件落 <code>EventLog</code> 可 replay
+· <code>Coordinator.decompose</code>→<code>_topological_layers</code> 按 <b>DAG 分层</b>执行；<b>成环 <code>raise ValueError</code></b>
+· <code>Message.request</code> + <code>Part(untrusted=bool)</code>（session=可信内部 / knowledge=不可信外部）
+· 并发 <code>asyncio.Semaphore</code> 默认 <b>1</b>（串行），共享状态过 <code>PolicyGate</code> 锁
+· Reviewer 红线：<b>验收门禁绝不降级给小模型</b>；减员时 strictness 反升；<code>require_reviewer</code>→fail-closed
+· <code>Tracer.span/meter/score</code> → <code>CapacityLedger.health</code> → Mobilizer 减员 / Breaker 熔断（OTel/Langfuse adapter 接缝）
+· <code>EvalHarness</code> 加权均分 ≥ <b>0.8</b> 才 <code>gate</code> 上线；review 失败该用例=0 分；<code>export_trainset</code> replay→jsonl 蒸馏
+</div>
+
+<h2>🔁 多 Agent 业务闭环（主脊 + 观测进控制 + 评估飞轮）</h2>
+<svg viewBox="0 0 760 542" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="多 Agent 闭环">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8a919c"/></marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#a371f7"/></marker>
+  </defs>
+  <!-- spine -->
+  <rect class="n-cmd" x="300" y="14" width="270" height="46" rx="9"/><text class="n-t" x="435" y="34" text-anchor="middle">① ExecutionOrder（军令）</text><text class="n-s" x="435" y="50" text-anchor="middle">目标/约束/预算/验收标准</text>
+  <line class="ar" x1="435" y1="60" x2="435" y2="82"/>
+  <rect class="n-cmd" x="300" y="84" width="270" height="46" rx="9"/><text class="n-t" x="435" y="104" text-anchor="middle">② Coordinator 拆解 → DAG</text><text class="n-s" x="435" y="120" text-anchor="middle">topological_layers · 成环即报错</text>
+  <line class="ar" x1="435" y1="130" x2="435" y2="152"/>
+  <rect class="n-cmd" x="300" y="154" width="270" height="42" rx="9"/><text class="n-t" x="435" y="173" text-anchor="middle">③ Router 能力路由</text><text class="n-s" x="435" y="189" text-anchor="middle">按 skills/model_tier 选兵</text>
+  <line class="ar" x1="435" y1="196" x2="435" y2="216"/>
+  <rect class="n-gate" x="300" y="218" width="270" height="42" rx="9"/><text class="n-t" x="435" y="237" text-anchor="middle">④ PolicyGate 治理（先治理再执行）</text><text class="n-s" x="435" y="253" text-anchor="middle">预算/权限/外泄/注入 · 并发锁</text>
+  <line class="ar" x1="435" y1="260" x2="435" y2="280"/>
+  <rect class="n-run" x="300" y="282" width="270" height="46" rx="9"/><text class="n-t" x="435" y="302" text-anchor="middle">⑤ Executor 执行（A2A Message）</text><text class="n-s" x="435" y="318" text-anchor="middle">trusted/untrusted 分部 · 超时兜底</text>
+  <line class="ar" x1="435" y1="328" x2="435" y2="348"/>
+  <rect class="n-key" x="300" y="350" width="270" height="46" rx="9"/><text class="n-t" x="435" y="370" text-anchor="middle">🔍 ⑥ Reviewer 独立复核</text><text class="n-s" x="435" y="386" text-anchor="middle">执行者≠复核者 · 不降级 · fail-closed</text>
+  <line class="ar" x1="435" y1="396" x2="435" y2="416"/>
+  <rect class="n-out" x="300" y="418" width="270" height="42" rx="9"/><text class="n-t" x="435" y="437" text-anchor="middle">⑦ EventLog append-only</text><text class="n-s" x="435" y="453" text-anchor="middle">状态由 run_id replay 推导</text>
+  <!-- obs tap (left) -->
+  <rect class="n-key" x="24" y="250" width="236" height="128" rx="10"/>
+  <text class="n-t" x="142" y="272" text-anchor="middle">🔭 观测进控制环</text>
+  <text class="n-s" x="142" y="294" text-anchor="middle">Tracer: span / meter / score</text>
+  <text class="n-s" x="142" y="312" text-anchor="middle">↓ 喂 CapacityLedger.health</text>
+  <text class="n-s" x="142" y="336" text-anchor="middle">↓ 驱动</text>
+  <text class="n-s" x="142" y="356" text-anchor="middle">Mobilizer 减员 · Breaker 熔断</text>
+  <text class="n-s" x="142" y="374" text-anchor="middle">（不是只看的仪表盘）</text>
+  <path class="ard" d="M300 305 L262 314"/>
+  <path class="ard" d="M300 373 L262 350"/>
+  <!-- eval loop (bottom) -->
+  <line class="ar" x1="435" y1="460" x2="435" y2="484"/>
+  <rect class="n-run" x="220" y="486" width="430" height="44" rx="10"/>
+  <text class="n-t" x="435" y="506" text-anchor="middle">🎯 EvalHarness 硬门禁（加权≥0.8 才上线） → export_trainset 飞轮</text>
+  <text class="n-s" x="435" y="522" text-anchor="middle">EventLog replay → 成功/失败样本 jsonl → 蒸馏小模型 / badcase 回流</text>
+</svg>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<h2>① 多 Agent 交互设计</h2>
+<div class="grid">
+
+  <details class="c"><summary><span class="t">🕸 DAG 编排，不是链式对话</span><div class="peek">depends_on + 拓扑分层 + 成环即报错</div></summary>
+    <div class="body">
+    <p><span class="k q">现状（真代码）</span>Coordinator 把 ExecutionOrder <code>decompose</code> 成带 <code>depends_on</code> 的 Task；<code>_topological_layers</code> 按依赖分层，<b>层内 <code>asyncio.gather</code> 并行</b>、层间串行；<b>循环依赖直接 <code>raise ValueError("cyclic task dependency")</code></b>——交互拓扑在装配期就是合法 DAG，不靠运行时对话涌现。</p>
+    <p><span class="k l">为什么这样</span>多 Agent 最怕"你问我我问你"的死循环和无界对话。用 DAG 把协作变成<b>可静态校验的依赖图</b>，依赖没就绪的任务记 <code>task.skipped</code> 而不是硬等。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">✉️ 类型化 A2A 信封（trusted/untrusted 分部）</span><div class="peek">消息带来源标记，不是裸字符串</div></summary>
+    <div class="body">
+    <p><span class="k q">现状</span>所有 agent 走统一 <code>Message.request(from_agent,to_agent,task,run_id)</code>，body 是 <code>Part(kind,data,untrusted)</code> 列表：<b>session 上下文=可信内部部</b>（<code>untrusted=False</code>）、<b>knowledge/RAG 命中=不可信外部部</b>（<code>untrusted=True</code>）。传输层可换：InProcess / HTTP JSON-RPC / SSE / RemoteAgentProxy + capability discovery。</p>
+    <p><span class="k l">交互的关键</span>信封<b>自带来源可信度</b>——下游 agent 知道哪部分是"我方内部状态"、哪部分是"外部可能被投毒的内容"，这是防 prompt injection 的信息基座（呼应网关的 SECRET/PII 分级、nanocodex 的记忆"线索非事实"）。</p>
+    </div>
+  </details>
+
+  <details class="c star"><summary><span class="t">🔍 检查交互：执行者 ≠ 复核者</span><div class="peek">独立复核·不降级·fail-closed（你问的"检查"）</div></summary>
+    <div class="body">
+    <p><span class="k q">现状（真代码）</span><code>_review</code> 单独找 <code>Reviewer</code> agent 对 Executor 的 artifact 按 <code>task.acceptance</code> 打分裁决，返回 <code>{passed,score,reasons}</code>。三条硬设计：</p>
+    <p>· <b>执行者产出、复核者独立判</b>——防"执行者自证正确"（模型给自己打高分）。<br>
+    · <b>红线：验收门禁绝不降级给小模型</b>（Reviewer 恒 flagship tier）；系统减员（attrition）时 Reviewer <code>strictness</code> 反而<b>调高</b>到 ≥0.7——越缺人越严把关。<br>
+    · <b>fail-closed</b>：Reviewer 报错记为未通过不崩整个 run；<code>require_reviewer=True</code> 时无 Reviewer 直接判不通过（不静默放行）。</p>
+    <p><span class="k l">交互形态</span>Executor→（EventLog）→Reviewer 单向复核，<b>不是 executor 和 reviewer 对话辩论</b>；裁决 <code>review.done</code> 事件回流 Coordinator 决定 done/failed。</p>
+    <p><span class="k r">诚实边界</span>无 LLM 时 <code>_rule_verdict</code> 是<b>占位 stub</b>（默认给 0.75 通过）——真规则/真 LLM 裁决要补；这是"参考实现"的诚实缺口。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">⚙️ 并发 + 共享状态锁 + HITL 断点续</span><div class="peek">Semaphore 默认 1·PolicyGate 锁·durable resume</div></summary>
+    <div class="body">
+    <p><span class="k q">现状</span>并发 <code>asyncio.Semaphore(concurrency)</code> 默认 <b>1（串行、行为保守）</b>，层内可并行；预算/账本等共享状态统一过 <code>PolicyGate</code> 的锁（并发安全）。HITL：<code>task.needs_approval</code>→发 <code>task.input_required</code> 事件挂起→<code>resume(run_id,task_id,human_input)</code> 从 EventLog replay <b>断点续跑</b>（durable）。单任务 <code>task_timeout</code> 兜底，挂死的 agent 不拖垮整个 run。</p>
+    <p><span class="k l">回扣</span>"同订单写锁"的多 Agent 版——共享状态的并发一律走一把闸，和排产订单锁、定时器 per-id 锁同一思路。</p>
+    </div>
+  </details>
+
+</div>
+
+<h2>② 架构 · 观测 · 评估</h2>
+<div class="grid">
+
+  <details class="c"><summary><span class="t">🏗 分层装配（Milestone 增量长大）</span><div class="peek">最小闭环 → 逐层接治理/韧性/观测/门禁</div></summary>
+    <div class="body">
+    <p><span class="k q">现状</span><code>Runtime</code> 把组件装配成系统，按 Milestone 增量：M2 最小闭环(Coordinator→Router→Executor→Reviewer) → M4 Breaker/Checkpoint → M5 Mobilization/Reserve → M6 Governor → M7 Tracer → M8 Eval gate。每个能力 <b>opt-in、默认 OFF、不调用则行为不变</b>（memory/knowledge 注入都是这规矩）。</p>
+    <p><span class="k l">架构取向</span>组件都靠 <code>set_xxx</code> 注入、面向接口（Transport/Tracer/Governor 都是可换实现）——可测试、可逐步生产化，而不是一个大 God-Runtime。</p>
+    </div>
+  </details>
+
+  <details class="c star"><summary><span class="t">🔭 观测"进控制环"，不是仪表盘</span><div class="peek">span/meter/score → health → 减员/熔断</div></summary>
+    <div class="body">
+    <p><span class="k q">现状（真代码）</span><code>Tracer</code> 三能力：<code>span(name,actor)</code>（包一次 agent 调用，记 status ok/error + duration）、<code>meter(actor,tokens,cost,latency)</code>（成本计量）、<code>score(task_id,score)</code>（在线质量打分）。<code>recent_latency/recent_cost(actor,window=10)</code> 给<b>每个 actor 的滑动窗口</b>。</p>
+    <p><span class="k p">承重洞察</span>观测数据<b>回喂控制环</b>：<code>meter</code>→<code>CapacityLedger.health</code>→<b>Mobilizer 减员/动员</b>；<code>score</code> 过低→<b>Breaker 熔断</b>。所以观测不是"事后看的大屏"，是<b>实时驱动降级与接管的信号源</b>（源码注释原话："实时态势屏 + 黑匣子，看真实而非阅兵"）。留了 <b>OpenTelemetry / Langfuse adapter 接缝</b>。</p>
+    <p><span class="k r">诚实边界</span>真实实现目前是 <code>InMemoryTracer</code>（测试/开发用），OTel/Langfuse 是<b>接缝未接线</b>；生产化要接真实后端 + 滑动基线排除异常样本（呼应排产可观测优化）。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🎯 评估：硬门禁 + 数据飞轮</span><div class="peek">≥0.8 才上线·EventLog→蒸馏训练集</div></summary>
+    <div class="body">
+    <p><span class="k q">现状（真代码）</span><code>EvalHarness(threshold=0.8)</code>：跑 <code>EvalCase</code>（order+expected+weight）→ 加权均分 → <code>gate()</code> <b>≥0.8 才允许"上线"</b>（硬门禁）。评分 <code>completion*0.5 + avg_review*0.5</code>，<b>任一用例 review 未过=0 分</b>（一票否决）。<code>ChaosDrill</code> 主动演练失败：工具失败/超预算/远程 agent 不可用/review 拒绝/权限违规。</p>
+    <p><span class="k p">飞轮</span><code>export_trainset_async</code>：EventLog <code>replay</code> → 按 task_id 分组 → 标 success/failure → 导 <b>jsonl 训练集</b>（蒸馏小模型 / badcase 回流）。这和排产的 <code>mine_eval_candidates→online_hard_cases</code>、你上一轮的 Bad-case 回流飞轮<b>是同一台飞轮</b>。</p>
+    </div>
+  </details>
+
+</div>
+
+<h2>③ 业务设计闭环：有没有类似架构方案？——有，同一副骨架</h2>
+<div class="grid">
+  <details class="c star" open><summary><span class="t">🧭 一副骨架，单/多 Agent 通吃</span><div class="peek">command→govern→execute→review→log→observe→eval→飞轮</div></summary>
+    <div class="body">
+    <p>你问"业务设计整个闭环是否有类似架构设计方案"——<b>有，而且就是你已经在两个项目里跑通的那一副</b>：</p>
+    <p class="thesis" style="margin:.6em 0"><b>命令(Order/意图) → 治理(先治理再执行) → 执行 → 独立复核 → 事件留痕 → 观测进控制 → 评估硬门禁 → badcase 飞轮</b></p>
+    <p>多 Agent 版相对单 Agent 版<b>只在"执行"这一环从单点变成编队</b>（DAG+能力路由+角色分离+韧性），骨架、治理位置、复核位置、飞轮位置<b>完全一致</b>。所以它不是新范式，是同一套驾驭工程换了承重。</p>
+    <table>
+      <tr><th>闭环环节</th><th>campaign（多 Agent）</th><th>排产（单 Agent workflow）</th><th>nanocodex（编码 agent）</th></tr>
+      <tr><td>命令入口</td><td>ExecutionOrder（目标/预算/验收）</td><td>意图识别 + query_plan</td><td>prompt + 任务预算</td></tr>
+      <tr><td>治理前置</td><td>PolicyGate（预算/权限/外泄/注入）</td><td>四段治理 governance→preview</td><td>权限双门 can_write⊥classify</td></tr>
+      <tr><td>执行</td><td><b>编队</b>：DAG+Router+Executor</td><td>单链 execute</td><td>run_turn / best-of-N 编排</td></tr>
+      <tr><td>独立复核</td><td>Reviewer（不降级/fail-closed）</td><td>verify 回读 before/after</td><td>verify 选 winner</td></tr>
+      <tr><td>留痕</td><td>EventLog append-only replay</td><td>audit_log append-only</td><td>session log</td></tr>
+      <tr><td>观测</td><td>Tracer→health→减员/熔断</td><td>trace_id/P95 节点级</td><td>NCX_TRACE 打点</td></tr>
+      <tr><td>评估门禁</td><td>EvalHarness ≥0.8 gate</td><td>golden + CI rule_pass_rate≥1.0</td><td>（forge sentinel 门）</td></tr>
+      <tr><td>飞轮</td><td>export_trainset 蒸馏</td><td>mine_eval_candidates→online_hard_cases</td><td>失败轨迹→forge</td></tr>
+    </table>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🌉 桥：nanocodex best-of-N → campaign</span><div class="peek">受限编排 → 可治理可观测的多 Agent runtime</div></summary>
+    <div class="body">
+    <p><span class="k">演进叙事</span>nanocodex 的 best-of-N 已是<b>受限多 Agent</b>：进程内、<b>无消息总线</b>、文件隔离做 IPC、一个 verify 选 winner。campaign 是<b>完整多 Agent</b>：跨进程<b>类型化 A2A 消息</b>、EventLog 事件溯源、独立 Reviewer、DAG 编排、韧性（Breaker/Mobilizer）、HITL durable resume、观测进控制环。</p>
+    <p><span class="k q">面试用</span>"我先在 nanocodex 用最省的结构（文件 IPC + 单 verify）验证了'编排靠结构不靠更聪明的模型'；当协作要跨进程、要审计、要治理、要演练时，就长成 campaign 这套可指挥·可观测·可演练的 runtime——<b>同一套驾驭工程，承重从'单机编排'升到'分布式治理'</b>。"</p>
+    </div>
+  </details>
+</div>
+
+<h2>🎤 面试话术（三点各一句）</h2>
+<div class="strip">
+<b>① 交互</b>："多 Agent 交互我不做自由对话——用 <b>DAG + 类型化 A2A 信封</b>：任务带依赖、拓扑分层、成环直接报错；消息按 trusted/untrusted 分部标来源。检查交互是<b>执行者≠复核者</b>的独立复核，验收<b>绝不降级给小模型</b>、无复核者 fail-closed。"<br><br>
+<b>② 观测评估</b>："观测我做成<b>进控制环</b>不是仪表盘——span/meter/score 回喂 health，驱动减员和熔断，看真实而非阅兵；OTel/Langfuse 留了接缝。评估是<b>硬门禁 + 飞轮</b>：加权≥0.8 才上线、任一复核不过一票否决，EventLog replay 导训练集回流蒸馏。"<br><br>
+<b>③ 业务闭环</b>："业务闭环有现成骨架：<b>命令→治理→执行→独立复核→留痕→观测→评估门禁→飞轮</b>。单 Agent（排产）和多 Agent（campaign）<b>同一副骨架</b>，只是执行那一环从单点变编队。所以不是每个项目重新发明架构，是同一套驾驭工程换承重。"
+</div>
+
+<h2>🧾 一句话总纲</h2>
+<div class="thesis">多 Agent 设计的三个深化：<b>交互</b>=DAG+类型化 A2A 信封+执行者≠复核者（不是对话）；<b>观测</b>=span/meter/score 进控制环驱动减员熔断（不是仪表盘）；<b>业务闭环</b>=命令→治理→执行→复核→留痕→观测→评估门禁→飞轮的同一副骨架，单/多 Agent 只差"执行"是单点还是编队。配套完整框架见 <code>campaign-multi-agent-design-brief</code>（Command/Formation/A2A/Governance/Rehearsal）。</div>

@@ -1,0 +1,245 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex 面试项目介绍（内容生成前置）</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;
+    --q:#3fb950;--l:#d29922;--r:#f85149;--p:#8957e5}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    max-width:900px;margin:0 auto;padding:26px 20px 90px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:17px;margin:1.2em 0 .4em}
+  h3{font-size:15px;color:#cbd3db;margin:1.1em 0 .3em}
+  blockquote{color:var(--mut);font-size:13.5px;border-left:3px solid var(--line);margin:.6em 0;padding:2px 14px;
+    background:var(--card);border-radius:0 8px 8px 0}
+  blockquote p{margin:.4em 0}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  pre{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow-x:auto}
+  a{color:#58a6ff}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:13.5px;margin:12px 0}
+  .toc a{margin:2px 10px 2px 0;display:inline-block}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin:.6em 0}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  th{background:#1b2129}
+  ul,ol{padding-left:1.4em}
+  li{margin:.25em 0}
+  hr{border:none;border-top:1px solid var(--line);margin:1.1em 0}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:0;overflow:hidden;margin:10px 0}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .body{padding:2px 18px 14px}
+  .btns{margin:10px 0 16px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 14px;
+    font-size:13px;cursor:pointer;margin-right:8px}
+</style>
+
+<h1>nanocodex 面试项目介绍（内容生成前置）</h1>
+<blockquote>
+<p>用途：这份文档不是给面试官直接读的，而是作为后续生成口播、自我介绍、项目介绍、PPT、宣传文案、短视频脚本时的统一上游输入。<br />
+原则：后续生成内容时，优先基于这份文档改写，不要每次从 README、设计稿、流程图里重新拼素材，避免口径漂移。</p>
+</blockquote>
+
+<div class="toc"><b>目录：</b><br><a href="#1-GitHub-在线链接">1. GitHub / 在线链接</a>
+<a href="#2-一句话定位">2. 一句话定位</a>
+<a href="#3-面试版-30-秒介绍">3. 面试版 30 秒介绍</a>
+<a href="#4-面试版-90-秒介绍">4. 面试版 90 秒介绍</a>
+<a href="#5-这项目最值得讲的-5-个点">5. 这项目最值得讲的 5 个点</a>
+<a href="#6-适合投递-讲述的岗位方向">6. 适合投递 / 讲述的岗位方向</a>
+<a href="#7-生成内容时必须保留的事实锚点">7. 生成内容时必须保留的事实锚点</a>
+<a href="#8-生成内容时不要乱写的点">8. 生成内容时不要乱写的点</a>
+<a href="#9-可直接喂给生成器的结构化前置">9. 可直接喂给生成器的结构化前置</a>
+<a href="#10-可直接复制的生成指令">10. 可直接复制的生成指令</a></div>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<details class="c" id="1-GitHub-在线链接">
+<summary><span class="t">1. GitHub / 在线链接</span><div class="peek">GitHub 仓库：&lt;https://github.com/dgy-github/nanocodex&gt;</div></summary>
+<div class="body">
+<ul>
+<li>GitHub 仓库：<a href="https://github.com/dgy-github/nanocodex">https://github.com/dgy-github/nanocodex</a></li>
+<li>在线能力页：<a href="https://dgy-github.github.io/nanocodex/nanocodex.html">https://dgy-github.github.io/nanocodex/nanocodex.html</a></li>
+<li>中文 README：<a href="https://github.com/dgy-github/nanocodex/blob/main/README.zh-CN.md">https://github.com/dgy-github/nanocodex/blob/main/README.zh-CN.md</a></li>
+<li>面试总入口：<a href="https://github.com/dgy-github/nanocodex/blob/main/docs/interview-prep/INTERVIEW-MASTER-MAP.zh-CN.html">https://github.com/dgy-github/nanocodex/blob/main/docs/interview-prep/INTERVIEW-MASTER-MAP.zh-CN.html</a></li>
+<li>nanocodex 主看物图谱：<a href="https://github.com/dgy-github/nanocodex/blob/main/docs/interview-prep/nanocodex-interview-final-map.zh-CN.html">https://github.com/dgy-github/nanocodex/blob/main/docs/interview-prep/nanocodex-interview-final-map.zh-CN.html</a></li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="2-一句话定位">
+<summary><span class="t">2. 一句话定位</span><div class="peek">nanocodex 是一个从零自研的、可本地部署的 Codex 风格 coding agent 项目，重点不只是“把模型接起来”，而是把工具…</div></summary>
+<div class="body">
+<p><code>nanocodex</code> 是一个从零自研的、可本地部署的 Codex 风格 coding agent 项目，重点不只是“把模型接起来”，而是把工具调用、权限控制、上下文压缩、项目记忆、MCP、成本控制、桌面端交互和可分发交付做成一个完整工程系统。</p>
+</div>
+</details>
+
+<details class="c" id="3-面试版-30-秒介绍">
+<summary><span class="t">3. 面试版 30 秒介绍</span><div class="peek">我做过一个从零自研的 coding agent，项目叫 nanocodex。它本质上是一个 Codex 风格的本地开发代理，不只是调用大模型…</div></summary>
+<div class="body">
+<p>我做过一个从零自研的 coding agent，项目叫 <code>nanocodex</code>。它本质上是一个 Codex 风格的本地开发代理，不只是调用大模型回答代码问题，而是让模型能够在受控边界里调用文件、shell、补丁、搜索、MCP 等工具，完成真实的软件开发任务。我在这个项目里重点解决的是权限双层控制、工具工程、上下文压缩、项目记忆和本地可交付这几件事，后来又把它从 Python 原型线重构到 Rust + Tauri，变成更适合长期维护和分发的版本。</p>
+</div>
+</details>
+
+<details class="c" id="4-面试版-90-秒介绍">
+<summary><span class="t">4. 面试版 90 秒介绍</span><div class="peek">nanocodex 可以看成我对“AI coding agent 怎么从 demo 走到工程系统”这件事的一次完整实现。项目早期先用 Pyt…</div></summary>
+<div class="body">
+<p><code>nanocodex</code> 可以看成我对“AI coding agent 怎么从 demo 走到工程系统”这件事的一次完整实现。项目早期先用 Python 验证 agent loop、工具调用、审批模型和桌面交互，证明产品面是成立的；后面再用 Rust 把核心运行时重写成更清晰的 crate 边界，加上 Tauri 桌面壳，解决启动性能、类型契约、可维护性和原生分发的问题。</p>
+<p>它的核心不是让模型“自己决定一切”，而是把高风险部分尽量放回代码侧处理。比如工具暴露不是一次把所有 schema 都塞给模型，而是有动态 schema 选择和 <code>tool_search</code>；写操作不是直接放行，而是经过 sandbox 和 approval 两层正交门控；上下文不是满了就暴力摘要，而是先做非破坏式上下文编辑，再做更高成本的压缩；项目记忆也不是简单向量库堆砌，而是围绕本地工作流做按需召回和整理。整个项目体现的是一种很明确的工程观：LLM 负责推理和表达，确定性边界、安全约束、执行控制和可追责性必须落在系统代码里。</p>
+</div>
+</details>
+
+<details class="c" id="5-这项目最值得讲的-5-个点">
+<summary><span class="t">5. 这项目最值得讲的 5 个点</span><div class="peek">1. 权限双层正交</div></summary>
+<div class="body">
+<ol>
+<li>
+<p><strong>权限双层正交</strong>
+   - 一层是 sandbox，决定物理上能不能读、写、联网。
+   - 一层是 approval，决定超出边界时是自动拒绝、询问，还是在特定策略下放行。
+   - 关键点不是“弹不弹窗”，而是安全边界不依赖模型措辞。</p>
+</li>
+<li>
+<p><strong>从 Python 原型到 Rust 重构</strong>
+   - Python 线适合快速验证产品形态。
+   - Rust 线适合收紧运行时边界、显式化类型契约、优化分发体验。
+   - 这不是简单换语言，而是工程阶段切换。</p>
+</li>
+<li>
+<p><strong>工具工程而不是纯聊天</strong>
+   - 模型要在真实仓库里调用文件、shell、补丁、搜索、MCP、技能文档等工具。
+   - 我关注的是工具如何暴露、如何裁剪、如何并发、如何回填结果、如何在预算内安全运行。</p>
+</li>
+<li>
+<p><strong>上下文压缩与项目记忆</strong>
+   - 不是粗暴“满了就总结”。
+   - 优先做非破坏式上下文编辑、工具结果瘦身、动态可见视图，再配合项目记忆。
+   - 目标是让长任务还能持续推进，而不是越跑越糊。</p>
+</li>
+<li>
+<p><strong>本地部署与桌面交付</strong>
+   - 不依赖云端 IDE 才能用。
+   - CLI、桌面 GUI、配置、审批、日志、成本、会话恢复都在本地闭环。
+   - 更像一个可交付的开发工具，而不是实验脚本。</p>
+</li>
+</ol>
+</div>
+</details>
+
+<details class="c" id="6-适合投递-讲述的岗位方向">
+<summary><span class="t">6. 适合投递 / 讲述的岗位方向</span><div class="peek">AI Infra / AI Engineering</div></summary>
+<div class="body">
+<ul>
+<li>AI Infra / AI Engineering</li>
+<li>Agent Platform / Agent Runtime</li>
+<li>Coding Agent / Developer Tools</li>
+<li>本地部署 AI 工具链</li>
+<li>企业级 AI 应用平台</li>
+</ul>
+<p>如果岗位更偏“基建 / 框架 / 平台”，<code>nanocodex</code> 很适合作为主讲项目。<br />
+如果岗位更偏“业务落地 / 治理 / 企业流程”，排产项目通常更容易对口。</p>
+</div>
+</details>
+
+<details class="c" id="7-生成内容时必须保留的事实锚点">
+<summary><span class="t">7. 生成内容时必须保留的事实锚点</span><div class="peek">项目名：nanocodex</div></summary>
+<div class="body">
+<ul>
+<li>项目名：<code>nanocodex</code></li>
+<li>仓库：<a href="https://github.com/dgy-github/nanocodex">https://github.com/dgy-github/nanocodex</a></li>
+<li>项目类型：本地可运行的 Codex 风格 coding agent</li>
+<li>技术路线：先 Python 原型，再 Rust 重构，桌面端使用 Tauri</li>
+<li>核心能力：</li>
+<li>工具调用</li>
+<li>sandbox / approval 双层控制</li>
+<li>上下文压缩</li>
+<li>项目记忆</li>
+<li>MCP 集成</li>
+<li>skills 机制</li>
+<li>本地 GUI / CLI</li>
+<li>核心视角：不是“一个会写代码的聊天机器人”，而是“一个把模型接入真实开发环境、并用工程边界约束住它的系统”</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="8-生成内容时不要乱写的点">
+<summary><span class="t">8. 生成内容时不要乱写的点</span><div class="peek">不要写成“所有决策都交给模型”。</div></summary>
+<div class="body">
+<ul>
+<li>不要写成“所有决策都交给模型”。</li>
+<li>不要写成“安全主要靠提示词约束”。</li>
+<li>不要把它说成纯 SaaS 产品，它强调的是本地运行和本地控制。</li>
+<li>不要把项目记忆直接说成“向量数据库语义检索”，如果要说，必须谨慎落到真实实现。</li>
+<li>不要把任何未核实的机制说成既成事实，尤其是 best-of-N、编排、长期记忆这类容易被深问的点。</li>
+</ul>
+</div>
+</details>
+
+<details class="c" id="9-可直接喂给生成器的结构化前置">
+<summary><span class="t">9. 可直接喂给生成器的结构化前置</span><div class="peek">```yaml</div></summary>
+<div class="body">
+<pre><code class="language-yaml">project_name: nanocodex
+repo_url: https://github.com/dgy-github/nanocodex
+project_type: 本地可部署的 Codex 风格 coding agent
+stage:
+  - Python 原型验证
+  - Rust 运行时重构
+  - Tauri 桌面化交付
+one_line_positioning: &gt;
+  一个从零自研的 coding agent 工程系统，重点在工具调用、权限控制、
+  上下文压缩、项目记忆、MCP 集成和本地可交付，而不只是接一个大模型聊天。
+core_keywords:
+  - coding agent
+  - tool calling
+  - sandbox
+  - approval
+  - context compaction
+  - project memory
+  - MCP
+  - Tauri
+  - Rust
+  - local-first
+interview_angles:
+  - 为什么从 Python 过渡到 Rust
+  - 为什么安全边界要落在代码而不是提示词
+  - 为什么工具暴露要动态裁剪而不是全量给模型
+  - 为什么上下文压缩要先做非破坏式编辑
+  - 为什么本地部署和原生分发对开发工具很重要
+target_roles:
+  - AI Infra
+  - Agent Platform
+  - Developer Tools
+  - 企业 AI 工程
+must_keep_claims:
+  - 这是一个从零自研的项目
+  - 重点是工程边界而不是单纯模型接入
+  - Python 是原型线，Rust 是产品化重构线
+  - 项目关注本地可运行、可控制、可分发
+avoid_claims:
+  - 所有判断都靠模型
+  - 安全主要靠 prompt
+  - 未核实的 best-of-N / 编排细节
+  - 夸大成通用 AGI 平台
+</code></pre>
+</div>
+</details>
+
+<details class="c" id="10-可直接复制的生成指令">
+<summary><span class="t">10. 可直接复制的生成指令</span><div class="peek">如果后面要生成口播、自我介绍、项目介绍页、视频文案，可以先把下面这句和上面的 YAML 一起喂给模型：</div></summary>
+<div class="body">
+<p>如果后面要生成口播、自我介绍、项目介绍页、视频文案，可以先把下面这句和上面的 YAML 一起喂给模型：</p>
+<pre><code class="language-text">请基于这份 nanocodex 项目介绍前置材料，生成一版适合面试场景的中文内容。要求：
+1. 保留事实锚点，不虚构没有实现的机制；
+2. 强调“工程边界、工具系统、本地交付”，不要写成普通聊天机器人；
+3. 语言自然、专业、可信；
+4. 如果输出用于口播，优先使用短句和可讲述表达；
+5. 如无特别要求，默认面向 AI Infra / Agent Platform / Developer Tools 岗位。
+</code></pre>
+</div>
+</details>
+

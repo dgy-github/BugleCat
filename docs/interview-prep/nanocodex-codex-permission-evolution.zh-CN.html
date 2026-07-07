@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanocodex 流程图详解 · 借鉴 codex + 驾驭工程细节</title>
+<style>
+  :root{
+    --bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--accent:#c2410c;--accent-soft:#fbe9df;--danger:#c0392b;--danger-soft:#fdecec;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 80px;}
+  header.hero{padding:40px 0 20px;border-bottom:1px solid var(--border);}
+  header.hero h1{font-size:25px;margin:0 0 8px;}
+  header.hero .thesis{font-size:14.5px;color:var(--text2);margin:0;max-width:760px;}
+  header.hero .thesis b{color:var(--accent);}
+  .meta{font-size:12px;color:var(--muted);margin-top:12px;}
+  nav.toc{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.93);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;padding:10px 0;margin-bottom:6px;}
+  nav.toc a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav.toc a:hover{border-color:var(--accent);color:var(--accent);}
+  section{padding:28px 0 4px;scroll-margin-top:54px;}
+  h2{font-size:20px;margin:0 0 4px;}
+  h3{font-size:16px;margin:22px 0 2px;display:flex;align-items:center;gap:8px;}
+  .lead{color:var(--text2);font-size:13.5px;margin:6px 0 14px;max-width:840px;}
+  figure{margin:8px 0 6px;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:10px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  .pts{background:var(--surface);border-left:4px solid var(--accent);border-radius:0 12px 12px 0;padding:11px 16px;margin:8px 0 4px;}
+  .pts b{color:var(--accent);}
+  .pts ul{margin:6px 0 0;padding-left:18px;}
+  .pts li{font-size:12.5px;line-height:1.5;margin:3px 0;}
+  code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:1px 5px;border-radius:5px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
+  th{font-size:12px;color:var(--muted);background:var(--surface);}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:20px;}
+  .pill.keep{background:var(--surface2);color:var(--text2);border:1px solid var(--border2);}
+  .pill.redo{background:var(--accent);color:#fff;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:6px 0;}
+  .card{background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:13px;}
+  .card.hero{border-left:4px solid var(--accent);}
+  .card .v{font-size:15px;font-weight:800;}
+  .card ul{margin:6px 0 0;padding-left:16px;}
+  .card li{font-size:11.5px;line-height:1.4;}
+  .quote{background:var(--accent-soft);border-left:4px solid var(--accent);border-radius:0 12px 12px 0;padding:13px 17px;font-size:13.5px;margin:10px 0;}
+  footer{margin-top:36px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>nanocodex 流程图详解 · 借鉴 codex + 驾驭工程细节</h1>
+  <p class="thesis"><b>nanocodex = codex 的 Rust 重写，权限控制是相对 codex 最大的再设计。</b>
+  本页把每个知识点画成竖向流程图（阶段标签 + 图标方框 + 分支 + 侧注），每图配「面试要点」，供模拟面试精确作答。</p>
+  <div class="meta">看法：先扫流程图建立画面 → 读面试要点定位可背句 → 卡壳时回到图上那个方框。</div>
+</header>
+
+<nav class="toc">
+  <a href="#map">🗺 地铁图</a>
+  <a href="#codex">📦 借鉴 codex</a>
+  <a href="#f-perm">🔐 权限判定</a>
+  <a href="#f-untrusted">🛡 untrusted 三筛</a>
+  <a href="#f-turn">⚙️ 一个回合</a>
+  <a href="#f-ctx">🗜 上下文压缩</a>
+  <a href="#f-orch">🌳 编排 best-of-N</a>
+  <a href="#f-forge">🧬 ncx-forge</a>
+  <a href="#redo">⭐ 三点再设计</a>
+  <a href="#talk">🎤 话术</a>
+</nav>
+
+<!-- ============ 地铁图 ============ -->
+<section id="map">
+  <h2>🗺 一图总览：版本主线 + 两条叙事轨道</h2>
+  <p class="lead">中间脊柱 v0→v6；上方虚线 = <b>codex 借鉴线</b>，下方实线 = <b>权限控制进化线</b>；⭐橙站 = 相对 codex 的再设计。</p>
+  <figure>
+  <svg viewBox="0 0 960 600" role="img" aria-label="nanocodex 版本地铁图">
+    <line x1="55" y1="74" x2="905" y2="74" stroke="#5b6472" stroke-width="2.5" stroke-dasharray="7 5"/>
+    <text x="60" y="46" font-size="13" font-weight="700" fill="#57534a" font-family="system-ui">📦 codex 借鉴线（能搬就逐字搬）</text>
+    <g font-size="10.5" fill="#57534a" text-anchor="middle" font-family="system-ui">
+      <rect x="34" y="61" width="92" height="26" rx="13" fill="#f3f1ea" stroke="#5b6472" stroke-dasharray="4 3"/><text x="80" y="78">apply_patch/@path</text>
+      <rect x="300" y="61" width="92" height="26" rx="13" fill="#f3f1ea" stroke="#5b6472" stroke-dasharray="4 3"/><text x="346" y="78">拆 3沙箱·4审批</text>
+      <rect x="699" y="61" width="92" height="26" rx="13" fill="#f3f1ea" stroke="#5b6472" stroke-dasharray="4 3"/><text x="745" y="78">best-of-N 结构</text>
+    </g>
+    <g stroke="#5b6472" stroke-width="2" stroke-dasharray="4 4"><line x1="80" y1="88" x2="80" y2="150"/><line x1="346" y1="88" x2="346" y2="150"/><line x1="745" y1="88" x2="745" y2="150"/></g>
+    <g text-anchor="middle" font-family="system-ui">
+      <rect x="26" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c7c2b5"/><text x="80" y="200" font-size="30">📦</text><text x="80" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v0</text><text x="80" y="258" font-size="11.5" font-weight="600" fill="#1f1d1a">移植内核</text><text x="80" y="282" font-size="9.5" fill="#8a857a">站在 codex</text><text x="80" y="296" font-size="9.5" fill="#8a857a">肩上</text>
+      <rect x="159" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c7c2b5"/><text x="213" y="200" font-size="30">⚙️</text><text x="213" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v1</text><text x="213" y="258" font-size="11.5" font-weight="600" fill="#1f1d1a">Harness 立骨</text><text x="213" y="282" font-size="9.5" fill="#8a857a">AgentLoop</text><text x="213" y="296" font-size="9.5" fill="#8a857a">+ 预算</text>
+      <rect x="292" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c2410c" stroke-width="2.5"/><text x="380" y="168" font-size="15">⭐</text><text x="346" y="200" font-size="30">🔐</text><text x="346" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v2</text><text x="346" y="258" font-size="11.5" font-weight="700" fill="#c2410c">权限双层正交</text><text x="346" y="282" font-size="9.5" fill="#8a857a">policy ⊥ approver</text><text x="346" y="296" font-size="9.5" fill="#8a857a">+ SessionGrants</text>
+      <rect x="425" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c7c2b5"/><text x="479" y="200" font-size="30">🗜️</text><text x="479" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v3</text><text x="479" y="258" font-size="11.5" font-weight="600" fill="#1f1d1a">上下文·工具</text><text x="479" y="282" font-size="9.5" fill="#8a857a">非破坏压缩</text><text x="479" y="296" font-size="9.5" fill="#8a857a">渐进暴露</text>
+      <rect x="558" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c7c2b5"/><text x="612" y="200" font-size="30">🧠</text><text x="612" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v4</text><text x="612" y="258" font-size="11.5" font-weight="600" fill="#1f1d1a">项目记忆</text><text x="612" y="282" font-size="9.5" fill="#8a857a">recall=线索</text><text x="612" y="296" font-size="9.5" fill="#8a857a">非事实</text>
+      <rect x="691" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c2410c" stroke-width="2.5"/><text x="779" y="168" font-size="15">⭐</text><text x="745" y="200" font-size="30">🌳</text><text x="745" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v5</text><text x="745" y="258" font-size="11.5" font-weight="700" fill="#c2410c">编排 best-of-N</text><text x="745" y="282" font-size="9.5" fill="#8a857a">reason() 空工具</text><text x="745" y="296" font-size="9.5" fill="#8a857a">= 能力剥夺</text>
+      <rect x="824" y="150" width="108" height="176" rx="12" fill="#f3f1ea" stroke="#c2410c" stroke-width="2.5"/><text x="912" y="168" font-size="15">⭐</text><text x="878" y="200" font-size="30">🧬</text><text x="878" y="234" font-size="15" font-weight="800" fill="#1f1d1a">v6</text><text x="878" y="258" font-size="11.5" font-weight="700" fill="#c2410c">ncx-forge 离线</text><text x="878" y="282" font-size="9.5" fill="#8a857a">只演化文字</text><text x="878" y="296" font-size="9.5" fill="#8a857a">沙箱托底</text>
+    </g>
+    <g stroke="#c2410c" stroke-width="2.5"><line x1="213" y1="326" x2="213" y2="406"/><line x1="346" y1="326" x2="346" y2="406"/><line x1="745" y1="326" x2="745" y2="406"/><line x1="878" y1="326" x2="878" y2="406"/></g>
+    <line x1="55" y1="420" x2="905" y2="420" stroke="#c2410c" stroke-width="3"/>
+    <text x="60" y="452" font-size="13" font-weight="700" fill="#c2410c" font-family="system-ui">🔐 权限控制进化线（相对 codex 的再设计）</text>
+    <g font-size="10.5" fill="#fff" text-anchor="middle" font-weight="600" font-family="system-ui">
+      <rect x="167" y="407" width="92" height="26" rx="13" fill="#c2410c"/><text x="213" y="424">历史不变式</text>
+      <rect x="300" y="407" width="92" height="26" rx="13" fill="#c2410c"/><text x="346" y="424">两层正交锁</text>
+      <rect x="699" y="407" width="92" height="26" rx="13" fill="#c2410c"/><text x="745" y="424">代码级剥夺</text>
+      <rect x="832" y="407" width="92" height="26" rx="13" fill="#c2410c"/><text x="878" y="424">训练=边界</text>
+    </g>
+    <rect x="55" y="486" width="850" height="60" rx="12" fill="#ebe8df" stroke="#c7c2b5"/>
+    <text x="480" y="512" font-size="13.5" font-weight="800" fill="#1f1d1a" text-anchor="middle" font-family="system-ui">贯穿主题：模型是第一杠杆 · harness 是第二杠杆</text>
+    <text x="480" y="533" font-size="11" fill="#57534a" text-anchor="middle" font-family="system-ui">codex 给了词汇 → nanocodex 做成「可单测 · 可回放 · 改不动安全边界」的纯函数系统</text>
+  </svg>
+  </figure>
+</section>
+
+<!-- ============ 借鉴 codex ============ -->
+<section id="codex">
+  <h2>📦 借鉴 codex 什么（原样搬 vs 再设计）</h2>
+  <table>
+    <thead><tr><th>codex 特性</th><th>nanocodex 怎么用</th><th style="width:92px">取舍</th></tr></thead>
+    <tbody>
+      <tr><td>apply_patch 工具（格式+描述）</td><td>工具描述<b>逐字移植</b>（改了→模型退回 git-diff 乱套）</td><td><span class="pill keep">原样搬</span></td></tr>
+      <tr><td>沙箱三模式 read-only/workspace-write/danger</td><td><code>SandboxPolicy</code> 三档，「照搬 Codex 三模式」</td><td><span class="pill redo">重写纯函数</span></td></tr>
+      <tr><td>审批四档 untrusted/on-failure/on-request/never</td><td><code>Approver::classify</code> 四档 → 三态</td><td><span class="pill redo">重写纯函数</span></td></tr>
+      <tr><td><code>@path</code> 文件内联</td><td>codex 风格 <code>@path</code> 把文件拉进 prompt</td><td><span class="pill keep">原样搬</span></td></tr>
+      <tr><td>on-failure 重跑 / ExecResult 形状</td><td>失败后 escalated 重跑同一条；字段对齐但不 set</td><td><span class="pill keep">搬形状</span></td></tr>
+      <tr><td>tool_calls OpenAI 形态</td><td>每 tool_call 必有回复、不以孤立 tool 开头</td><td><span class="pill redo">自加固不变式</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 流程图 1：权限判定 ============ -->
+<section id="f-perm">
+  <h3>🔐 流程图 1 · 一次写操作的权限判定（v2 核心）</h3>
+  <figure>
+  <svg viewBox="0 0 540 700" role="img" aria-label="权限判定流程图" font-family="system-ui">
+    <rect x="0" y="0" width="540" height="42" rx="10" fill="#c2410c"/><text x="270" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">🔐 一次写操作 · 权限判定流程</text>
+    <g font-size="11" font-weight="800" fill="#c2410c" text-anchor="middle">
+      <text x="34" y="82" transform="rotate(-90 34 82)">入口</text><text x="34" y="176" transform="rotate(-90 34 176)">① 物理门</text><text x="34" y="360" transform="rotate(-90 34 360)">② 越界门</text><text x="34" y="600" transform="rotate(-90 34 600)">③ 执行间</text>
+    </g>
+    <line x1="64" y1="56" x2="64" y2="672" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#a1)"><line x1="300" y1="96" x2="300" y2="118"/><line x1="300" y1="170" x2="300" y2="192"/><line x1="300" y1="248" x2="300" y2="270"/></g>
+    <g text-anchor="middle">
+      <rect x="180" y="58" width="240" height="40" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="83" font-size="12.5" font-weight="600" fill="#1f1d1a">🔧 工具请求：写文件 / 跑命令</text>
+      <rect x="180" y="120" width="240" height="50" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="300" y="141" font-size="12.5" font-weight="700" fill="#1f1d1a">📐 SandboxPolicy 算 escalation</text><text x="300" y="159" font-size="10" fill="#8a857a">can_write 词法路径包含（越界?）</text>
+      <rect x="180" y="194" width="240" height="52" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="216" font-size="12.5" font-weight="700" fill="#1f1d1a">📓 SessionGrants 精确命中?</text><text x="300" y="234" font-size="10" fill="#8a857a">本会话已批过的同一条命令</text>
+      <rect x="180" y="272" width="240" height="54" rx="10" fill="#f3f1ea" stroke="#c2410c" stroke-width="2"/><text x="300" y="294" font-size="12.5" font-weight="800" fill="#c2410c">⚖️ Approver::classify</text><text x="300" y="312" font-size="10" fill="#8a857a">4 档策略 · untrusted 先过三筛</text>
+    </g>
+    <path d="M420,220 H486 V517 H420" fill="none" stroke="#57534a" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#a1)"/><text x="500" y="370" font-size="9.5" fill="#57534a" transform="rotate(-90 500 370)">命中→AutoApprove 短路</text><text x="300" y="264" font-size="9.5" fill="#57534a" text-anchor="middle">未命中 ↓</text>
+    <g stroke="#57534a" stroke-width="1.6" fill="none" marker-end="url(#a1)"><path d="M230,326 V352 H132 V372"/><path d="M300,326 V372"/></g>
+    <g text-anchor="middle">
+      <rect x="72" y="374" width="120" height="48" rx="10" fill="#fdecec" stroke="#c0392b"/><text x="132" y="394" font-size="11.5" font-weight="700" fill="#c0392b">✋ AutoDeny</text><text x="132" y="411" font-size="9.5" fill="#a03024">拒绝（never 报错）</text>
+      <rect x="216" y="374" width="176" height="48" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="304" y="394" font-size="11.5" font-weight="700" fill="#1f1d1a">🙋 Ask → ApprovalHandler</text><text x="304" y="411" font-size="9.5" fill="#8a857a">Deny / Once / Always</text>
+    </g>
+    <text x="190" y="345" font-size="9" fill="#57534a" text-anchor="middle">越界</text><text x="336" y="345" font-size="9" fill="#57534a" text-anchor="middle">要问</text>
+    <path d="M304,422 V488" fill="none" stroke="#57534a" stroke-width="1.6" marker-end="url(#a1)"/><text x="360" y="460" font-size="9.5" fill="#57534a" text-anchor="middle">批准(≠Deny)</text><text x="300" y="482" font-size="9.5" fill="#57534a" text-anchor="middle">AutoApprove 也走这里 ↓</text>
+    <g text-anchor="middle">
+      <rect x="180" y="490" width="240" height="54" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="300" y="512" font-size="12.5" font-weight="700" fill="#1f1d1a">📦 PolicyExecutor 容器执行</text><text x="300" y="530" font-size="10" fill="#8a857a">Job Object 杀进程树 + 超时 · 不做审批</text>
+      <rect x="180" y="590" width="240" height="44" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="615" font-size="12" font-weight="600" fill="#1f1d1a">✅ 结果 / ⏱ 超时 exit 124</text>
+    </g>
+    <line x1="300" y1="544" x2="300" y2="588" stroke="#57534a" stroke-width="1.8" marker-end="url(#a1)"/>
+    <text x="270" y="668" font-size="10.5" fill="#8a857a" text-anchor="middle">正交：物理门放行 ≠ 越界门放行（danger 全开时 untrusted 未知命令仍 Ask）</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b>
+    <ul>
+      <li><b>两道正交纯函数</b>：<code>SandboxPolicy.can_write</code> 判物理（3 档模式 + 词法路径包含）⊥ <code>Approver::classify</code> 判越界（4 档 → 3 态）。</li>
+      <li><b>SessionGrants 短路</b>：本会话精确命中过的命令直接 AutoApprove；一字不差匹配，fork/resume 即清空。</li>
+      <li><b>三态出口</b>：AutoApprove 直跑 / Ask 弹 ApprovalHandler（Deny·Once·Always）/ AutoDeny 拒（never 档报错）。</li>
+      <li><b>PolicyExecutor 只做容器</b>（Job Object+timeout），决策在它之前已定死——判断与执行彻底分开。</li>
+      <li>一句话：<b>安全边界建在代码上不建在措辞上</b>；danger 全开也不改 approval 策略，故 untrusted 未知命令仍会问。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 流程图 2：untrusted 三重过滤 ============ -->
+<section id="f-untrusted">
+  <h3>🛡 流程图 2 · untrusted 三重过滤 <code>is_trusted()</code>（越界门内部）</h3>
+  <p class="lead">这是「② 越界门」在 <code>untrusted</code> 档下的子流程：决定一条命令能不能自动放行。<b>最危险的检查放第一步</b>。</p>
+  <figure>
+  <svg viewBox="0 0 540 620" role="img" aria-label="untrusted 三重过滤流程图" font-family="system-ui">
+    <rect x="0" y="0" width="540" height="42" rx="10" fill="#c2410c"/><text x="270" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">🛡 untrusted 档 · 三重过滤 is_trusted()</text>
+    <g font-size="11" font-weight="800" fill="#c2410c" text-anchor="middle"><text x="34" y="90" transform="rotate(-90 34 90)">输入</text><text x="34" y="180" transform="rotate(-90 34 180)">筛①正则</text><text x="34" y="280" transform="rotate(-90 34 280)">筛②白名单</text><text x="34" y="380" transform="rotate(-90 34 380)">筛③git</text><text x="34" y="500" transform="rotate(-90 34 500)">汇总</text></g>
+    <line x1="64" y1="56" x2="64" y2="592" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="a2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#a2)"><line x1="250" y1="94" x2="250" y2="116"/><line x1="250" y1="176" x2="250" y2="198"/><line x1="250" y1="262" x2="250" y2="284"/><line x1="250" y1="348" x2="250" y2="392"/></g>
+    <g text-anchor="middle">
+      <rect x="140" y="56" width="220" height="38" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="250" y="80" font-size="12.5" font-weight="600" fill="#1f1d1a">📥 命令字符串 command</text>
+      <rect x="130" y="118" width="240" height="58" rx="10" fill="#f3f1ea" stroke="#c2410c" stroke-width="2"/><text x="250" y="139" font-size="12.5" font-weight="800" fill="#c2410c">🚫 ① 危险正则 ×7 扫全串</text><text x="250" y="156" font-size="10" fill="#8a857a">任意位置命中即 false · 先于一切</text><text x="250" y="170" font-size="10" fill="#8a857a">例：rm -[rf] / 覆盖重定向 …</text>
+      <rect x="130" y="200" width="240" height="60" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="250" y="221" font-size="12.5" font-weight="700" fill="#1f1d1a">📋 ② 取 first_token 查 29 白名单</text><text x="250" y="238" font-size="10" fill="#8a857a">剥路径前缀 / .exe / 小写化</text><text x="250" y="252" font-size="10" fill="#8a857a">TRUSTED_COMMANDS（29 条）</text>
+      <rect x="130" y="286" width="240" height="60" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="250" y="307" font-size="12.5" font-weight="700" fill="#1f1d1a">🔀 ③ base==git? 查 15 写子命令</text><text x="250" y="324" font-size="10" fill="#8a857a">首个非 flag token</text><text x="250" y="338" font-size="10" fill="#8a857a">GIT_WRITE_SUBCMDS（15 条）</text>
+    </g>
+    <!-- 命中→不可信 右侧汇流 -->
+    <g stroke="#c0392b" stroke-width="1.6" fill="none" marker-end="url(#a2)"><path d="M370,147 H452 V430 H388"/><path d="M370,230 H452"/><path d="M370,316 H452"/></g>
+    <text x="466" y="300" font-size="9.5" fill="#c0392b" transform="rotate(-90 466 300)">命中/不在/写子命令 → 不可信</text>
+    <g text-anchor="middle">
+      <rect x="150" y="392" width="200" height="52" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="250" y="413" font-size="12.5" font-weight="700" fill="#1f1d1a">三筛全过 → is_trusted=true</text><text x="250" y="430" font-size="10" fill="#8a857a">再看 escalation</text>
+      <rect x="120" y="470" width="130" height="52" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="185" y="491" font-size="11.5" font-weight="700" fill="#c2410c">trusted &amp; 未越界</text><text x="185" y="508" font-size="11" fill="#1f1d1a">→ AutoApprove</text>
+      <rect x="290" y="470" width="130" height="52" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="355" y="491" font-size="11.5" font-weight="700" fill="#1f1d1a">否则</text><text x="355" y="508" font-size="11" fill="#1f1d1a">→ Ask（问人）</text>
+    </g>
+    <line x1="250" y1="444" x2="250" y2="466" stroke="#57534a" stroke-width="1.8" marker-end="url(#a2)"/>
+    <path d="M388,430 V470" fill="none" stroke="#c0392b" stroke-width="1.6" marker-end="url(#a2)"/>
+    <g text-anchor="middle" font-size="10.5" fill="#57534a">
+      <text x="270" y="560">例：<tspan fill="#1f1d1a" font-weight="700">git status</tspan>→AutoApprove · <tspan fill="#1f1d1a" font-weight="700">git push</tspan>→Ask · <tspan fill="#c0392b" font-weight="700">rm -rf x</tspan>→Ask</text>
+      <text x="270" y="580" font-size="10">rm 即使被可信命令引导也拦——正则第①步先跑，先于 first_token 解析</text>
+    </g>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点（务必背准顺序与数字）</b>
+    <ul>
+      <li><b>三步顺序</b>：① 7 条 dangerous 正则扫全串（任意位置命中即 false）→ ② 剥路径/<code>.exe</code>、取 first_token 查 <b>29</b> 条白名单 → ③ <code>base==git</code> 再查 <b>15</b> 条写子命令。</li>
+      <li><b>为什么正则放第一步</b>：fail-safe——<code>rm -rf</code> 即便前面有可信 token 引导、或 rm 不在白名单，也先被拦。</li>
+      <li><b>结合 escalation</b>：untrusted 分支 = <code>is_trusted(cmd) &amp;&amp; !越界 ? AutoApprove : Ask</code>；白名单是<b>保守</b>的——<code>git status</code> 自动、<code>git push</code> 仍问。</li>
+      <li>它是「越界门 classify」的 untrusted 档内部逻辑，不是独立系统。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 流程图 3：一个回合 run_turn ============ -->
+<section id="f-turn">
+  <h3>⚙️ 流程图 3 · 一个回合 <code>run_turn</code>（v1 Harness）</h3>
+  <figure>
+  <svg viewBox="0 0 560 720" role="img" aria-label="run_turn 回合流程图" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="42" rx="10" fill="#c2410c"/><text x="280" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">⚙️ 一个回合 run_turn</text>
+    <g font-size="11" font-weight="800" fill="#c2410c" text-anchor="middle"><text x="30" y="100" transform="rotate(-90 30 100)">入口</text><text x="30" y="330" transform="rotate(-90 30 330)">迭代循环</text><text x="30" y="600" transform="rotate(-90 30 600)">工具执行</text><text x="30" y="690" transform="rotate(-90 30 690)">退出</text></g>
+    <line x1="58" y1="56" x2="58" y2="700" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#a3)"><line x1="300" y1="92" x2="300" y2="112"/><line x1="300" y1="150" x2="300" y2="170"/></g>
+    <g text-anchor="middle">
+      <rect x="170" y="56" width="260" height="36" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="79" font-size="12" font-weight="600" fill="#1f1d1a">👤 用户输入（可含图 image_block）</text>
+      <rect x="170" y="114" width="260" height="36" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="137" font-size="12" fill="#1f1d1a">有图? → 视觉 provider · user_prompt hook</text>
+    </g>
+    <text x="452" y="132" font-size="9.5" fill="#57534a">hook 可 blocked 短路</text>
+    <!-- loop box -->
+    <rect x="120" y="176" width="380" height="360" rx="12" fill="none" stroke="#c2410c" stroke-dasharray="6 4"/>
+    <text x="300" y="192" font-size="10.5" font-weight="700" fill="#c2410c" text-anchor="middle">for iteration in 0..max_model_calls</text>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#a3)"><line x1="300" y1="230" x2="300" y2="250"/><line x1="300" y1="288" x2="300" y2="308"/><line x1="300" y1="356" x2="300" y2="376"/></g>
+    <g text-anchor="middle">
+      <rect x="150" y="200" width="300" height="30" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="300" y="220" font-size="11" fill="#1f1d1a">查 cancel · 前置 budget_note</text>
+      <rect x="150" y="250" width="300" height="38" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="300" y="268" font-size="11" font-weight="600" fill="#1f1d1a">schemas_for_query 选可见工具</text><text x="300" y="282" font-size="9.5" fill="#8a857a">≤9 全暴露 / ALWAYS+tool_hints+catalog_score(+genome)</text>
+      <rect x="150" y="308" width="300" height="48" rx="8" fill="#fff" stroke="#c2410c"/><text x="300" y="328" font-size="11.5" font-weight="700" fill="#c2410c">for_model_edited 压缩发送视图</text><text x="300" y="344" font-size="9.5" fill="#8a857a">→ active_provider().chat()（主/视觉）</text>
+      <rect x="150" y="376" width="300" height="44" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="300" y="395" font-size="11" fill="#1f1d1a">finish? error→返回 · 无 tool_calls→completed</text><text x="300" y="409" font-size="9.5" fill="#8a857a">有 tool_calls ↓ 持久化助手消息</text>
+      <rect x="150" y="440" width="300" height="48" rx="8" fill="#fff" stroke="#c2410c"/><text x="300" y="460" font-size="11" font-weight="700" fill="#1f1d1a">遍历 tool_calls：连续 read_only→join_all 并发</text><text x="300" y="475" font-size="9.5" fill="#8a857a">写/未知→串行 · 每步查 cancel+工具预算</text>
+      <rect x="150" y="500" width="300" height="28" rx="8" fill="#fff" stroke="#c7c2b5"/><text x="300" y="519" font-size="10.5" fill="#1f1d1a">execute: pre-hook → 工具 → post-hook</text>
+    </g>
+    <line x1="300" y1="420" x2="300" y2="440" stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#a3)"/><line x1="300" y1="488" x2="300" y2="500" stroke="#57534a" stroke-width="1.7" marker-end="url(#a3)"/>
+    <text x="468" y="516" font-size="9" fill="#57534a">apply_patch/写shell→🔐沙箱</text>
+    <!-- back arrow loop -->
+    <path d="M150,514 H132 V210 H150" fill="none" stroke="#57534a" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a3)"/><text x="120" y="360" font-size="9" fill="#57534a" transform="rotate(-90 120 360)">add_tool_result 按序回填 ↺</text>
+    <!-- exit -->
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#a3)"><line x1="300" y1="536" x2="300" y2="560"/><line x1="300" y1="620" x2="300" y2="644"/></g>
+    <g text-anchor="middle">
+      <rect x="150" y="562" width="300" height="58" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="583" font-size="11.5" font-weight="700" fill="#1f1d1a">退出条件（任一）</text><text x="300" y="600" font-size="9.5" fill="#8a857a">模型不带工具作答 / error / cancel</text><text x="300" y="613" font-size="9.5" fill="#8a857a">/ 触及预算 / max_model_calls 耗尽</text>
+      <rect x="180" y="646" width="240" height="40" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="671" font-size="12" font-weight="600" fill="#1f1d1a">📼 recorder.record → JSONL</text>
+    </g>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b>
+    <ul>
+      <li><b>循环上限</b>：<code>for iteration in 0..max_model_calls</code>（= max_iterations 与 task_budget 取小）；每步先查 cancel + 工具预算，为 0 则<b>回填未应答 tool_call</b> 再退出。</li>
+      <li><b>工具视图每回合重建</b>：<code>schemas_for_query</code>——≤9 全暴露，否则 ALWAYS_VISIBLE + 上回合 tool_hints + catalog_score 词法打分（上限 9），再叠 genome 覆盖。</li>
+      <li><b>并发规则</b>：当前+下一个都 <code>read_only</code> 才 <code>join_all</code> 并发；写/未知一律串行。</li>
+      <li><b>历史合法性不变式</b>：cancel/预算耗尽时 <code>backfill_unanswered_tool_calls</code> 合成占位回复——否则下次请求 400。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 流程图 4：上下文压缩 ============ -->
+<section id="f-ctx">
+  <h3>🗜 流程图 4 · 上下文压缩 <code>for_model_edited</code>（v3，非破坏发送视图）</h3>
+  <figure>
+  <svg viewBox="0 0 540 520" role="img" aria-label="上下文压缩流程图" font-family="system-ui">
+    <rect x="0" y="0" width="540" height="42" rx="10" fill="#c2410c"/><text x="270" y="27" font-size="15.5" font-weight="800" fill="#fff" text-anchor="middle">🗜 上下文压缩 · 发送时视图（原始不动）</text>
+    <g font-size="11" font-weight="800" fill="#c2410c" text-anchor="middle"><text x="34" y="95" transform="rotate(-90 34 95)">输入</text><text x="34" y="185" transform="rotate(-90 34 185)">第 1 趟</text><text x="34" y="300" transform="rotate(-90 34 300)">第 2 趟</text><text x="34" y="430" transform="rotate(-90 34 430)">输出</text></g>
+    <line x1="64" y1="56" x2="64" y2="492" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="a4" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#a4)"><line x1="300" y1="96" x2="300" y2="118"/><line x1="300" y1="176" x2="300" y2="198"/><line x1="300" y1="270" x2="300" y2="298"/><line x1="300" y1="360" x2="300" y2="404"/></g>
+    <g text-anchor="middle">
+      <rect x="160" y="58" width="280" height="38" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="82" font-size="12" font-weight="600" fill="#1f1d1a">messages + system_notes + Policy</text>
+      <rect x="160" y="120" width="280" height="56" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="300" y="141" font-size="12.5" font-weight="700" fill="#1f1d1a">① 压缩旧 tool 结果</text><text x="300" y="159" font-size="10" fill="#8a857a">→ 上限 max_tool_result_chars</text>
+      <rect x="160" y="200" width="280" height="46" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="221" font-size="12" font-weight="700" fill="#1f1d1a">仍超 max_chars ?</text><text x="300" y="238" font-size="10" fill="#8a857a">否 → 直接输出</text>
+      <rect x="160" y="300" width="280" height="60" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="300" y="321" font-size="12.5" font-weight="700" fill="#1f1d1a">② 在 user 边界丢最旧前缀</text><text x="300" y="338" font-size="10" fill="#8a857a">切点推进到 user 消息</text><text x="300" y="352" font-size="10" fill="#8a857a">跳过打头的孤立 tool 消息</text>
+      <rect x="160" y="406" width="280" height="50" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="426" font-size="12" font-weight="700" fill="#1f1d1a">📤 发送时 ContextMessages</text><text x="300" y="443" font-size="10" fill="#8a857a">+ ContextEditStats · self.messages 不变</text>
+    </g>
+    <path d="M440,223 H492 V430 H440" fill="none" stroke="#57534a" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#a4)"/><text x="506" y="330" font-size="9.5" fill="#57534a" transform="rotate(-90 506 330)">否 → 跳过第2趟</text>
+    <text x="270" y="486" font-size="10.5" fill="#8a857a" text-anchor="middle">非破坏：压缩只发生在「发送时」，原始历史保留 → 可 resume / 回放 / 换模型重算</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b>
+    <ul>
+      <li><b>两趟</b>：① 压旧 tool 结果到 <code>max_tool_result_chars</code> → ② 仍超 <code>max_chars</code> 则在 <b>user 边界</b>丢最旧前缀。</li>
+      <li><b>非破坏</b>：<code>self.messages</code> 原始历史不动，压缩是「发送时视图」——保留原始才敢激进压（resume/回放/换模型）。</li>
+      <li><b>硬规则</b>：切点绝不落在 tool_result；前缀丢弃把切点推进到 user 边界并跳过打头孤立 tool——维护 OpenAI 历史合法性（否则 400）。</li>
+      <li><b>换业务</b>：编码留最近代码 diff；客服/售后留用户原始诉求+订单号（不同的保留优先级）。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 流程图 5：编排 best-of-N ============ -->
+<section id="f-orch">
+  <h3>🌳 流程图 5 · 编排 best-of-N（v5，父子无总线）</h3>
+  <figure>
+  <svg viewBox="0 0 560 640" role="img" aria-label="编排 best-of-N 流程图" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="42" rx="10" fill="#c2410c"/><text x="280" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">🌳 编排 best-of-N（父子无总线）</text>
+    <g font-size="11" font-weight="800" fill="#c2410c" text-anchor="middle"><text x="30" y="95" transform="rotate(-90 30 95)">分类</text><text x="30" y="170" transform="rotate(-90 30 170)">规划</text><text x="30" y="300" transform="rotate(-90 30 300)">隔离并发</text><text x="30" y="430" transform="rotate(-90 30 430)">验收</text><text x="30" y="560" transform="rotate(-90 30 560)">落地</text></g>
+    <line x1="58" y1="56" x2="58" y2="612" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="a5" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#a5)"><line x1="300" y1="96" x2="300" y2="118"/><line x1="300" y1="170" x2="300" y2="192"/><line x1="300" y1="292" x2="300" y2="330"/><line x1="300" y1="404" x2="300" y2="426"/></g>
+    <g text-anchor="middle">
+      <rect x="170" y="58" width="260" height="38" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="76" font-size="12" font-weight="700" fill="#1f1d1a">classify（Fast · 空工具 reason）</text><text x="300" y="90" font-size="9.5" fill="#8a857a">→ simple / medium / high</text>
+      <rect x="170" y="120" width="260" height="50" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="141" font-size="12" font-weight="700" fill="#1f1d1a">plan 只算一次（空工具）</text><text x="300" y="158" font-size="9.5" fill="#8a857a">分发所有 worker+verifier 当唯一真相</text>
+      <rect x="130" y="194" width="340" height="98" rx="12" fill="none" stroke="#c2410c" stroke-dasharray="6 4"/><text x="300" y="212" font-size="10.5" font-weight="700" fill="#c2410c">fan-out：N worker · join_all 并发</text>
+      <rect x="150" y="222" width="130" height="60" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="215" y="242" font-size="10.5" font-weight="600" fill="#1f1d1a">worker i</text><text x="215" y="257" font-size="9" fill="#8a857a">copy_tree 私有</text><text x="215" y="269" font-size="9" fill="#8a857a">scratch 隔离</text>
+      <rect x="320" y="222" width="130" height="60" rx="9" fill="#fff" stroke="#c7c2b5"/><text x="385" y="242" font-size="10.5" font-weight="600" fill="#1f1d1a">worker j</text><text x="385" y="257" font-size="9" fill="#8a857a">带工具 AgentLoop</text><text x="385" y="269" font-size="9" fill="#8a857a">Tier::Fast</text>
+      <rect x="160" y="330" width="280" height="52" rx="10" fill="#f3f1ea" stroke="#c2410c" stroke-width="2"/><text x="300" y="351" font-size="12" font-weight="800" fill="#c2410c">verify（空工具）</text><text x="300" y="368" font-size="9.5" fill="#8a857a">拼 --- worker i --- → 输出 PASS/FAIL + BEST:&lt;n&gt;</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.6" fill="none" marker-end="url(#a5)"><path d="M230,382 V404 H190 V426"/><path d="M370,382 V404 H410 V426"/></g>
+    <g text-anchor="middle">
+      <rect x="70" y="428" width="230" height="60" rx="10" fill="#f3f1ea" stroke="#c2410c"/><text x="185" y="449" font-size="11.5" font-weight="700" fill="#c2410c">PASS → promote_worker(best)</text><text x="185" y="465" font-size="9.5" fill="#8a857a">copy_tree winner → 真 workspace</text><text x="185" y="478" font-size="9.5" fill="#8a857a">删所有 scratch</text>
+      <rect x="320" y="428" width="230" height="60" rx="10" fill="#fdecec" stroke="#c0392b"/><text x="435" y="449" font-size="11.5" font-weight="700" fill="#c0392b">FAIL → verdict 当 feedback 灌回</text><text x="435" y="465" font-size="9.5" fill="#a03024">重试 ≤ max_verify_retries</text><text x="435" y="478" font-size="9.5" fill="#a03024">用尽仍 promote best（标 unverified）</text>
+    </g>
+    <path d="M435,488 V512 H300 V512" fill="none" stroke="#c0392b" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#a5)"/>
+    <g text-anchor="middle"><rect x="150" y="512" width="300" height="52" rx="10" fill="#ebe8df" stroke="#c7c2b5"/><text x="300" y="533" font-size="11.5" font-weight="700" fill="#1f1d1a">递归子任务：串行 for 循环</text><text x="300" y="550" font-size="9.5" fill="#8a857a">每个先 promote 落地，k+1 才能叠加 k 的改动</text></g>
+    <line x1="185" y1="488" x2="185" y2="536" stroke="#57534a" stroke-width="1.6" marker-end="url(#a5)"/>
+    <text x="280" y="600" font-size="10.5" fill="#8a857a" text-anchor="middle">无消息总线：prompt 下发 + 文件隔离-提升 + PASS/FAIL/BEST 回灌，父节点是唯一中枢</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b>
+    <ul>
+      <li><b>三通道通讯（无总线）</b>：① prompt 下发（状态按值序列化进全新无状态子会话）② 文件隔离-提升（真 IPC）③ <code>PASS/FAIL/BEST</code> 裁决回灌。</li>
+      <li><b>能力剥夺</b>：classify/plan/verify 走 <code>reason()</code> = 空 <code>ToolRegistry</code>，代码级物理拿不到工具。</li>
+      <li><b>隔离修的真实 bug</b>：并行 <code>apply_patch</code> Add 同名文件撞车 → 每 worker 私有 <code>ncx_worker_{pid}_{n}</code> 拷贝；真 workspace 只在 verify 后被 promote 写一次。</li>
+      <li><b>裁决健壮性</b>：<code>verdict_passed = !contains("FAIL")</code>（位置无关）；<code>BEST:</code> 缺失/畸形兜底 index 0——偏向「往前推进」而非卡死。</li>
+      <li><b>递归串行</b>：子任务用 for 循环，每个先 promote 再进下一个（依赖可叠加）；并行会重新引入撞车。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 流程图 6：ncx-forge ============ -->
+<section id="f-forge">
+  <h3>🧬 流程图 6 · ncx-forge 离线演化循环（v6）</h3>
+  <figure>
+  <svg viewBox="0 0 560 640" role="img" aria-label="ncx-forge 离线演化流程图" font-family="system-ui">
+    <rect x="0" y="0" width="560" height="42" rx="10" fill="#c2410c"/><text x="280" y="27" font-size="16" font-weight="800" fill="#fff" text-anchor="middle">🧬 ncx-forge 离线演化循环</text>
+    <g font-size="11" font-weight="800" fill="#c2410c" text-anchor="middle"><text x="30" y="95" transform="rotate(-90 30 95)">门禁</text><text x="30" y="175" transform="rotate(-90 30 175)">抽取</text><text x="30" y="255" transform="rotate(-90 30 255)">变异</text><text x="30" y="360" transform="rotate(-90 30 360)">评估</text><text x="30" y="475" transform="rotate(-90 30 475)">接受</text><text x="30" y="575" transform="rotate(-90 30 575)">接缝</text></g>
+    <line x1="58" y1="56" x2="58" y2="612" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <defs><marker id="a6" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#a6)"><line x1="300" y1="96" x2="300" y2="116"/><line x1="300" y1="156" x2="300" y2="176"/><line x1="300" y1="224" x2="300" y2="244"/><line x1="300" y1="312" x2="300" y2="332"/><line x1="300" y1="400" x2="300" y2="420"/><line x1="300" y1="470" x2="300" y2="490"/></g>
+    <g text-anchor="middle">
+      <rect x="150" y="58" width="300" height="38" rx="10" fill="#f3f1ea" stroke="#c2410c" stroke-width="2"/><text x="300" y="76" font-size="12" font-weight="800" fill="#c2410c">🔑 self_check(sentinel) 门</text><text x="300" y="90" font-size="9.5" fill="#8a857a">证明注入生效，否则拒绝训练</text>
+      <rect x="150" y="118" width="300" height="38" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="136" font-size="12" font-weight="600" fill="#1f1d1a">ncx --dump-genome → baseline</text><text x="300" y="150" font-size="9.5" fill="#8a857a">genome = system_prompt + tool_desc</text>
+      <rect x="150" y="178" width="300" height="46" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="199" font-size="12" font-weight="700" fill="#1f1d1a">teacher panel（codex/claude/api）</text><text x="300" y="216" font-size="9.5" fill="#8a857a">reflective mutation → TOML 覆盖</text>
+      <rect x="150" y="246" width="300" height="66" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="267" font-size="12" font-weight="700" fill="#1f1d1a">evaluator：bench + 隐藏 check.py</text><text x="300" y="284" font-size="9.5" fill="#8a857a">跑候选 genome 打分</text><text x="300" y="298" font-size="9.5" fill="#8a857a">收割失败轨迹（脱敏）</text>
+      <rect x="150" y="334" width="300" height="46" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="355" font-size="12" font-weight="700" fill="#1f1d1a">accept：TRAIN margin &amp; VAL 无回归</text><text x="300" y="372" font-size="9.5" fill="#8a857a">双集接受，防过拟合</text>
+      <rect x="150" y="422" width="300" height="46" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/><text x="300" y="443" font-size="12" font-weight="700" fill="#1f1d1a">pareto：passrate↑ / cost↓</text><text x="300" y="460" font-size="9.5" fill="#8a857a">多目标择优 → winner genome.toml</text>
+      <rect x="150" y="492" width="300" height="48" rx="10" fill="#ebe8df" stroke="#c2410c" stroke-width="2"/><text x="300" y="513" font-size="12" font-weight="800" fill="#c2410c">═ NCX_GENOME（唯一接缝）═</text><text x="300" y="530" font-size="9.5" fill="#8a857a">运行时 Genome::from_env() 读取</text>
+    </g>
+    <text x="280" y="575" font-size="10.5" fill="#8a857a" text-anchor="middle">只演化文字 · 执行永过沙箱 → 改不动安全边界</text>
+    <text x="280" y="595" font-size="10" fill="#8a857a" text-anchor="middle">空/格式错/空白 → Genome::default() 可证明 no-op（字节级回退默认）</text>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b>
+    <ul>
+      <li><b>只演化文字</b>：genome = system_prompt + 工具描述（纯文本），<b>绝不动行为/权限</b>。</li>
+      <li><b>唯一接缝 + 可证明 no-op</b>：<code>NCX_GENOME</code> 是训练↔运行唯一通道；空/错 → 字节级回退默认脚手架。</li>
+      <li><b>训练接缝即安全边界</b>：执行始终过沙箱 → 被不可信失败轨迹喂养的 teacher 也无法注入新能力。</li>
+      <li><b>sentinel 门</b>：无法证明注入生效前拒绝训练——防「离线全绿是假象」。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 三点再设计 ============ -->
+<section id="redo">
+  <h2>⭐ 相对 codex 的三点再设计（面试主攻）</h2>
+  <div class="grid">
+    <div class="card hero"><div class="v">1 · 两层正交纯函数</div><ul><li>sandbox/approval 拆成 <code>can_write</code> ⊥ <code>classify</code></li><li>每次重算、无持久跳转</li><li>可单测、可回放</li></ul></div>
+    <div class="card hero"><div class="v">2 · 三层解耦</div><ul><li>policy / approval / prompt 三层</li><li>ApprovalHandler 踢出 sandbox crate</li><li>层间独立判定</li></ul></div>
+    <div class="card hero"><div class="v">3 · 能力剥夺 + 训练即边界</div><ul><li><code>reason()</code> 空 registry → 物理无工具</li><li>genome 只换文字、执行永过沙箱</li><li>离线训练改不动安全边界</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ 话术 ============ -->
+<section id="talk">
+  <h2>🎤 面试话术（90 秒）</h2>
+  <div class="quote">「nanocodex 是我把 codex 用 Rust 重写的 agent。<b>能原样搬的逐字搬</b>——apply_patch 描述、<code>@path</code>、tool_calls 形态、沙箱三模式、审批四档。<b>但权限控制我做了再设计</b>：拆成两层正交纯函数——<code>can_write</code> 判物理、<code>classify</code> 判越界——再加一层人类提示，三层解耦、每次重算、只留一个窄的 session 授权。更进一步，用<b>代码级能力剥夺</b>（推理节点空工具）和<b>训练接缝即安全边界</b>（离线只演化文字、执行永过沙箱）把权限焊死。一句话：codex 给了我词汇，我把它做成了可单测、可回放、改不动安全边界的纯函数系统。」</div>
+</section>
+
+<footer>
+  nanocodex 流程图详解 · 6 张流程图（权限判定 / untrusted 三筛 / run_turn / 上下文压缩 / best-of-N / ncx-forge）<br>
+  配套：<code>docs/portrait_parts/04_sandbox.md</code>（沙箱审批） · <code>05_orchestrator_comm.md</code>（编排通讯） · <code>docs/nanocodex-drive-engineering-interview-drills.zh.md</code>（刷题卡）
+</footer>
+
+</div>
+</body>
+</html>

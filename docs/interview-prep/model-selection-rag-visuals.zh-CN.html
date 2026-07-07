@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模型选型 + RAG · 决策图谱</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--sel:#c2410c;--rag:#6d28d9;--ok:#0e7a52;--danger:#c0392b;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;}
+  .wrap{max-width:1000px;margin:0 auto;padding:26px 20px 70px;}
+  h1{font-size:23px;margin:0 0 4px;} .sub{font-size:13px;color:var(--text2);margin:0 0 18px;}
+  nav{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.93);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;gap:8px;padding:9px 0;margin-bottom:10px;flex-wrap:wrap;}
+  nav a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 11px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav a:hover{border-color:var(--sel);color:var(--sel);}
+  section{padding:20px 0 4px;scroll-margin-top:52px;}
+  h2{font-size:18px;margin:0 0 6px;} .lead{color:var(--text2);font-size:13px;margin:2px 0 12px;max-width:840px;}
+  figure{margin:6px 0;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:12px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  table{width:100%;border-collapse:separate;border-spacing:3px;font-size:12px;margin:6px 0;}
+  th,td{padding:7px 9px;border-radius:7px;text-align:left;vertical-align:top;}
+  th{background:var(--surface2);color:var(--text2);font-size:11.5px;}
+  td{background:#fff;border:1px solid var(--border);}
+  td.dim{font-weight:700;color:var(--sel);background:var(--surface);white-space:nowrap;}
+  .stack{display:flex;flex-direction:column;gap:6px;}
+  .layer{display:grid;grid-template-columns:118px 1fr;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:10px 12px;border-left:4px solid var(--rag);}
+  .layer .lb{font-weight:800;font-size:13px;color:var(--rag);}
+  .layer .body{font-size:12px;color:var(--text2);}
+  .layer .body b{color:var(--text);}
+  .note{background:var(--surface);border-left:4px solid var(--sel);border-radius:0 10px 10px 0;padding:9px 14px;font-size:12.5px;margin:8px 0;}
+  .note.rag{border-left-color:var(--rag);}
+  code{font-family:var(--mono);font-size:11px;background:var(--surface2);padding:1px 4px;border-radius:4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🧭 模型选型 + RAG · 决策图谱</h1>
+<p class="sub">面试前扫一眼定位。选型是<b style="color:var(--sel)">漏斗</b>(先减法后加权再工程)，RAG 是<b style="color:var(--rag)">分层 + query 决策流</b>(先判该不该查)。</p>
+<nav>
+  <a href="#funnel">🎯 选型漏斗</a><a href="#serving">🛠 服务架构矩阵</a><a href="#raglayers">📚 RAG 分层</a><a href="#ragflow">🔎 RAG query 流</a>
+</nav>
+
+<!-- ===== 选型漏斗 ===== -->
+<section id="funnel">
+  <h2>🎯 模型选型决策漏斗</h2>
+  <p class="lead">先做减法(布尔一票否决)→再做加权(只在小池子跑 eval)→最后按需叠工程护栏。<b>0 分乘权重还是 0</b>，所以硬过滤必须在打分前。</p>
+  <figure>
+  <svg viewBox="0 0 640 470" role="img" aria-label="模型选型漏斗" font-family="system-ui">
+    <defs><marker id="fa" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <!-- stage 1 -->
+    <polygon points="80,40 560,40 500,120 140,120" fill="#fbe4d6" stroke="#c2410c" stroke-width="2"/>
+    <text x="320" y="66" font-size="14" font-weight="800" fill="#c2410c" text-anchor="middle">① 硬过滤（布尔一票否决 · 回答"能不能做"）</text>
+    <text x="320" y="88" font-size="11" fill="#7a2e08" text-anchor="middle">模态(图像/音频→VLM/ASR) → 语言(中文/领域) → 隐私(不出域→只能本地)</text>
+    <text x="320" y="105" font-size="10" fill="#7a2e08" text-anchor="middle">不达标直接淘汰，不进打分、不看多准多便宜</text>
+    <line x1="320" y1="120" x2="320" y2="146" stroke="#57534a" stroke-width="1.8" marker-end="url(#fa)"/>
+    <!-- stage 2 -->
+    <polygon points="140,148 500,148 456,224 184,224" fill="#f3f1ea" stroke="#c7c2b5" stroke-width="1.5"/>
+    <text x="320" y="174" font-size="13" font-weight="700" fill="#1f1d1a" text-anchor="middle">② 样本拟合 + 质量（用自己 eval 集量）</text>
+    <text x="320" y="194" font-size="10.5" fill="#57534a" text-anchor="middle">零样本 floor / 少样本 k* 曲线 · 准确/精度/召回/HITL/UX</text>
+    <text x="320" y="210" font-size="10" fill="#8a857a" text-anchor="middle">按"哪种错更贵、错能不能被工程兜住"给维度加权</text>
+    <line x1="320" y1="224" x2="320" y2="250" stroke="#57534a" stroke-width="1.8" marker-end="url(#fa)"/>
+    <!-- stage 3 -->
+    <polygon points="184,252 456,252 420,318 220,318" fill="#f3f1ea" stroke="#c7c2b5" stroke-width="1.5"/>
+    <text x="320" y="278" font-size="13" font-weight="700" fill="#1f1d1a" text-anchor="middle">③ 成本最优（合格者中选）</text>
+    <text x="320" y="298" font-size="10.5" fill="#57534a" text-anchor="middle">(passrate, token 成本) 双轴 Pareto · fast/pro 分层</text>
+    <text x="320" y="312" font-size="10" fill="#8a857a" text-anchor="middle">被支配点淘汰，省的预算投到 best-of-N + verify</text>
+    <line x1="320" y1="318" x2="320" y2="344" stroke="#57534a" stroke-width="1.8" marker-end="url(#fa)"/>
+    <!-- stage 4 -->
+    <rect x="150" y="346" width="340" height="66" rx="10" fill="#ebe8df" stroke="#c2410c"/>
+    <text x="320" y="370" font-size="13" font-weight="800" fill="#c2410c" text-anchor="middle">④ 服务架构（选完之后按需叠护栏）</text>
+    <text x="320" y="390" font-size="10.5" fill="#57534a" text-anchor="middle">私有部署 · 并发+兜底 · 部署方式 · 限流 · 网关多路+降级</text>
+    <text x="320" y="404" font-size="10" fill="#8a857a" text-anchor="middle">触发 = 请求量 × 单请求代价 × 后端脆弱性 任一高</text>
+    <text x="600" y="80" font-size="10" fill="#c2410c" transform="rotate(90 600 80)">候选池：几十 → 几个</text>
+  </svg>
+  </figure>
+  <div class="note">🎤 30 秒话术："我不选最强模型，而是<b>先做减法</b>——模态/语言/隐私三道布尔一票否决把候选砍到几个，<b>再做加权</b>——用自己的 eval 集在承重维度打分、按'哪种错更贵'配权重，<b>成本上画 Pareto</b>、fast/pro 分层，<b>最后按业务</b>叠服务架构护栏。硬过滤在前是因为 0 分乘权重还是 0。"</div>
+</section>
+
+<!-- ===== 服务架构矩阵 ===== -->
+<section id="serving">
+  <h2>🛠 服务架构决策矩阵（漏斗第④层展开）</h2>
+  <p class="lead">每行 = 一个工程护栏 · 何时需要 · 设计含义。<b>不是都要做</b>——纯单人本地 demo 上这些就是过度设计。</p>
+  <table>
+    <thead><tr><th style="width:150px">护栏</th><th style="width:38%">何时需要</th><th>设计含义</th></tr></thead>
+    <tbody>
+      <tr><td class="dim">模态硬过滤</td><td>输入/输出含非文本；或数据混截图/语音(非文本占比>5%)</td><td>流水线第一个 filter：In⊆Cap_in 且 Out⊆Cap_out 布尔判；runtime 再加输入 guard 挡漏网模态</td></tr>
+      <tr><td class="dim">分段路由</td><td>一条链跨多模态(ASR+VLM+文本)</td><td>默认拆段各选最优+编排层串；量小链短才反选全能模型</td></tr>
+      <tr><td class="dim">隐私一票否决</td><td>数据不出域/出境是硬合同/法规</td><td>decision table 硬淘汰整类云方案，不是加权扣分；成本让位合规</td></tr>
+      <tr><td class="dim">私有部署</td><td>隐私倒逼 / 调用量越过盈亏点 / 要低延迟断网可用</td><td>量化换显存(Q4_K_M 挤单卡)+任务做窄补精度+两级混合；隐性成本(常驻/运维/冷启动)显式摊开</td></tr>
+      <tr><td class="dim">推理引擎</td><td>确定自部署后选跑什么</td><td>高并发生产 vLLM/TGI(PagedAttention+continuous batching)；验证期 Ollama/llama.cpp；前缀重复用 APC</td></tr>
+      <tr><td class="dim">并发+超时+重试</td><td>请求量×代价×脆弱性任一高；后端有配额/会 429</td><td>Semaphore/令牌桶只围外部调用；超时分层；指数退避+jitter+封顶+按状态码分可重试(4xx 不重试)</td></tr>
+      <tr><td class="dim">幂等+并发安全</td><td>请求可能重试 / 多 worker 改同一共享态</td><td>idempotency-key 去重 或 锁串行化(临界区只放微秒级内存操作)；分布式换 Redis Lua</td></tr>
+      <tr><td class="dim">熔断+背压</td><td>下游已在坏要给喘息；多级流水线要协同降速</td><td>熔断连续失败≥N+cooldown 半开探测(monotonic 时钟)；背压软(brake.signal)硬(Semaphore)叠加</td></tr>
+      <tr><td class="dim">限流/配额</td><td>上游峰值>下游可消化；多租户防 noisy neighbor</td><td>令牌桶按 token 计+completion 预扣对账；分层令牌桶+借还做租户隔离；滑动窗口防临界穿透</td></tr>
+      <tr><td class="dim">网关多路+降级</td><td>接入真实业务、单点不可用影响业务(demo 不需要)</td><td>轻量路由器前置+三维决策表+多 key 轮转+分层超时+可返回终点(高危 guarded-fallback/低危静态兜底)+全程留痕</td></tr>
+    </tbody>
+  </table>
+  <div class="note">🔑 铁律：<b>任何一环失效都落到能用的默认(fast_model 空回退主 model)、出域的永远是脱敏后材料、降级答案绝不冒充正常结果</b>。轮转≠熔断：轮转换 key、熔断跳过坏路。</div>
+</section>
+
+<!-- ===== RAG 分层 ===== -->
+<section id="raglayers">
+  <h2>📚 RAG 优化分层塔</h2>
+  <p class="lead">自上而下：先判该不该查，再逐层加优化，grounding 校验做在模型外。<b>不是都要上</b>——Agentic/Graph 只在特定场景才值得。</p>
+  <div class="stack">
+    <div class="layer"><div class="lb">L0 基础</div><div class="body"><b>解决</b>：用外部知识替代硬记/瞎编，答案可引用溯源。<b>技术</b>：chunk(按 markdown 标题切)+bge-small-zh+Qdrant top_k=3+citations。<b>何时</b>：知识静态、单跳可覆盖(规则/SOP/FAQ)。</div></div>
+    <div class="layer"><div class="lb">L1 Query</div><div class="body"><b>解决</b>：检索前决定要不要查/查哪个库/用什么 query(不是重写提示词)。<b>技术</b>：<b>Routing(structured_sql vs rag，最大杠杆)</b>+Rewriting+Expansion+HyDE+子问题分解。<b>何时</b>：同时有结构化源和非结构化源就必须 routing。</div></div>
+    <div class="layer"><div class="lb">L2 检索</div><div class="body"><b>解决</b>：最大化 top-k 相关度与信噪比(真正胜负手)。<b>技术</b>：Hybrid(BM25+dense，RRF 融合)+按业务单元 chunking+父子块+metadata pre-filter+rerank+file fallback。<b>何时</b>：query 里既有硬 token(编号)又有软表达。</div></div>
+    <div class="layer"><div class="lb">L3 重排+据</div><div class="body"><b>解决</b>：召回≠可用，精排+拼装+强制每字段回溯证据，检索侧掐死幻觉。<b>技术</b>：cross-encoder/LLM rerank(auto 降级)+top_k=3 最相关放首尾+citation-or-silence+回库 fuzzy 核验。<b>何时</b>：高准确/可审计/错答代价高。</div></div>
+    <div class="layer"><div class="lb">L4 Agentic</div><div class="body"><b>解决</b>：让模型自判够不够、要不要再查、<b>何时停</b>。<b>技术</b>：retrieve-or-not+multi-hop+self-critique+<code>max_retrieval_steps</code> 硬熔断+step 记账。<b>何时</b>：答案分布多源且下一步依赖上一步(多跳诊断)；单跳套循环是过度设计。</div></div>
+    <div class="layer"><div class="lb">L5 Graph</div><div class="body"><b>解决</b>：答案藏在实体多跳关系里时沿边推理；并厘清 RAG≠记忆。<b>技术</b>：三元组建图(networkx→Neo4j)+多跳 BFS/Cypher+社区摘要；记忆分层 DB/事件源/BM25/向量。<b>何时</b>：多跳/影响面/全局趋势用图；指代走会话记忆不走 RAG。</div></div>
+  </div>
+</section>
+
+<!-- ===== RAG query 决策流 ===== -->
+<section id="ragflow">
+  <h2>🔎 一条 query 进来的决策流</h2>
+  <figure>
+  <svg viewBox="0 0 940 300" role="img" aria-label="RAG query 决策流" font-family="system-ui">
+    <defs><marker id="ra" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <!-- routing decision -->
+    <rect x="20" y="110" width="130" height="60" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/>
+    <text x="85" y="134" font-size="12" font-weight="800" fill="#6d28d9" text-anchor="middle">① Routing</text>
+    <text x="85" y="151" font-size="9.5" fill="#57534a" text-anchor="middle">该不该检索?</text>
+    <text x="85" y="163" font-size="9" fill="#8a857a" text-anchor="middle">query_plan</text>
+    <!-- branch up: structured -->
+    <path d="M150,128 H220 V70 H300" fill="none" stroke="#0e7a52" stroke-width="1.8" marker-end="url(#ra)"/>
+    <text x="235" y="62" font-size="9.5" fill="#0e7a52" text-anchor="middle">structured_sql</text>
+    <rect x="300" y="48" width="150" height="44" rx="9" fill="#eef6f1" stroke="#0e7a52"/>
+    <text x="375" y="68" font-size="11" font-weight="700" fill="#0e7a52" text-anchor="middle">直查 SQLite</text>
+    <text x="375" y="82" font-size="9" fill="#57534a" text-anchor="middle">不进 RAG · 准确可审计</text>
+    <!-- branch down: rag chain -->
+    <path d="M150,152 H180 V210 H210" fill="none" stroke="#57534a" stroke-width="1.8" marker-end="url(#ra)"/>
+    <text x="180" y="185" font-size="9.5" fill="#6d28d9" text-anchor="middle">rag</text>
+    <g text-anchor="middle">
+      <rect x="210" y="188" width="120" height="46" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="270" y="208" font-size="10.5" font-weight="700" fill="#1f1d1a">② Query 加工</text><text x="270" y="223" font-size="8.5" fill="#8a857a">改写/扩展/HyDE/拆</text>
+      <rect x="360" y="188" width="120" height="46" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="420" y="208" font-size="10.5" font-weight="700" fill="#1f1d1a">③ Hybrid 召回</text><text x="420" y="223" font-size="8.5" fill="#8a857a">BM25+dense·RRF</text>
+      <rect x="510" y="188" width="120" height="46" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="570" y="208" font-size="10.5" font-weight="700" fill="#1f1d1a">④ Rerank</text><text x="570" y="223" font-size="8.5" fill="#8a857a">精排 top-20→3</text>
+      <rect x="660" y="188" width="110" height="46" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="715" y="208" font-size="10.5" font-weight="700" fill="#1f1d1a">⑤ 拼装</text><text x="715" y="223" font-size="8.5" fill="#8a857a">top_k=3+引用</text>
+      <rect x="800" y="182" width="120" height="58" rx="9" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="860" y="203" font-size="10.5" font-weight="800" fill="#6d28d9">⑥ Grounding</text><text x="860" y="218" font-size="8.5" fill="#57534a">模型外校验</text><text x="860" y="230" font-size="8.5" fill="#c0392b">无据则拒</text>
+    </g>
+    <g stroke="#57534a" stroke-width="1.8" fill="none" marker-end="url(#ra)"><line x1="330" y1="211" x2="358" y2="211"/><line x1="480" y1="211" x2="508" y2="211"/><line x1="630" y1="211" x2="658" y2="211"/><line x1="770" y1="211" x2="798" y2="211"/></g>
+    <!-- agentic loop back -->
+    <path d="M860,182 V150 H420 V186" fill="none" stroke="#6d28d9" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ra)"/>
+    <text x="640" y="144" font-size="9" fill="#6d28d9" text-anchor="middle">L4 Agentic：证据不够且有预算 → 再查一轮（max_retrieval_steps 熔断）</text>
+  </svg>
+  </figure>
+  <div class="note rag">🎯 题眼：<b>先判该不该查</b>(结构化直查 DB 别硬 RAG) · <b>查了知道何时停</b>(Agentic 的 max_retrieval_steps) · <b>答了能证明有据</b>(grounding 校验做在模型外)。向量 RAG 找"像的"，Graph RAG 找"连着的"。</div>
+</section>
+
+<footer style="margin-top:28px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);">
+  配套刷题卡：<code>model-selection-serving-drills.zh.md</code>(选型+服务) · <code>rag-optimization-drills.zh.md</code>(RAG) · 均挂钩排产/网关/nanocodex 真项目
+</footer>
+</div>
+</body>
+</html>

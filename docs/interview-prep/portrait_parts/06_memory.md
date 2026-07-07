@@ -23,7 +23,7 @@ MEMORY 是 agent 自己写、可自演化的经验库，落地为单个人类可
 
 1. **单文件 markdown 存储** — `.ncx/memory/LEARNINGS.md`，每条 `<!-- ts: tags: -->` 头 + 正文，每次 mutation 全文件 `write_all` 重写 — 显式选人类可读 markdown（不是 JSONL）让开发者能手开手改，≤200 条规模下原子正确性比追加吞吐更重要。
 2. **写 + 精确去重 + newest-N 截断** — `remember` 用 `normalize()` 阻止同事实大小写/空格变体重存，超 200 条丢最旧 — 保持库可信 + 有界增长 + 近期偏置；`now` 由调用方传入便于测试确定性。
-3. **混合词法语义召回（每轮注入）** — `recall` = tag+8/substr+4（同词互斥 else-if）/phrase+6/jaccard×20，query 经 `semantic_aliases` 扩展，按 query 注入临时 note — ≤200 条上嵌入模型是杀鸡用牛刀，零依赖的关键词+Jaccard 混合 "够用"；按 query 召回只把相关 note 入 context 并限 token。
+3. **词法 + 硬编码同义词表召回（非 embedding，每轮注入）** — `recall` = tag+8/substr+4（同词互斥 else-if）/phrase+6/jaccard×20，query 经 `semantic_aliases`（一张 ~8 条手写同义词表，非模型）扩展，按 query 注入临时 note — 全程无 embedding 调用/向量库；≤200 条规模上嵌入模型是杀鸡用牛刀，零依赖的关键词+Jaccard+小同义词表混合 "够用"；按 query 召回只把相关 note 入 context 并限 token。
 4. **启发式近重折叠 consolidate** — Jaccard≥0.85，newest-first 贪心：每条与所有已建簇代表逐一比、落入第一个达标的簇（first-match），只丢近似重复保最新，idempotent，每次启动自动跑 — 模型会写语义重叠的同一教训变体，折叠保召回信号纯净且库小；幂等且廉价所以可无脑每次启动跑。
 5. **LLM 折叠 summarize_consolidate** — 同样的 first-match 贪心聚类（与全部代表逐一比），但把 size>1 的簇用 fast model 合成一条（max ts + tags 并集），None → 退化保最新，仅 `--memory-merge` 触发 — 启发式只能丢，LLM 能真正把多条同主题事实合成更丰富的一条；因有 LLM 成本所以不每次启动跑。
 6. **INSTRUCTIONS 层（与 memory 分离）** — `load_project_instructions` 按 `~/.codex/AGENTS.md`→`~/.claude/CLAUDE.md`→repo-root 向下到 workspace 的 AGENTS/CLAUDE/.claude-CLAUDE 顺序拼接、16000 字符封顶，启动一次进系统提示 — 镜像 Codex/Claude-Code 生态的人写持久指引惯例；parent-before-child 让嵌套指令能细化 repo 级。
@@ -44,7 +44,7 @@ MEMORY 是 agent 自己写、可自演化的经验库，落地为单个人类可
 - **召回无最低分下限**：overlap=0 也照样按 recency 排序并填满 8/4000 caps，空/离题 query 会把 8 条最新 note 当相关推出（`memory.rs:104-129`）。
 - **字符 cap 是 greedy break 不是 skip**：某条超 `max_chars` 就 `break`，一条长的早 note 会切掉本可放下的更短相关 note（`memory.rs:123-125`）。
 - **recency tie-break 对真实数据基本失效**：`min(ts,999_999)` 对真实 epoch（~1.7e9）饱和到 999_999，所有真实时间戳低位相同，tie-break 实际只在 ts<999_999（即测试）下生效 — 待跟进。
-- **`semantic_aliases` 单向硬编码**：是一张固定小表（如 search→web/tavily），只对这几个领域帮到语义召回（`memory.rs:295-308`）。
+- **`semantic_aliases` 单向硬编码**：是一张固定小表（如 search→web/tavily），不是 embedding/模型；只对表里这几个领域的查询词有同义扩展，表外词汇完全退化为纯字符串匹配（`memory.rs:295-308`）。
 - **聚类是 order-dependent 的 first-match 贪心单链**：每条与 *所有* 已建簇代表逐一比 Jaccard、落入第一个达标的簇（不是只比单一 FIRST 代表），newest-first、非传递完整，渐变漂移的 note 链可能不全折叠（`memory.rs:148-160`、`193-209`）。
 - **`parse_entries` 把缺失/畸形 `ts:` 静默归 0**：该条会排成最旧、最先被 cap 丢掉（`memory.rs:418`）。
 - **`write_all` 全文件重写且非原子**（`std::fs::write`，无文件锁）：写到一半崩溃可能截断 `LEARNINGS.md`，单 checkout 并发 session 会 race（即已知 shared-worktree 隐患）。

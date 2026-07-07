@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工具工程 + ReAct 执行范式 · 决策图</title>
+<style>
+  :root{--bg:#faf9f6;--surface:#f3f1ea;--surface2:#ebe8df;--surface0:#fdfcfa;--border:#d9d6cc;--border2:#c7c2b5;
+    --text:#1f1d1a;--text2:#57534a;--muted:#8a857a;--tool:#0e7a52;--react:#1f6feb;--danger:#c0392b;
+    --mono:ui-monospace,Consolas,monospace;--sans:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.55;}
+  .wrap{max-width:1000px;margin:0 auto;padding:26px 20px 70px;}
+  h1{font-size:23px;margin:0 0 4px;} .sub{font-size:13px;color:var(--text2);margin:0 0 16px;}
+  nav{position:sticky;top:0;z-index:10;background:rgba(250,249,246,.93);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);display:flex;gap:8px;padding:9px 0;margin-bottom:10px;flex-wrap:wrap;}
+  nav a{font-size:12px;text-decoration:none;color:var(--text2);padding:4px 11px;border-radius:20px;border:1px solid var(--border);background:var(--surface);}
+  nav a:hover{border-color:var(--tool);color:var(--tool);}
+  section{padding:20px 0 4px;scroll-margin-top:52px;} h2{font-size:18px;margin:0 0 6px;}
+  .lead{font-size:13px;color:var(--text2);margin:2px 0 12px;}
+  figure{margin:6px 0;background:var(--surface0);border:1px solid var(--border);border-radius:16px;padding:12px;overflow-x:auto;}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto;}
+  .pts{background:var(--surface);border-left:4px solid var(--tool);border-radius:0 10px 10px 0;padding:11px 16px;margin:8px 0;}
+  .pts.r{border-left-color:var(--react);}
+  .pts b{color:var(--tool);} .pts.r b{color:var(--react);}
+  .pts ul{margin:6px 0 0;padding-left:18px;} .pts li{font-size:12.5px;line-height:1.5;margin:3px 0;}
+  code{font-family:var(--mono);font-size:11px;background:var(--surface2);padding:1px 4px;border-radius:4px;}
+  table{width:100%;border-collapse:separate;border-spacing:3px;font-size:12px;margin:6px 0;}
+  th,td{padding:7px 9px;border-radius:7px;text-align:left;vertical-align:top;} th{background:var(--surface2);color:var(--text2);font-size:11.5px;} td{background:#fff;border:1px solid var(--border);}
+  td.dim{font-weight:700;color:var(--tool);white-space:nowrap;}
+  footer{margin-top:28px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🔧 工具工程 + ReAct 执行范式 · 决策图</h1>
+<p class="sub">第 4 个横切主题。<b style="color:#0e7a52">工具工程</b>=收窄"模型能做什么"，<b style="color:#1f6feb">执行范式</b>=约束"模型做多久/失败怎么办"。全部挂钩 nanocodex 真代码。</p>
+<nav><a href="#thesis">🎯 题眼</a><a href="#flow">🔁 一次工具调用决策流</a><a href="#react">⚖️ ReAct vs Plan</a><a href="#retry">🔄 异常四选一</a></nav>
+
+<section id="thesis">
+  <h2>🎯 题眼</h2>
+  <div class="pts"><b>贯穿三不变量</b><ul>
+    <li><b>分类权不给模型</b>：read_only()/危险与否是代码静态声明+保守白名单，不信模型自述。</li>
+    <li><b>中途退出必 backfill 保历史合法</b>：否则 OpenAI 协议下一次请求 400。</li>
+    <li><b>语法合法≠语义正确</b>：JSON mode 保证能 parse，不保证符合 schema，都要挂确定性断言+有界重试。</li>
+  </ul></div>
+  <div class="pts r"><b>一句话</b>：收窄副作用 + 结构化可校验 + 带明确终止/重试边界的循环——绝不让 agent 无界打转，也绝不把"没验过"伪装成成功。</div>
+</section>
+
+<!-- 决策流 -->
+<section id="flow">
+  <h2>🔁 一次工具调用的完整决策流</h2>
+  <figure>
+  <svg viewBox="0 0 620 900" role="img" aria-label="工具调用决策流" font-family="system-ui">
+    <rect x="0" y="0" width="620" height="40" rx="10" fill="#0e7a52"/><text x="310" y="26" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">🔧 一次工具调用 · 端到端决策流</text>
+    <defs><marker id="ta" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#57534a"/></marker></defs>
+    <g font-size="11" font-weight="800" fill="#0e7a52" text-anchor="middle">
+      <text x="30" y="90" transform="rotate(-90 30 90)">①选工具</text><text x="30" y="200" transform="rotate(-90 30 200)">②校验参数</text>
+      <text x="30" y="330" transform="rotate(-90 30 330)">③权限门</text><text x="30" y="460" transform="rotate(-90 30 460)">④执行</text>
+      <text x="30" y="590" transform="rotate(-90 30 590)">⑤错误/超时</text><text x="30" y="700" transform="rotate(-90 30 700)">⑥反馈</text>
+      <text x="30" y="820" transform="rotate(-90 30 820)">⑦继续/终止</text>
+    </g>
+    <line x1="58" y1="56" x2="58" y2="880" stroke="#d9d6cc" stroke-dasharray="3 4"/>
+    <g stroke="#57534a" stroke-width="1.7" fill="none" marker-end="url(#ta)">
+      <line x1="310" y1="100" x2="310" y2="122"/><line x1="310" y1="196" x2="310" y2="218"/><line x1="310" y1="330" x2="310" y2="358"/>
+      <line x1="310" y1="452" x2="310" y2="474"/><line x1="310" y1="558" x2="310" y2="580"/><line x1="310" y1="666" x2="310" y2="688"/><line x1="310" y1="756" x2="310" y2="778"/>
+    </g>
+    <g text-anchor="middle">
+      <rect x="160" y="58" width="300" height="42" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="310" y="76" font-size="11.5" font-weight="700" fill="#1f1d1a">schemas_for_query 渐进暴露</text><text x="310" y="90" font-size="9.5" fill="#8a857a">上限9 + tool_search 反馈回路(下轮带 hints)</text>
+
+      <rect x="150" y="124" width="320" height="72" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="310" y="144" font-size="11.5" font-weight="700" fill="#1f1d1a">parse_args 容错解析 → schema 校验</text><text x="310" y="160" font-size="9.5" fill="#8a857a">畸形 arguments 塌缩成 {}(不 panic)</text><text x="310" y="174" font-size="9.5" fill="#8a857a">execute 开头 args.get().and_then() else</text><text x="310" y="187" font-size="9.5" fill="#8a857a">缺字段/类型错 → 返回可读 Error 字符串</text>
+
+      <rect x="140" y="220" width="340" height="108" rx="9" fill="#f3f1ea" stroke="#0e7a52" stroke-width="2"/><text x="310" y="240" font-size="11.5" font-weight="800" fill="#0e7a52">ToolRegistry::execute 权限门</text><text x="310" y="256" font-size="9.5" fill="#8a857a">pre-hook 可 blocked 短路</text><text x="310" y="270" font-size="9.5" fill="#8a857a">写/未知 → Approver::classify → AutoApprove/Ask/AutoDeny</text><text x="310" y="284" font-size="9.5" fill="#c0392b">dangerous_patterns/git写子命令 → 强制 Ask</text><text x="310" y="298" font-size="9.5" fill="#8a857a">read-only 下 can_write 恒 false(物理隔离)</text><text x="310" y="312" font-size="9.5" fill="#8a857a">plan mode 拒所有写；AutoDeny 永不软化</text>
+
+      <rect x="140" y="360" width="340" height="92" rx="9" fill="#f3f1ea" stroke="#0e7a52"/><text x="310" y="380" font-size="11.5" font-weight="700" fill="#1f1d1a">④ 并发/串行执行</text><text x="310" y="396" font-size="9.5" fill="#8a857a">连续 read_only()(静态声明,不信模型)→ join_all 并发</text><text x="310" y="410" font-size="9.5" fill="#8a857a">write/unknown → 退回单条串行保序</text><text x="310" y="424" font-size="9.5" fill="#8a857a">tokio::select! biased 每100ms 轮询 cancel</text><text x="310" y="438" font-size="9.5" fill="#8a857a">best-of-N 各跑隔离工作区(幂等地基)</text>
+
+      <rect x="160" y="474" width="300" height="84" rx="9" fill="#f3f1ea" stroke="#c7c2b5"/><text x="310" y="494" font-size="11.5" font-weight="700" fill="#1f1d1a">⑤ 错误/超时不 panic</text><text x="310" y="510" font-size="9.5" fill="#8a857a">全部 format 成 Error: 字符串</text><text x="310" y="524" font-size="9.5" fill="#8a857a">超时 = ExecResult.timed_out 字段(非异常)</text><text x="310" y="538" font-size="9.5" fill="#8a857a">NCX_TRACE 打 span 归因</text><text x="310" y="551" font-size="9.5" fill="#c0392b">⚠ok()=exit0 只判进程层，非语义成功</text>
+
+      <rect x="160" y="580" width="300" height="86" rx="9" fill="#f3f1ea" stroke="#1f6feb"/><text x="310" y="600" font-size="11.5" font-weight="700" fill="#1f6feb">⑥ 反馈：role:tool 喂回</text><text x="310" y="616" font-size="9.5" fill="#8a857a">add_tool_result 写成 role:tool 消息</text><text x="310" y="630" font-size="9.5" fill="#8a857a">模型看 Exit code/STDERR 自纠</text><text x="310" y="644" font-size="9.5" fill="#8a857a">编排层 FAIL→verdict 拼进下轮 feedback</text><text x="310" y="658" font-size="9.5" fill="#c0392b">⚠回灌无熔断会对噪声反复打转</text>
+
+      <rect x="150" y="688" width="320" height="68" rx="9" fill="#f3f1ea" stroke="#1f6feb" stroke-width="2"/><text x="310" y="708" font-size="11.5" font-weight="800" fill="#1f6feb">⑦ 继续/终止判定</text><text x="310" y="724" font-size="9.5" fill="#8a857a">无 tool_calls→completed；remaining==0→budget</text><text x="310" y="738" font-size="9.5" fill="#8a857a">max_model_calls 耗尽→task_budget 兜底</text><text x="310" y="750" font-size="9.5" fill="#8a857a">双预算 model_calls/tool_calls 分开计</text>
+
+      <rect x="140" y="778" width="340" height="92" rx="10" fill="#ebe8df" stroke="#c0392b" stroke-width="2"/><text x="310" y="800" font-size="12" font-weight="800" fill="#c0392b">⑧ 兜底不变量：backfill</text><text x="310" y="818" font-size="10" fill="#57534a">cancel/预算耗尽 → backfill_unanswered_tool_calls</text><text x="310" y="834" font-size="10" fill="#57534a">悬空 tool_call 补占位 role:tool（否则 400）</text><text x="310" y="850" font-size="10" fill="#57534a">resume 侧 sanitize_restored_messages 同逻辑</text>
+    </g>
+  </svg>
+  </figure>
+  <div class="pts"><b>面试要点</b><ul>
+    <li><b>分类权不给模型</b>：read_only() 是工具作者的静态声明，agent_loop 只信声明不信模型自述——一次幻觉就能导致并发写踩踏或跳审批。</li>
+    <li><b>三处"⚠"是最容易被追问的坑</b>：<code>ok()=exit0</code> 只判进程层成功不判语义正确；反馈回灌没熔断会让模型对同一噪声反复打转；渐进暴露纯词法打分可能漏召回。</li>
+    <li><b>backfill 是协议层可靠性</b>：OpenAI 兼容协议下，assistant 的每个 tool_call 必须有配对 role:tool 应答，否则下次请求 400——不删消息（可能含有价值 reasoning）而是补占位。</li>
+  </ul></div>
+</section>
+
+<!-- ReAct vs Plan -->
+<section id="react">
+  <h2>⚖️ ReAct vs Plan-and-Execute 选型</h2>
+  <table>
+    <thead><tr><th style="width:130px">维度</th><th>ReAct（边想边做）</th><th>Plan-and-Execute（先规划再施工）</th></tr></thead>
+    <tbody>
+      <tr><td class="dim">结构</td><td>reason+act 交替的<b>有界单循环</b></td><td>规划节点(无工具)+执行节点分离的<b>多节点 pipeline</b></td></tr>
+      <tr><td class="dim">适合</td><td>路径不确定、读多写少、要自适应(coding 主循环)</td><td>写副作用、要人审、步骤明确(排产四段治理)</td></tr>
+      <tr><td class="dim">失败恢复</td><td>隐式便宜：错误当 isError 喂回自纠</td><td>显式集中：独立 verify 节点判 PASS/FAIL</td></tr>
+      <tr><td class="dim">可控性</td><td>自适应但难审(报错随时改道)</td><td>清单可审、可 dry-run、可并行、可分层(贵模型plan+便宜模型worker)</td></tr>
+      <tr><td class="dim">nanocodex 落点</td><td>agent_loop.rs run_turn_inner</td><td>orchestrator.rs：classify判high才切真Plan，PLAN_SYS写死"You have NO tools"防越权</td></tr>
+    </tbody>
+  </table>
+  <div class="pts r"><b>口诀</b>：不确定就 ReAct(自适应)，要可控就 Plan(可审可并行可分层)。<b>update_plan 不算真 Plan</b>——它是 ReAct 里的软清单(advisory，只给 UI 展示不改控制流)，真 Plan 必须有独立于规划的执行节点。</div>
+</section>
+
+<!-- 异常四选一 -->
+<section id="retry">
+  <h2>🔄 执行清单异常处理：四选一 + 三条硬边界</h2>
+  <figure>
+  <svg viewBox="0 0 620 420" role="img" aria-label="异常四选一" font-family="system-ui">
+    <rect x="0" y="0" width="620" height="38" rx="10" fill="#1f6feb"/><text x="310" y="24" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">某一步失败了 → 四选一</text>
+    <g text-anchor="middle" font-size="10.5">
+      <rect x="20" y="54" width="140" height="76" rx="9" fill="#eef6f1" stroke="#0e7a52"/><text x="90" y="76" font-weight="700" fill="#0e7a52">重试同一步</text><text x="90" y="94" font-size="9" fill="#57534a">瞬时/环境错</text><text x="90" y="107" font-size="9" fill="#57534a">(网络抖动/超时/锁)</text><text x="90" y="120" font-size="8.5" fill="#8a857a">上限 max_retries</text>
+
+      <rect x="176" y="54" width="140" height="76" rx="9" fill="#fff6e9" stroke="#b8860b"/><text x="246" y="76" font-weight="700" fill="#8a6100">整体重规划</text><text x="246" y="94" font-size="9" fill="#57534a">方案错/前提被推翻</text><text x="246" y="120" font-size="8.5" fill="#8a857a">上限 max_depth(1)</text>
+
+      <rect x="332" y="54" width="140" height="76" rx="9" fill="#ede9fe" stroke="#6d28d9"/><text x="402" y="76" font-weight="700" fill="#6d28d9">降级出 unverified</text><text x="402" y="94" font-size="9" fill="#57534a">达标不了有次优解</text><text x="402" y="120" font-size="8.5" fill="#8a857a">promote best + 标记</text>
+
+      <rect x="488" y="54" width="112" height="76" rx="9" fill="#fdecec" stroke="#c0392b"/><text x="544" y="76" font-weight="700" fill="#c0392b">上报人工</text><text x="544" y="94" font-size="9" fill="#57534a">越权/需人判</text><text x="544" y="120" font-size="8.5" fill="#8a857a">HITL 插入点</text>
+    </g>
+    <rect x="60" y="150" width="500" height="80" rx="10" fill="#f3f1ea" stroke="#c7c2b5"/>
+    <text x="310" y="172" font-size="11.5" font-weight="700" fill="#1f1d1a" text-anchor="middle">分界线</text>
+    <text x="310" y="192" font-size="10.5" fill="#57534a" text-anchor="middle">错误局部且计划仍成立 → 重试该步</text>
+    <text x="310" y="208" font-size="10.5" fill="#57534a" text-anchor="middle">错误全局或路线错 → 丢弃 steps 重规划</text>
+    <text x="310" y="222" font-size="9.5" fill="#c0392b" text-anchor="middle">重试必须喂反馈(FAIL理由拼进prompt)，不喂反馈=抽卡</text>
+    <rect x="60" y="246" width="500" height="66" rx="10" fill="#ebe8df" stroke="#c2410c"/>
+    <text x="310" y="268" font-size="11.5" font-weight="800" fill="#c2410c" text-anchor="middle">三条硬边界缺一不可</text>
+    <text x="310" y="288" font-size="10" fill="#57534a" text-anchor="middle"><tspan font-family="monospace">max_steps</tspan>(总步数) · <tspan font-family="monospace">max_retries</tspan>(单步重试) · <tspan font-family="monospace">terminate</tspan>(什么算完成/彻底失败)</text>
+    <text x="310" y="304" font-size="10" fill="#8a857a" text-anchor="middle">用尽仍不过 → promote best 打 "[unverified after retries]"，fail-loud 不伪装成功</text>
+    <text x="310" y="336" font-size="10.5" fill="#8a857a" text-anchor="middle">诚实边界：当前是 classify 静态分流(simple走重试/high走重规划)，非按失败性质动态切换</text>
+    <text x="310" y="354" font-size="10" fill="#8a857a" text-anchor="middle">重试地基是幂等：nanocodex 用工作区隔离+延迟 promote，winner 才落地</text>
+  </svg>
+  </figure>
+</section>
+
+<footer>工具工程+ReAct决策图 · 挂钩 nanocodex agent_loop.rs/orchestrator.rs/tools.rs/approval.rs · 配套刷题卡 <code>tool-engineering-react-drills.zh.md</code></footer>
+</div>
+</body>
+</html>

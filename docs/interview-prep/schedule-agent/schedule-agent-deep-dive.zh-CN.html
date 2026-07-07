@@ -1,0 +1,193 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排产抗打详解 · L3 深度</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149;--p:#a371f7}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15.5px/1.72 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:920px;margin:0 auto;padding:24px 18px 80px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:20px;margin:1.8em 0 .5em;padding:6px 0 6px 10px;border-left:4px solid var(--acc);background:#12233b;border-radius:0 8px 8px 0}
+  h3{font-size:15.5px;margin:1.1em 0 .3em;color:var(--l)}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.86em;color:#e6edf3}
+  b{color:#fff3d6}
+  a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:14px}
+  .toc a{display:inline-block;margin:3px 10px 3px 0}
+  .done{color:var(--q)} .todo{color:var(--mut)}
+  .why{border-left:3px solid var(--q);background:var(--card);padding:8px 14px;margin:8px 0;border-radius:0 8px 8px 0}
+  .warn{border-left:3px solid var(--r);background:#1f1614;padding:9px 14px;margin:10px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 14px;margin:7px 0}
+  pre{background:#0a0d12;border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow-x:auto;font-size:12.5px;line-height:1.5;color:#d6dee8}
+  table{width:100%;border-collapse:collapse;margin:.5em 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#1b2129;color:var(--l)}
+  .qa{margin:7px 0;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .qa>summary{cursor:pointer;padding:10px 14px;list-style:none;font-weight:600;background:#1b2129}
+  .qa>summary::-webkit-details-marker{display:none}
+  .qa>summary::before{content:"🔨 ";}
+  .qa .ans{padding:10px 14px;font-size:14.5px}
+  .fl{color:var(--mut);font-family:ui-monospace,Consolas,monospace;font-size:11.5px}
+</style>
+
+<h1>🛡 排产抗打详解 · L3 深度层</h1>
+<p class="hint">被钻到底时翻这里。每个承重点 = <b>机制 · 真代码(file:line) · 数字/常量 · 诚实边界 · 被追问链</b>。全部锚 <code>_scan_schedule</code> 真实代码,读码得、非记忆。配套 <a href="schedule-agent-interview-plan.zh-CN.html">入口页</a> · <a href="schedule-agent-interview-final-map.zh-CN.html">图谱</a>。</p>
+
+<div class="toc">
+<b>承重点进度</b>：
+<a class="done" href="#gov">✅ ① 四段治理</a>
+<a class="done" href="#perm">✅ ② 权限+DryRun</a>
+<a class="done" href="#audit">✅ ③ 审计</a>
+<a class="done" href="schedule-agent-eval-deep-dive.zh-CN.html">✅ ④ 评测(独立篇)</a>
+<a class="done" href="#intent">✅ ⑤ 意图打分</a>
+<a class="done" href="#rag">✅ ⑥ RAG</a>
+<a class="done" href="#obs">✅ ⑦ 可观测</a>
+<a class="done" href="#mem">✅ ⑧ 多轮记忆</a>
+</div>
+
+<h2 id="gov">① 四段治理（写操作流水线）★</h2>
+<h3>机制</h3>
+<p>写请求的真实流经是<b>分支图不是直线</b>（<span class="fl">graph/graph.py</span> 实测）：</p>
+<pre>START → rewrite → route ─┬─ need_clarify ─→ respond        (歧义/confidence&lt;0.5/缺实体)
+                         ├─ readonly ─→ query → rag → answer_verify → respond
+                         └─ write ─→ governance ─┬─ blocked ─→ respond
+                                                 └─ approved → preview ─┬─ await_confirm → respond
+                                                                        └─ execute → execute → verify → respond → END</pre>
+<p><b>四段 = governance(权限/风险) → preview(dry-run 只读) → execute(落库) → verify(回读+审计)</b>。写操作永远先过前三关，<code>execute</code> 前必须 confirmed。</p>
+<h3>关键代码</h3>
+<div class="box"><b>三条件边</b>（<span class="fl">graph/conditions.py</span>，逐字）：<br>
+· <code>after_route</code>：<code>intent_ambiguous</code> / <code>confidence&lt;0.5</code> / <code>missing_entities</code> 任一 → <code>need_clarify</code>；<code>is_write</code> → <code>write</code>；else <code>readonly</code>。<br>
+· <code>after_governance</code>：<code>not governance_passed</code> → <code>blocked</code>；else <code>approved</code>。<br>
+· <code>after_preview</code>：<b><code>confirmed is True</code> → execute；else await_confirm</b>（严格 <code>is True</code>，不是 truthy）。</div>
+<div class="box"><b>preview</b>（<span class="fl">graph/nodes/preview.py</span>）：按 intent 分派 8 个 <code>_preview_*</code> 函数，每个<b>只 query 不写</b>，返回 <code>{action, summary, …, impact:[…]}</code>；<b>不设 confirmed</b> —— confirmed 由外部（人工审批入口）注入，这是 HITL 落点。</div>
+<h3>数字/常量</h3>
+<div class="box">10 节点 · 3 条件边 · 8 个 intent 有 preview 处理器 · execute→verify 是普通边（执行后必回读）。</div>
+<h3>诚实边界</h3>
+<div class="warn">· <b>verify 不回滚</b>（见 ③）——不一致只标 needs_review。<br>· 单实例；confirmed 注入是入口的事，图内不管。<br>· 未实现 preview 的 intent 落 <code>{"summary":"…（待实现）"}</code> 兜底。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>为什么写操作要拆四段，不直接执行？</summary><div class="ans">把"判断→预览→执行→验证"拆成四道<b>确定性门</b>，人只在 preview→execute 之间注入 confirmed（HITL）。<b>安全建在图结构上，不靠模型自觉</b>——模型跑偏也越不过图的边。</div></details>
+<details class="qa"><summary>confirmed 谁设的？为什么用 <code>is True</code> 不是 truthy？</summary><div class="ans">preview 节点<b>不设</b> confirmed，由人工审批入口注入 <code>True</code>。用 <code>is True</code> 而非 truthy 判断，是防 <code>"1"</code>/<code>"yes"</code>/非空对象这类 truthy 值误判成"已确认"——<b>只有布尔 True 才落库</b>，写操作的保守。</div></details>
+<details class="qa"><summary>readonly 和 write 怎么分流？</summary><div class="ans"><code>after_route</code> 看 <code>is_write</code>（intent 是否属 WRITE_INTENTS）；但<b>先判 need_clarify</b>（歧义/confidence&lt;0.5/缺实体）——不确定就不往下走，宁可追问。</div></details>
+<details class="qa"><summary>为什么 governance 在 preview 之前？</summary><div class="ans">先权限后预览：<b>没权限的连预览都不给看</b>（避免泄露订单/机台数据），权限是第一道门。preview 只对已授权的操作算影响。</div></details>
+<details class="qa"><summary>preview 崩了会拖垮整条链吗？</summary><div class="ans">不会。preview_node 里 <code>try/except</code> 包住，异常返回 <code>{"error":"preview_failed","message":…}</code>，图继续走；后续 verify 看 <code>tool_result.success</code> 判定。</div></details>
+
+<h2 id="perm">② 权限 + DryRun ★</h2>
+<h3>机制</h3>
+<p><code>governance_node</code> 做两件事：①<b>角色层级权限检查</b> ②<b>高风险操作的实体兜底</b>。查询灵活（只读不过 governance），写操作保守（必过）。DryRun（preview）是执行前"看清影响再决定"的只读关。</p>
+<h3>关键代码 <span class="fl">graph/nodes/governance.py</span></h3>
+<div class="box">· <code>ROLE_HIERARCHY = ["业务员","工艺员","主任","厂长"]</code>（index 0–3）；<code>_get_role_level</code> 返回 index，<b>未知角色 → -1（最低）</b>。<br>
+· 权限判定：<code>minimum_role = intent_config["minimum_role"]</code>（来自 intents.json）；<b><code>user_level &lt; required_level → blocked</code></b>。<br>
+· 风险检查：<code>risk_level=="high"</code> 时，<code>machine_failure</code> 缺 <code>machine_id</code> → blocked（<code>reason_code=missing_machine_id</code>）。<br>
+· <code>need_approval = intent_config["need_approval"]</code> —— 是否走人工审批也是 config 驱动。<br>
+· blocked 立即 <code>log_audit(status="blocked")</code> 并返回 <code>governance_passed=False</code>。</div>
+<h3>数字/常量</h3>
+<div class="box">4 级角色（0/1/2/3，未知 -1）· 3 个 blocked reason_code：<code>unknown_intent</code> / <code>permission_denied</code> / <code>missing_machine_id</code>。</div>
+<h3>诚实边界</h3>
+<div class="warn">· 权限是<b>每意图静态 <code>minimum_role</code></b>，<b>不是数据级 ACL</b>（"某人只能改自己的订单"这种没做）。<br>· 风险检查目前只硬编码了 <code>machine_failure</code> 一条，其他高危靠 route 追问兜。<br>· DryRun 的影响估算是"查库预估"，不是真事务模拟。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>权限到底怎么判的？给不给模型？</summary><div class="ans">角色查 <code>ROLE_HIERARCHY</code> 得 level，和 intent 的 <code>minimum_role</code> 比，低于就 blocked。<b>全确定性、不给模型</b>——安全相关分类（权限/是否可写/风险）绝不交给模型（信条）。</div></details>
+<details class="qa"><summary>未知角色、未知意图怎么办？</summary><div class="ans"><b>fail-closed</b>：未知角色 level=-1 恒最低权限；未知意图直接 blocked（<code>reason_code=unknown_intent</code>）。不认识的一律不放行。</div></details>
+<details class="qa"><summary>DryRun 和普通"预览一下"有啥区别？</summary><div class="ans">它是写操作前<b>强制的一道只读关</b>，产出 <code>impact</code> 清单（会动哪些订单/机台/日期），确认后才 execute——不是可选的 UI 预览，是安全防线。</div></details>
+<details class="qa"><summary>高危操作怎么防？</summary><div class="ans">分级（<code>risk_level</code>）+ 缺关键实体直接 block（machine_failure 无 machine_id）+ <code>need_approval</code> 走审批。物理拦截，不靠 prompt 劝模型别乱来。</div></details>
+<details class="qa"><summary>接手的，如果让你重新设计权限？</summary><div class="ans">上<b>数据级 ACL</b>（行级：谁能改哪些订单/机台），把 <code>risk_level</code> 硬编码检查改成<b>可配置规则表</b>，再叠操作频率限流。现在够用但粒度粗，这是诚实的改进方向。</div></details>
+
+<h2 id="audit">③ 审计 audit_log ★</h2>
+<h3>机制</h3>
+<p>写操作全程留痕、append-only。<b>governance 拦截时写一条，verify 执行后写一条；execute 本身不写</b>——审计落在"<b>决策点(governance)</b>"和"<b>验证点(verify)</b>"，不在"动作点(execute)"。</p>
+<h3>关键代码 <span class="fl">tools/audit_log.py</span></h3>
+<div class="box"><b>真实 schema（17 列）</b>：<code>id, trace_id, created_at, intent, action, actor_role, request, target_order_id, target_machine_id, status, success, need_approval, error, before_state_json, after_state_json, verify_checks_json, metadata_json</code>。<br>
+<b>6 个索引</b>：trace_id / created_at / intent / status / target_order_id / target_machine_id（查得快）。<br>
+· <code>log_audit()</code> 自动从 entities/after_state 抽 <code>target_order_id</code>/<code>target_machine_id</code> 建索引列。<br>
+· <b>写点</b>：governance.py 3 处（unknown_intent / permission_denied / missing_machine_id，status=blocked）+ verify.py 2 处（执行失败 status=failed/skipped；回读后 status=passed/needs_review）。<br>
+· <code>before_state</code>=preview_result（改前预估），<code>after_state</code>=tool_result（改后实况）。<br>
+· 查询：<code>recent_audit_rows(limit=50)</code> 反序列化 json 列；按 trace_id 索引查单链路。</div>
+<h3>数字/常量</h3>
+<div class="box">17 列 / 6 索引 · <code>success</code>、<code>need_approval</code> 是 INTEGER(0/1)。</div>
+<h3>诚实边界</h3>
+<div class="warn">· <b>execute 不写审计</b>——execute 若崩在 verify 之前，靠 verify 记 failed 兜（但没有"execute 已发起"的独立时点）。<br>· 审计与业务<b>同库</b>（SQLite），无独立审计库/WORM，防篡改级别有限。<br>· <code>created_at</code> 用 <code>time.strftime</code> 本地时间，非 UTC/单调时钟。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>为什么只在 governance 和 verify 写，execute 不写？</summary><div class="ans">审计记的是"<b>决策和结果</b>"不是"动作过程"：governance 记"为什么拦/放"，verify 记"改完回读对不对"。execute 只是执行，其结果由 verify 回读后如实入账（<code>before</code>=preview，<code>after</code>=tool_result）——记结果比记动作更有追责价值。</div></details>
+<details class="qa"><summary><code>success</code> 到底怎么判？</summary><div class="ans"><code>success = tool_result.success AND all_passed</code>（verify 回读的 checks 全过）。<b>光执行成功不算</b>，回读还得一致；不一致 → success=0 + status=needs_review。</div></details>
+<details class="qa"><summary>能复原整条链路吗？</summary><div class="ans">能。<code>trace_id</code> 有索引，一次请求的所有 audit 行按 trace_id 拉齐；<code>before/after_state</code> 还原改前改后状态。管理台 <code>recent_audit_rows()</code> 直接看最近 50 条。</div></details>
+<details class="qa"><summary>append-only 怎么保证？会被改吗？</summary><div class="ans">应用层只 <code>INSERT</code>、不 UPDATE/DELETE。<b>但同库无 DB 级 WORM</b>——真要防篡改得独立审计库 + 哈希链/外部只追加存储。这是诚实缺口。</div></details>
+<details class="qa"><summary>审计能看出"批准的 vs 实际执行的"不一致吗？</summary><div class="ans">能。<code>before_state</code>(preview 预估) 对 <code>after_state</code>(tool_result 实况) 直接比对——这也正是 verify 判 <code>needs_review</code> 的依据。批的是 A、执行成 B，审计里一眼看出。</div></details>
+
+<h2 id="intent">⑤ 意图打分（零 LLM）★</h2>
+<h3>机制</h3>
+<p>意图识别<b>纯规则/关键词打分，零 LLM</b>。<code>score_intents</code> 遍历 intents.json 每个意图算分→排序→top1 为结果；<code>_score_to_confidence</code> 把分数阶梯映射成 confidence；<code>analyze_intent_ambiguity</code> 判歧义。</p>
+<h3>关键代码 <span class="fl">graph/nodes/route.py</span></h3>
+<div class="box">· <code>_calculate_intent_score</code>：命中 trigger_phrases <b>+12</b>、各意图关键词 <b>+16~40</b>、冲突信号 <b>−30~−40</b>；特判 <code>_looks_like_rule_question</code> → ask_rule 直接 score=999/conf=0.95。<br>
+· <code>_score_to_confidence</code>：score≥30→<b>0.95</b> / ≥24→0.90 / …；无分 → unknown, <b>0.2</b>。<br>
+· <code>analyze_intent_ambiguity</code>：top1/top2 分差 ≤ <code>AMBIGUOUS_MARGIN</code> → 歧义；<code>is_write</code> 且 confidence &lt; <code>WRITE_CONFIRM_CONFIDENCE</code> → 歧义（写操作低置信不猜）。<br>
+· <code>classify_intent(text)</code> → <code>(intent_code, confidence)</code>；route_node 产出 intent_code/confidence/intent_candidates[:3]/is_write/missing_entities。</div>
+<h3>数字/常量</h3>
+<div class="box">加分 +12 / +16~40，扣分 −30~−40；conf 阶梯 30→0.95、24→0.90；unknown=0.2；ask_rule 特判 999。</div>
+<h3>诚实边界</h3>
+<div class="warn">· 纯词法，漏长尾/口语化/同义变体；关键词权重是<b>手调 magic numbers</b>（靠 audit self_recognition + golden 覆盖兜）。<br>· 优化：规则低置信才调<b>大模型前置兜底</b> + embedding 语义匹配 + 未命中样本聚类挖新意图。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>意图识别为什么零 LLM？confidence 哪来的？</summary><div class="ans">意图<b>决定路由和权限</b>，是安全相关分类，不能交给概率模型——用规则打分：确定性、可复现、零成本。<code>confidence</code> 是 <code>_score_to_confidence</code> 把<b>规则分数</b>阶梯映射来的，<b>不是模型概率</b>。（这题最容易被抓自相矛盾，务必答"规则"。）</div></details>
+<details class="qa"><summary>意图类型超十个，怎么扩展不出乱子？</summary><div class="ans">config-driven（intents.json 加一条=加配置不改核心）+ <code>audit</code> 5 检查防退化（dark/conflict/self_recog/coverage/orphan）——加了不抢老意图命中、有 golden 覆盖、不产生孤儿。</div></details>
+<details class="qa"><summary>纯关键词漏召回怎么办？</summary><div class="ans">现状靠 trigger_phrases + 关键词加权，长尾会漏；优化是<b>低置信才调大模型兜底</b>（省成本）+ embedding 语义匹配，对未命中样本聚类挖新意图回流 intents.json。</div></details>
+<details class="qa"><summary>写操作意图识别错了、直接执行了怎么办？</summary><div class="ans">识别错也<b>越不过四段治理</b>：低置信/歧义 → need_clarify 追问；写操作还要过 governance 权限 + preview 确认。意图只是入口，安全靠图结构不靠意图准。</div></details>
+
+<h2 id="rag">⑥ RAG / 检索（按场景路由）★</h2>
+<h3>机制</h3>
+<p>不是一条链打所有问题，而是<b>按意图路由到不同 retriever</b>（<code>INTENT_RETRIEVER_MAP</code>）。query_plan 先判该不该检索；grounding 做在<b>模型外</b>（state 里的 grounding_contract / answer_verification / retrieval_steps）。</p>
+<h3>关键代码 <span class="fl">rag/retrievers.py</span></h3>
+<div class="box">· <b>意图→retriever 映射</b>：ask_order_status/ask_machine_load→<code>sql</code>，ask_rule→<code>hybrid</code>，ask_reason→<code>composite</code>，query_failure_impact→<code>graph</code>，默认 <code>hybrid</code>。<br>
+· <b>SQLRetriever</b>：order_id/machine_id 直接 SQL（ctsalebid/jt/gg/pcrq/ddsl），score=1.0（精确最高）。<br>
+· <b>VectorRetriever</b>：fastembed <code>bge-small-zh-v1.5</code> 512 维 + Qdrant（32 条规则）；不可用返回 []。<br>
+· <b>HybridRetriever</b>：向量召回 <b>top_k×3</b> 候选 → 关键词重排（每命中 <b>+0.1</b>）→ 取 top_k；向量挂了全靠关键词。<br>
+· <b>GraphRetriever</b>：networkx <b>3 跳</b>（machine→order→spec→alt_machine），答故障影响。<br>
+· <code>route_and_search</code>：主 retriever 空 → <b>降级 file_keyword</b>；统一返回 <code>[{source,title,text,score,metadata}]</code>，失败返回 [] 不抛。<br>
+· grounding 字段（<span class="fl">graph/state.py</span>）：<code>query_plan</code> / <code>retrieval_steps</code>(防无限检索) / <code>grounding_contract</code>(允许来源) / <code>answer_verification</code>(回答前证据校验)。</div>
+<h3>数字/常量</h3>
+<div class="box">bge-small-zh-v1.5 <b>512 维</b> · Qdrant <b>32</b> 条规则 · Hybrid 候选池 top_k×3、关键词 +0.1/命中 · 实测 <b>Recall@3=0.83 / MRR=0.956</b>。</div>
+<h3>诚实边界</h3>
+<div class="warn">· <b>CaseRetriever 目前是 stub</b>（复用 vector + 标记 case，audit_log 向量化未实现）。<br>· <b>GraphRAG 是 networkx L1，不是 Neo4j</b>。<br>· Vector 依赖外部 Qdrant 路径（<code>D:\schedule-agent-foundry\data\qdrant_local</code>），不在就返回 [] 全靠 file_keyword。<br>· Rerank 生产不默认开（小规则库易被标题权重带偏，1000+ 条再引入）；Neg-Precision=0% 是 BM25 短板。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>为什么不纯向量一把梭？</summary><div class="ans">订单号/机台/规格是<b>强约束字段</b>，纯向量把"语义相似"误当"业务正确"。所以精确走 SQL(score=1.0)、规则走 Hybrid(向量+关键词重排)、诊断走 Composite、故障影响走 Graph。</div></details>
+<details class="qa"><summary>怎么防 RAG 幻觉 / 订单不存在还编机台？</summary><div class="ans">grounding <b>做在模型外</b>：<code>grounding_contract</code>(限定允许来源) + <code>answer_verification</code>(回答前证据校验) + <code>retrieval_steps</code>(防无限检索) + <code>response_must_not_contain</code>(不存在禁编字段)。模型只能用喂进来的证据。</div></details>
+<details class="qa"><summary>GraphRAG 这种为什么不能用向量？</summary><div class="ans">"机台故障影响哪些订单"的答案<b>不在任何一段文字里</b>，是顺着 machine→order→spec→alt_machine 3 跳<b>关系</b>拼出来的。向量检索文本片段无能为力，得走图。用 networkx 抽 SQLite 成图（L1，不上 Neo4j）。</div></details>
+<details class="qa"><summary>retriever 挂了/Qdrant 不可用怎么办？</summary><div class="ans">每个 retriever <b>失败返回 [] 不抛异常</b>；<code>route_and_search</code> 主 retriever 空就<b>降级 file_keyword</b>（本地 md 关键词，永远可用）。RAG 挂了系统还能答，只是质量降级。</div></details>
+<details class="qa"><summary>诚实说，哪些是没做完的？</summary><div class="ans">CaseRetriever 是 stub（复用 vector，真实现要 audit_log 向量化 + 90 天时间过滤）；GraphRAG 是 networkx L1 玩具级；Rerank 没生产化。规则库到 1000+ 条这些才值得补。</div></details>
+
+<h2 id="obs">⑦ 可观测 / Tracing</h2>
+<h3>机制</h3>
+<p>每请求一个 <code>trace_id</code>，节点级 Span 记录；用 <b>P95 而非 avg</b> 看尾延迟；节点级 P95 定位慢节点；异常检测三类。</p>
+<h3>关键代码/结构 <span class="fl">interview_challenges/solutions/solution_08.py</span></h3>
+<div class="box">· 三层模型：<code>Span</code>(name/trace_id/start·end/status[OK·ERROR·TIMEOUT]/attributes/error) → <code>Trace</code>(spans[]/is_success=all OK) → MetricsCollector/AnomalyDetector。<br>
+· 异常检测三类：<b>延迟</b>(节点历史 P95×2) / <b>错误率</b>(最近 window 错误率≥阈值) / <b>成本</b>(单请求超预算)。<br>
+· 生产另有 <span class="fl">eval/tracer.py</span> 接 Langfuse/LangSmith（graph.compile 时按环境变量注入 callbacks）。</div>
+<h3>数字/常量（实测 solution_08）</h3>
+<div class="box">端到端 <b>P50=941 / P95=4702 / avg=1480ms</b>；节点级 <b>LLM P95=4588 vs Route P95=15ms</b>；成功率 90%；50 请求 ¥0.0774；7 个慢请求 &gt;2000ms。</div>
+<h3>诚实边界</h3>
+<div class="warn">· 延迟基线用了<b>含异常样本的全量数据</b>→自指污染，生产要滑动基线（排除近期窗口）。<br>· 扁平 span，无 OTel 父子树。<br>· ⚠️ 这 <b>4702ms 是含 LLM 的端到端</b>；别和 <b>eval 规则检查 28ms</b> 混（那个不打模型）。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>为什么 P95 不用 avg？怎么定位慢节点？</summary><div class="ans">avg 掩盖长尾，P95 反映尾延迟=体感命门。定位靠<b>节点级 P95</b>：LLM 4588ms vs Route 15ms，一眼看出锅在 LLM 不在路由。复现 <code>python -X utf8 …/solution_08.py</code>。</div></details>
+<details class="qa"><summary>异常检测怎么做的？基线哪来的？</summary><div class="ans">三类：节点延迟超历史 P95×2、window 错误率超阈值、单请求超预算。<b>诚实坑</b>：基线用了含异常样本的全量→自指污染，生产要滑动基线（排除刚发生的异常窗口）。</div></details>
+<details class="qa"><summary>为什么你 eval 2 秒跑完但生产 P95 4.7 秒？</summary><div class="ans">两个不同东西：eval 规则检查<b>不打模型</b>（P95=28ms），生产端到端<b>要等 LLM</b>（P95=4702ms，其中 LLM 占 4588ms）。规则回归快正是因为它测的是确定性管线逻辑，不是模型延迟。</div></details>
+
+<h2 id="mem">⑧ 多轮记忆 / 指代消解</h2>
+<h3>机制</h3>
+<p><code>rewrite_node</code> 前置：<b>规则先判"需不需要重写"</b> → 需要才调 LLM 用最近 3 轮历史改写成"自包含 query" → LLM 失败降级规则拼接。<b>70%+ 单轮自包含直接直通、零成本</b>。指代消解靠"改写"，<b>不靠向量召回</b>。</p>
+<h3>关键代码 <span class="fl">graph/nodes/rewrite.py</span></h3>
+<div class="box">· <code>need_rewrite</code> 3 信号：①有指代词(那/这/它…)且<b>无实体</b> ②超短追问(&lt;8 字且在 SHORT_FOLLOWUPS) ③短 query(&lt;12 字)+无实体+有历史。<b>首轮绝不重写</b>。<br>
+· <code>_has_entity</code>：订单号/规格/机台号正则——有具体实体就当自包含，不重写。<br>
+· <code>_llm_rewrite</code>：DeepSeek(temperature=0)，喂 <code>_format_history(max_turns=3)</code>，输出一行自包含 query，失败→None。<br>
+· <code>_rule_rewrite</code>(无 LLM 降级)：从历史正则抽<b>最近</b>机台号/订单号/规格，拼到当前 query 前。<br>
+· state：<code>original_request</code>(不动，审计/Langfuse 用) + <code>rewrite_applied</code>。</div>
+<h3>数字/常量</h3>
+<div class="box">最近 <b>3 轮</b>历史(max_turns=3)；超短追问 &lt;8 字、短 query &lt;12 字；DeepSeek temperature=0。</div>
+<h3>诚实边界</h3>
+<div class="warn">· 无 <code>DEEPSEEK_API_KEY</code> → 规则拼接(demo 级，"生产建议配 LLM")。<br>· 需重写判定是<b>规则启发式</b>，可能误判（漏判指代/误判自包含）。<br>· 结构化多轮状态(订单/机台/确认态)走 State 字段，不进向量库。</div>
+<h3>被追问链</h3>
+<details class="qa"><summary>"把它排到 101" 怎么知道"它"是谁？</summary><div class="ans"><code>rewrite_node</code> 检测到指代词"它"且无实体 → 调 LLM 用<b>最近 3 轮历史</b>改写成"把订单 SO-X 排到 101 机台" → 再进 route。LLM 挂了就规则拼接（抽历史最近订单号）。</div></details>
+<details class="qa"><summary>为什么不用向量召回做指代消解？</summary><div class="ans">向量会把"<b>语义像但时间无关</b>"的历史块拉进来误导。指代要的是<b>时序最近</b>（刚才说的那个订单），不是语义最相似——所以用最近 N 轮原文 + 改写，不用 RAG。</div></details>
+<details class="qa"><summary>每轮都调 LLM 重写不费钱吗？</summary><div class="ans">不。<b>规则前置过滤</b>：70%+ query 自包含（"101 机台坏了影响哪些订单"），直接直通零成本；只有命中 3 个信号的多轮 query 才调 LLM，省 200–500ms + token。</div></details>
+<details class="qa"><summary>重写错了怎么办？</summary><div class="ans">多重兜底：LLM 失败→规则拼接；重写后==原文→标 rewrite_applied=False 走原 query；<code>original_request</code> 永远留底可审计。且重写只影响检索/路由，写操作还有四段治理兜。</div></details>
+
+<hr style="border-color:var(--line);margin:2em 0">
+<p class="hint">✅ 8 个承重点全部抗打（写链路 3 + 意图 + RAG + 可观测 + 多轮记忆；评测独立成篇 <a href="schedule-agent-eval-deep-dive.zh-CN.html">eval-deep-dive</a>）。全部锚真实代码。这份 = 被钻到 L3 时的兜底层。</p>

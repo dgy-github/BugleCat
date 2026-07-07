@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排产评测体系详解 · 复习</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149;--p:#a371f7}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15.5px/1.72 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:900px;margin:0 auto;padding:24px 18px 80px}
+  h1{font-size:23px;margin:.2em 0}
+  h2{font-size:19px;margin:1.6em 0 .5em;padding-bottom:5px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:1.1em 0 .3em;color:var(--l)}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.87em;color:#e6edf3}
+  b{color:#fff3d6}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .why{border-left:3px solid var(--q);background:var(--card);padding:8px 14px;margin:8px 0;border-radius:0 8px 8px 0}
+  .why b{color:var(--q)}
+  .warn{border-left:3px solid var(--r);background:#1f1614;padding:9px 14px;margin:10px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin:8px 0}
+  table{width:100%;border-collapse:collapse;margin:.5em 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#1b2129;color:var(--l)}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:10px 0}
+  .flow .n{flex:1;min-width:150px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:13px}
+  .flow .n b{display:block;color:var(--acc);margin-bottom:3px}
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin:7px 0;font-size:14px}
+  .blk .tag{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:4px;margin-right:6px}
+  .tag.block{background:var(--r);color:#fff} .tag.warn2{background:var(--l);color:#0d1117}
+</style>
+
+<h1>🧪 排产评测体系详解（复习版·重点在"为什么"）</h1>
+<p class="hint">闪卡只给点，这份把每个点讲透。全部锚 <code>eval/</code> 真实代码（audit.py / judge.py / runner.py / README）。</p>
+
+<div class="warn"><b>先纠一个容易绕晕的：其实是"两套东西"，不是一个"三层"。</b><br>
+① <b>audit.py</b> = 独立的"<b>skill 防腐烂体检</b>"（不跑用例、不调 LLM，只查意图系统本身有没有烂）。<br>
+② <b>eval runner</b> = 跑 44 条 golden 用例的<b>三层评测</b>：L1 规则断言 → L2 LLM-judge → L3 Tracing。<br>
+你稿子里说的"三层防护 audit→check_expected→judge"是把 audit 也算成一道防线的讲法，没错；README 里的"三层"专指 eval 内部的 L1/L2/L3。<b>两种讲法都对，别被面试官绕。</b></div>
+
+<div class="thesis"><b>一句话理解</b>：<b>audit 保证"意图系统没烂"，eval 保证"跑起来结果对"</b>；CI 里两个都过才放行。核心信条贯穿其中——<b>能用确定性规则判的（L1/audit）就不用 LLM judge（L2）</b>。</div>
+
+<h2>🩺 A. audit.py —— Skill 防腐烂体检（5 项）</h2>
+<div class="why"><b>为什么要它</b>：意图系统会<b>随业务演化而腐烂</b>——你不断加新意图，老意图的触发词悄悄被抢、覆盖出现空洞、route.py 里堆下永不触发的死代码。腐烂是<b>静默</b>的，不体检没人发现。audit 就是上线前的"体检"，<b>不跑用例、不调 LLM</b>，纯查意图配置本身健康度。</div>
+
+<div class="blk"><span class="tag block">blocking</span><b>① dark_skills（死意图）</b><br>查：某意图的<b>所有触发词都识别不到自己</b>（永远触发不了）。机制：遍历该意图每条 <code>trigger_phrases</code>，拼成完整话跑 <code>classify_intent</code>，若命中的不是自己→这条 trigger 失效；<b>全失效=dark skill</b>。防：加新意图后老意图触发词被抢命中，老意图变死代码。</div>
+
+<div class="blk"><span class="tag warn2">warning</span><b>② trigger_conflicts（触发词冲突）</b><br>查：<b>同一短语被多个意图共用</b>（如"插单"既属 insert_order 又属 emergency）。这会让两个意图打分接近→路由不稳。<b>只 warning 不阻断</b>——重复允许存在，但要人<b>知道</b>这里有歧义风险。当前 4 个短语共用。</div>
+
+<div class="blk"><span class="tag block">blocking</span><b>③ self_recognition（自识别率）</b><br>查：每个意图的触发词命中自己的比例，<b>&lt;50% = 高风险 skill</b>（说明触发词写得没区分度、容易被别人抢）。</div>
+
+<div class="blk"><span class="tag block">blocking</span><b>④ coverage（用例覆盖率）</b><br>查：<b>golden cases 覆盖了多少意图</b>。没被任何用例覆盖的意图=<b>改了它没人会发现</b>（回归测不到）。当前 <b>23/23 = 100%</b>。</div>
+
+<div class="blk"><span class="tag block">blocking</span><b>⑤ orphan_intents（孤儿意图）</b><br>查：route.py 里有 <code>code == "xxx"</code> 的<b>加分逻辑</b>，但 <code>intents.json</code> 里<b>没定义</b>这个意图→"幽灵代码"（这段加分永远不触发）。用正则扫 route.py 的引用 − intents.json 的定义。</div>
+
+<div class="why"><b>面试金句</b>：4 项 blocking（dark/self_recog/coverage/orphan）失败直接阻断 CI，1 项 warning（conflict）。"<b>我给意图系统做了体检，防它随业务演化悄悄腐烂</b>"——这是资深信号，大多数人只测功能、不测"配置系统本身有没有烂"。</div>
+
+<h2>📏 B. eval L1 —— 规则断言（~16 类，确定性、零成本）</h2>
+<div class="why"><b>为什么是第一层、还是硬门禁</b>：这些判据<b>都是确定性的</b>（意图对不对、路径含不含 execute 是二值），能用规则判就<b>绝不用 LLM judge</b>（信条）。零成本、可复现、2 秒跑完 44 条。</div>
+<p>每条 golden 用例声明一组 <code>expected</code> 字段，runner 比对<b>实际 vs 期望</b>。~16 类字段按管线分层：</p>
+<table>
+  <tr><th>层</th><th>expected 字段</th><th>断言什么</th></tr>
+  <tr><td>意图</td><td><code>intent_code</code> / <code>confidence_min·max</code> / <code>entities</code> / <code>is_write</code> / <code>missing_entities</code></td><td>选对意图、置信度区间、实体抽对、读写判对、该缺的实体缺了</td></tr>
+  <tr><td>治理</td><td><code>governance_passed</code></td><td>治理该过/该拦</td></tr>
+  <tr><td>路径</td><td><code>path</code> / <code>path_must_contain</code> / <code>path_must_not_contain</code></td><td>走对节点链（如只读 must_not_contain <code>execute</code>）</td></tr>
+  <tr><td>检索</td><td><code>query_plan</code> / <code>tool_name</code> / <code>rag_retriever</code> / <code>max_retrieval_steps</code></td><td>该不该检索、用对 SQL 工具、用对 retriever(hybrid/graph)、检索步数不超限</td></tr>
+  <tr><td>证据</td><td><code>answer_grounded</code> / <code>evidence_source</code></td><td>有据、来源是 sqlite</td></tr>
+  <tr><td>输出</td><td><code>response_must_contain</code> / <code>response_must_not_contain</code></td><td>输出层硬断言（订单不存在→禁含机台/日期，防编造）</td></tr>
+</table>
+<div class="why"><b>关键理解</b>：这不是"答了没"，是<b>选对意图→走对路径→用对检索→有据→不编造</b>整条链的确定性校验。所以"100% 规则通过"才有意义。</div>
+
+<h2>🚦 C. CI 门禁 —— rule_pass_rate ≥ 1.0</h2>
+<div class="box">
+· 跑 44 条 golden 的 <b>L1 规则检查</b>，必须 <b>44/44 = 100%</b> 才 <code>exit 0</code>；低于阈值 <code>exit 1</code>，挡住合入/部署。<br>
+· <b>为什么是 1.0 不是 0.95</b>：规则断言是<b>确定性二值</b>（意图对就是对），错一条=<b>真回归</b>，没有"差不多"。0.95 只允许<b>本地临时排查</b>用，CI/部署固定 1.0。<br>
+· <b>为什么快</b>：L1 不调 LLM，纯管线逻辑，<b>P50/P95 = 3ms/28ms</b>，44 条 2.25s 跑完。
+</div>
+<div class="warn"><b>⚠️ 别把两个 P95 说混了！</b><br>
+这里的 <b>28ms</b> 是<b>规则 eval</b> 的延迟（<b>不调 LLM</b>，只跑路由/治理逻辑）。<br>
+之前说的 <b>端到端 P95=4702ms</b> 是 tracing 里<b>含 LLM 调用</b>的延迟（慢在 LLM 那 4588ms）。<br>
+被追问时说清："规则回归 2 秒跑完是因为不打模型；生产端到端慢是因为要等 LLM"——两个数字不冲突。</div>
+
+<h2>🤖 D. eval L2 —— LLM-as-judge（3 维 1-5，带降级）</h2>
+<div class="why"><b>为什么 judge 只当第二层、不当硬门禁</b>：语义质量有主观性、成本高、还可能网关不可用。硬门禁交给 L1 确定性判据；judge 只做<b>语义补充评估</b>。</div>
+<div class="box">
+· <b>3 个评分维度</b>（judge.py 的 prompt 写死）：<b>相关性</b>（是否针对问题）/ <b>准确性</b>（事实对不对、关键信息有没有引具体数据）/ <b>完整性</b>（是否覆盖 criteria 全部要求）。给 <b>1-5 整数</b>。<br>
+· <b>降级机制</b>：网关挂了 <code>_judge_with_llm</code> 抛异常 → 自动降到 <code>_judge_with_rules</code>：从 criteria+state 提关键词，算命中率→分数（<b>≥0.9→5 / ≥0.7→4 / ≥0.5→3 / ≥0.3→2 / else 1</b>）；报告里 <code>method</code> 字段标 <code>llm</code> 还是 <code>rule</code>，可复现。<br>
+· <b>容错</b>：三级 JSON 解析（直接 parse → 去 markdown 代码块 → 正则提第一个 <code>{...}</code>），score 钳到 1-5。
+</div>
+<div class="why"><b>被追问"judge 打不准怎么办"</b>：留<b>人工校准子集</b>验 judge-human 一致率，<b>&lt;0.9 先修 judge</b>；能转成确定性断言的（L1）就<b>不用 judge</b>。这是"有确定性判据别用 LLM judge"信条的落地。</div>
+
+<h2>📡 E. L3 Tracing + 数据飞轮</h2>
+<div class="box">
+· <b>L3 = LangSmith Tracing</b>：设 <code>LANGSMITH_API_KEY</code> 自动启用，每个 invoke 有完整 trace，看节点耗时/State 变化/失败链路；无 key 自动跳过不影响评测。<br>
+· <b>数据飞轮</b>：线上 <code>audit_log</code> → <code>mine_eval_candidates</code> 挖候选 → 人审 → 晋级 <code>online_hard_cases.json</code> → <code>run_scheduled_eval</code>。<b>评测集从真实失败里长出来</b>（呼应你之前的 Bad-case 回流：响应异常自动修、业务理解异常才送人标）。
+</div>
+
+<h2>🎤 30 秒串讲（把整套讲成一个故事）</h2>
+<div class="thesis">"我的评测是<b>两套</b>：一套 <b>audit</b> 给意图系统做体检，防它随业务演化<b>悄悄腐烂</b>（死意图/覆盖空洞/幽灵代码，4 项 blocking）；一套 <b>eval</b> 跑 44 条 golden，三层——<b>L1 ~16 类确定性规则断言</b>（选对意图→走对路径→用对检索→不编造，CI 要 100% 才放行、2 秒跑完因为不打模型）、<b>L2 LLM-judge</b> 3 维（相关/准确/完整，网关挂了降级关键词打分）、<b>L3 Tracing</b>。信条一以贯之：<b>能确定性判的就不用 judge</b>。坏例还通过飞轮从线上回流。"</div>
+
+<p class="hint">配套：<a href="schedule-agent-number-drills.zh-CN.html">数字闪卡</a> · <a href="schedule-agent-interview-final-map.zh-CN.html">图谱</a> · <a href="schedule-agent-interview-final.zh-CN.html">念稿</a></p>

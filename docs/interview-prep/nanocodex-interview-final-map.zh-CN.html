@@ -1,0 +1,247 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>nanocodex 面试终版 · 可展开图谱</title>
+<style>
+  :root{--bg:#0d1117;--fg:#e6edf3;--mut:#8a919c;--card:#161b22;--line:#30363d;--acc:#1f6feb;--q:#3fb950;--l:#d29922;--r:#f85149}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;max-width:1000px;margin:0 auto;padding:26px 20px 80px}
+  h1{font-size:25px;margin:.2em 0}
+  h2{font-size:18px;margin:1.5em 0 .6em;border-left:4px solid var(--acc);padding-left:10px}
+  code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:.9em;color:#e6edf3}
+  a{color:#58a6ff}
+  .thesis{background:#12233b;border:1px solid #1f4b7a;border-radius:10px;padding:12px 16px;margin:14px 0}
+  .hint{color:var(--mut);font-size:13px;margin:.3em 0 1em}
+  .strip{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13.5px;margin:10px 0}
+  .strip b{color:var(--q)}
+  .grid{display:grid;gap:12px;grid-template-columns:1fr}
+  details.c{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  details.c>summary{cursor:pointer;padding:13px 16px;list-style:none;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  details.c>summary::-webkit-details-marker{display:none}
+  details.c[open]>summary{border-bottom:1px solid var(--line);background:#1b2129}
+  .t{font-weight:700;font-size:15.5px}
+  .sub{color:var(--mut);font-weight:400;font-size:12px}
+  .peek{color:var(--mut);font-size:12.5px}
+  .star{border-color:#8957e5;box-shadow:0 0 0 1px #8957e5 inset}
+  .new{border-color:#238636;box-shadow:0 0 0 1px #238636 inset}
+  .body{padding:12px 16px}
+  .body p{margin:.5em 0}
+  .k{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:4px;margin-right:6px;background:#21262d;color:var(--mut)}
+  .k.q{color:#0d1117;background:var(--q)} .k.l{color:#0d1117;background:var(--l)} .k.r{color:#fff;background:var(--r)}
+  .btns{margin:10px 0 4px}
+  .btns button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:5px 12px;font-size:13px;cursor:pointer;margin-right:8px}
+  svg{width:100%;height:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;margin:6px 0}
+  .n-def{fill:#12233b;stroke:#1f4b7a} .n-run{fill:#132a1a;stroke:#238636} .n-gate{fill:#2a2312;stroke:#9e7318}
+  .n-key{fill:#241833;stroke:#8957e5} .n-out{fill:#161b22;stroke:#30363d}
+  .n-t{fill:#e6edf3;font:600 13px sans-serif} .n-s{fill:#8a919c;font:11px sans-serif}
+  .ar{stroke:#8a919c;stroke-width:1.5;fill:none;marker-end:url(#a)} .al{fill:#8a919c;font:11px sans-serif}
+</style>
+
+<h1>🦀 nanocodex 面试终版 · 可展开图谱</h1>
+<p class="hint">折叠=扫图定位，点任一卡=就地展开全文。★=承重主攻点，🆕=新并入。定位优势：<b>从零自研 full ownership</b>——每个设计决策都是我的，被钻到 L3 不怕。</p>
+
+<div class="thesis">把 <b>OpenAI Codex 用 Rust 从零重写</b>的编码 agent 工程底座。选 Rust <b>不为性能</b>（agent I/O 密集）——为 <b>~199× 启动 · 单文件分发 · 编译期钉死循环不变式</b>。信条：<b>模型是第一杠杆 · harness 是第二杠杆 · 安全建在代码不建在措辞</b>。</div>
+
+<h2>📁 nanocodex 资料导航（这一份=主看物）</h2>
+<div class="strip" style="border-left:4px solid #1f6feb">
+  <b>① 主看物</b>：本文件=可展开图谱（数字条·架构图·9 承重卡·5 硬追问卡·8 优化卡）。<br>
+  <b>② 录音稿</b>：<a href="nanocodex-interview-final.zh.md">nanocodex-interview-final.zh.md</a>（逐字念稿，9 段叙事+L3）。<br>
+  <b>③ 定时器设计</b>：<a href="nanocodex-scheduler-design.zh-CN.html">nanocodex-scheduler-design.zh-CN.html</a>（本图谱⑧的完整实现方案，流程图+9 决策卡）。<br>
+  <b>④ 权限演化图</b>：<a href="nanocodex-codex-permission-evolution.zh-CN.html">permission-evolution.html</a>（双层门/untrusted 三筛流程图）。<br>
+  <b>⑤ 深挖刷题</b>：<a href="nanocodex-drive-engineering-interview-drills.zh.md">drive-engineering-drills.zh.md</a> · <a href="nanocodex-module-followups.zh.md">module-followups.zh.md</a>（30 条模块追问）。<br>
+  <b>⑥ 知识点全档</b>：<a href="nanocodex-portrait.zh-CN.html">nanocodex-portrait.zh-CN.html</a>（9 子系统知识点卡合一 HTML，比本图谱更深，含每卡关键数字/取舍与坑/自测）。<br>
+  <span style="color:var(--mut)">· 画像/速记：<code>nanocodex-portrait.zh.md</code> / <code>nanocodex-portrait-cram.zh.md</code>（8 子系统 L3 底料）。</span>
+</div>
+
+<h2>🔢 数字速记（"给个数字"直接甩）</h2>
+<div class="strip">
+· 启动 <b>~199×</b> 加速（5.5ms vs Python 1.1s，实测）· 单文件 <b>2.4MB</b> 二进制 · <b>137</b> 测试 · <b>8</b> 子系统<br>
+· 沙箱常量：<b>3</b> 沙箱模式 / <b>4</b> 审批档 / <b>29</b> TRUSTED 白名单 / <b>15</b> git 写子命令 / <b>7</b> dangerous 正则<br>
+· 双预算默认 <b>150</b> model calls / <b>300</b> tool calls · 工具可见上限 <b>9</b> · 唯一训练接缝 <code>NCX_GENOME</code><br>
+· codex 血统：<code>apply_patch</code> 工具描述<b>逐字移植</b>
+</div>
+
+<h2>🧠 主循环 run_turn（一切围着它转）</h2>
+<svg viewBox="0 0 720 452" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="run_turn 主循环">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0l10 5-10 5z" fill="#8a919c"/></marker></defs>
+  <!-- loop boxes -->
+  <rect class="n-def" x="280" y="20" width="260" height="46" rx="9"/>
+  <text class="n-t" x="410" y="41" text-anchor="middle">① 组装上下文</text>
+  <text class="n-s" x="410" y="58" text-anchor="middle">for_model_edited 非破坏发送视图</text>
+  <line class="ar" x1="410" y1="66" x2="410" y2="90"/>
+  <rect class="n-def" x="280" y="92" width="260" height="46" rx="9"/>
+  <text class="n-t" x="410" y="113" text-anchor="middle">② 调模型（Provider）</text>
+  <text class="n-s" x="410" y="130" text-anchor="middle">fast / pro 分层</text>
+  <line class="ar" x1="410" y1="138" x2="410" y2="162"/>
+  <rect class="n-gate" x="280" y="164" width="260" height="46" rx="9"/>
+  <text class="n-t" x="410" y="185" text-anchor="middle">③ 有 tool_call？</text>
+  <text class="n-s" x="410" y="202" text-anchor="middle">无 → 作答退出</text>
+  <line class="ar" x1="540" y1="187" x2="576" y2="187"/>
+  <rect class="n-out" x="578" y="164" width="132" height="46" rx="9"/>
+  <text class="n-t" x="644" y="185" text-anchor="middle">作答 → 退出</text>
+  <text class="n-s" x="644" y="202" text-anchor="middle">5 退出点</text>
+  <line class="ar" x1="410" y1="210" x2="410" y2="234"/>
+  <rect class="n-run" x="280" y="236" width="260" height="50" rx="9"/>
+  <text class="n-t" x="410" y="257" text-anchor="middle">④ 执行工具 → 双层门 → 沙箱容器</text>
+  <text class="n-s" x="410" y="274" text-anchor="middle">can_write ⊥ classify · Job Object+timeout</text>
+  <line class="ar" x1="410" y1="286" x2="410" y2="310"/>
+  <rect class="n-def" x="280" y="312" width="260" height="46" rx="9"/>
+  <text class="n-t" x="410" y="333" text-anchor="middle">⑤ 结果喂回历史</text>
+  <text class="n-s" x="410" y="350" text-anchor="middle">backfill 悬空 tool_call 保历史合法</text>
+  <!-- return arrow -->
+  <path class="ar" d="M280 335 L150 335 L150 43 L280 43"/>
+  <text class="al" x="118" y="195" text-anchor="middle" transform="rotate(-90 118 195)">for 0..max_model_calls（有界循环）</text>
+  <!-- extensions -->
+  <rect class="n-key" x="180" y="392" width="470" height="46" rx="9"/>
+  <text class="n-t" x="415" y="413" text-anchor="middle">扩展环（围绕主循环）</text>
+  <text class="n-s" x="415" y="430" text-anchor="middle">🎭 best-of-N编排 · 🧠 记忆 · 🧬 ncx-forge 离线演化 · 🕒 定时器</text>
+</svg>
+<p class="hint">退出点五个：无工具 / error / cancel / 预算耗尽 / 触及 max_model_calls。</p>
+
+<div class="btns">
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=true)">全部展开</button>
+  <button onclick="document.querySelectorAll('details.c').forEach(d=>d.open=false)">全部折叠</button>
+</div>
+
+<h2>🧩 承重维度（点开看 承重 / L3 / 被追问）</h2>
+<div class="grid">
+
+  <details class="c"><summary><span class="t">🦀 ① 定位 + 为什么 Rust</span><div class="peek">自研·不为性能·编译期钉不变式</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>OpenAI Codex 用 Rust <b>从零重写</b>，起源是我自己用 Coding Agent 的真实痛点（上下文/任务拆解/文件修改/执行反馈/测试闭环）——<b>先理解问题→再抽象系统→再自己实现</b>。full ownership。</p>
+    <p><span class="k q">L3</span>单进程 current-thread Tokio，<code>?Send</code> + <code>Rc&lt;RefCell&gt;</code>（I/O 密集用单线程 <code>join_all</code> 做只读并发，非 OS 线程）；8 子系统绕 <code>AgentLoop::run_turn</code>。为什么 Rust：<b>不为性能</b>（agent 等模型/等工具，CPU 不是瓶颈）——为 ~199× 启动/2.4MB 单文件分发/类型系统编译期钉死循环不变式。</p>
+    <p><span class="k l">被追问"为什么不 Go"</span>要的是编译期把 <code>?Send</code>/借用/状态机不变式钉死的类型表达力 + 生态（async-trait/serde），Rust 更贴合把"能力袋"和循环状态建模。</p>
+    </div>
+  </details>
+
+  <details class="c star"><summary><span class="t">🔄 ② Harness 主循环 run_turn</span><div class="peek">有界循环 + 双预算 + 历史合法性不变式</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>一回合 = <code>for iteration in 0..max_model_calls</code> 有界循环：组装上下文→调模型→有工具就执行→喂回→再循环，直到不带工具作答/error/cancel/触及预算。</p>
+    <p><span class="k q">L3</span><code>max_model_calls = max_iterations.min(task_budget.max_model_calls.max(1))</code>；<b>双预算</b>（model_calls/tool_calls，默认 150/300）；<b>历史合法性不变式</b>=<code>backfill_unanswered_tool_calls</code> 给悬空 tool_call 补占位 <code>role:tool</code>（否则下次请求 400）。</p>
+    <p><span class="k l">被追问"怎么防死循环"</span>双预算 + 无进展检测 + max_model_calls 硬上限；<b>五退出点</b>（无工具/error/cancel/预算/max）。</p>
+    </div>
+  </details>
+
+  <details class="c star"><summary><span class="t">🚪 ③ 权限双门 <span class="sub">相对 codex 的再设计</span></span><div class="peek">两道正交纯函数门 + 能力剥夺</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>安全建在代码上不建在措辞上。一次写操作过<b>两道正交的门</b>：物理门判"能不能写"、越界门判"越界了怎么办"，再加一层人类提示。</p>
+    <p><span class="k q">L3</span><code>SandboxPolicy.can_write</code>（3 档模式 + 词法路径包含，纯函数零 I/O）⊥ <code>Approver::classify</code>（4 档 → AutoApprove/Ask/AutoDeny）。<b>untrusted 三筛顺序</b>：7 条危险正则先跑（<code>rm -rf</code> 即使被引导也拦）→ 29 条白名单（first_token）→ git 15 条写子命令。<code>SessionGrants</code> 精确匹配（<code>ls -la</code>≠<code>ls -l</code>），session 级即丢。<code>PolicyExecutor</code> 只做容器（Job Object+timeout），<b>不碰审批</b>。<b>能力剥夺</b>：read-only 下 can_write 恒 false、plan mode 拒所有写。</p>
+    <p><span class="k l">被追问"danger-full-access 全放吗"</span>否，只清零 escalation bit 不改 approval policy；untrusted+danger 下未知命令仍 Ask。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🗜 ④ 上下文压缩（非破坏）</span><div class="peek">发送时视图·原始历史不动·两趟</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span><code>for_model_edited</code> 构建<b>发送时视图</b>，<code>self.messages</code> 原始历史不动（非破坏）：压旧 tool 结果 → user 边界丢最旧前缀。</p>
+    <p><span class="k q">L3</span>切点<b>绝不落在 tool_result</b>（否则历史以孤立 tool 开头→400）；非破坏才敢激进压（resume/回放/换模型都吃原始）。</p>
+    <p><span class="k l">被追问"为什么非破坏"</span>压缩是有损猜测，保留原始是唯一能兜底的地基。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🎭 ⑤ 编排 best-of-N</span><div class="peek">靠结构不靠更聪明模型·无消息总线</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>高复杂度任务靠<b>结构</b>：classify→plan→N 个 worker 并行→verify 选 winner→回灌重试。</p>
+    <p><span class="k q">L3</span>父子<b>无消息总线</b>，三通道：prompt 下发 + 文件隔离-提升（<code>copy_tree</code> 私有 scratch，winner 才 promote）+ <code>PASS/FAIL/BEST</code> 裁决回灌。classify/plan/verify 走 <code>reason()</code> = 空 <code>ToolRegistry</code>（<b>代码级拿不到工具</b>）；用尽重试仍 promote best 标 <code>[unverified]</code>。</p>
+    <p><span class="k l">被追问"子 agent 怎么通讯"</span>不对话——文本是下行通道，<b>磁盘才是代码的真 IPC</b>，裁决文本是回路。</p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🧠 ⑥ 记忆</span><div class="peek">线索不是事实</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>项目记忆是"<b>线索不是事实</b>"。</p>
+    <p><span class="k q">L3</span><code>recall</code> 注入标 <code>RECALL_HEADER</code>（"线索而非事实"）；<code>remember</code> 仅 CONFIRMED + 精确去重；<code>consolidate(0.85)</code> 启动即幂等去重。</p>
+    <p><span class="k l">被追问"为什么当线索"</span>记忆会过期（记的文件/flag 可能已不存在）——注入当线索让模型去验证，不当既定事实直接落地。</p>
+    </div>
+  </details>
+
+  <details class="c star"><summary><span class="t">🧬 ⑦ ncx-forge 离线演化 <span class="sub">相对 codex 独有</span></span><div class="peek">只演化文字不动行为·训练接缝即安全边界</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>让 agent 离线自动优化自己，但<b>只演化文字、不动行为</b>。</p>
+    <p><span class="k q">L3</span>genome = system_prompt + 工具描述（<b>纯文本</b>）；<code>NCX_GENOME</code> 是训练↔运行唯一接缝；<b>可证明 no-op</b>（空/错→字节级回退默认）；执行始终过沙箱→被不可信失败轨迹喂养的 teacher 也注入不了新能力（<b>训练接缝即安全边界</b>）；sentinel 门无法证明注入生效前拒绝训练。</p>
+    <p><span class="k l">被追问"离线优化会不会引入风险"</span>能演化的只有文字，执行永过沙箱——离线训练改不动安全边界。</p>
+    </div>
+  </details>
+
+  <details class="c new"><summary><span class="t">🕒 ⑧ 定时器设计 <span class="sub">🆕 并入</span></span><div class="peek">难点不是计时·是无人时 Ask 怎么办</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>给单文件 CLI agent 加调度。<b>难点不是计时</b>（那是 OS 的事），是<b>"没人在场时 <code>Decision::Ask</code> 怎么办"</b>。</p>
+    <p><span class="k q">L3</span><b>委托 OS 调度器</b>（Task Scheduler/cron/launchd）spawn 无头单发 <code>ncx [PROMPT]</code>（复用既有单发路径，~5.5ms 冷启动让 per-fire 进程免费，<b>不自带 daemon</b>）；声明式 <code>~/.nanocodex/schedules.toml</code>（沿用 config.toml/mcp.toml 约定）；<b>无人值守解析器 <code>Ask→Deny</code> fail-closed</b>（<code>classify()</code> 一行不改，复用双层门<b>零新权限</b>，是"能力剥夺"范式延伸）；per-id 锁文件防重叠（同排产订单锁，带 TTL）。</p>
+    <p><span class="k l">被追问"无人时 Ask 怎么办 / 算不算新攻击面"</span>fail-closed Deny——新增决策是<b>收紧非放宽</b>；写操作要在配置里显式预授权一个不产生 Ask 的策略组合（授权前移到写配置那刻）。呼应 forge"训练接缝即安全边界"同一信条。</p>
+    <p><span class="k">详见</span><a href="nanocodex-scheduler-design.zh-CN.html">完整实现方案（流程图 + 9 决策卡 + 分阶段计划）→</a></p>
+    </div>
+  </details>
+
+  <details class="c"><summary><span class="t">🧭 ⑨ 驾驭工程（元）+ 哲学</span><div class="peek">模型第一杠杆·harness 第二杠杆</div></summary>
+    <div class="body">
+    <p><span class="k">承重</span>核心信念——<b>模型是第一杠杆，harness 是第二杠杆</b>。编排靠结构不靠更聪明的模型，forge 只演化文字，沙箱托底。</p>
+    <p><span class="k q">L3</span>四信条同排产：LLM 原始输出不直接落地 / 安全建在代码不建在措辞 / 有确定性判据就别用 LLM judge / 数据不出域。</p>
+    <p><span class="k l">与排产对称</span>同一套驾驭工程，nanocodex 长成"<b>沙箱+best-of-N+离线演化</b>"，排产长成"确定性 workflow+四段治理+评测飞轮"；骨架同，承重随业务。</p>
+    </div>
+  </details>
+
+</div>
+
+<h2>🔥 硬追问补充（跨维度·被钻时用）</h2>
+<div class="grid">
+
+  <details class="c"><summary><span class="t">和 codex 什么关系，是不是抄的？</span><div class="peek">能搬则搬，承重处自己再设计</div></summary>
+    <div class="body"><p>能原样搬的<b>逐字搬</b>（<code>apply_patch</code> 工具描述 / <code>@path</code> / tool_calls 形态 / 沙箱三模式 / 审批四档）——这是工程诚实，不重造轮子。<b>但权限双层正交纯函数 + 代码级能力剥夺 + ncx-forge 训练接缝即安全边界，是我的再设计</b>。能搬则搬，该做工程判断处自己重设计——这才是 full ownership。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t"><code>?Send</code>+<code>Rc&lt;RefCell&gt;</code> 为什么不用多线程？</span><div class="peek">I/O 密集，瓶颈不是 CPU</div></summary>
+    <div class="body"><p>agent 是 I/O 密集（等模型/等工具），CPU 不是瓶颈；单线程 <code>join_all</code> 做只读并发够用，还<b>免掉 Send 约束的复杂度</b>。要的是编译期把循环状态机不变式钉死，而不是压榨多核。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">工具可见上限 9 为什么？</span><div class="peek">工具太多模型选择退化</div></summary>
+    <div class="body"><p>暴露的工具越多，模型选择越容易退化/误选；卡在 9 控制暴露面，让每次决策的候选集小而清晰。呼应"harness 是第二杠杆"——约束比堆能力更值钱。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">genome 演化了怎么知道没变坏？</span><div class="peek">sentinel 门 + 可证明 no-op（诚实缺口）</div></summary>
+    <div class="body"><p><code>NCX_GENOME</code> 注入前过 <b>sentinel 门</b>（证明不了注入生效就拒绝训练）+ <b>可证明 no-op 回退</b>（空/错→字节级回默认）。<span style="color:var(--l)">诚实缺口</span>：目前没有<b>行为回归 eval 集</b>验"文字变了但行为没退化"——这是优化项（见优化卡）。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">怎么调试线上跑偏？</span><div class="peek">NCX_TRACE env 打点</div></summary>
+    <div class="body"><p>置 <code>NCX_TRACE</code> 打开链路打点，看组装/调模型/工具/裁决每步的输入输出定位。<span style="color:var(--l)">优化方向</span>：升结构化 span/OTel 父子树（呼应排产可观测优化），现在是扁平打点。</p></div>
+  </details>
+
+</div>
+
+<h2>🚀 优化方向（被问"怎么优化/下一步"·现状→优化）</h2>
+<p class="hint">答法：现状能用 + 有 X 局限 + 方向 Y + 当前不做因为 Z。</p>
+<div class="grid">
+
+  <details class="c star"><summary><span class="t">🧬 ncx-forge（最大缺口）</span><div class="peek">只 sentinel 门 → 加行为回归 eval</div></summary>
+    <div class="body"><p><span class="k">现状</span>sentinel 门 + 可证明 no-op 回退，只保证"能安全回退"。</p><p><span class="k q">优化</span>加<b>行为回归 eval 集</b>（文字变了跑一批任务比通过率/工具序列，退化则拒绝晋级）+ <b>A/B genome 对比</b> + held-out 防对训练轨迹过拟合。这是 forge 从"安全"到"可信有效"的关键一步。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">🎭 编排 best-of-N</span><div class="peek">纯文件+裁决文本 → 回灌学习+多裁判</div></summary>
+    <div class="body"><p><span class="k">现状</span>无消息总线，靠文件隔离+PASS/FAIL/BEST 裁决文本；worker 间不学习。</p><p><span class="k q">优化</span>失败 worker 的轨迹<b>回灌 forge 学习</b>；verify 从单裁判升<b>多裁判对抗投票</b>（呼应 workflow adversarial verify）；跨 worker 结构化 artifact 索引减重复探索。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">🗜 上下文压缩</span><div class="peek">两趟启发式 → 学习式重要性评分</div></summary>
+    <div class="body"><p><span class="k">现状</span>两趟启发式（压旧 tool 结果 + 丢最旧前缀），非破坏。</p><p><span class="k q">优化</span>加<b>学习式重要性评分</b>决定丢谁 + <b>工具结果摘要模型</b>（借鉴 pi 的 compact 摘要，而非直接截断）；仍守非破坏原始历史。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">🧠 记忆</span><div class="peek">精确去重 → 向量化语义去重+分层</div></summary>
+    <div class="body"><p><span class="k">现状</span>精确字符串去重 + <code>consolidate(0.85)</code>。</p><p><span class="k q">优化</span><b>向量化语义去重</b>（近义线索合并）+ <b>分层记忆</b>（会话/长期/项目）+ 过期线索的时效衰减。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">🚪 权限</span><div class="peek">静态29白名单 → 项目级可学习信任</div></summary>
+    <div class="body"><p><span class="k">现状</span>29 条静态白名单 + 7 危险正则，全代码内置。</p><p><span class="k q">优化</span><b>项目级可学习信任策略</b>（某仓库常用且历史安全的命令可提信任），但<b>判定仍在代码不给模型</b>、危险正则永远兜底——扩的是白名单来源，不是把决策权交出去。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">👁 可观测</span><div class="peek">NCX_TRACE 扁平 → 结构化 OTel 树</div></summary>
+    <div class="body"><p><span class="k">现状</span><code>NCX_TRACE</code> 环境变量开扁平打点。</p><p><span class="k q">优化</span>升<b>结构化 span / OTel 父子树</b>（嵌套工具/子 agent 可见）+ 每回合 token/延迟/退出原因指标（呼应排产可观测优化，两项目同一方向）。</p></div>
+  </details>
+
+  <details class="c new"><summary><span class="t">🕒 定时器</span><div class="peek">MVP OS单后端 → cron/launchd+补跑</div></summary>
+    <div class="body"><p><span class="k">现状</span>设计阶段；MVP=Windows Task Scheduler 单后端 + 无人值守解析器 + 锁。</p><p><span class="k q">优化</span>补 <b>cron/launchd 后端</b> + <code>on_missed</code> 补跑 + 结果通知（文件/webhook）+ 预授权写任务的显式校验 + <code>Ask→Deny</code> 解析器的属性测试。详见<a href="nanocodex-scheduler-design.zh-CN.html">设计文档</a>分阶段计划。</p></div>
+  </details>
+
+  <details class="c"><summary><span class="t">🔄 主循环诊断</span><div class="peek">无进展检测较粗 → 降级重规划信号</div></summary>
+    <div class="body"><p><span class="k">现状</span>双预算 + 无进展检测 + 硬上限。</p><p><span class="k q">优化</span>更细的循环诊断（区分"卡住重试" vs "该重规划"），触发<b>自动降级/重规划信号</b>而非闷头耗预算——呼应排产 verify 输出"重试 vs 重规划"的同思路。</p></div>
+  </details>
+
+</div>
+
+<h2>🧾 一句话总纲（背这句）</h2>
+<div class="thesis">nanocodex 是我从用 Codex/Claude Code 的真实痛点出发、用 Rust <b>从零重写</b>的编码 agent 工程底座。选 Rust 不为性能而为 <b>~199× 启动 + 单文件分发 + 编译期钉死循环不变式</b>。相对 codex 最大的再设计=<b>权限双层正交纯函数 + 代码级能力剥夺 + 训练接缝即安全边界</b>；连定时器都用同一信条（<code>Ask→Deny</code> fail-closed、复用双层门零新权限）。贯穿哲学：<b>模型是第一杠杆、harness 是第二杠杆，安全建在代码不建在措辞</b>。</div>
