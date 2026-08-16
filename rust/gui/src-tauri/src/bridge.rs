@@ -16,22 +16,22 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use ncx_config::{
-    load_config, permission_mode_to_knobs, write_nanocodex_config, Config, ConfigPaths, Overrides,
+    load_config, permission_mode_to_knobs, write_nanocodex_config, ConfigPaths, Overrides,
 };
 use ncx_core::{
-    discover_skills, expand_file_mentions, load_workspace_instructions, new_session_id,
-    skills_index_block, AgentLoop, ApprovalDecision, ApprovalHandler, ApprovalRequest,
-    CheckpointStore, ContextEditPolicy, LoopEvent, MemoryStore, Provider, Session, SessionGrants,
-    SessionIndex, TaskBudget, ToolContext, ToolRegistry,
+    discover_skills, expand_file_mentions, load_workspace_instructions, model_provider_from_config,
+    new_session_id, skills_index_block, vision_provider_from_config, AgentLoop,
+    AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest, CheckpointStore,
+    LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext, ToolRegistry,
+    UserQuestionHandler, UserQuestionRequest,
 };
-use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -56,6 +56,44 @@ pub const EVENT: &str = "ncx://event";
 /// (inserts a one-shot sender when asking) and the `approve` command (takes it
 /// to answer). `Send + Sync` so it can live in Tauri state.
 pub type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<ApprovalDecision>>>>;
+pub type PendingQuestionMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Option<String>>>>>;
+
+/// Shared cooperative cancellation state for the active GUI turn.
+pub type CancelFlag = Arc<AtomicBool>;
+
+/// Request cancellation and release any approval dialog the turn is waiting on.
+///
+/// The agent loop polls the flag during model/tool work. Resolving approvals as
+/// denied is necessary because an approval future otherwise has no opportunity
+/// to observe the flag while it is suspended.
+pub fn request_cancel(
+    cancel: &CancelFlag,
+    pending: &PendingMap,
+    questions: &PendingQuestionMap,
+) -> usize {
+    cancel.store(true, Ordering::Release);
+    let senders = pending
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, sender)| sender)
+        .collect::<Vec<_>>();
+    let count = senders.len();
+    for sender in senders {
+        let _ = sender.send(ApprovalDecision::Deny);
+    }
+    let question_senders = questions
+        .lock()
+        .unwrap()
+        .drain()
+        .map(|(_, sender)| sender)
+        .collect::<Vec<_>>();
+    let question_count = question_senders.len();
+    for sender in question_senders {
+        let _ = sender.send(None);
+    }
+    count + question_count
+}
 
 /// A request from the UI to the agent thread.
 pub enum Command {
@@ -126,6 +164,12 @@ pub enum UiEvent {
         cwd: String,
         details: String,
     },
+    Question {
+        id: u64,
+        question: String,
+        options: Vec<String>,
+        allow_free_text: bool,
+    },
     /// The turn finished.
     Done {
         final_text: String,
@@ -146,7 +190,7 @@ pub struct UiMsg {
     pub text: String,
 }
 
-fn emit(app: &AppHandle, ev: UiEvent) {
+pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
     let _ = app.emit(EVENT, ev);
 }
 
@@ -175,7 +219,7 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
             UiEvent::Ready {
                 model: cfg.model,
                 sandbox: cfg.sandbox_mode,
-                workspace: workspace.display().to_string(),
+                workspace: display_path(workspace),
                 session_id: session_id.to_string(),
                 models: cfg.available_models,
                 permission_mode: cfg.permission_mode,
@@ -203,14 +247,15 @@ pub fn save_last_workspace(path: &std::path::Path) {
         if let Some(parent) = f.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::write(f, path.display().to_string());
+        let _ = std::fs::write(f, display_path(path));
     }
 }
 
 /// The last chosen workspace, if it still exists as a directory.
 pub fn load_last_workspace() -> Option<PathBuf> {
     let f = last_workspace_file()?;
-    let p = PathBuf::from(std::fs::read_to_string(f).ok()?.trim());
+    let raw = std::fs::read_to_string(f).ok()?;
+    let p = PathBuf::from(strip_verbatim_prefix(raw.trim()));
     p.is_dir().then_some(p)
 }
 
@@ -219,11 +264,23 @@ pub fn load_last_workspace() -> Option<PathBuf> {
 /// verbatim `\\?\` prefix, which `set_current_dir` rejects.
 fn restore_session_workspace(ws: Option<&str>) {
     let Some(ws) = ws else { return };
-    let ws = ws.strip_prefix(r"\\?\").unwrap_or(ws);
-    let p = PathBuf::from(ws);
+    let p = PathBuf::from(strip_verbatim_prefix(ws));
     if p.is_dir() {
         let _ = std::env::set_current_dir(&p);
         save_last_workspace(&p);
+    }
+}
+
+/// Return a stable user-facing path without Windows' verbatim namespace prefix.
+pub fn display_path(path: &Path) -> String {
+    strip_verbatim_prefix(&path.to_string_lossy())
+}
+
+fn strip_verbatim_prefix(raw: &str) -> String {
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        raw.strip_prefix(r"\\?\").unwrap_or(raw).to_string()
     }
 }
 
@@ -246,31 +303,36 @@ fn is_unsafe_against(dir: &std::path::Path, home: Option<&std::path::Path>) -> b
     canon.parent().is_none()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn home_is_unsafe_but_a_project_dir_is_not() {
-        let base = std::env::temp_dir().join(format!("ncx_ws_{}", new_session_id()));
-        let home = base.join("home");
-        let project = base.join("home").join("proj");
-        std::fs::create_dir_all(&project).unwrap();
-
-        assert!(is_unsafe_against(&home, Some(&home)), "home dir must be unsafe");
-        assert!(
-            !is_unsafe_against(&project, Some(&home)),
-            "a project under home must be safe"
-        );
-        let _ = std::fs::remove_dir_all(&base);
-    }
-}
-
 /// Approval handler that round-trips through the frontend modal.
 struct GuiApprover {
     app: AppHandle,
     pending: PendingMap,
     counter: AtomicU64,
+}
+
+struct GuiQuestioner {
+    app: AppHandle,
+    pending: PendingQuestionMap,
+    counter: AtomicU64,
+}
+
+#[async_trait(?Send)]
+impl UserQuestionHandler for GuiQuestioner {
+    async fn request(&self, request: UserQuestionRequest) -> Option<String> {
+        let id = self.counter.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        emit(
+            &self.app,
+            UiEvent::Question {
+                id,
+                question: request.question,
+                options: request.options,
+                allow_free_text: request.allow_free_text,
+            },
+        );
+        rx.await.unwrap_or(None)
+    }
 }
 
 #[async_trait(?Send)]
@@ -300,6 +362,7 @@ impl ApprovalHandler for GuiApprover {
 /// (keep the id) and Fork (a new id). `None` starts a fresh session.
 fn build_agent(
     approver: Rc<dyn ApprovalHandler>,
+    questioner: Rc<dyn UserQuestionHandler>,
     seed: Option<(String, Vec<Value>)>,
     grants: Rc<RefCell<SessionGrants>>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
@@ -311,19 +374,9 @@ fn build_agent(
     let cfg = load_config(overrides).map_err(|e| e.to_string())?;
     cfg.validate().map_err(|e| e.to_string())?;
 
-    let provider = DeepSeekProvider::with_opts(
-        cfg.api_key.clone(),
-        &cfg.base_url,
-        cfg.model.clone(),
-        cfg.timeout_s as u64,
-        cfg.max_retries as u32,
-    );
-    // The CC permission mode is the single source of truth for gating: it derives
-    // the sandbox, approval policy, per-edit approval, and plan flag.
-    let (sandbox_mode, approval_policy, require_edit, plan) =
-        permission_mode_to_knobs(&cfg.permission_mode);
-    let network = sandbox_mode == "danger-full-access";
-    let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
+    let runtime_profile = AgentRuntimeProfile::from_config(&cfg);
+    let provider = model_provider_from_config(&cfg, cfg.model.clone());
+    let policy = runtime_profile.sandbox_policy(&cfg.workspace);
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     // Memory is recalled per prompt by AgentLoop (query-scoped), not dumped here.
     // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
@@ -331,24 +384,23 @@ fn build_agent(
     let instructions = load_workspace_instructions(&cfg.workspace, 16_000);
     let skills = discover_skills(&cfg.workspace);
     let skills_index = skills_index_block(&skills);
-    let plan_note = if plan {
+    let plan_note = if runtime_profile.permissions.plan_mode {
         PLAN_MODE_NOTE.to_string()
     } else {
         String::new()
     };
     let system_prompt =
         compose_system_prompt(SYSTEM_PROMPT, &[instructions, skills_index, plan_note]);
-    let ctx = ToolContext::new(cfg.workspace.clone(), policy)
-        .with_approval_policy(approval_policy)
-        .with_require_edit_approval(require_edit)
-        .with_plan_mode(plan)
+    let ctx = runtime_profile
+        .apply_tool_context(ToolContext::new(cfg.workspace.clone(), policy))
         .with_session_grants(grants)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
         .with_hooks(cfg.hooks.clone())
         .with_skills(skills)
-        .with_approver(approver);
+        .with_approver(approver)
+        .with_user_question_handler(questioner);
     let tools = ToolRegistry::new(ctx);
     let log_path = cfg.workspace.join(".nanocodex").join("session.jsonl");
     let (session_id, session) = match seed {
@@ -361,10 +413,9 @@ fn build_agent(
             Session::with_log(system_prompt, Some(log_path.clone())),
         ),
     };
-    let agent = AgentLoop::new(Box::new(provider), tools, session)
-        .with_task_budget(task_budget_from_config(&cfg))
-        .with_context_edit(context_edit_from_config(&cfg))
-        .with_vision_provider(build_vision_provider(&cfg));
+    let agent = runtime_profile
+        .apply(AgentLoop::new(Box::new(provider), tools, session))
+        .with_vision_provider(vision_provider_from_config(&cfg));
     Ok((
         agent,
         cfg.workspace.clone(),
@@ -385,36 +436,15 @@ fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
     out
 }
 
-fn positive_usize(value: i64, fallback: usize) -> usize {
-    usize::try_from(value)
-        .ok()
-        .filter(|v| *v > 0)
-        .unwrap_or(fallback)
-}
-
-fn nonnegative_usize(value: i64, fallback: usize) -> usize {
-    usize::try_from(value).ok().unwrap_or(fallback)
-}
-
-fn task_budget_from_config(cfg: &Config) -> TaskBudget {
-    TaskBudget {
-        max_model_calls: positive_usize(cfg.max_iterations, 60),
-        max_tool_calls: nonnegative_usize(cfg.max_tool_calls, 120),
-    }
-}
-
-fn context_edit_from_config(cfg: &Config) -> ContextEditPolicy {
-    ContextEditPolicy {
-        enabled: cfg.context_edit_enabled,
-        max_chars: positive_usize(cfg.context_edit_max_chars, 120_000),
-        keep_recent_messages: positive_usize(cfg.context_edit_keep_recent_messages, 30),
-        max_tool_result_chars: positive_usize(cfg.context_edit_max_tool_result_chars, 4_000),
-    }
-}
-
 /// Spawn the dedicated agent thread. Returns immediately; the thread lives for
 /// the app's lifetime, draining `rx` one prompt at a time (turns are serial).
-pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending: PendingMap) {
+pub fn spawn_worker(
+    app: AppHandle,
+    mut rx: UnboundedReceiver<Command>,
+    pending: PendingMap,
+    questions: PendingQuestionMap,
+    cancel: CancelFlag,
+) {
     std::thread::Builder::new()
         .name("ncx-agent".into())
         .spawn(move || {
@@ -429,6 +459,11 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                     pending: pending.clone(),
                     counter: AtomicU64::new(1),
                 });
+                let questioner: Rc<dyn UserQuestionHandler> = Rc::new(GuiQuestioner {
+                    app: app.clone(),
+                    pending: questions.clone(),
+                    counter: AtomicU64::new(1),
+                });
                 // Restore the last chosen workspace so we don't fall back to the
                 // launch cwd (often the user's home) on every start.
                 if let Some(ws) = load_last_workspace() {
@@ -438,7 +473,7 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
                 let (mut agent, mut workspace, mut session_id, mut log_path, mut session_index) =
-                    match build_agent(approver.clone(), None, grants.clone()) {
+                    match build_agent(approver.clone(), questioner.clone(), None, grants.clone()) {
                         Ok(v) => v,
                         Err(e) => {
                             emit(&app, UiEvent::Error { message: e });
@@ -460,7 +495,8 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                                     continue;
                                 }
                             };
-                            let result = agent.run_turn(user_input, None).await;
+                            let is_cancelled = || cancel.load(Ordering::Acquire);
+                            let result = agent.run_turn(user_input, Some(&is_cancelled)).await;
                             let _ = session_index.record_turn(
                                 &session_id,
                                 &workspace,
@@ -479,7 +515,12 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         }
                         Command::Reload => {
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
-                            match build_agent(approver.clone(), None, grants.clone()) {
+                            match build_agent(
+                                approver.clone(),
+                                questioner.clone(),
+                                None,
+                                grants.clone(),
+                            ) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -508,9 +549,16 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             // Reopen the conversation in ITS original workspace, not
                             // whatever dir we're currently in — otherwise a resumed
                             // session runs against the wrong project.
-                            restore_session_workspace(session_index.get(&id).map(|s| s.workspace.as_str()));
+                            restore_session_workspace(
+                                session_index.get(&id).map(|s| s.workspace.as_str()),
+                            );
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
-                            match build_agent(approver.clone(), Some((id, msgs)), grants.clone()) {
+                            match build_agent(
+                                approver.clone(),
+                                questioner.clone(),
+                                Some((id, msgs)),
+                                grants.clone(),
+                            ) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -527,9 +575,16 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                         Command::Fork(id) => {
                             let msgs = session_index.load_snapshot(&id).unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
-                            restore_session_workspace(session_index.get(&id).map(|s| s.workspace.as_str()));
+                            restore_session_workspace(
+                                session_index.get(&id).map(|s| s.workspace.as_str()),
+                            );
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
-                            match build_agent(approver.clone(), Some((new_session_id(), msgs)), grants.clone()) {
+                            match build_agent(
+                                approver.clone(),
+                                questioner.clone(),
+                                Some((new_session_id(), msgs)),
+                                grants.clone(),
+                            ) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -567,7 +622,12 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                             let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
                             // Same session → keep the "always allow" grants.
-                            match build_agent(approver.clone(), Some((session_id.clone(), msgs)), grants.clone()) {
+                            match build_agent(
+                                approver.clone(),
+                                questioner.clone(),
+                                Some((session_id.clone(), msgs)),
+                                grants.clone(),
+                            ) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -592,7 +652,12 @@ pub fn spawn_worker(app: AppHandle, mut rx: UnboundedReceiver<Command>, pending:
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
                             let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
                             // Same session → keep the "always allow" grants.
-                            match build_agent(approver.clone(), Some((session_id.clone(), msgs)), grants.clone()) {
+                            match build_agent(
+                                approver.clone(),
+                                questioner.clone(),
+                                Some((session_id.clone(), msgs)),
+                                grants.clone(),
+                            ) {
                                 Ok((a, ws, sid, lp, idx)) => {
                                     agent = a;
                                     workspace = ws;
@@ -678,32 +743,6 @@ fn clipped_label(text: &str, limit: usize) -> String {
 
 // ── vision attachments (ported from the CLI) ──────────────────────────────────
 
-/// Build a dedicated vision provider from `vl_*` config, or `None` when no VL
-/// model is set (image turns then stay on the main provider). Only `vl_model`
-/// is required; `vl_base_url`/`vl_api_key` fall back to the main ones.
-fn build_vision_provider(cfg: &Config) -> Option<Box<dyn Provider>> {
-    if cfg.vl_model.trim().is_empty() {
-        return None;
-    }
-    let base_url = if cfg.vl_base_url.trim().is_empty() {
-        &cfg.base_url
-    } else {
-        &cfg.vl_base_url
-    };
-    let api_key = if cfg.vl_api_key.trim().is_empty() {
-        cfg.api_key.clone()
-    } else {
-        cfg.vl_api_key.clone()
-    };
-    Some(Box::new(DeepSeekProvider::with_opts(
-        api_key,
-        base_url,
-        cfg.vl_model.clone(),
-        cfg.timeout_s as u64,
-        cfg.max_retries as u32,
-    )))
-}
-
 /// Build the user turn input. No images -> plain text; with image paths ->
 /// an OpenAI multimodal `content` array (text block + one base64 `image_url`
 /// block per file), which trips AgentLoop's image detection -> vision routing.
@@ -758,4 +797,143 @@ fn base64_encode(data: &[u8]) -> String {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ncx_core::Skill;
+    use ncx_sandbox::WORKSPACE_WRITE;
+
+    #[test]
+    fn home_is_unsafe_but_a_project_dir_is_not() {
+        let base = std::env::temp_dir().join(format!("ncx_ws_{}", new_session_id()));
+        let home = base.join("home");
+        let project = base.join("home").join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+
+        assert!(
+            is_unsafe_against(&home, Some(&home)),
+            "home dir must be unsafe"
+        );
+        assert!(
+            !is_unsafe_against(&project, Some(&home)),
+            "a project under home must be safe"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn display_path_hides_windows_verbatim_prefix() {
+        assert_eq!(display_path(Path::new(r"\\?\D:\work")), r"D:\work");
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share")),
+            r"\\server\share"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_sets_flag_and_denies_pending_approvals() {
+        let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+        let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
+        let (sender, receiver) = oneshot::channel();
+        pending.lock().unwrap().insert(7, sender);
+        let (question_sender, question_receiver) = oneshot::channel();
+        questions.lock().unwrap().insert(8, question_sender);
+
+        assert_eq!(request_cancel(&cancel, &pending, &questions), 2);
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(pending.lock().unwrap().is_empty());
+        assert!(questions.lock().unwrap().is_empty());
+        assert!(matches!(receiver.await.unwrap(), ApprovalDecision::Deny));
+        assert_eq!(question_receiver.await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn gui_registry_smoke_covers_builtin_and_optional_tool_combinations() {
+        let root = std::env::temp_dir().join(format!("ncx_gui_tools_{}", new_session_id()));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let root = root.canonicalize().unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn smoke() {}\n").unwrap();
+        let memory = Rc::new(MemoryStore::new(root.join(".ncx/memory")));
+        let skill = Skill {
+            name: "smoke-skill".into(),
+            description: "GUI registry smoke fixture".into(),
+            path: PathBuf::from("<builtin>/smoke-skill/SKILL.md"),
+            dir: PathBuf::from("<builtin>/smoke-skill"),
+            embedded: Some("Use the fixture.".into()),
+        };
+        let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &root))
+            .with_memory(memory)
+            .with_skills(vec![skill]);
+        let registry = ToolRegistry::new(ctx);
+
+        for name in [
+            "read_file",
+            "apply_patch",
+            "str_replace_editor",
+            "update_plan",
+            "shell",
+            "grep",
+            "grep_literal",
+            "glob",
+            "web_search",
+            "web_fetch",
+            "list_directory",
+            "path_info",
+            "git_status",
+            "git_diff",
+            "tool_search",
+            "remember",
+            "skill",
+        ] {
+            assert!(registry.get(name).is_some(), "GUI runtime missing {name}");
+        }
+
+        let read = registry
+            .execute_with_recovery("read_file", &json!({"path": "src/lib.rs"}))
+            .await;
+        assert!(read.contains("pub fn smoke"), "{read}");
+        let search = registry
+            .execute_with_recovery("grep", &json!({"pattern": "smoke"}))
+            .await;
+        assert!(search.contains("src/lib.rs:1"), "{search}");
+        let discovery = registry
+            .execute_with_recovery("glob", &json!({"pattern": "**/*.rs"}))
+            .await;
+        assert!(discovery.contains("src/lib.rs"), "{discovery}");
+        let listing = registry
+            .execute_with_recovery("list_directory", &json!({"path": "src"}))
+            .await;
+        assert!(listing.contains("lib.rs"), "{listing}");
+        let path_info = registry
+            .execute_with_recovery("path_info", &json!({"path": "src/lib.rs"}))
+            .await;
+        assert!(path_info.contains("\"exists\":true"), "{path_info}");
+        let plan = registry
+            .execute_with_recovery(
+                "update_plan",
+                &json!({"plan": [{"step": "GUI smoke", "status": "completed"}]}),
+            )
+            .await;
+        assert!(!plan.starts_with("Error:"), "{plan}");
+        let edit = registry
+            .execute_with_recovery(
+                "str_replace_editor",
+                &json!({"command": "create", "path": "created.txt", "new_str": "created by GUI smoke\n"}),
+            )
+            .await;
+        assert!(edit.contains("Patch applied successfully"), "{edit}");
+        let discovered = registry
+            .execute_with_recovery("tool_search", &json!({"query": "version control"}))
+            .await;
+        assert!(discovered.contains("version-control"), "{discovered}");
+        let skill_result = registry
+            .execute_with_recovery("skill", &json!({"name": "smoke-skill"}))
+            .await;
+        assert!(skill_result.contains("Use the fixture"), "{skill_result}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

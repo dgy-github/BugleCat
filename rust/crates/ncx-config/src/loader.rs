@@ -64,6 +64,7 @@ pub struct Overrides {
     pub ark_api_key: Option<String>,
     pub max_iterations: Option<i64>,
     pub max_tool_calls: Option<i64>,
+    pub max_parallel_tool_calls: Option<i64>,
     pub max_retries: Option<i64>,
     pub context_token_budget: Option<i64>,
     pub context_window: Option<i64>,
@@ -164,6 +165,7 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "search_api_key",
         "max_iterations",
         "max_tool_calls",
+        "max_parallel_tool_calls",
         "max_retries",
         "context_token_budget",
         "context_window",
@@ -213,6 +215,7 @@ const PROFILE_KEYS: &[&str] = &[
     "ark_api_key",
     "max_iterations",
     "max_tool_calls",
+    "max_parallel_tool_calls",
     "max_retries",
     "context_token_budget",
     "context_window",
@@ -239,7 +242,8 @@ fn as_int(s: Option<&str>, default: i64) -> i64 {
 }
 
 fn as_float(s: Option<&str>, default: f64) -> f64 {
-    s.and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(default)
+    s.and_then(|v| v.trim().parse::<f64>().ok())
+        .unwrap_or(default)
 }
 
 fn as_bool(s: Option<&str>, default: bool) -> bool {
@@ -367,15 +371,27 @@ pub fn load_mcp_servers_at(path: &Path) -> Vec<crate::config::McpServerConfig> {
     };
     let mut out = Vec::new();
     for s in arr {
-        let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let command = s.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = s
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let command = s
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if name.is_empty() || command.is_empty() {
             continue;
         }
         let args: Vec<String> = s
             .get("args")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let env: HashMap<String, String> = s
             .get("env")
@@ -386,7 +402,12 @@ pub fn load_mcp_servers_at(path: &Path) -> Vec<crate::config::McpServerConfig> {
                     .collect()
             })
             .unwrap_or_default();
-        out.push(McpServerConfig { name, command, args, env });
+        out.push(McpServerConfig {
+            name,
+            command,
+            args,
+            env,
+        });
     }
     out
 }
@@ -490,6 +511,10 @@ pub(crate) fn load_config_impl(
         ("available_models", &["NANOCODEX_MODELS"]),
         ("max_iterations", &["NANOCODEX_MAX_ITERATIONS"]),
         ("max_tool_calls", &["NANOCODEX_MAX_TOOL_CALLS"]),
+        (
+            "max_parallel_tool_calls",
+            &["NANOCODEX_MAX_PARALLEL_TOOL_CALLS"],
+        ),
         ("max_retries", &["NANOCODEX_MAX_RETRIES"]),
     ];
     for (field, env_keys) in env_map {
@@ -536,6 +561,7 @@ pub(crate) fn load_config_impl(
     apply_str!(ark_api_key);
     apply_int!(max_iterations);
     apply_int!(max_tool_calls);
+    apply_int!(max_parallel_tool_calls);
     apply_int!(max_retries);
     apply_int!(context_token_budget);
     apply_int!(context_window);
@@ -602,6 +628,10 @@ pub(crate) fn load_config_impl(
         network_access,
         max_iterations: as_int(merged.get("max_iterations").map(|s| s.as_str()), 150),
         max_tool_calls: as_int(merged.get("max_tool_calls").map(|s| s.as_str()), 300),
+        max_parallel_tool_calls: as_int(
+            merged.get("max_parallel_tool_calls").map(|s| s.as_str()),
+            8,
+        ),
         timeout_s: 120,
         max_retries: as_int(merged.get("max_retries").map(|s| s.as_str()), 3),
         context_token_budget: as_int(
@@ -851,6 +881,7 @@ approval_policy = "on-request"
             concat!(
                 "api_key = \"sk-base\"\n",
                 "max_tool_calls = 33\n",
+                "max_parallel_tool_calls = 3\n",
                 "context_edit_enabled = false\n",
                 "context_edit_max_chars = 9000\n",
                 "context_edit_keep_recent_messages = 11\n",
@@ -864,11 +895,24 @@ approval_policy = "on-request"
         };
         let mut env = HashMap::new();
         env.insert("NANOCODEX_MAX_TOOL_CALLS".into(), "44".into());
+        env.insert("NANOCODEX_MAX_PARALLEL_TOOL_CALLS".into(), "5".into());
         env.insert("NANOCODEX_CONTEXT_EDIT_ENABLED".into(), "true".into());
+
+        let env_cfg = load_config_impl(
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
+            &paths,
+            &env,
+        )
+        .unwrap();
+        assert_eq!(env_cfg.max_parallel_tool_calls, 5);
 
         let cfg = load_config_impl(
             Overrides {
                 workspace: Some(tmp.clone()),
+                max_parallel_tool_calls: Some(7),
                 context_edit_max_chars: Some(12_345),
                 ..Default::default()
             },
@@ -878,6 +922,7 @@ approval_policy = "on-request"
         .unwrap();
 
         assert_eq!(cfg.max_tool_calls, 44);
+        assert_eq!(cfg.max_parallel_tool_calls, 7);
         assert!(cfg.context_edit_enabled);
         assert_eq!(cfg.context_edit_max_chars, 12_345);
         assert_eq!(cfg.context_edit_keep_recent_messages, 11);

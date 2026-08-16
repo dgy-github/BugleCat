@@ -16,12 +16,16 @@
     | { kind: "tool_start"; name: string; args: string }
     | { kind: "tool_result"; name: string; result: string }
     | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
+    | { kind: "question"; id: number; question: string; options: string[]; allow_free_text: boolean }
     | { kind: "done"; final_text: string; stop_reason: string; usage: Record<string, number> }
     | { kind: "loaded"; messages: { role: string; text: string }[] }
     | { kind: "error"; message: string };
 
   type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
   let approval = $state<Approval | null>(null);
+  type UserQuestion = { id: number; question: string; options: string[]; allow_free_text: boolean };
+  let userQuestion = $state<UserQuestion | null>(null);
+  let questionAnswer = $state("");
 
   type Settings = {
     model: string;
@@ -80,6 +84,7 @@
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   let busy = $state(false);
+  let stopping = $state(false);
   // File explorer (workspace tree)
   type DirEntry = { name: string; path: string; is_dir: boolean };
   let filesOpen = $state(false);
@@ -94,6 +99,11 @@
   );
   let sessionTitle = $state("新会话");
   let sidebarOpen = $state(true);
+  const SIDEBAR_DEFAULT_WIDTH = 250;
+  const SIDEBAR_MIN_WIDTH = 190;
+  const SIDEBAR_MAX_WIDTH = 440;
+  let sidebarWidth = $state(SIDEBAR_DEFAULT_WIDTH);
+  let sidebarResizing = $state(false);
   let sandboxMode = $state("");
   let tokIn = $state(0);
   let tokOut = $state(0);
@@ -121,11 +131,17 @@
   // visible at a glance — a bare "Exit code: 0" otherwise reads as "no info".
   const toolOutcome = (result: string = ""): "err" | "empty" | "ok" => {
     const exit = result.match(/Exit code: (-?\d+)/);
+    const trimmed = result.trimStart();
     const body = result
       .replace(/\n?Exit code: -?\d+\s*$/, "")
       .replace(/^STDERR:\s*/, "")
       .trim();
-    if (/^STDERR:/m.test(result) || (exit && exit[1] !== "0")) return "err";
+    if (
+      (exit && exit[1] !== "0") ||
+      trimmed.startsWith("Error:") ||
+      trimmed.startsWith("Sandbox denied:") ||
+      trimmed.startsWith("[interrupted:")
+    ) return "err";
     if (body === "") return "empty";
     return "ok";
   };
@@ -293,11 +309,68 @@
   }
   let scroller: HTMLDivElement;
 
+  function clampSidebarWidth(width: number): number {
+    const viewportMax = typeof window === "undefined"
+      ? SIDEBAR_MAX_WIDTH
+      : Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.floor(window.innerWidth * 0.45)));
+    return Math.min(viewportMax, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+  }
+
+  function setSidebarWidth(width: number, persist = true) {
+    sidebarWidth = clampSidebarWidth(width);
+    if (persist) {
+      try { localStorage.setItem("ncx.sidebarWidth", String(sidebarWidth)); } catch { /* storage is optional */ }
+    }
+  }
+
+  function stopSidebarResize() {
+    if (!sidebarResizing) return;
+    sidebarResizing = false;
+    window.removeEventListener("pointermove", resizeSidebar);
+    window.removeEventListener("pointerup", stopSidebarResize);
+    document.body.classList.remove("sidebar-resizing");
+  }
+
+  function resizeSidebar(event: PointerEvent) {
+    if (!sidebarResizing) return;
+    setSidebarWidth(event.clientX - sidebarResizeStartX + sidebarResizeStartWidth);
+  }
+
+  let sidebarResizeStartX = 0;
+  let sidebarResizeStartWidth = SIDEBAR_DEFAULT_WIDTH;
+  function beginSidebarResize(event: PointerEvent) {
+    if (!sidebarOpen) return;
+    event.preventDefault();
+    sidebarResizing = true;
+    sidebarResizeStartX = event.clientX;
+    sidebarResizeStartWidth = sidebarWidth;
+    document.body.classList.add("sidebar-resizing");
+    window.addEventListener("pointermove", resizeSidebar);
+    window.addEventListener("pointerup", stopSidebarResize, { once: true });
+  }
+
+  function handleSidebarResizeKey(event: KeyboardEvent) {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      setSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setSidebarWidth(SIDEBAR_MIN_WIDTH);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setSidebarWidth(SIDEBAR_MAX_WIDTH);
+    }
+  }
+
   function scrollDown() {
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
   }
 
   onMount(async () => {
+    try {
+      const savedWidth = Number(localStorage.getItem("ncx.sidebarWidth"));
+      if (Number.isFinite(savedWidth)) setSidebarWidth(savedWidth, false);
+    } catch { /* storage is optional */ }
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
       const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; price_in: number; price_out: number }>("get_status");
@@ -363,13 +436,27 @@
         case "approval":
           approval = { id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
           break;
+        case "question":
+          userQuestion = {
+            id: p.id,
+            question: p.question,
+            options: p.options,
+            allow_free_text: p.allow_free_text,
+          };
+          questionAnswer = "";
+          break;
         case "tool_result": {
-          // Attach the result to the most recent unfinished tool entry.
-          const last = messages.find(
+          // Results preserve dispatch order, so pair with the earliest pending call.
+          const pendingIndex = messages.findIndex(
             (m) => m.role === "tool" && m.name === p.name && m.result === undefined,
-          ) as Extract<Msg, { role: "tool" }> | undefined;
+          );
+          if (toolOutcome(p.result) === "err") {
+            if (pendingIndex >= 0) messages.splice(pendingIndex, 1);
+            break;
+          }
           const collapsed = isLong(p.result);
-          if (last) { last.result = p.result; last.collapsed = collapsed; }
+          const pending = messages[pendingIndex] as Extract<Msg, { role: "tool" }> | undefined;
+          if (pendingIndex >= 0 && pending) { pending.result = p.result; pending.collapsed = collapsed; }
           else messages.push({ role: "tool", name: p.name, result: p.result, collapsed });
           break;
         }
@@ -386,6 +473,7 @@
           }
           streamingIdx = null;
           busy = false;
+          stopping = false;
           refreshSessions();
           dequeue();
           break;
@@ -399,12 +487,14 @@
             );
           streamingIdx = null;
           busy = false;
+          stopping = false;
           refreshSessions(); // keep the session you just left visible in 最近会话
           break;
         case "error":
           streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
           busy = false;
+          stopping = false;
           break;
       }
       scrollDown();
@@ -522,7 +612,24 @@
     } catch (e) {
       messages.push({ role: "note", text: `发送失败：${e}` });
       busy = false;
+      stopping = false;
       dequeue();
+    }
+  }
+
+  async function stopGeneration() {
+    if (!busy || stopping) return;
+    stopping = true;
+    // A stop applies to the active turn, so do not start queued follow-ups
+    // after its cancellation event arrives.
+    queued = [];
+    approval = null;
+    userQuestion = null;
+    try {
+      await invoke("stop_generation");
+    } catch (e) {
+      stopping = false;
+      messages.push({ role: "note", text: `停止失败：${e}` });
     }
   }
   function dequeue() {
@@ -582,6 +689,18 @@
       await invoke("approve", { id, decision });
     } catch (e) {
       messages.push({ role: "note", text: `审批失败：${e}` });
+    }
+  }
+
+  async function answerUserQuestion(answer: string | null) {
+    if (!userQuestion) return;
+    const id = userQuestion.id;
+    userQuestion = null;
+    questionAnswer = "";
+    try {
+      await invoke("answer_question", { id, answer });
+    } catch (e) {
+      messages.push({ role: "note", text: `回答问题失败：${e}` });
     }
   }
 
@@ -1058,7 +1177,7 @@
   }
 </script>
 
-<main class="app">
+<main class="app" style={`--sidebar-width: ${sidebarWidth}px`}>
   <aside class="sidebar" class:collapsed={!sidebarOpen}>
     <div class="side-head">
       <span class="side-brand">nanocodex</span>
@@ -1108,6 +1227,25 @@
       <button class="foot-gear" title="设置" onclick={openSettings} aria-label="设置">⚙</button>
     </div>
   </aside>
+  {#if sidebarOpen}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="sidebar-resizer"
+      class:active={sidebarResizing}
+      role="separator"
+      aria-label="调整侧边栏宽度"
+      aria-orientation="vertical"
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      aria-valuenow={sidebarWidth}
+      tabindex="0"
+      title="拖动调整侧边栏宽度，双击恢复默认"
+      onpointerdown={beginSidebarResize}
+      ondblclick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
+      onkeydown={handleSidebarResizeKey}
+    ></div>
+  {/if}
 
   <div class="workarea">
   <section class="main">
@@ -1284,6 +1422,8 @@
           placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"}
           rows="2"
         ></textarea>
+        <button class="stop-btn" class:visible={busy} onclick={stopGeneration}
+          disabled={!busy || stopping} title="停止生成" aria-label="停止生成" tabindex={busy ? 0 : -1}>■</button>
         <button onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
           {busy ? "排队" : "发送"}
         </button>
@@ -1305,6 +1445,31 @@
           <button class="deny" onclick={() => decide("deny")}>拒绝</button>
           <button class="plain" onclick={() => decide("always")} title="本次会话始终允许（命令 / 编辑）">始终允许</button>
           <button class="ok" onclick={() => decide("once")}>批准</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if userQuestion}
+    <div class="overlay">
+      <div class="modal question-modal">
+        <h3>需要你的选择</h3>
+        <p class="areason">{userQuestion.question}</p>
+        {#if userQuestion.options.length > 0}
+          <div class="question-options">
+            {#each userQuestion.options as option}
+              <button class="plain" onclick={() => answerUserQuestion(option)}>{option}</button>
+            {/each}
+          </div>
+        {/if}
+        {#if userQuestion.allow_free_text}
+          <textarea bind:value={questionAnswer} rows="3" placeholder="输入你的回答"></textarea>
+        {/if}
+        <div class="abtns">
+          <button class="deny" onclick={() => answerUserQuestion(null)}>取消</button>
+          {#if userQuestion.allow_free_text}
+            <button class="ok" disabled={questionAnswer.trim() === ""} onclick={() => answerUserQuestion(questionAnswer)}>提交</button>
+          {/if}
         </div>
       </div>
     </div>

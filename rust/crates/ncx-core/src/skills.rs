@@ -317,10 +317,7 @@ mod tests {
             "---\nname: commit-message\ndescription: custom override\n---\nmy rules",
         );
         let skills = discover_skills_with_home(&ws, None);
-        let cm = skills
-            .iter()
-            .find(|s| s.name == "commit-message")
-            .unwrap();
+        let cm = skills.iter().find(|s| s.name == "commit-message").unwrap();
         assert!(!cm.is_builtin(), "filesystem skill should win");
         assert_eq!(cm.description, "custom override");
     }
@@ -329,8 +326,16 @@ mod tests {
     fn workspace_shadows_home_same_name() {
         let home = tmp("home");
         let ws = tmp("ws");
-        write_skill(&home, "shared", "---\nname: shared\ndescription: from home\n---\nx");
-        write_skill(&ws, "shared", "---\nname: shared\ndescription: from workspace\n---\ny");
+        write_skill(
+            &home,
+            "shared",
+            "---\nname: shared\ndescription: from home\n---\nx",
+        );
+        write_skill(
+            &ws,
+            "shared",
+            "---\nname: shared\ndescription: from workspace\n---\ny",
+        );
         let skills = fs_only(discover_skills_with_home(&ws, Some(&home)));
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].description, "from workspace");
@@ -339,7 +344,11 @@ mod tests {
     #[test]
     fn index_block_lists_name_and_description() {
         let ws = tmp("index");
-        write_skill(&ws, "a", "---\nname: alpha\ndescription: do alpha things\n---\nbody");
+        write_skill(
+            &ws,
+            "a",
+            "---\nname: alpha\ndescription: do alpha things\n---\nbody",
+        );
         let skills = discover_skills_with_home(&ws, None);
         let block = skills_index_block(&skills);
         assert!(block.contains("call the `skill` tool"));

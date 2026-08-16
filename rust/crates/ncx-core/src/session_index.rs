@@ -97,7 +97,10 @@ impl SessionSummary {
                 .get("has_snapshot")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            archived: value.get("archived").and_then(|v| v.as_bool()).unwrap_or(false),
+            archived: value
+                .get("archived")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         })
     }
 }
@@ -134,7 +137,7 @@ impl SessionIndex {
         // Sort by parsed epoch-ms, not raw string: the index mixes 13-digit
         // ms-epoch timestamps with legacy ISO strings, and comparing those as
         // strings mis-sorted the (older) ISO entries to the top.
-        out.sort_by(|a, b| parse_ts_ms(&b.updated_at).cmp(&parse_ts_ms(&a.updated_at)));
+        out.sort_by_key(|entry| std::cmp::Reverse(parse_ts_ms(&entry.updated_at)));
         out
     }
 
@@ -155,7 +158,11 @@ impl SessionIndex {
         log_path: &Path,
     ) -> SessionSummary {
         let prior_created = self.by_id.get(session_id).map(|s| s.created_at.clone());
-        let prior_archived = self.by_id.get(session_id).map(|s| s.archived).unwrap_or(false);
+        let prior_archived = self
+            .by_id
+            .get(session_id)
+            .map(|s| s.archived)
+            .unwrap_or(false);
         let saved = self.save_snapshot(session_id, session);
         let mut summary = summarize(
             session_id,
@@ -442,7 +449,10 @@ mod tests {
         assert!(iso > 0 && ms > 0);
         assert!(iso < ms, "ISO {iso} should sort older than ms {ms}");
         // 2026-06-08 is ~1.78e12 ms since epoch.
-        assert!((1_700_000_000_000..1_800_000_000_000).contains(&iso), "{iso}");
+        assert!(
+            (1_700_000_000_000..1_800_000_000_000).contains(&iso),
+            "{iso}"
+        );
         assert_eq!(parse_ts_ms(""), 0);
     }
 

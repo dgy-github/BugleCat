@@ -20,7 +20,7 @@ use tokio::time::timeout;
 const MAX_OUTPUT: usize = 16_000;
 
 /// Outcome of a single sandboxed command.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExecResult {
     pub exit_code: i32,
     pub stdout: String,
@@ -28,19 +28,6 @@ pub struct ExecResult {
     pub timed_out: bool,
     pub sandbox_denied: bool,
     pub denial_reason: String,
-}
-
-impl Default for ExecResult {
-    fn default() -> Self {
-        ExecResult {
-            exit_code: 0,
-            stdout: String::new(),
-            stderr: String::new(),
-            timed_out: false,
-            sandbox_denied: false,
-            denial_reason: String::new(),
-        }
-    }
 }
 
 impl ExecResult {
@@ -114,27 +101,11 @@ impl PolicyExecutor {
         timeout_s: u64,
         extra_env: &HashMap<String, String>,
     ) -> ExecResult {
-        let mut env = build_env();
-        for (k, v) in extra_env {
-            env.insert(k.clone(), v.clone());
-        }
-        let mut cmd = base_command(command);
+        let mut cmd = command_with_env(command, cwd, extra_env);
         cmd.current_dir(cwd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
-        cmd.env_clear();
-        for (k, v) in &env {
-            cmd.env(k, v);
-        }
-        #[cfg(windows)]
-        {
-            // Run the cmd.exe child without a console window so GUI-launched
-            // commands don't flash a black box (CREATE_NO_WINDOW). tokio ORs this
-            // with CREATE_UNICODE_ENVIRONMENT; Job containment still applies.
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -193,6 +164,31 @@ impl PolicyExecutor {
             }
         }
     }
+}
+
+/// Build the same sandboxed command shape for one-shot and managed execution.
+pub(crate) fn command_with_env(
+    command: &str,
+    cwd: &Path,
+    extra_env: &HashMap<String, String>,
+) -> Command {
+    let mut env = build_env();
+    env.extend(
+        extra_env
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
+    let mut command = base_command(command);
+    command.current_dir(cwd).env_clear();
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// Build the base subprocess command for this platform.
@@ -259,7 +255,7 @@ fn build_env() -> HashMap<String, String> {
 
 /// Win32 Job Object containment — mirrors `_WindowsJob` / `WindowsJobExecutor`.
 #[cfg(windows)]
-mod win_job {
+pub(crate) mod win_job {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,

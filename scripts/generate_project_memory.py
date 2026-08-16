@@ -1,0 +1,248 @@
+"""Generate a searchable project-level module and symbol memory index."""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import json
+import re
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT = ROOT / "docs" / "project-memory" / "SYMBOL_INDEX.md"
+DEFAULT_JSON = ROOT / "docs" / "project-memory" / "SYMBOL_INDEX.json"
+DEFAULT_MODULES = ROOT / "docs" / "project-memory" / "MODULE_CATALOG.md"
+DEFAULT_INTERFACES = ROOT / "docs" / "project-memory" / "INTERFACE_CATALOG.md"
+SKIP_PARTS = {".git", ".nanocodex", ".pytest_cache", "node_modules", "target", "out"}
+
+
+@dataclass(frozen=True)
+class Symbol:
+    language: str
+    path: str
+    kind: str
+    name: str
+    line: int
+    summary: str
+
+
+def _short_doc(value: str | None) -> str:
+    if not value:
+        return ""
+    return " ".join(value.strip().split())[:180]
+
+
+def _relative(path: Path) -> str:
+    return path.relative_to(ROOT).as_posix()
+
+
+def _is_skipped(path: Path) -> bool:
+    return any(part in SKIP_PARTS for part in path.parts)
+
+
+def scan_python(path: Path) -> list[Symbol]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError):
+        return []
+    result: list[Symbol] = []
+    module_doc = _short_doc(ast.get_docstring(tree))
+    result.append(Symbol("Python", _relative(path), "module", path.stem, 1, module_doc))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            kind = "async function" if isinstance(node, ast.AsyncFunctionDef) else "function"
+            result.append(
+                Symbol("Python", _relative(path), kind, node.name, node.lineno, _short_doc(ast.get_docstring(node)))
+            )
+        elif isinstance(node, ast.ClassDef):
+            result.append(
+                Symbol("Python", _relative(path), "class", node.name, node.lineno, _short_doc(ast.get_docstring(node)))
+            )
+    return result
+
+
+RUST_ITEM = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?"
+    r"(?P<kind>fn|struct|enum|trait|type|const|static)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+    re.MULTILINE,
+)
+
+
+def scan_rust(path: Path) -> list[Symbol]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return []
+    result = [Symbol("Rust", _relative(path), "module", path.stem, 1, "")]
+    for match in RUST_ITEM.finditer(text):
+        line = text.count("\n", 0, match.start()) + 1
+        result.append(Symbol("Rust", _relative(path), match.group("kind"), match.group("name"), line, ""))
+    return result
+
+
+WEB_ITEM = re.compile(
+    r"^\s*(?:export\s+)?(?:async\s+)?(?:(?:function|class|interface|type|const|let)\s+)"
+    r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)",
+    re.MULTILINE,
+)
+
+
+def scan_web(path: Path) -> list[Symbol]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return []
+    result = [Symbol("Web", _relative(path), "module", path.stem, 1, "")]
+    for match in WEB_ITEM.finditer(text):
+        line = text.count("\n", 0, match.start()) + 1
+        result.append(Symbol("Web", _relative(path), "symbol", match.group("name"), line, ""))
+    return result
+
+
+def discover() -> list[Symbol]:
+    symbols: list[Symbol] = []
+    roots = [ROOT / "nanocodex", ROOT / "rust" / "crates", ROOT / "rust" / "gui" / "src"]
+    for base in roots:
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or _is_skipped(path):
+                continue
+            if path.suffix == ".py":
+                symbols.extend(scan_python(path))
+            elif path.suffix == ".rs":
+                symbols.extend(scan_rust(path))
+            elif path.suffix in {".ts", ".js", ".svelte"}:
+                symbols.extend(scan_web(path))
+    return sorted(symbols, key=lambda item: (item.language, item.path, item.line, item.name))
+
+
+def render_markdown(symbols: list[Symbol]) -> str:
+    lines = [
+        "# 项目符号记忆索引",
+        "",
+        "> 由 `python scripts/generate_project_memory.py` 自动生成，请勿手工编辑。",
+        "> 新功能开发前搜索本文件；模块或公共符号变化后重新生成。",
+        "",
+    ]
+    current = ""
+    for symbol in symbols:
+        if symbol.language != current:
+            current = symbol.language
+            lines.extend([f"## {current}", "", "| 路径 | 行 | 类型 | 名称 | 摘要 |", "| --- | ---: | --- | --- | --- |"])
+        summary = symbol.summary.replace("|", "\\|")
+        lines.append(f"| `{symbol.path}` | {symbol.line} | {symbol.kind} | `{symbol.name}` | {summary} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_modules(symbols: list[Symbol]) -> str:
+    grouped: dict[str, list[Symbol]] = {}
+    for symbol in symbols:
+        grouped.setdefault(symbol.path, []).append(symbol)
+    lines = [
+        "# Module Catalog",
+        "",
+        "> Generated by `python scripts/generate_project_memory.py`.",
+        "> Read this catalog before opening source files. Use the listed symbols to narrow source inspection.",
+        "",
+        "| Language | Module | Responsibility summary | Main reusable symbols |",
+        "| --- | --- | --- | --- |",
+    ]
+    for path, items in sorted(grouped.items()):
+        module = next((item for item in items if item.kind == "module"), items[0])
+        public = [item.name for item in items if item.kind != "module" and not item.name.startswith("_")]
+        names = ", ".join(f"`{name}`" for name in public[:12])
+        if len(public) > 12:
+            names += f" (+{len(public) - 12})"
+        summary = module.summary.replace("|", "\\|") or "See reusable symbols; add a module doc comment when responsibility changes."
+        lines.append(f"| {module.language} | `{path}` | {summary} | {names} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+INTERFACE_KINDS = {"class", "async function", "function", "struct", "enum", "trait", "type", "symbol"}
+
+
+def is_interface(symbol: Symbol) -> bool:
+    if symbol.kind not in INTERFACE_KINDS or symbol.name.startswith("_"):
+        return False
+    path = symbol.path
+    interface_path = any(
+        token in path
+        for token in (
+            "/tools/",
+            "/provider/",
+            "/sandbox/",
+            "/storyboard/",
+            "cli.py",
+            "config.py",
+            "gui.py",
+            "src/args.rs",
+            "src/lib.rs",
+            "src/main.rs",
+            "request.rs",
+            "response.rs",
+            "types.rs",
+        )
+    )
+    interface_name = symbol.name.endswith(("Tool", "Config", "Request", "Response", "Error", "Policy"))
+    return interface_path or interface_name
+
+
+def render_interfaces(symbols: list[Symbol]) -> str:
+    interfaces = [symbol for symbol in symbols if is_interface(symbol)]
+    lines = [
+        "# Interface Catalog",
+        "",
+        "> Generated candidate interface registry. Confirm behavior in the linked source before editing.",
+        "> Public HTTP operations remain authoritative in each feature OpenAPI document.",
+        "",
+        "| Language | Interface | Kind | Location | Contract summary | Reuse rule |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for item in interfaces:
+        summary = item.summary.replace("|", "\\|") or "Read the declaration and nearby tests for the exact contract."
+        reuse = "Extend this owner before creating a parallel interface."
+        lines.append(
+            f"| {item.language} | `{item.name}` | {item.kind} | `{item.path}:{item.line}` | {summary} | {reuse} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
+    parser.add_argument("--modules", type=Path, default=DEFAULT_MODULES)
+    parser.add_argument("--interfaces", type=Path, default=DEFAULT_INTERFACES)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    symbols = discover()
+    markdown = render_markdown(symbols)
+    modules_text = render_modules(symbols)
+    interfaces_text = render_interfaces(symbols)
+    json_text = json.dumps([asdict(item) for item in symbols], ensure_ascii=False, indent=2) + "\n"
+    if args.check:
+        stale = not args.output.exists() or args.output.read_text(encoding="utf-8") != markdown
+        stale |= not args.json.exists() or args.json.read_text(encoding="utf-8") != json_text
+        stale |= not args.modules.exists() or args.modules.read_text(encoding="utf-8") != modules_text
+        stale |= not args.interfaces.exists() or args.interfaces.read_text(encoding="utf-8") != interfaces_text
+        if stale:
+            print("Project memory index is stale; run scripts/generate_project_memory.py")
+            return 1
+        print(f"Project memory index is current ({len(symbols)} symbols)")
+        return 0
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(markdown, encoding="utf-8", newline="\n")
+    args.json.write_text(json_text, encoding="utf-8", newline="\n")
+    args.modules.write_text(modules_text, encoding="utf-8", newline="\n")
+    args.interfaces.write_text(interfaces_text, encoding="utf-8", newline="\n")
+    print(f"Wrote {len(symbols)} symbols to {args.output.relative_to(ROOT)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -90,6 +90,7 @@ pub struct Config {
     pub network_access: bool,
     pub max_iterations: i64,
     pub max_tool_calls: i64,
+    pub max_parallel_tool_calls: i64,
     pub timeout_s: i64,
     /// SDK retry count for transient errors (408/409/429/5xx); default 3.
     pub max_retries: i64,
@@ -131,6 +132,7 @@ impl Default for Config {
             network_access: false,
             max_iterations: 150,
             max_tool_calls: 300,
+            max_parallel_tool_calls: 8,
             timeout_s: 120,
             max_retries: 3,
             context_token_budget: 512_000,
@@ -174,6 +176,12 @@ impl Config {
             return Err(ConfigError(format!(
                 "Invalid permission_mode {:?}; expected one of {:?}.",
                 self.permission_mode, VALID_PERMISSION_MODES
+            )));
+        }
+        if !(1..=128).contains(&self.max_parallel_tool_calls) {
+            return Err(ConfigError(format!(
+                "Invalid max_parallel_tool_calls {}; expected an integer from 1 to 128.",
+                self.max_parallel_tool_calls
             )));
         }
         for (idx, hook) in self.hooks.iter().enumerate() {
@@ -225,6 +233,10 @@ impl Config {
         m.insert("workspace", self.workspace.to_string_lossy().to_string());
         m.insert("max_iterations", self.max_iterations.to_string());
         m.insert("max_tool_calls", self.max_tool_calls.to_string());
+        m.insert(
+            "max_parallel_tool_calls",
+            self.max_parallel_tool_calls.to_string(),
+        );
         m.insert("timeout_s", self.timeout_s.to_string());
         m.insert("max_retries", self.max_retries.to_string());
         m.insert(
@@ -298,12 +310,27 @@ mod tests {
 
     #[test]
     fn default_permission_mode_is_valid() {
-        assert!(VALID_PERMISSION_MODES.contains(&Config::default().permission_mode.as_str()));
+        let default = Config::default();
+        assert!(VALID_PERMISSION_MODES.contains(&default.permission_mode.as_str()));
+        assert_eq!(default.max_parallel_tool_calls, 8);
         Config {
             api_key: "k".into(),
             ..Config::default()
         }
         .validate()
         .expect("default permission_mode validates");
+    }
+
+    #[test]
+    fn parallel_tool_limit_must_be_bounded() {
+        for invalid in [0, 129] {
+            let cfg = Config {
+                api_key: "k".into(),
+                max_parallel_tool_calls: invalid,
+                ..Config::default()
+            };
+            let err = cfg.validate().unwrap_err();
+            assert!(err.to_string().contains("max_parallel_tool_calls"));
+        }
     }
 }

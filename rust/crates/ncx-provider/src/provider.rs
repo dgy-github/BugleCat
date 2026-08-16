@@ -162,6 +162,8 @@ impl DeepSeekProvider {
 
     /// Streaming completion. Invokes the two callbacks with incremental text and
     /// returns the aggregate response (same shape as [`chat`]).
+    // Keep callback and request fields explicit to preserve the public provider API.
+    #[allow(clippy::too_many_arguments)]
     pub async fn chat_stream<C, R>(
         &self,
         messages: &[Value],

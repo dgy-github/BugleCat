@@ -7,9 +7,11 @@
 
 mod bridge;
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ncx_config::{
@@ -23,7 +25,7 @@ use ncx_core::{
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-use bridge::{spawn_worker, Command, PendingMap};
+use bridge::{request_cancel, spawn_worker, CancelFlag, Command, PendingMap, PendingQuestionMap};
 
 #[derive(Serialize)]
 pub struct Status {
@@ -46,6 +48,9 @@ pub struct Status {
 struct AppState {
     tx: UnboundedSender<Command>,
     pending: PendingMap,
+    questions: PendingQuestionMap,
+    question_counter: AtomicU64,
+    cancel: CancelFlag,
 }
 
 #[derive(Serialize)]
@@ -87,7 +92,7 @@ fn get_status() -> Result<Status, String> {
         sandbox: cfg.sandbox_mode.clone(),
         approval: cfg.approval_policy.clone(),
         permission_mode: cfg.permission_mode.clone(),
-        workspace: cfg.workspace.display().to_string(),
+        workspace: bridge::display_path(&cfg.workspace),
         api_key: red.get("api_key").cloned().unwrap_or_default(),
         max_iterations: cfg.max_iterations,
         max_tool_calls: cfg.max_tool_calls,
@@ -109,6 +114,9 @@ fn send_prompt(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     state
+        .cancel
+        .store(false, std::sync::atomic::Ordering::Release);
+    state
         .tx
         .send(Command::Prompt {
             text,
@@ -127,14 +135,14 @@ fn get_config_location() -> Result<ConfigLocation, String> {
 /// agent so the new root, its project instructions, memory, and git all apply.
 #[tauri::command]
 fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let p = PathBuf::from(path.trim());
+    let p = PathBuf::from(bridge::display_path(Path::new(path.trim())));
     if !p.is_dir() {
         return Err(format!("not a directory: {}", p.display()));
     }
     std::env::set_current_dir(&p).map_err(|e| format!("cannot enter {}: {e}", p.display()))?;
     bridge::save_last_workspace(&p); // remember it across launches
     let _ = state.tx.send(Command::Reload);
-    Ok(p.display().to_string())
+    Ok(bridge::display_path(&p))
 }
 
 /// Change the approval policy live (no session reset) + persist it.
@@ -227,8 +235,15 @@ fn fork_session(session_id: String, state: tauri::State<'_, AppState>) -> Result
 #[tauri::command]
 fn get_workspace() -> Result<String, String> {
     std::env::current_dir()
-        .map(|p| p.display().to_string())
+        .map(|p| bridge::display_path(&p))
         .map_err(|e| e.to_string())
+}
+
+/// Stop the active turn. The completion event still owns the final UI reset.
+#[tauri::command]
+fn stop_generation(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    request_cancel(&state.cancel, &state.pending, &state.questions);
+    Ok(())
 }
 
 #[tauri::command]
@@ -415,6 +430,55 @@ fn approve(id: u64, decision: String, state: tauri::State<'_, AppState>) -> Resu
             .map_err(|_| "approval already resolved".to_string()),
         None => Err(format!("no pending approval with id {id}")),
     }
+}
+
+/// Answer or dismiss a pending `ask_user_question` request.
+#[tauri::command]
+fn answer_question(
+    id: u64,
+    answer: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let answer = answer.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    });
+    let sender = state.questions.lock().unwrap().remove(&id);
+    match sender {
+        Some(tx) => tx
+            .send(answer)
+            .map_err(|_| "question already resolved".to_string()),
+        None => Err(format!("no pending question with id {id}")),
+    }
+}
+
+/// Deterministic debug-only entry point used by the real WebView click test.
+#[tauri::command]
+async fn e2e_ask_question(
+    app: tauri::AppHandle,
+    question: String,
+    options: Vec<String>,
+    allow_free_text: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    if !cfg!(debug_assertions) {
+        return Err("E2E question command is disabled in release builds".to_string());
+    }
+    let id = state.question_counter.fetch_add(1, Ordering::Relaxed);
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    state.questions.lock().unwrap().insert(id, sender);
+    bridge::emit(
+        &app,
+        bridge::UiEvent::Question {
+            id,
+            question,
+            options,
+            allow_free_text,
+        },
+    );
+    receiver
+        .await
+        .map_err(|_| "question response channel closed".to_string())
 }
 
 #[tauri::command]
@@ -615,7 +679,7 @@ fn git_diff() -> Result<String, String> {
 #[derive(Serialize)]
 pub struct FileChange {
     path: String,
-    added: i64,   // -1 = unknown (binary/untracked)
+    added: i64, // -1 = unknown (binary/untracked)
     removed: i64,
     kind: String, // modified | added | deleted | renamed | untracked
 }
@@ -736,9 +800,7 @@ fn list_dir(rel: String) -> Result<Vec<DirEntry>, String> {
             .replace('\\', "/");
         out.push(DirEntry { name, path, is_dir });
     }
-    out.sort_by(|a, b| {
-        (!a.is_dir, a.name.to_lowercase()).cmp(&(!b.is_dir, b.name.to_lowercase()))
-    });
+    out.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
     Ok(out)
 }
 
@@ -776,11 +838,19 @@ fn open_url(url: String) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        ProcessCommand::new("open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+        ProcessCommand::new("open")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        ProcessCommand::new("xdg-open").arg(&url).spawn().map(|_| ()).map_err(|e| e.to_string())
+        ProcessCommand::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -801,7 +871,10 @@ fn list_mcp() -> Result<Vec<McpRow>, String> {
             } else {
                 format!("{} {}", s.command, s.args.join(" "))
             };
-            McpRow { name: s.name, command }
+            McpRow {
+                name: s.name,
+                command,
+            }
         })
         .collect())
 }
@@ -812,7 +885,11 @@ fn list_mcp() -> Result<Vec<McpRow>, String> {
 fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
     let dir = std::env::temp_dir().join("ncx_gui_paste");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let ext = if ext.trim().is_empty() { "png".into() } else { ext };
+    let ext = if ext.trim().is_empty() {
+        "png".into()
+    } else {
+        ext
+    };
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -863,7 +940,7 @@ fn memory_store() -> MemoryStore {
 #[tauri::command]
 fn memory_list() -> Result<Vec<MemoryNote>, String> {
     let mut entries = memory_store().entries();
-    entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+    entries.sort_by_key(|entry| Reverse(entry.ts));
     Ok(entries
         .into_iter()
         .map(|e| MemoryNote {
@@ -948,7 +1025,10 @@ fn open_session_snapshot(session_id: String) -> Result<(), String> {
     }
     let path = index.snapshot_path(&session_id);
     if !path.exists() {
-        return Err(format!("session snapshot does not exist: {}", path.display()));
+        return Err(format!(
+            "session snapshot does not exist: {}",
+            path.display()
+        ));
     }
     open_file(&path)
 }
@@ -999,20 +1079,39 @@ pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
     let pending_for_worker = pending.clone();
+    let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
+    let questions_for_worker = questions.clone();
+    let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
+    let cancel_for_worker = cancel.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState { tx, pending })
+        .manage(AppState {
+            tx,
+            pending,
+            questions,
+            question_counter: AtomicU64::new(1_000_000),
+            cancel,
+        })
         .setup(move |app| {
             // Hand the agent thread an AppHandle (to emit events), the receiver
             // (to take prompts), and the shared pending-approvals map.
-            spawn_worker(app.handle().clone(), rx, pending_for_worker);
+            spawn_worker(
+                app.handle().clone(),
+                rx,
+                pending_for_worker,
+                questions_for_worker,
+                cancel_for_worker,
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
             send_prompt,
+            stop_generation,
             approve,
+            answer_question,
+            e2e_ask_question,
             get_settings,
             save_settings,
             get_config_location,

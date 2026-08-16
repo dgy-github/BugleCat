@@ -17,9 +17,9 @@ use async_trait::async_trait;
 use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
 use ncx_core::{
-    discover_skills, load_project_instructions, skills_index_block, AgentLoop, AgentRunner,
-    ContextEditPolicy, MemoryStore, Session, Summarizer, TaskBudget, Tier, ToolContext,
-    ToolRegistry,
+    discover_skills, load_project_instructions, model_provider_from_config, skills_index_block,
+    AgentLoop, AgentRunner, AgentRuntimeProfile, MemoryStore, Session, Summarizer, Tier,
+    ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -72,13 +72,7 @@ impl LiveRunner {
         task: &str,
         with_tools: bool,
     ) -> String {
-        let provider = DeepSeekProvider::with_opts(
-            self.cfg.api_key.clone(),
-            &self.cfg.base_url,
-            self.model_for(tier),
-            self.cfg.timeout_s as u64,
-            self.cfg.max_retries as u32,
-        );
+        let provider = model_provider_from_config(&self.cfg, self.model_for(tier));
         let policy = SandboxPolicy::new(self.cfg.sandbox_mode.clone(), workspace)
             .with_network_access(self.cfg.network_access);
         let ctx = ToolContext::new(workspace.to_path_buf(), policy)
@@ -100,9 +94,8 @@ impl LiveRunner {
         let instructions = load_project_instructions(workspace, 16_000);
         let system = compose_system_prompt(system, &[instructions, skills_index]);
         let session = Session::new(system);
-        let mut agent = AgentLoop::new(Box::new(provider), tools, session)
-            .with_task_budget(task_budget_from_config(&self.cfg))
-            .with_context_edit(context_edit_from_config(&self.cfg));
+        let mut agent = AgentRuntimeProfile::from_legacy_permissions(&self.cfg)
+            .apply(AgentLoop::new(Box::new(provider), tools, session));
         agent.run_turn(json!(task), None).await.final_text
     }
 
@@ -173,33 +166,6 @@ fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
         }
     }
     out
-}
-
-fn positive_usize(value: i64, fallback: usize) -> usize {
-    usize::try_from(value)
-        .ok()
-        .filter(|v| *v > 0)
-        .unwrap_or(fallback)
-}
-
-fn nonnegative_usize(value: i64, fallback: usize) -> usize {
-    usize::try_from(value).ok().unwrap_or(fallback)
-}
-
-fn task_budget_from_config(cfg: &Config) -> TaskBudget {
-    TaskBudget {
-        max_model_calls: positive_usize(cfg.max_iterations, 60),
-        max_tool_calls: nonnegative_usize(cfg.max_tool_calls, 120),
-    }
-}
-
-fn context_edit_from_config(cfg: &Config) -> ContextEditPolicy {
-    ContextEditPolicy {
-        enabled: cfg.context_edit_enabled,
-        max_chars: positive_usize(cfg.context_edit_max_chars, 120_000),
-        keep_recent_messages: positive_usize(cfg.context_edit_keep_recent_messages, 30),
-        max_tool_result_chars: positive_usize(cfg.context_edit_max_tool_result_chars, 4_000),
-    }
 }
 
 pub struct LiveSummarizer {

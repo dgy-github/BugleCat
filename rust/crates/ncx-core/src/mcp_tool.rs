@@ -30,7 +30,11 @@ pub struct McpTool {
 impl McpTool {
     pub fn new(def: McpToolDef, client: Rc<Mutex<McpClient>>) -> Self {
         let read_only = is_read_only_name(&def.name);
-        McpTool { def, client, read_only }
+        McpTool {
+            def,
+            client,
+            read_only,
+        }
     }
 }
 
@@ -75,8 +79,7 @@ impl Tool for McpTool {
                 }
                 Decision::Ask => {
                     if let Some(approver) = &ctx.approver {
-                        let details =
-                            serde_json::to_string_pretty(args).unwrap_or_default();
+                        let details = serde_json::to_string_pretty(args).unwrap_or_default();
                         let ans = approver
                             .request(ApprovalRequest {
                                 command: format!("mcp:{} {args}", self.def.name),
@@ -113,8 +116,28 @@ impl Tool for McpTool {
 
 // ── startup helper ────────────────────────────────────────────────────────────
 
+/// Connect to one MCP server and prepare its tools without mutating a registry.
+///
+/// The returned tools keep the server process alive. Callers can prepare every
+/// configured server first and only commit them after all connections and name
+/// validation succeed, which prevents a failed reload from dropping live tools.
+pub async fn prepare_mcp_server_tools(
+    name: &str,
+    command: &str,
+    args: &[String],
+    env: &HashMap<String, String>,
+) -> Result<Vec<Box<dyn Tool>>, String> {
+    let mut client = McpClient::connect(name, command, args, env).await?;
+    let defs = client.list_tools().await?;
+    let shared = Rc::new(Mutex::new(client));
+    Ok(defs
+        .into_iter()
+        .map(|def| Box::new(McpTool::new(def, shared.clone())) as Box<dyn Tool>)
+        .collect())
+}
+
 /// Connect to an MCP server, list its tools, and register each as a `McpTool`.
-/// Prints a progress line to stderr. Returns the number of tools registered.
+/// Returns the number of tools registered.
 pub async fn register_mcp_server(
     tools: &mut ToolRegistry,
     name: &str,
@@ -122,14 +145,12 @@ pub async fn register_mcp_server(
     args: &[String],
     env: &HashMap<String, String>,
 ) -> Result<usize, String> {
-    let mut client = McpClient::connect(name, command, args, env).await?;
-    let defs = client.list_tools().await?;
-    let n = defs.len();
-    let shared = Rc::new(Mutex::new(client));
-    for def in defs {
-        tools.register(Box::new(McpTool::new(def, shared.clone())));
+    let prepared = prepare_mcp_server_tools(name, command, args, env).await?;
+    let count = prepared.len();
+    for tool in prepared {
+        tools.register(tool);
     }
-    Ok(n)
+    Ok(count)
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -197,10 +218,8 @@ for line in sys.stdin:
         std::fs::create_dir_all(&ws).unwrap();
         let ws = ws.canonicalize().unwrap();
 
-        let ctx = crate::tools::ToolContext::new(
-            ws.clone(),
-            SandboxPolicy::new(WORKSPACE_WRITE, &ws),
-        );
+        let ctx =
+            crate::tools::ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
         let mut reg = ToolRegistry::empty(ctx);
 
         let result = register_mcp_server(
@@ -227,7 +246,9 @@ for line in sys.stdin:
         assert!(reg.get("write_note").is_some());
         assert!(!reg.is_read_only("write_note"));
 
-        let out = reg.execute("echo", &serde_json::json!({"text": "hello mcp"})).await;
+        let out = reg
+            .execute("echo", &serde_json::json!({"text": "hello mcp"}))
+            .await;
         assert_eq!(out, "echo: hello mcp");
     }
 }

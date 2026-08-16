@@ -12,6 +12,7 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "api_key",
     "base_url",
     "model",
+    "fast_model",
     "sandbox_mode",
     "approval_policy",
     "permission_mode",
@@ -22,6 +23,7 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "ark_api_key",
     "max_iterations",
     "max_tool_calls",
+    "max_parallel_tool_calls",
     "context_edit_enabled",
     "context_edit_max_chars",
     "context_edit_keep_recent_messages",
@@ -126,6 +128,7 @@ mod tests {
             ("api_key", r#"sk-with"quote"#),
             ("base_url", "https://api.deepseek.com/beta"),
             ("model", "deepseek-v4-pro"),
+            ("fast_model", "deepseek-chat"),
         ]));
         let parsed = text.parse::<toml::Value>().unwrap();
         assert_eq!(parsed["api_key"].as_str().unwrap(), r#"sk-with"quote"#);
@@ -134,6 +137,7 @@ mod tests {
             "https://api.deepseek.com/beta"
         );
         assert_eq!(parsed["model"].as_str().unwrap(), "deepseek-v4-pro");
+        assert_eq!(parsed["fast_model"].as_str().unwrap(), "deepseek-chat");
     }
 
     #[test]
@@ -159,14 +163,22 @@ mod tests {
         write_nanocodex_config(&map(&[("api_key", "sk-1")]), &target).unwrap();
         assert!(target.is_file());
 
-        write_nanocodex_config(&map(&[("model", "deepseek-chat")]), &target).unwrap();
+        write_nanocodex_config(
+            &map(&[
+                ("model", "deepseek-v4-pro"),
+                ("fast_model", "deepseek-chat"),
+            ]),
+            &target,
+        )
+        .unwrap();
 
         let parsed = std::fs::read_to_string(&target)
             .unwrap()
             .parse::<toml::Value>()
             .unwrap();
         assert_eq!(parsed["api_key"].as_str().unwrap(), "sk-1");
-        assert_eq!(parsed["model"].as_str().unwrap(), "deepseek-chat");
+        assert_eq!(parsed["model"].as_str().unwrap(), "deepseek-v4-pro");
+        assert_eq!(parsed["fast_model"].as_str().unwrap(), "deepseek-chat");
     }
 
     #[test]
@@ -189,6 +201,7 @@ mod tests {
         let text = dump_nanocodex_toml(&map(&[
             ("max_iterations", "12"),
             ("max_tool_calls", "34"),
+            ("max_parallel_tool_calls", "6"),
             ("context_edit_enabled", "false"),
             ("context_edit_max_chars", "9000"),
             ("context_edit_keep_recent_messages", "8"),
@@ -197,6 +210,7 @@ mod tests {
         let parsed = text.parse::<toml::Value>().unwrap();
         assert_eq!(parsed["max_iterations"].as_str().unwrap(), "12");
         assert_eq!(parsed["max_tool_calls"].as_str().unwrap(), "34");
+        assert_eq!(parsed["max_parallel_tool_calls"].as_str().unwrap(), "6");
         assert_eq!(parsed["context_edit_enabled"].as_str().unwrap(), "false");
         assert_eq!(parsed["context_edit_max_chars"].as_str().unwrap(), "9000");
         assert_eq!(

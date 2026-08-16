@@ -39,6 +39,10 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
         "Show the current model, or switch it: /model <name>.",
     ),
     (
+        "/mcp",
+        "Reload MCP servers atomically from config: /mcp reload.",
+    ),
+    (
         "/approvals",
         "Show the approval policy, or set it: /approvals <untrusted|on-failure|on-request|never>.",
     ),
@@ -56,7 +60,10 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
         "/verify",
         "Build/test the recent change and report pass/fail: /verify [what].",
     ),
-    ("/skills", "List available agent skills (name + when to use)."),
+    (
+        "/skills",
+        "List available agent skills (name + when to use).",
+    ),
     ("/history", "Show recent saved sessions."),
     (
         "/export",
@@ -227,6 +234,7 @@ mod tests {
             "/cost",
             "/usage-credits",
             "/model",
+            "/mcp",
             "/approvals",
             "/diff",
             "/review",

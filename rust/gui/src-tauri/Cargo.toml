@@ -30,7 +30,6 @@ tokio = { version = "1", features = ["rt", "time", "macros", "sync"] }
 async-trait = "0.1"
 
 ncx-config = { path = "../../crates/ncx-config" }
-ncx-provider = { path = "../../crates/ncx-provider" }
 ncx-sandbox = { path = "../../crates/ncx-sandbox" }
 ncx-core = { path = "../../crates/ncx-core" }
 

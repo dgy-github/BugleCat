@@ -26,6 +26,8 @@ OPTIONS:
                             Max model calls for one task (default: config/60).
         --max-tool-calls <N>
                             Max tool calls for one task (default: config/120).
+        --max-parallel-tool-calls <N>
+                            Max concurrent read-only tool calls (default: config/8).
         --context-edit-max-chars <N>
                             Provider-view context character budget.
         --context-edit-keep-recent <N>
@@ -61,6 +63,7 @@ pub struct Args {
     pub permission_mode: Option<String>,
     pub max_iterations: Option<i64>,
     pub max_tool_calls: Option<i64>,
+    pub max_parallel_tool_calls: Option<i64>,
     pub context_edit_max_chars: Option<i64>,
     pub context_edit_keep_recent_messages: Option<i64>,
     pub context_edit_max_tool_result_chars: Option<i64>,
@@ -109,7 +112,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-w" | "--workspace" => {
                 args.workspace = Some(PathBuf::from(take_value(argv, &mut i, a)?));
             }
-            "--image" => args.images.push(PathBuf::from(take_value(argv, &mut i, a)?)),
+            "--image" => args
+                .images
+                .push(PathBuf::from(take_value(argv, &mut i, a)?)),
             "-m" | "--model" => args.model = Some(take_value(argv, &mut i, a)?),
             "-p" | "--profile" => args.profile = Some(take_value(argv, &mut i, a)?),
             "-s" | "--sandbox" => args.sandbox = Some(take_value(argv, &mut i, a)?),
@@ -117,6 +122,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--permission-mode" => args.permission_mode = Some(take_value(argv, &mut i, a)?),
             "--max-iterations" => args.max_iterations = Some(take_i64(argv, &mut i, a)?),
             "--max-tool-calls" => args.max_tool_calls = Some(take_i64(argv, &mut i, a)?),
+            "--max-parallel-tool-calls" => {
+                args.max_parallel_tool_calls = Some(take_i64(argv, &mut i, a)?);
+            }
             "--context-edit-max-chars" => {
                 args.context_edit_max_chars = Some(take_i64(argv, &mut i, a)?);
             }
@@ -187,6 +195,8 @@ mod tests {
             "7",
             "--max-tool-calls",
             "9",
+            "--max-parallel-tool-calls",
+            "4",
         ])
         .unwrap();
         assert_eq!(a.model.as_deref(), Some("deepseek-chat"));
@@ -194,6 +204,7 @@ mod tests {
         assert_eq!(a.profile.as_deref(), Some("fast"));
         assert_eq!(a.max_iterations, Some(7));
         assert_eq!(a.max_tool_calls, Some(9));
+        assert_eq!(a.max_parallel_tool_calls, Some(4));
     }
 
     #[test]
@@ -224,6 +235,7 @@ mod tests {
     #[test]
     fn numeric_flags_validate_integer_values() {
         assert!(args(&["--max-tool-calls", "abc"]).is_err());
+        assert!(args(&["--max-parallel-tool-calls", "abc"]).is_err());
         let a = args(&["--disable-context-edit"]).unwrap();
         assert!(a.disable_context_edit);
     }

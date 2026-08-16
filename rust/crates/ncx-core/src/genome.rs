@@ -92,7 +92,10 @@ impl Genome {
     /// The effective description for tool `name`: the override if present, else
     /// `default`. Borrow-safe: returned ref lives as long as both inputs.
     pub fn describe<'a>(&'a self, name: &str, default: &'a str) -> &'a str {
-        self.tool_desc.get(name).map(String::as_str).unwrap_or(default)
+        self.tool_desc
+            .get(name)
+            .map(String::as_str)
+            .unwrap_or(default)
     }
 }
 
@@ -120,7 +123,10 @@ read_file = "Read a file."
         let g = Genome::parse(toml).unwrap();
         assert!(!g.is_empty());
         assert_eq!(g.base_system_prompt("DEFAULT"), "You are a focused agent.");
-        assert_eq!(g.describe("apply_patch", "DEFAULT"), "Edit files via V4A patches.");
+        assert_eq!(
+            g.describe("apply_patch", "DEFAULT"),
+            "Edit files via V4A patches."
+        );
         assert_eq!(g.describe("read_file", "DEFAULT"), "Read a file.");
         // A tool not in the map keeps its default.
         assert_eq!(g.describe("shell", "SHELL_DEFAULT"), "SHELL_DEFAULT");

@@ -12,9 +12,13 @@
 
 pub mod detect;
 pub mod executor;
+pub mod managed;
 pub mod patch;
+pub mod pty;
 pub mod read_file;
 
 pub use detect::looks_read_only;
 pub use executor::{ExecResult, PolicyExecutor};
+pub use managed::{ManagedProcess, ProcessOutputChunk, ProcessSnapshot};
 pub use patch::{apply_patch, parse_patch, ActionType, ApplyOutcome, FileAction, PatchError};
+pub use pty::{PtyOutputChunk, PtyProcess, PtySnapshot};

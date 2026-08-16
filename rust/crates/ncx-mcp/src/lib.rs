@@ -59,7 +59,13 @@ impl McpClient {
         let mut child = cmd.spawn().map_err(|e| format!("spawn {command}: {e}"))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
-        let mut client = McpClient { child, stdin, stdout, next_id: 0, server: server.to_string() };
+        let mut client = McpClient {
+            child,
+            stdin,
+            stdout,
+            next_id: 0,
+            server: server.to_string(),
+        };
         client.initialize().await?;
         Ok(client)
     }
@@ -80,12 +86,16 @@ impl McpClient {
     async fn write_msg(&mut self, msg: &Value) -> Result<(), String> {
         let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
         line.push('\n');
-        self.stdin.write_all(line.as_bytes()).await.map_err(|e| format!("write: {e}"))?;
+        self.stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| format!("write: {e}"))?;
         self.stdin.flush().await.map_err(|e| format!("flush: {e}"))
     }
 
     async fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
-        self.write_msg(&json!({"jsonrpc": "2.0", "method": method, "params": params})).await
+        self.write_msg(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
+            .await
     }
 
     /// Send a request and read responses until the one with the matching id
@@ -111,7 +121,9 @@ impl McpClient {
                 if line.is_empty() {
                     continue;
                 }
-                let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+                let Ok(v) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
                 if v.get("id").and_then(|x| x.as_u64()) != Some(id) {
                     continue; // a notification or a different response
                 }
@@ -123,7 +135,10 @@ impl McpClient {
         };
         match timeout(REQ_TIMEOUT, read).await {
             Ok(r) => r,
-            Err(_) => Err(format!("timeout waiting for '{method}' from '{}'", self.server)),
+            Err(_) => Err(format!(
+                "timeout waiting for '{method}' from '{}'",
+                self.server
+            )),
         }
     }
 
@@ -133,14 +148,25 @@ impl McpClient {
         let mut out = Vec::new();
         if let Some(tools) = res.get("tools").and_then(|t| t.as_array()) {
             for t in tools {
-                let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let name = t
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if name.is_empty() {
                     continue;
                 }
                 out.push(McpToolDef {
                     name,
-                    description: t.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    input_schema: t.get("inputSchema").cloned().unwrap_or_else(|| json!({"type": "object"})),
+                    description: t
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    input_schema: t
+                        .get("inputSchema")
+                        .cloned()
+                        .unwrap_or_else(|| json!({"type": "object"})),
                 });
             }
         }
@@ -149,7 +175,9 @@ impl McpClient {
 
     /// Call a tool and return its content as a string.
     pub async fn call_tool(&mut self, name: &str, args: &Value) -> Result<String, String> {
-        let res = self.request("tools/call", json!({"name": name, "arguments": args})).await?;
+        let res = self
+            .request("tools/call", json!({"name": name, "arguments": args}))
+            .await?;
         Ok(format_content(&res))
     }
 }
@@ -184,7 +212,11 @@ pub fn format_content(res: &Value) -> String {
         }
     }
     if parts.is_empty() {
-        if res.get("isError").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if res
+            .get("isError")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             "(tool error with no content)".to_string()
         } else {
             "(no content)".to_string()
@@ -208,7 +240,8 @@ mod tests {
 
     #[test]
     fn format_content_includes_structured() {
-        let res = json!({"content": [{"type": "text", "text": "ok"}], "structuredContent": {"x": 1}});
+        let res =
+            json!({"content": [{"type": "text", "text": "ok"}], "structuredContent": {"x": 1}});
         let out = format_content(&res);
         assert!(out.contains("ok"));
         assert!(out.contains("structuredContent"));
@@ -217,7 +250,10 @@ mod tests {
 
     #[test]
     fn format_content_empty_error() {
-        assert_eq!(format_content(&json!({"content": [], "isError": true})), "(tool error with no content)");
+        assert_eq!(
+            format_content(&json!({"content": [], "isError": true})),
+            "(tool error with no content)"
+        );
     }
 
     // ── live end-to-end against a Python mock MCP server ──────────────────────
@@ -280,7 +316,10 @@ for line in sys.stdin:
         assert_eq!(tools[0].name, "echo");
         assert!(tools[0].description.contains("echo"));
 
-        let out = client.call_tool("echo", &json!({"text": "hi there"})).await.expect("call_tool");
+        let out = client
+            .call_tool("echo", &json!({"text": "hi there"}))
+            .await
+            .expect("call_tool");
         assert_eq!(out, "echo: hi there");
     }
 }

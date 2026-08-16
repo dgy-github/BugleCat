@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextEditPolicy {
     pub enabled: bool,
     pub max_chars: usize,
@@ -363,9 +363,7 @@ fn read_log(path: Option<&Path>) -> Vec<Value> {
         .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
         .filter_map(|mut value| {
             let obj = value.as_object_mut()?;
-            if obj.get("role").and_then(|v| v.as_str()).is_none() {
-                return None;
-            }
+            obj.get("role").and_then(|v| v.as_str())?;
             obj.remove("_ts");
             Some(value)
         })

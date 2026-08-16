@@ -16,21 +16,20 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use ncx_config::{
-    load_config, load_mcp_servers, permission_mode_to_knobs, write_nanocodex_config, Config,
-    ConfigPaths, Overrides, VALID_PERMISSION_MODES, WRITABLE_KEYS,
+    load_config, load_mcp_servers, write_nanocodex_config, Config, ConfigPaths, McpServerConfig,
+    Overrides, VALID_PERMISSION_MODES, WRITABLE_KEYS,
 };
 use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
     custom_command_prompt, discover_skills, expand_file_mentions, list_custom_commands,
-    load_project_instructions, new_session_id, register_mcp_server, skills_index_block, AgentLoop,
-    CheckpointMeta, CheckpointStore, ContextEditPolicy, Genome, MemoryStore, Orchestrator,
-    OrchestratorConfig, Provider, Session, SessionIndex, SessionSummary, TaskBudget, ToolContext,
+    load_project_instructions, model_provider_from_config, new_session_id,
+    prepare_mcp_server_tools, skills_index_block, vision_provider_from_config, AgentLoop,
+    AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, MemoryStore, Orchestrator,
+    OrchestratorConfig, PromptAssembler, Session, SessionIndex, SessionSummary, Tool, ToolContext,
     ToolRegistry, TurnResult,
 };
-use ncx_provider::DeepSeekProvider;
-use ncx_sandbox::SandboxPolicy;
 use serde_json::{json, Value};
 
 use args::{parse_args, Args};
@@ -88,6 +87,7 @@ async fn run(args: Args) -> i32 {
         approval_policy: args.approval.clone(),
         max_iterations: args.max_iterations,
         max_tool_calls: args.max_tool_calls,
+        max_parallel_tool_calls: args.max_parallel_tool_calls,
         context_edit_enabled: if args.disable_context_edit {
             Some(false)
         } else {
@@ -140,25 +140,9 @@ async fn run(args: Args) -> i32 {
         };
     }
 
-    let provider = DeepSeekProvider::with_opts(
-        cfg.api_key.clone(),
-        &cfg.base_url,
-        cfg.model.clone(),
-        cfg.timeout_s as u64,
-        cfg.max_retries as u32,
-    );
-    // --permission-mode (when given) is the single source of gating, overriding
-    // --sandbox/--approval; otherwise keep the classic sandbox+approval behavior.
-    let (sandbox_mode, approval_policy, require_edit, plan_mode) =
-        match args.permission_mode.as_deref() {
-            Some(pm) => {
-                let (s, a, r, p) = permission_mode_to_knobs(pm);
-                (s.to_string(), a.to_string(), r, p)
-            }
-            None => (cfg.sandbox_mode.clone(), cfg.approval_policy.clone(), false, false),
-        };
-    let network = sandbox_mode == "danger-full-access";
-    let policy = SandboxPolicy::new(sandbox_mode, &cfg.workspace).with_network_access(network);
+    let runtime_profile = runtime_profile_for_args(&cfg, &args);
+    let provider = model_provider_from_config(&cfg, cfg.model.clone());
+    let policy = runtime_profile.sandbox_policy(&cfg.workspace);
     // Project memory: recalled per prompt by AgentLoop (query-scoped); the
     // `remember` tool lets the agent append verified notes (smarter on THIS repo).
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
@@ -183,17 +167,19 @@ async fn run(args: Args) -> i32 {
     let base_prompt = genome.base_system_prompt(SYSTEM_PROMPT).to_string();
     // Plan-mode steering note (feat/gui permission model): appended to the
     // composed prompt so the agent knows it is in read-only/plan mode.
-    let plan_note = if plan_mode {
+    let plan_note = if runtime_profile.permissions.plan_mode {
         PLAN_MODE_NOTE.to_string()
     } else {
         String::new()
     };
-    let system_prompt =
-        compose_system_prompt(&base_prompt, &[instructions, skills_index, plan_note]);
-    let ctx = ToolContext::new(cfg.workspace.clone(), policy)
-        .with_approval_policy(approval_policy)
-        .with_require_edit_approval(require_edit)
-        .with_plan_mode(plan_mode)
+    let mut prompt = PromptAssembler::new(base_prompt.clone());
+    prompt
+        .upsert("project_instructions", 10, instructions)
+        .upsert("skills", 20, skills_index)
+        .upsert("plan_mode", 30, plan_note);
+    let system_prompt = prompt.build();
+    let ctx = runtime_profile
+        .apply_tool_context(ToolContext::new(cfg.workspace.clone(), policy))
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
@@ -205,22 +191,33 @@ async fn run(args: Args) -> i32 {
     // descriptions) as TOML and exit. Done BEFORE MCP registration so the dump
     // contains only the evolvable core surface, not server-provided tools.
     if args.dump_genome {
-        print!("{}", dump_genome_toml(&base_prompt, &tools.ctx.tool_catalog.borrow()));
+        print!(
+            "{}",
+            dump_genome_toml(&base_prompt, &tools.ctx.tool_catalog.borrow())
+        );
         return 0;
     }
     // MCP is off by default: only connect servers (spawning subprocesses outside
     // the sandbox) when the user opts in with --mcp. Keeps startup fast and quiet.
+    let mut mcp_tool_names = Vec::new();
     if args.mcp {
         let servers = load_mcp_servers();
         if servers.is_empty() {
             eprintln!("mcp: --mcp set but no servers found in ~/.nanocodex/mcp.toml");
         }
-        for srv in servers {
-            match register_mcp_server(&mut tools, &srv.name, &srv.command, &srv.args, &srv.env).await
-            {
-                Ok(n) => eprintln!("mcp({}): {} tool(s) registered", srv.name, n),
-                Err(e) => eprintln!("mcp({}): connect failed: {e}", srv.name),
-            }
+        match prepare_configured_mcp_tools(&servers).await {
+            Ok(prepared) => match tools.replace_tools(&[], prepared) {
+                Ok(names) => {
+                    mcp_tool_names = names;
+                    eprintln!(
+                        "mcp: {} server(s), {} tool(s) registered",
+                        servers.len(),
+                        mcp_tool_names.len()
+                    );
+                }
+                Err(error) => eprintln!("mcp: registration rejected: {error}"),
+            },
+            Err(error) => eprintln!("mcp: load failed: {error}"),
         }
     }
     let log_path = session_log_path(&cfg.workspace);
@@ -231,10 +228,9 @@ async fn run(args: Args) -> i32 {
         Session::with_log(system_prompt, Some(log_path.clone()))
     };
     let restored_count = session.restored_count;
-    let mut agent = AgentLoop::new(Box::new(provider), tools, session)
-        .with_task_budget(task_budget_from_config(&cfg))
-        .with_context_edit(context_edit_from_config(&cfg))
-        .with_vision_provider(build_vision_provider(&cfg));
+    let mut agent = runtime_profile
+        .apply(AgentLoop::new(Box::new(provider), tools, session))
+        .with_vision_provider(vision_provider_from_config(&cfg));
     let mut recorder = SessionRecorder::new(session_id, cfg.workspace.clone(), log_path);
 
     if args.resume {
@@ -272,7 +268,7 @@ async fn run(args: Args) -> i32 {
         return if result.stop_reason == "error" { 1 } else { 0 };
     }
 
-    repl(&mut agent, &cfg, &mut recorder).await;
+    repl(&mut agent, &cfg, &mut recorder, &mut mcp_tool_names).await;
     0
 }
 
@@ -314,10 +310,17 @@ fn dump_genome_toml(system_prompt: &str, catalog: &[ncx_core::tools::ToolCatalog
     let mut out = String::new();
     out.push_str("# Default nanocodex harness genome (ncx --dump-genome).\n");
     out.push_str("# Edit system_prompt and tool_desc.* to evolve the agent.\n\n");
-    out.push_str(&format!("system_prompt = \"{}\"\n\n", toml_escape(system_prompt)));
+    out.push_str(&format!(
+        "system_prompt = \"{}\"\n\n",
+        toml_escape(system_prompt)
+    ));
     out.push_str("[tool_desc]\n");
     for entry in catalog {
-        out.push_str(&format!("{} = \"{}\"\n", entry.name, toml_escape(&entry.description)));
+        out.push_str(&format!(
+            "{} = \"{}\"\n",
+            entry.name,
+            toml_escape(&entry.description)
+        ));
     }
     out
 }
@@ -339,20 +342,14 @@ fn toml_escape(s: &str) -> String {
     out
 }
 
-fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
-    let mut out = base.to_string();
-    for block in blocks {
-        if !block.trim().is_empty() {
-            out.push_str("\n\n");
-            out.push_str(block.trim());
-        }
-    }
-    out
-}
-
 /// Interactive REPL. Slash commands are dispatched without a model call; any
 /// other line becomes a turn (with `@file` mention expansion).
-async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut SessionRecorder) {
+async fn repl(
+    agent: &mut AgentLoop,
+    cfg: &ncx_config::Config,
+    recorder: &mut SessionRecorder,
+    mcp_tool_names: &mut Vec<String>,
+) {
     println!(
         "nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit. \
          (attach images inline: `--image <path> your question`)",
@@ -379,6 +376,9 @@ async fn repl(agent: &mut AgentLoop, cfg: &ncx_config::Config, recorder: &mut Se
             match dispatch_slash(&cmd, &arg, agent, cfg, recorder, &usage) {
                 SlashOutcome::Exit => break,
                 SlashOutcome::Printed(text) => println!("{text}"),
+                SlashOutcome::ReloadMcp => {
+                    println!("{}", reload_mcp_tools(agent, mcp_tool_names).await)
+                }
                 SlashOutcome::Prompt(text) => {
                     run_one_turn(agent, &text, cfg, recorder, &mut usage).await
                 }
@@ -438,6 +438,7 @@ enum SlashOutcome {
     Exit,
     Printed(String),
     Prompt(String),
+    ReloadMcp,
 }
 
 /// Handle a slash command that doesn't require a model call. Returns the text to
@@ -487,6 +488,13 @@ fn dispatch_slash(
                 ))
             }
         }
+        "/mcp" => {
+            if arg.eq_ignore_ascii_case("reload") {
+                SlashOutcome::ReloadMcp
+            } else {
+                SlashOutcome::Printed("Usage: /mcp reload".to_string())
+            }
+        }
         "/skills" => SlashOutcome::Printed(render_skills(&agent.tools.ctx.skills)),
         "/plan" => {
             let plan = agent.tools.ctx.plan.borrow();
@@ -511,6 +519,48 @@ fn dispatch_slash(
             Err(e) => SlashOutcome::Printed(format!("Custom command failed: {e}")),
         },
     }
+}
+
+async fn reload_mcp_tools(agent: &mut AgentLoop, current_names: &mut Vec<String>) -> String {
+    let servers = load_mcp_servers();
+    let server_count = servers.len();
+    let prepared = match prepare_configured_mcp_tools(&servers).await {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            return format!(
+                "MCP reload failed: {error}. Existing {} MCP tool(s) retained.",
+                current_names.len()
+            );
+        }
+    };
+
+    let old_count = current_names.len();
+    match agent.tools.replace_tools(current_names, prepared) {
+        Ok(new_names) => {
+            let new_count = new_names.len();
+            *current_names = new_names;
+            format!(
+                "MCP reload complete: {server_count} server(s), {new_count} tool(s) active; replaced {old_count}."
+            )
+        }
+        Err(error) => {
+            format!("MCP reload rejected: {error}. Existing {old_count} MCP tool(s) retained.")
+        }
+    }
+}
+
+async fn prepare_configured_mcp_tools(
+    servers: &[McpServerConfig],
+) -> Result<Vec<Box<dyn Tool>>, String> {
+    let mut prepared = Vec::new();
+    for server in servers {
+        let mut tools =
+            prepare_mcp_server_tools(&server.name, &server.command, &server.args, &server.env)
+                .await
+                .map_err(|error| format!("server '{}': {error}", server.name))?;
+        prepared.append(&mut tools);
+    }
+    Ok(prepared)
 }
 
 fn render_skills(skills: &[ncx_core::Skill]) -> String {
@@ -600,7 +650,10 @@ fn export_session_text(
     // explicitly named destination is never clobbered.
     if !arg.trim().is_empty() {
         if path.is_dir() {
-            return format!("export failed: {} is a directory; pass a file path", path.display());
+            return format!(
+                "export failed: {} is a directory; pass a file path",
+                path.display()
+            );
         }
         if path.exists() {
             return format!(
@@ -609,8 +662,12 @@ fn export_session_text(
             );
         }
     }
-    let markdown =
-        render_session_markdown(&session.system, &session.messages, &cfg.model, &cfg.workspace);
+    let markdown = render_session_markdown(
+        &session.system,
+        &session.messages,
+        &cfg.model,
+        &cfg.workspace,
+    );
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             return format!("export failed: cannot create {}: {e}", parent.display());
@@ -650,7 +707,12 @@ fn export_target_path(workspace: &Path, session_id: &str, arg: &str) -> PathBuf 
 }
 
 /// Render the system prompt + message history as a single Markdown document.
-fn render_session_markdown(system: &str, messages: &[Value], model: &str, workspace: &Path) -> String {
+fn render_session_markdown(
+    system: &str,
+    messages: &[Value],
+    model: &str,
+    workspace: &Path,
+) -> String {
     let mut out = String::from("# nanocodex session export\n\n");
     let (users, assistants, tools) = count_roles(messages);
     out.push_str(&format!("- model: `{model}`\n"));
@@ -870,7 +932,6 @@ fn doc_prompt(fmt: &str, arg: &str) -> String {
         backend = doc_backend_hint(fmt),
     )
 }
-
 
 fn config_text(cfg: &ncx_config::Config, arg: &str) -> String {
     let path = ConfigPaths::default().nanocodex;
@@ -1202,51 +1263,14 @@ fn clipped_label(text: &str, limit: usize) -> String {
     }
 }
 
-fn positive_usize(value: i64, fallback: usize) -> usize {
-    usize::try_from(value)
-        .ok()
-        .filter(|v| *v > 0)
-        .unwrap_or(fallback)
-}
-
-fn nonnegative_usize(value: i64, fallback: usize) -> usize {
-    usize::try_from(value).ok().unwrap_or(fallback)
-}
-
-fn task_budget_from_config(cfg: &ncx_config::Config) -> TaskBudget {
-    TaskBudget {
-        max_model_calls: positive_usize(cfg.max_iterations, 60),
-        max_tool_calls: nonnegative_usize(cfg.max_tool_calls, 120),
+fn runtime_profile_for_args(cfg: &Config, args: &Args) -> AgentRuntimeProfile {
+    match args.permission_mode.as_deref() {
+        Some(mode) => AgentRuntimeProfile::from_permission_mode(cfg, mode),
+        None if args.sandbox.is_some() || args.approval.is_some() => {
+            AgentRuntimeProfile::from_legacy_permissions(cfg)
+        }
+        None => AgentRuntimeProfile::from_config(cfg),
     }
-}
-
-/// Build a dedicated vision provider from the `vl_*` config, or `None` when no
-/// vision model is configured (image turns then stay on the main provider).
-///
-/// Only `vl_model` is required; `vl_base_url` / `vl_api_key` fall back to the
-/// main `base_url` / `api_key`, so a user can either point at a separate VL
-/// endpoint (e.g. DashScope) or just name a vision model on the same endpoint.
-fn build_vision_provider(cfg: &ncx_config::Config) -> Option<Box<dyn Provider>> {
-    if cfg.vl_model.trim().is_empty() {
-        return None;
-    }
-    let base_url = if cfg.vl_base_url.trim().is_empty() {
-        &cfg.base_url
-    } else {
-        &cfg.vl_base_url
-    };
-    let api_key = if cfg.vl_api_key.trim().is_empty() {
-        cfg.api_key.clone()
-    } else {
-        cfg.vl_api_key.clone()
-    };
-    Some(Box::new(DeepSeekProvider::with_opts(
-        api_key,
-        base_url,
-        cfg.vl_model.clone(),
-        cfg.timeout_s as u64,
-        cfg.max_retries as u32,
-    )))
 }
 
 /// Build the one-shot user input. With no images it is just the prompt text;
@@ -1259,8 +1283,8 @@ fn build_image_user_input(text: &str, images: &[PathBuf]) -> Result<serde_json::
     }
     let mut content = vec![json!({"type": "text", "text": text})];
     for path in images {
-        let bytes =
-            std::fs::read(path).map_err(|e| format!("cannot read image {}: {e}", path.display()))?;
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("cannot read image {}: {e}", path.display()))?;
         let url = format!("data:{};base64,{}", image_mime(path), base64_encode(&bytes));
         content.push(json!({"type": "image_url", "image_url": {"url": url}}));
     }
@@ -1306,15 +1330,6 @@ fn base64_encode(data: &[u8]) -> String {
         });
     }
     out
-}
-
-fn context_edit_from_config(cfg: &ncx_config::Config) -> ContextEditPolicy {
-    ContextEditPolicy {
-        enabled: cfg.context_edit_enabled,
-        max_chars: positive_usize(cfg.context_edit_max_chars, 120_000),
-        keep_recent_messages: positive_usize(cfg.context_edit_keep_recent_messages, 30),
-        max_tool_result_chars: positive_usize(cfg.context_edit_max_tool_result_chars, 4_000),
-    }
 }
 
 #[cfg(test)]
@@ -1382,10 +1397,29 @@ mod tests {
     fn vision_provider_only_built_when_vl_model_set() {
         let mut cfg = ncx_config::Config::default();
         // No vl_model -> image turns stay on the main provider.
-        assert!(build_vision_provider(&cfg).is_none());
+        assert!(vision_provider_from_config(&cfg).is_none());
         // vl_model set -> a dedicated vision provider is constructed.
         cfg.vl_model = "qwen-vl-max".into();
-        assert!(build_vision_provider(&cfg).is_some());
+        assert!(vision_provider_from_config(&cfg).is_some());
+    }
+
+    #[test]
+    fn cli_and_gui_use_equivalent_runtime_profiles_for_same_config() {
+        let cfg = Config {
+            permission_mode: "default".into(),
+            max_iterations: 9,
+            max_tool_calls: 21,
+            max_parallel_tool_calls: 4,
+            context_edit_max_chars: 42_000,
+            context_edit_keep_recent_messages: 12,
+            context_edit_max_tool_result_chars: 888,
+            ..Default::default()
+        };
+
+        let cli_profile = runtime_profile_for_args(&cfg, &Args::default());
+        let gui_profile = AgentRuntimeProfile::from_config(&cfg);
+
+        assert_eq!(cli_profile, gui_profile);
     }
 
     #[test]

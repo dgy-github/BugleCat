@@ -386,7 +386,7 @@ def _as_int(value: Any, default: int) -> int:
 
 # Keys the GUI Settings dialog may write. Order here is the order on disk.
 _WRITABLE_KEYS = (
-    "api_key", "base_url", "model",
+    "api_key", "base_url", "model", "fast_model",
     "sandbox_mode", "approval_policy", "reasoning_effort",
     "vl_base_url", "vl_api_key", "vl_model",
     "ark_api_key",

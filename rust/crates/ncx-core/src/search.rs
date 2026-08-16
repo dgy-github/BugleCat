@@ -163,6 +163,16 @@ pub fn grep(
     Ok(out)
 }
 
+/// Literal text search with the same result contract as [`grep`].
+pub fn grep_literal(
+    root: &Path,
+    pattern: &str,
+    path_glob: Option<&str>,
+    max_results: usize,
+) -> Result<String, String> {
+    grep(root, &regex::escape(pattern), path_glob, max_results)
+}
+
 /// glob: filenames matching a pattern → newline list of `rel/path` (capped).
 pub fn glob(root: &Path, pattern: &str, max_results: usize) -> String {
     let re = glob_to_regex(pattern);
@@ -227,6 +237,50 @@ impl Tool for GrepTool {
             Ok(s) => s,
             Err(e) => format!("Error: {e}"),
         }
+    }
+}
+
+/// `grep_literal` is the argument-compatible fallback for malformed regexes.
+pub struct GrepLiteralTool;
+
+#[async_trait(?Send)]
+impl Tool for GrepLiteralTool {
+    fn name(&self) -> &str {
+        "grep_literal"
+    }
+
+    fn description(&self) -> &str {
+        "Search file contents for an exact literal string. This read-only fallback accepts the \
+         same pattern, path_glob, and max_results fields as grep but never parses pattern as regex."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Exact literal text to find."},
+                "path_glob": {"type": "string", "description": "Optional glob limiting searched files."},
+                "max_results": {"type": "integer", "minimum": 1, "description": "Max matches (default 200)."}
+            },
+            "required": ["pattern"]
+        })
+    }
+
+    fn read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(pattern) = args.get("pattern").and_then(Value::as_str) else {
+            return "Error: 'pattern' is required and must be a string.".into();
+        };
+        let path_glob = args.get("path_glob").and_then(Value::as_str);
+        let max = args
+            .get("max_results")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
+        grep_literal(&ctx.workspace, pattern, path_glob, max)
+            .unwrap_or_else(|error| format!("Error: {error}"))
     }
 }
 
@@ -318,11 +372,18 @@ impl Tool for WebSearchTool {
         }
         match ncx_provider::ddg_instant_answer(query).await {
             Ok(s) => s,
-            Err(e) => format!("Error: web_search failed: {e}"),
+            Err(ddg_error) => match ncx_provider::wikipedia_search(query, 6).await {
+                Ok(s) => format!("(DuckDuckGo unavailable; using Wikipedia)\n{s}"),
+                Err(wikipedia_error) => match ncx_provider::bing_rss_search(query, 6).await {
+                    Ok(s) => format!("(DuckDuckGo and Wikipedia unavailable; using Bing)\n{s}"),
+                    Err(bing_error) => format!(
+                        "Error: web_search failed: duckduckgo={ddg_error}, wikipedia={wikipedia_error}, bing={bing_error}"
+                    ),
+                },
+            },
         }
     }
 }
-
 
 /// `web_fetch` — fetch a URL and return its readable text (HTML stripped).
 pub struct WebFetchTool;
@@ -431,6 +492,14 @@ mod tests {
     fn grep_invalid_regex_errors() {
         let d = fixture("badre");
         assert!(grep(&d, "(unclosed", None, 200).is_err());
+    }
+
+    #[test]
+    fn grep_literal_accepts_regex_metacharacters() {
+        let d = fixture("literal");
+        std::fs::write(d.join("src/literal.txt"), "value = [unfinished\n").unwrap();
+        let out = grep_literal(&d, "[unfinished", None, 200).unwrap();
+        assert!(out.contains("src/literal.txt:1"), "{out}");
     }
 
     #[test]

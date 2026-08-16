@@ -283,7 +283,11 @@ impl<'a> Orchestrator<'a> {
         let plan = self.runner.reason(Tier::Main, PLAN_SYS, task).await;
         let raw = self
             .runner
-            .reason(Tier::Main, DECOMPOSE_SYS, &build_decompose_task(task, &plan))
+            .reason(
+                Tier::Main,
+                DECOMPOSE_SYS,
+                &build_decompose_task(task, &plan),
+            )
             .await;
         let mut subtasks = parse_subtasks(&raw);
         orch_trace(&format!(
@@ -804,7 +808,8 @@ mod tests {
 
     #[tokio::test]
     async fn parse_subtasks_extracts_prefixed_lines() {
-        let raw = "SUBTASK: first thing\nnoise line\n  subtask: second\nSUBTASK:   \nSUBTASK: third";
+        let raw =
+            "SUBTASK: first thing\nnoise line\n  subtask: second\nSUBTASK:   \nSUBTASK: third";
         let got = parse_subtasks(raw);
         assert_eq!(got, vec!["first thing", "second", "third"]);
     }

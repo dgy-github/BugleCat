@@ -11,6 +11,8 @@ use serde_json::Value;
 
 const ENDPOINT: &str = "https://api.duckduckgo.com/";
 const TAVILY_ENDPOINT: &str = "https://api.tavily.com/search";
+const WIKIPEDIA_ENDPOINT: &str = "https://en.wikipedia.org/w/api.php";
+const BING_ENDPOINT: &str = "https://www.bing.com/search";
 
 /// Keyed general web search via Tavily (built for LLM agents — returns clean
 /// title/url/content). Needs an API key. Falls back to nothing here; the caller
@@ -107,6 +109,122 @@ pub async fn ddg_instant_answer(query: &str) -> Result<String, String> {
     Ok(format_answer(&v, query))
 }
 
+/// Keyless fallback search using Wikipedia's OpenSearch API.
+pub async fn wikipedia_search(query: &str, limit: u32) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("client error: {e}"))?;
+    let resp = client
+        .get(WIKIPEDIA_ENDPOINT)
+        .query(&[
+            ("action", "opensearch"),
+            ("search", query),
+            ("limit", &limit.min(10).to_string()),
+            ("namespace", "0"),
+            ("format", "json"),
+        ])
+        .header("User-Agent", "nanocodex/0.1 (+https://localhost)")
+        .send()
+        .await
+        .map_err(|e| format!("request error: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status().as_u16()));
+    }
+    let value: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("decode error: {e}"))?;
+    format_wikipedia(&value, query)
+}
+
+fn format_wikipedia(value: &Value, query: &str) -> Result<String, String> {
+    let rows = value
+        .as_array()
+        .ok_or_else(|| "response was not an array".to_string())?;
+    let titles = rows.get(1).and_then(Value::as_array);
+    let descriptions = rows.get(2).and_then(Value::as_array);
+    let urls = rows.get(3).and_then(Value::as_array);
+    let Some(titles) = titles else {
+        return Err("response omitted result titles".to_string());
+    };
+    let lines = titles
+        .iter()
+        .enumerate()
+        .filter_map(|(index, title)| {
+            let title = title.as_str()?;
+            let description = descriptions
+                .and_then(|items| items.get(index))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let url = urls
+                .and_then(|items| items.get(index))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            Some(format!("- {title} ({url})\n  {description}"))
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        Ok(format!("No Wikipedia results for {query:?}."))
+    } else {
+        Ok(lines.join("\n"))
+    }
+}
+
+/// Keyless broad-search fallback using Bing's RSS response.
+pub async fn bing_rss_search(query: &str, limit: usize) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("client error: {e}"))?;
+    let response = client
+        .get(BING_ENDPOINT)
+        .query(&[("format", "rss"), ("q", query)])
+        .header("User-Agent", "nanocodex/0.1 (+https://localhost)")
+        .send()
+        .await
+        .map_err(|e| format!("request error: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status().as_u16()));
+    }
+    let xml = response
+        .text()
+        .await
+        .map_err(|e| format!("read error: {e}"))?;
+    format_bing_rss(&xml, query, limit)
+}
+
+fn format_bing_rss(xml: &str, query: &str, limit: usize) -> Result<String, String> {
+    let document = roxmltree::Document::parse(xml).map_err(|e| format!("XML error: {e}"))?;
+    let lines = document
+        .descendants()
+        .filter(|node| node.has_tag_name("item"))
+        .take(limit.min(10))
+        .filter_map(|item| {
+            let field = |name| {
+                item.children()
+                    .find(|child| child.has_tag_name(name))
+                    .and_then(|child| child.text())
+                    .unwrap_or("")
+            };
+            let title = field("title");
+            if title.is_empty() {
+                return None;
+            }
+            Some(format!(
+                "- {title} ({})\n  {}",
+                field("link"),
+                html_to_text(field("description"))
+            ))
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        Ok(format!("No Bing results for {query:?}."))
+    } else {
+        Ok(lines.join("\n"))
+    }
+}
+
 /// Pull the useful fields out of an IA response into a short block.
 fn format_answer(v: &Value, query: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -173,7 +291,6 @@ fn format_answer(v: &Value, query: &str) -> String {
     }
 }
 
-
 const MAX_FETCH_BYTES: usize = 2_000_000;
 const MAX_TEXT_CHARS: usize = 12_000;
 
@@ -203,7 +320,11 @@ pub async fn fetch_url(url: &str) -> Result<String, String> {
         .unwrap_or("")
         .to_lowercase();
     let bytes = resp.bytes().await.map_err(|e| format!("read error: {e}"))?;
-    let slice = if bytes.len() > MAX_FETCH_BYTES { &bytes[..MAX_FETCH_BYTES] } else { &bytes[..] };
+    let slice = if bytes.len() > MAX_FETCH_BYTES {
+        &bytes[..MAX_FETCH_BYTES]
+    } else {
+        &bytes[..]
+    };
     let body = String::from_utf8_lossy(slice);
     let mut text = if ctype.contains("html") || body.trim_start().starts_with('<') {
         html_to_text(&body)
@@ -239,7 +360,11 @@ pub fn html_to_text(html: &str) -> String {
                 .take_while(|c| c.is_ascii_alphabetic())
                 .map(|c| c.to_ascii_lowercase())
                 .collect();
-            let tag_end = chars[i..].iter().position(|&c| c == '>').map(|p| i + p).unwrap_or(chars.len() - 1);
+            let tag_end = chars[i..]
+                .iter()
+                .position(|&c| c == '>')
+                .map(|p| i + p)
+                .unwrap_or(chars.len() - 1);
             if name == "script" || name == "style" {
                 let close = format!("</{name}>");
                 match find_ci(&chars, tag_end, &close) {
@@ -342,6 +467,27 @@ mod tests {
         assert!(out.contains("Answer: Rust is a systems language."));
         assert!(out.contains("https://rust-lang.org"));
         assert!(out.contains("empowering everyone"));
+    }
+
+    #[test]
+    fn wikipedia_formats_parallel_result_arrays() {
+        let value = json!([
+            "rust",
+            ["Rust (programming language)"],
+            ["A systems programming language."],
+            ["https://en.wikipedia.org/wiki/Rust_(programming_language)"]
+        ]);
+        let output = format_wikipedia(&value, "rust").unwrap();
+        assert!(output.contains("Rust (programming language)"));
+        assert!(output.contains("systems programming"));
+    }
+
+    #[test]
+    fn bing_formats_rss_items() {
+        let xml = r#"<rss><channel><item><title>Rust</title><link>https://rust-lang.org/</link><description>A &lt;b&gt;systems&lt;/b&gt; language.</description></item></channel></rss>"#;
+        let output = format_bing_rss(xml, "rust", 5).unwrap();
+        assert!(output.contains("Rust (https://rust-lang.org/)"));
+        assert!(output.contains("A systems language."));
     }
 
     #[tokio::test]

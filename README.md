@@ -76,6 +76,13 @@ tool.
 - Tool execution is centralized behind `ToolContext` and `ToolRegistry`, so
   sandbox policy, approval policy, timeouts, search, and memory are attached at
   the boundary where actions actually happen.
+- `AgentLoop` is assembled from replaceable model providers, named turn-context
+  providers, a tool registry, tool middleware, and an injectable scheduler.
+  The runtime still owns write barriers and routes every scheduled call through
+  `ToolRegistry`, preserving middleware, approval, and sandbox enforcement.
+- CLI, GUI, and orchestrated workers resolve budgets, context editing,
+  concurrency, and model endpoints through the same `AgentRuntimeProfile`
+  assembly path, preventing frontend-specific configuration drift.
 - The orchestration layer adds task classification, main/fast model routing,
   isolated worker workspaces, verifier selection, and promotion of the winning
   worker back into the real workspace.
@@ -97,9 +104,9 @@ tool.
   one-shot commands as well as interactive REPL use.
 - Typed ownership makes parallel worker isolation and result promotion easier
   to reason about without shared mutable state leaks.
-- 221 offline Rust tests cover the current crate boundary, including memory
-  consolidation, provider request/response parsing, sandbox policy, tools, and
-  orchestration.
+- The workspace test suite covers provider and runtime contracts, sandbox and
+  approval policy, tool scheduling and recovery, MCP replacement, persistent
+  processes, LSP, raw PTY sessions, GUI assembly, and orchestration.
 
 **Platform control-plane upgrades**
 
@@ -112,7 +119,20 @@ tool.
   prefixes once the context budget is exceeded.
 - **Tool search:** tools are registered into a catalog. Small registries expose
   all tools; larger registries expose core tools plus `tool_search`, and search
-  hits are made visible in the next schema view.
+  hits are made visible in the next schema view. The default view admits up to
+  16 schemas so a mixed task can expose LSP, background, and terminal tools in
+  the same model turn.
+- **Harness tool families:** the Rust runtime includes a real `rust-analyzer`
+  LSP provider, bounded background processes with incremental output, and
+  persistent ConPTY/PTY shells with raw stdin, cursor reads, resize, and close.
+  Windows child processes are contained in Job Objects.
+- **Tool recovery:** read-only tool failures are classified, transient failures
+  may be retried once, and argument-compatible fallbacks are selected without
+  bypassing middleware, approval, or sandbox enforcement.
+- **Structured workspace inspection:** `list_directory` and `path_info` use
+  native filesystem APIs, while `git_status` and `git_diff` expose fixed
+  read-only Git operations. Agents do not need to compose `ls`, `dir`, `find`,
+  or platform-specific shell probes just to inspect a workspace.
 - **Semantic memory:** project memory retrieval now uses a hybrid lexical
   semantic ranker: keywords, tags, phrase matches, Jaccard similarity, recency,
   and a small domain synonym map for agent/runtime terms.
@@ -182,6 +202,13 @@ only adding more features:
   policies gate every file/shell/network action.
 - **MCP integration + marketplace** — load servers from `mcp.toml`, or install
   from a built-in / remote catalog; tools surface as `mcp__<server>__<tool>`.
+  `/mcp reload` prepares and atomically swaps the active external tool set in
+  the same process.
+- **Pluggable Agent runtime** — model provider, turn context, tool registry,
+  scheduler, middleware, and permission profile are explicit runtime seams;
+  CLI and GUI share the same assembly contract.
+- **Harness tools** — real LSP queries, bounded background jobs, persistent raw
+  PTY sessions, structured workspace inspection, web tools, and session lookup.
 - **Skills system** — user skills plus three built-in coding skills; only
   name + description are injected, bodies load on demand.
 - **Custom slash commands** — prompt-backed project/user commands in
@@ -200,48 +227,33 @@ only adding more features:
   auto-disable.
 - **A/B worktree comparison** — run one prompt under two configs in isolated git
   worktrees, compare diff/cost/latency, adopt one side.
-- **Prompt enhancement, image input, Chinese-first responses**, and a
-  Tkinter GUI for Windows.
+- **Prompt enhancement, image input, Chinese-first responses**, and a Tauri 2 +
+  Svelte 5 desktop GUI for Windows.
 
 ## Architecture
 
 ```text
-nanocodex/
-├── agent/
-│   ├── loop.py            # the turn loop: call model → run tools → repeat
-│   ├── prompt.py          # base system prompt (Chinese-first communication)
-│   ├── session.py         # running message list + JSONL persistence
-│   ├── session_index.py   # browsable history index + per-session snapshots
-│   ├── compaction.py      # keep the prompt within a token budget
-│   ├── pricing.py         # cache-aware USD cost from real usage
-│   ├── auto_reasoning.py  # pick reasoning effort for the `auto` tier
-│   ├── enhance_prompt.py  # ✨ rewrite raw input into a clearer prompt
-│   ├── memory_store.py    # ~/.nanocodex/memory.md durable notes
-│   ├── agents_md.py       # layered AGENTS.md project instructions
-│   ├── images.py          # OpenAI multimodal image blocks
-│   ├── skills_store.py    # user + built-in skills discovery
-│   ├── schedule.py        # scheduled-task store (once / interval)
-│   ├── schedule_runner.py # fires due tasks, tracks failures
-│   └── ab_compare.py      # A/B worktree comparison (pure core)
-├── provider/
-│   ├── base.py            # Provider / ToolCall / ModelResponse contracts
-│   └── deepseek.py        # OpenAI-compatible chat-completions + streaming
-├── tools/                 # shell, apply_patch, update_plan, read_file,
-│                          # web_search, schedule, skills, remember,
-│                          # mcp, mcp_store, marketplace, patch
-├── sandbox/
-│   ├── policy.py          # what's writable / is network allowed
-│   ├── approval.py        # ASK / AUTO_APPROVE / AUTO_DENY state machine
-│   └── executor.py        # policy-level enforcement at the tool boundary
-├── builtin_skills/        # code-review, debug, write-tests
-├── cli.py                 # CLI entry (typer)
-├── gui.py                 # Tkinter GUI
-└── config.py              # layered config resolution
+rust/
+├── crates/
+│   ├── ncx-config/        # layered config and runtime limits
+│   ├── ncx-provider/      # replaceable OpenAI-compatible model boundary
+│   ├── ncx-sandbox/       # policy and approval decisions
+│   ├── ncx-tools/         # process executor, managed jobs, PTY, file tools
+│   ├── ncx-mcp/           # MCP transport and external tool discovery
+│   ├── ncx-core/          # AgentLoop, registry, context, middleware, scheduler
+│   └── ncx-cli/           # one-shot and interactive front end
+└── gui/
+    ├── src/               # Svelte 5 desktop UI
+    └── src-tauri/         # Tauri commands and shared runtime assembly
+
+nanocodex/                 # Python reference/prototyping implementation
 ```
 
 ## Tools
 
-The model sees these tools each turn (order matters):
+The Rust registry exposes a task-relevant subset each turn. Core tools stay
+visible; named matches and `tool_search` hints add specialized tools without
+sending the entire catalog on every model call.
 
 | Tool | Purpose |
 | --- | --- |
@@ -249,20 +261,41 @@ The model sees these tools each turn (order matters):
 | `apply_patch` | Apply a Codex-style patch to create/edit/delete files. |
 | `update_plan` | Maintain a visible step plan for multi-step tasks. |
 | `read_file` | Read a file (or a line range) from the workspace. |
-| `web_search` | DuckDuckGo search, gated by the network policy. |
-| `manage_schedule` | Create / list / cancel scheduled tasks in-chat. |
-| `manage_skills` | Create / list / read / delete user skills in-chat. |
+| `str_replace_editor` | Perform exact, approval-gated text edits. |
+| `grep`, `grep_literal`, `glob` | Search source and paths without shell parsing. |
+| `list_directory`, `path_info`, `git_status`, `git_diff` | Structured workspace inspection. |
+| `web_search`, `web_fetch` | Search and fetch through configured network policy. |
+| `lsp` | Query symbols, definitions, references, hover, and diagnostics. |
+| `background_start/poll/stop/list` | Manage bounded background processes with incremental output. |
+| `terminal_open/write/read/exec/resize/close/list` | Manage persistent raw PTY sessions. |
+| `ask_user_question` | Pause for a GUI/CLI answer when the frontend supplies a handler. |
+| `session_search`, `session_trace`, `session_event_read/search/trace` | Query saved session snapshots and redacted events. |
+| `skill` | Load a discovered skill body on demand. |
 | `remember` | Append a durable note to user memory. |
 | `mcp__<server>__<tool>` | Any tool exposed by a connected MCP server. |
 
 ## Install
 
+Current Rust release line:
+
 ```powershell
 cd path\to\nanocodex
+rustup toolchain install stable-x86_64-pc-windows-gnu
+cargo +stable-x86_64-pc-windows-gnu build --manifest-path rust\Cargo.toml -p ncx-cli --release
+
+cd rust\gui
+npm ci
+npm run tauri:build
+```
+
+This requires the Rust toolchain and Node.js 18 or newer. The original Python
+implementation remains available for reference and prototyping:
+
+```powershell
 python -m pip install -e ".[dev]"
 ```
 
-Requires Python ≥ 3.11.
+The Python line requires Python 3.11 or newer.
 
 ## Quick Start
 
@@ -275,6 +308,11 @@ cargo run -p ncx-cli
 cargo run -p ncx-cli -- --resume
 cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
+
+# Tauri desktop app
+cd gui
+npm ci
+npm run tauri -- dev
 ```
 
 Inside the Rust REPL, `/config` shows the resolved config file path, current
@@ -333,6 +371,7 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # context_window = 1048576
 # max_iterations = 60
 # max_tool_calls = 120
+# max_parallel_tool_calls = 8  # valid range: 1..=128; read-only tools only
 # context_edit_enabled = true
 # context_edit_max_chars = 120000
 # context_edit_keep_recent_messages = 30
@@ -459,6 +498,16 @@ Then start with MCP enabled:
 ```powershell
 nanocodex --mcp
 ```
+
+The Rust `ncx` REPL can apply MCP config changes without restarting:
+
+```text
+/mcp reload
+```
+
+Reload prepares every configured server before replacing the active MCP tool
+set. A connection error or tool-name conflict leaves the previous set active;
+an empty config removes all active MCP tools.
 
 Each server's tools surface to the model as `mcp__<server>__<tool>`. A
 **marketplace** adds one-click install from a built-in curated catalog or a
@@ -606,23 +655,35 @@ otherwise.
 
 ## GUI
 
-A Tkinter desktop GUI for Windows (`nanocodex-gui`):
+A Tauri 2 + Svelte 5 desktop GUI for Windows (`rust/gui`):
 
 - Streaming chat with reasoning/answer separation and a Stop button.
 - Project switcher, model switcher, and a multi-section Settings page.
 - Browsable session history (click to replay a full transcript).
-- File panel, prompt enhancement (✨), image attachment, `#` quick-capture to
-  memory, MCP auto-connect, scheduler controls, and the A/B comparison flow.
+- File panel, prompt enhancement, image attachment, `#` quick-capture to memory,
+  MCP controls, checkpoints, and permission modes.
+- A movable sidebar, approval dialog, and real `ask_user_question` modal with
+  choice, free-text, and cancel flows.
+- Failed tool results are removed from the visible transcript while remaining
+  available to the model and session log for recovery and diagnosis.
 
-Note: the GUI does not hot-reload — code changes require closing and reopening it.
+CLI and GUI derive provider, permission, budgets, context editing, concurrency,
+and LSP attachment from the same `AgentRuntimeProfile` assembly path.
 
 ## Tests
 
 Rust release line:
 
 ```powershell
-cd rust
-cargo test --workspace --target x86_64-pc-windows-gnu
+cargo fmt --manifest-path rust\Cargo.toml --all -- --check
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+
+cd rust\gui
+npm ci
+npm audit
+npm run build
+npm run test:e2e:question
 ```
 
 Python line:
@@ -631,8 +692,9 @@ Python line:
 python -m pytest -q
 ```
 
-Both suites are fully offline: mocked providers, injectable I/O, no real API
-key or network call required.
+The normal Rust and Python suites are deterministic and offline. Explicit live
+acceptance runs cover `rust-analyzer`, external network providers, MCP hot
+reload, and real model-driven combinations of LSP, background, and PTY tools.
 
 ## Release Packaging
 

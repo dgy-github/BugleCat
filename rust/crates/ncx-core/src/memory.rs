@@ -110,7 +110,7 @@ impl MemoryStore {
                 (s, e)
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
 
         let mut out = String::from(RECALL_HEADER);
         let mut used = out.len();
@@ -144,7 +144,7 @@ impl MemoryStore {
             return Ok(0);
         }
         // Newest first, so the kept representative of a cluster is the latest.
-        entries.sort_by(|a, b| b.ts.cmp(&a.ts));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.ts));
         let mut kept: Vec<(MemoryEntry, std::collections::HashSet<String>)> = Vec::new();
         let mut removed = 0usize;
         for e in entries {
@@ -187,7 +187,7 @@ impl MemoryStore {
         }
         let before = entries.len();
         let mut sorted = entries;
-        sorted.sort_by(|a, b| b.ts.cmp(&a.ts)); // newest first
+        sorted.sort_by_key(|entry| std::cmp::Reverse(entry.ts)); // newest first
 
         // Greedy single-link clustering by word-set similarity.
         let mut clusters: Vec<Vec<MemoryEntry>> = Vec::new();

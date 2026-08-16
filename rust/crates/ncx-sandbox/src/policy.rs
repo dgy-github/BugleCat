@@ -4,8 +4,7 @@
 //!
 //! * `read-only`          — read anywhere; no writes; no network
 //! * `workspace-write`    — read anywhere; write to workspace + writable roots
-//!                          (+ system temp only when opted in); no network
-//!                          unless explicitly enabled
+//!   (+ system temp only when opted in); no network unless explicitly enabled
 //! * `danger-full-access` — no restrictions
 //!
 //! This makes *policy decisions* (is this path writable? is network allowed?).
