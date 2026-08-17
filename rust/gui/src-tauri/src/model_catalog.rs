@@ -22,6 +22,7 @@ pub struct CatalogModel {
     pub price_out: f64,
     pub price_currency: String,
     pub price_source: PriceSource,
+    pub pricing_note: Option<String>,
     pub source_url: String,
     pub updated_at: String,
     pub context_length: Option<u64>,
@@ -37,13 +38,13 @@ pub struct CatalogProvider {
 
 const UPDATED_AT: &str = "2026-08-17";
 const DEEPSEEK_PRICING: &str = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing";
-const BAILIAN_PRICING: &str = "https://help.aliyun.com/zh/model-studio/model-pricing";
+const BAILIAN_PRICING: &str = "https://help.aliyun.com/zh/model-studio/qwen3-7-max";
 const ARK_PRICING: &str = "https://www.volcengine.com/product/ark";
-const ZHIPU_PRICING: &str = "https://docs.bigmodel.cn/cn/guide/start/model-overview";
-const MOONSHOT_PRICING: &str = "https://platform.moonshot.cn/docs/pricing/chat";
+const ZHIPU_PRICING: &str = "https://bigmodel.cn/pricing";
+const MOONSHOT_PRICING: &str = "https://platform.kimi.ai/";
 const MINIMAX_PRICING: &str = "https://platform.minimaxi.com/docs/guides/pricing-paygo";
-const OPENAI_PRICING: &str = "https://openai.com/api/pricing/";
-const GEMINI_PRICING: &str = "https://ai.google.dev/gemini-api/docs/pricing";
+const OPENAI_PRICING: &str = "https://developers.openai.com/api/docs/models/compare";
+const GEMINI_PRICING: &str = "https://ai.google.dev/gemini-api/docs/latest-model";
 const OPENROUTER_PRICING: &str = "https://openrouter.ai/models";
 
 fn model(
@@ -66,11 +67,17 @@ fn model(
         price_out,
         price_currency: price_currency.into(),
         price_source: PriceSource::OfficialDirect,
+        pricing_note: None,
         source_url: source_url.into(),
         updated_at: UPDATED_AT.into(),
         context_length,
         direct_available: true,
     }
+}
+
+fn with_pricing_note(mut preset: CatalogModel, note: &str) -> CatalogModel {
+    preset.pricing_note = Some(note.into());
+    preset
 }
 
 fn aggregator_model(
@@ -130,30 +137,17 @@ pub fn catalog() -> Vec<CatalogProvider> {
         CatalogProvider {
             id: "bailian".into(),
             name: "阿里百炼".into(),
-            models: vec![
-                model(
-                    "bailian",
-                    "qwen3-coder-next",
-                    "Qwen3 Coder Next",
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    1.0,
-                    4.0,
-                    "CNY",
-                    BAILIAN_PRICING,
-                    Some(256_000),
-                ),
-                model(
-                    "bailian",
-                    "qwen3.8-2.4t-a95b",
-                    "Qwen3.8",
-                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    12.0,
-                    36.0,
-                    "CNY",
-                    BAILIAN_PRICING,
-                    Some(1_000_000),
-                ),
-            ],
+            models: vec![model(
+                "bailian",
+                "qwen3.7-max",
+                "Qwen3.7 Max",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                12.0,
+                36.0,
+                "CNY",
+                BAILIAN_PRICING,
+                Some(1_000_000),
+            )],
         },
         CatalogProvider {
             id: "ark".into(),
@@ -161,25 +155,25 @@ pub fn catalog() -> Vec<CatalogProvider> {
             models: vec![
                 model(
                     "ark",
-                    "doubao-seed-2-1-pro-260215",
-                    "豆包 Seed 2.1 Pro",
-                    "https://ark.cn-beijing.volces.com/api/v3",
-                    6.0,
-                    30.0,
-                    "CNY",
-                    ARK_PRICING,
-                    Some(256_000),
-                ),
-                model(
-                    "ark",
-                    "doubao-seed-evolving-250715",
+                    "doubao-seed-evolving",
                     "豆包 Seed Evolving",
                     "https://ark.cn-beijing.volces.com/api/v3",
                     6.0,
                     30.0,
                     "CNY",
                     ARK_PRICING,
-                    Some(256_000),
+                    Some(1_000_000),
+                ),
+                model(
+                    "ark",
+                    "doubao-seed-2.0-code",
+                    "豆包 Seed 2.0 Code",
+                    "https://ark.cn-beijing.volces.com/api/v3",
+                    3.2,
+                    16.0,
+                    "CNY",
+                    ARK_PRICING,
+                    None,
                 ),
             ],
         },
@@ -192,8 +186,8 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     "glm-5.2",
                     "GLM-5.2",
                     "https://open.bigmodel.cn/api/paas/v4",
-                    10.0,
-                    33.0,
+                    8.0,
+                    28.0,
                     "CNY",
                     ZHIPU_PRICING,
                     Some(1_000_000),
@@ -217,23 +211,23 @@ pub fn catalog() -> Vec<CatalogProvider> {
             models: vec![
                 model(
                     "moonshot",
-                    "kimi-k2.5",
-                    "Kimi K2.5",
-                    "https://api.moonshot.cn/v1",
-                    4.0,
-                    16.0,
-                    "CNY",
+                    "kimi-k3",
+                    "Kimi K3",
+                    "https://api.moonshot.ai/v1",
+                    3.0,
+                    15.0,
+                    "USD",
                     MOONSHOT_PRICING,
-                    Some(256_000),
+                    Some(1_000_000),
                 ),
                 model(
                     "moonshot",
-                    "kimi-k2.5-turbo-preview",
-                    "Kimi K2.5 Turbo",
-                    "https://api.moonshot.cn/v1",
-                    8.0,
-                    24.0,
-                    "CNY",
+                    "kimi-k2.7-code",
+                    "Kimi K2.7 Code",
+                    "https://api.moonshot.ai/v1",
+                    0.95,
+                    4.0,
+                    "USD",
                     MOONSHOT_PRICING,
                     Some(256_000),
                 ),
@@ -245,14 +239,14 @@ pub fn catalog() -> Vec<CatalogProvider> {
             models: vec![
                 model(
                     "minimax",
-                    "MiniMax-M2.7",
-                    "MiniMax M2.7",
+                    "MiniMax-M3",
+                    "MiniMax M3",
                     "https://api.minimaxi.com/v1",
                     2.1,
                     8.4,
                     "CNY",
                     MINIMAX_PRICING,
-                    Some(204_800),
+                    None,
                 ),
                 model(
                     "minimax",
@@ -273,55 +267,56 @@ pub fn catalog() -> Vec<CatalogProvider> {
             models: vec![
                 model(
                     "openai",
-                    "gpt-5",
-                    "GPT-5",
+                    "gpt-5.6-sol",
+                    "GPT-5.6 Sol",
                     "https://api.openai.com/v1",
-                    1.25,
-                    10.0,
+                    5.0,
+                    30.0,
                     "USD",
                     OPENAI_PRICING,
-                    None,
+                    Some(1_050_000),
                 ),
                 model(
                     "openai",
-                    "gpt-5-mini",
-                    "GPT-5 mini",
+                    "gpt-5.6-terra",
+                    "GPT-5.6 Terra",
                     "https://api.openai.com/v1",
-                    0.25,
                     2.0,
+                    12.0,
                     "USD",
                     OPENAI_PRICING,
-                    None,
+                    Some(1_050_000),
+                ),
+                model(
+                    "openai",
+                    "gpt-5.6-luna",
+                    "GPT-5.6 Luna",
+                    "https://api.openai.com/v1",
+                    0.2,
+                    1.2,
+                    "USD",
+                    OPENAI_PRICING,
+                    Some(1_050_000),
                 ),
             ],
         },
         CatalogProvider {
             id: "gemini".into(),
             name: "Google Gemini".into(),
-            models: vec![
+            models: vec![with_pricing_note(
                 model(
                     "gemini",
-                    "gemini-2.5-pro",
-                    "Gemini 2.5 Pro",
+                    "gemini-3.7-flash",
+                    "Gemini 3.7 Flash",
                     "https://generativelanguage.googleapis.com/v1beta/openai",
-                    1.25,
-                    10.0,
+                    0.75,
+                    3.75,
                     "USD",
                     GEMINI_PRICING,
                     Some(1_000_000),
                 ),
-                model(
-                    "gemini",
-                    "gemini-2.5-flash",
-                    "Gemini 2.5 Flash",
-                    "https://generativelanguage.googleapis.com/v1beta/openai",
-                    0.30,
-                    2.50,
-                    "USD",
-                    GEMINI_PRICING,
-                    Some(1_000_000),
-                ),
-            ],
+                "当前限时价格，至 2026-12-31；之后按官网标准价调整。",
+            )],
         },
         CatalogProvider {
             id: "openrouter".into(),
@@ -388,6 +383,7 @@ pub fn parse_openrouter_models(json: &str) -> Result<Vec<CatalogModel>, String> 
             price_out: price("completion"),
             price_currency: "USD".into(),
             price_source: PriceSource::Aggregator,
+            pricing_note: None,
             source_url: OPENROUTER_PRICING.into(),
             updated_at: UPDATED_AT.into(),
             context_length: row.get("context_length").and_then(Value::as_u64),
@@ -469,6 +465,88 @@ mod tests {
         assert_eq!(deepseek.models[0].price_out, 2.0);
         assert_eq!(deepseek.models[1].price_in, 3.0);
         assert_eq!(deepseek.models[1].price_out, 6.0);
+    }
+
+    #[test]
+    fn official_catalog_uses_the_audited_current_models() {
+        let expected = [
+            ("bailian", vec!["qwen3.7-max"]),
+            ("ark", vec!["doubao-seed-evolving", "doubao-seed-2.0-code"]),
+            ("zhipu", vec!["glm-5.2", "glm-4.7-flash"]),
+            ("moonshot", vec!["kimi-k3", "kimi-k2.7-code"]),
+            ("minimax", vec!["MiniMax-M3", "MiniMax-M2.7-highspeed"]),
+            (
+                "openai",
+                vec!["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+            ),
+            ("gemini", vec!["gemini-3.7-flash"]),
+        ];
+
+        let providers = catalog();
+        for (provider_id, expected_ids) in expected {
+            let provider = providers
+                .iter()
+                .find(|provider| provider.id == provider_id)
+                .expect("missing provider");
+            let ids = provider
+                .models
+                .iter()
+                .map(|model| model.model_id.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected_ids, "unexpected models for {provider_id}");
+        }
+
+        let expected_prices = [
+            ("bailian", "qwen3.7-max", 12.0, 36.0, "CNY"),
+            ("ark", "doubao-seed-evolving", 6.0, 30.0, "CNY"),
+            ("ark", "doubao-seed-2.0-code", 3.2, 16.0, "CNY"),
+            ("zhipu", "glm-5.2", 8.0, 28.0, "CNY"),
+            ("zhipu", "glm-4.7-flash", 0.0, 0.0, "CNY"),
+            ("moonshot", "kimi-k3", 3.0, 15.0, "USD"),
+            ("moonshot", "kimi-k2.7-code", 0.95, 4.0, "USD"),
+            ("minimax", "MiniMax-M3", 2.1, 8.4, "CNY"),
+            ("minimax", "MiniMax-M2.7-highspeed", 4.2, 16.8, "CNY"),
+            ("openai", "gpt-5.6-sol", 5.0, 30.0, "USD"),
+            ("openai", "gpt-5.6-terra", 2.0, 12.0, "USD"),
+            ("openai", "gpt-5.6-luna", 0.2, 1.2, "USD"),
+            ("gemini", "gemini-3.7-flash", 0.75, 3.75, "USD"),
+        ];
+        for (provider_id, model_id, price_in, price_out, currency) in expected_prices {
+            let model = providers
+                .iter()
+                .find(|provider| provider.id == provider_id)
+                .and_then(|provider| {
+                    provider
+                        .models
+                        .iter()
+                        .find(|model| model.model_id == model_id)
+                })
+                .expect("missing audited model");
+            assert_eq!(
+                model.price_in, price_in,
+                "unexpected input price for {model_id}"
+            );
+            assert_eq!(
+                model.price_out, price_out,
+                "unexpected output price for {model_id}"
+            );
+            assert_eq!(
+                model.price_currency, currency,
+                "unexpected currency for {model_id}"
+            );
+            assert_eq!(model.price_source, PriceSource::OfficialDirect);
+            assert_eq!(model.updated_at, UPDATED_AT);
+        }
+    }
+
+    #[test]
+    fn limited_time_official_price_declares_its_expiry() {
+        let gemini = find_preset("gemini", "gemini-3.7-flash").expect("missing Gemini preset");
+
+        assert_eq!(
+            gemini.pricing_note.as_deref(),
+            Some("当前限时价格，至 2026-12-31；之后按官网标准价调整。")
+        );
     }
 
     #[test]

@@ -66,6 +66,7 @@
     price_out: number;
     price_currency: "CNY" | "USD";
     price_source: "official_direct" | "aggregator";
+    pricing_note: string | null;
     source_url: string;
     updated_at: string;
     context_length?: number | null;
@@ -1818,7 +1819,7 @@
           <div class="catalog-head">
             <div>
               <strong>厂商官方直连目录</strong>
-              <p>这里的单价来自各厂商官网，选择后会填写该厂商接口、模型、费用和币种；API 密钥仍需自行配置。</p>
+              <p>这里的单价来自各厂商官网，选择后会填写该厂商接口、模型、费用和币种；显示的是当前公开输入/输出价，缓存、长上下文阶梯和限时价格会单独说明；API 密钥仍需自行配置。</p>
             </div>
           </div>
           {#if modelCatalog}
@@ -1834,6 +1835,10 @@
                       </div>
                       <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
                       <span class="catalog-price-source">{priceSourceName(model.price_source)}</span>
+                      <small class="catalog-audit-note">已按官网核验：{model.updated_at}</small>
+                      {#if model.pricing_note}
+                        <small class="catalog-pricing-note">{model.pricing_note}</small>
+                      {/if}
                       <div class="catalog-model-actions">
                         <button
                           class="catalog-select"

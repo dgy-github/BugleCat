@@ -1343,6 +1343,7 @@ mod tests {
             price_out: 2.0,
             price_currency: "USD".into(),
             price_source: crate::model_catalog::PriceSource::OfficialDirect,
+            pricing_note: None,
             source_url: "https://openai.com/api/pricing".into(),
             updated_at: "2026-08-17".into(),
             context_length: None,

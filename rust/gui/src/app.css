@@ -1439,6 +1439,18 @@ main.app { flex-direction: row; }
   font-weight: 600;
 }
 .catalog-price-source.aggregator { color: var(--ink-3); }
+.catalog-audit-note {
+  display: block;
+  margin: calc(var(--sp-2) * -0.5) 0 var(--sp-2);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+.catalog-pricing-note {
+  display: block;
+  margin: calc(var(--sp-2) * -0.5) 0 var(--sp-2);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+}
 .catalog-aggregator {
   margin-top: var(--sp-4);
   padding-top: var(--sp-3);
