@@ -172,6 +172,18 @@ fn set_sandbox(mode: String, state: tauri::State<'_, AppState>) -> Result<(), St
 /// Switch the active model (persists + rebuilds keeping the current transcript).
 #[tauri::command]
 fn set_model(model: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    if let Some(preset) = find_preset_by_model_id(&model, &cached) {
+        let quick_switch_models = provider_models(&preset.provider_id, &cached)
+            .into_iter()
+            .map(|item| item.model_id)
+            .collect::<Vec<_>>();
+        drop(cached);
+        write_preset(&preset, &quick_switch_models)?;
+    }
     state
         .tx
         .send(Command::SetModel(model))
@@ -402,6 +414,22 @@ fn provider_models(provider_id: &str, openrouter_models: &[CatalogModel]) -> Vec
         .find(|provider| provider.id == provider_id)
         .map(|provider| provider.models)
         .unwrap_or_default()
+}
+
+fn find_preset_by_model_id(
+    model_id: &str,
+    openrouter_models: &[CatalogModel],
+) -> Option<CatalogModel> {
+    openrouter_models
+        .iter()
+        .find(|model| model.model_id == model_id)
+        .cloned()
+        .or_else(|| {
+            catalog()
+                .into_iter()
+                .flat_map(|provider| provider.models)
+                .find(|model| model.model_id == model_id)
+        })
 }
 
 /// 返回内置目录，并在有缓存时带上 OpenRouter 的实时模型清单。

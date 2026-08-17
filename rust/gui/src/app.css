@@ -1355,6 +1355,87 @@ main.app { flex-direction: row; }
   border-radius: var(--r-sm);
 }
 
+/* ── 模型厂商目录 ─────────────────────────────────────────────────────────── */
+.model-catalog {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper-1);
+}
+.catalog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.catalog-head strong { color: var(--ink); }
+.catalog-head p {
+  margin: 0.2rem 0 0;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.catalog-refresh,
+.catalog-select,
+.catalog-source {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 0.32rem 0.52rem;
+  font: inherit;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.catalog-refresh,
+.catalog-source {
+  background: var(--surface);
+  color: var(--ink-2);
+}
+.catalog-refresh:hover,
+.catalog-source:hover { background: var(--paper-3); color: var(--ink); }
+.catalog-provider + .catalog-provider {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.catalog-provider h4 {
+  margin: 0 0 var(--sp-2);
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+.catalog-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-2);
+}
+.catalog-model {
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.catalog-model.active { border-color: var(--accent-line); box-shadow: var(--ring); }
+.catalog-model-name { display: flex; flex-direction: column; gap: 0.15rem; }
+.catalog-model-name strong { font-size: var(--fs-sm); color: var(--ink); }
+.catalog-model-name code {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-model p {
+  margin: var(--sp-2) 0;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+.catalog-model-actions { display: flex; gap: var(--sp-2); }
+.catalog-select { background: var(--ok); border-color: var(--ok-deep); color: #fff; }
+.catalog-select:hover { background: var(--ok-deep); }
+.catalog-empty { margin: 0; color: var(--ink-3); font-size: var(--fs-sm); }
+
 /* ── Approval dropdown menu ───────────────────────────────────────────────── */
 .approval-wrap { position: relative; display: inline-block; }
 .menu-backdrop {

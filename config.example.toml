@@ -25,6 +25,10 @@ reasoning_effort = "auto"
 # context_edit_keep_recent_messages = 30
 # context_edit_max_tool_result_chars = 4000
 # available_models = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"]
+# 费用均按每百万 Token 计算；币种必须是 CNY（人民币）或 USD（美元）。
+# price_in = 0.27
+# price_out = 1.10
+# price_currency = "USD"
 
 # Deterministic hooks around tool execution and turn lifecycle. A non-zero
 # pre_tool or user_prompt hook blocks the action; post_tool/stop output is

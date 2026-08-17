@@ -41,6 +41,7 @@
     context_edit_max_tool_result_chars: number;
     price_in: number;
     price_out: number;
+    price_currency: "CNY" | "USD";
     api_key_masked: string;
     has_api_key: boolean;
     available_models: string[];
@@ -55,6 +56,25 @@
   let configLocation = $state<ConfigLocation | null>(null);
   let apiKeyInput = $state("");
   let saving = $state(false);
+
+  type CatalogModel = {
+    provider_id: string;
+    model_id: string;
+    display_name: string;
+    base_url: string;
+    price_in: number;
+    price_out: number;
+    price_currency: "CNY" | "USD";
+    source_url: string;
+    updated_at: string;
+    context_length?: number | null;
+    direct_available: boolean;
+  };
+  type CatalogProvider = { id: string; name: string; models: CatalogModel[] };
+  type ModelCatalogResponse = { providers: CatalogProvider[]; stale: boolean };
+  let modelCatalog = $state<ModelCatalogResponse | null>(null);
+  let catalogRefreshing = $state(false);
+  let presetSaving = $state("");
 
   type Checkpoint = {
     id: string;
@@ -110,10 +130,13 @@
   // Per-1M-token prices (from config); 0 = unknown → cost is hidden.
   let priceIn = $state(0);
   let priceOut = $state(0);
+  let priceCurrency = $state<"CNY" | "USD">("CNY");
   const cost = $derived((tokIn / 1e6) * priceIn + (tokOut / 1e6) * priceOut);
   let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
+  const currencySymbol = (currency: "CNY" | "USD") => currency === "USD" ? "$" : "¥";
+  const currencyName = (currency: "CNY" | "USD") => currency === "USD" ? "美元" : "人民币";
 
   // ── Collapsible tool output ───────────────────────────────────────────────
   // Large results auto-collapse so a single dump can't bury the conversation.
@@ -279,6 +302,13 @@
     currentModel = m; // optimistic; `ready` will confirm
     try {
       await invoke("set_model", { model: m });
+      try {
+        const updated = await invoke<Settings>("get_settings");
+        models = updated.available_models;
+        priceIn = updated.price_in || 0;
+        priceOut = updated.price_out || 0;
+        priceCurrency = updated.price_currency || "CNY";
+      } catch { /* 模型已切换，费用显示将在下一次状态刷新时同步 */ }
     } catch (e) {
       currentModel = prev;
       messages.push({ role: "note", text: `切换模型失败：${e}` });
@@ -373,13 +403,14 @@
     } catch { /* storage is optional */ }
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
-      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; price_in: number; price_out: number }>("get_status");
+      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
       sandboxMode = s.sandbox;
       currentModel = s.model;
       if (s.permission_mode) permissionMode = s.permission_mode;
       priceIn = s.price_in || 0;
       priceOut = s.price_out || 0;
+      priceCurrency = s.price_currency || "CNY";
     } catch (e) {
       header = "配置错误";
     }
@@ -706,16 +737,60 @@
 
   async function openSettings() {
     try {
-      const [loadedSettings, loadedLocation] = await Promise.all([
+      const [loadedSettings, loadedLocation, loadedCatalog] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ConfigLocation>("get_config_location"),
+        invoke<ModelCatalogResponse>("get_model_catalog"),
       ]);
       settings = loadedSettings;
       configLocation = loadedLocation;
+      modelCatalog = loadedCatalog;
       apiKeyInput = "";
+      void refreshOpenRouterModels();
     } catch (e) {
       messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
+  }
+
+  async function refreshOpenRouterModels() {
+    catalogRefreshing = true;
+    try {
+      modelCatalog = await invoke<ModelCatalogResponse>("refresh_openrouter_models");
+    } catch (e) {
+      messages.push({ role: "note", text: `OpenRouter 模型目录刷新失败：${e}` });
+    }
+    catalogRefreshing = false;
+  }
+
+  async function applyModelPreset(provider: CatalogProvider, model: CatalogModel) {
+    if (!settings) return;
+    presetSaving = `${provider.id}/${model.model_id}`;
+    try {
+      const selected = await invoke<CatalogModel>("apply_model_preset", {
+        providerId: provider.id,
+        modelId: model.model_id,
+      });
+      settings.model = selected.model_id;
+      settings.base_url = selected.base_url;
+      settings.price_in = selected.price_in;
+      settings.price_out = selected.price_out;
+      settings.price_currency = selected.price_currency;
+      settings.available_models = provider.models.map((item) => item.model_id);
+      currentModel = selected.model_id;
+      models = settings.available_models;
+      priceIn = selected.price_in;
+      priceOut = selected.price_out;
+      priceCurrency = selected.price_currency;
+    } catch (e) {
+      messages.push({ role: "note", text: `应用模型预设失败：${e}` });
+    }
+    presetSaving = "";
+  }
+
+  function openPriceSource(url: string) {
+    invoke("open_url", { url }).catch((e) =>
+      messages.push({ role: "note", text: `打开价格来源失败：${e}` }),
+    );
   }
 
   async function openConfigFile() {
@@ -751,16 +826,18 @@
       context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),
       price_in: String(settings.price_in),
       price_out: String(settings.price_out),
+      price_currency: settings.price_currency,
     };
     if (apiKeyInput.trim()) updates.api_key = apiKeyInput.trim();
     try {
       await invoke("save_settings", { updates });
       priceIn = Number(settings.price_in) || 0; // reflect new rate immediately
       priceOut = Number(settings.price_out) || 0;
+      priceCurrency = settings.price_currency;
       settings = null;
       apiKeyInput = "";
     } catch (e) {
-      messages.push({ role: "note", text: `Save failed: ${e}` });
+      messages.push({ role: "note", text: `保存设置失败：${e}` });
     }
     saving = false;
   }
@@ -1077,7 +1154,7 @@
     else messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" });
   }
   function cmdUsage() {
-    const c = priceIn || priceOut ? ` · ≈¥${fmtCost(cost)}` : "";
+    const c = priceIn || priceOut ? ` · ≈${currencySymbol(priceCurrency)}${fmtCost(cost)}` : "";
     messages.push({ role: "note", text: `本会话用量：输入 ${tokIn} / 输出 ${tokOut} tokens${c}` });
   }
   async function cmdMcp() {
@@ -1371,7 +1448,7 @@
           {/if}
         </div>
         {#if tokIn || tokOut}
-          <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈¥"}{fmtCost(cost)}{/if}</span>
+          <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈"}{currencySymbol(priceCurrency)}{fmtCost(cost)}{/if}</span>
         {/if}
       </div>
       {#if queued.length}
@@ -1720,6 +1797,47 @@
             {#each settings.available_models as m}<option value={m}>{m}</option>{/each}
           </select>
         </label>
+        <section class="model-catalog" aria-label="模型厂商目录">
+          <div class="catalog-head">
+            <div>
+              <strong>模型厂商目录</strong>
+              <p>选择后会自动填写模型、接口、每百万 Token 单价和币种；API 密钥仍需自行配置。</p>
+            </div>
+            <button class="catalog-refresh" onclick={refreshOpenRouterModels} disabled={catalogRefreshing}>
+              {catalogRefreshing ? "刷新中…" : "刷新 OpenRouter 全量模型"}
+            </button>
+          </div>
+          {#if modelCatalog}
+            {#each modelCatalog.providers as provider}
+              <div class="catalog-provider">
+                <h4>{provider.name}</h4>
+                <div class="catalog-models">
+                  {#each provider.models as model}
+                    <article class:active={settings.model === model.model_id} class="catalog-model">
+                      <div class="catalog-model-name">
+                        <strong>{model.display_name}</strong>
+                        <code>{model.model_id}</code>
+                      </div>
+                      <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
+                      <div class="catalog-model-actions">
+                        <button
+                          class="catalog-select"
+                          onclick={() => applyModelPreset(provider, model)}
+                          disabled={presetSaving === `${provider.id}/${model.model_id}`}
+                        >
+                          {presetSaving === `${provider.id}/${model.model_id}` ? "应用中…" : "使用此模型"}
+                        </button>
+                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>价格来源</button>
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          {:else}
+            <p class="catalog-empty">正在读取模型厂商目录…</p>
+          {/if}
+        </section>
         <p class="settings-note">权限（沙箱 / 审批）由顶部输入框旁的「权限模式」控制：规划 / 默认 / 自动接受编辑 / 全权放行。</p>
         <label>
           <span>推理强度</span>
@@ -1750,12 +1868,19 @@
           <input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} />
         </label>
         <label>
-          <span>输入单价 ¥/百万</span>
+          <span>输入单价 {currencySymbol(settings.price_currency)}/百万</span>
           <input type="number" min="0" step="0.01" bind:value={settings.price_in} placeholder="0 = 不计费" />
         </label>
         <label>
-          <span>输出单价 ¥/百万</span>
+          <span>输出单价 {currencySymbol(settings.price_currency)}/百万</span>
           <input type="number" min="0" step="0.01" bind:value={settings.price_out} placeholder="0 = 不计费" />
+        </label>
+        <label>
+          <span>价格币种</span>
+          <select bind:value={settings.price_currency}>
+            <option value="CNY">人民币（CNY）</option>
+            <option value="USD">美元（USD）</option>
+          </select>
         </label>
         <label>
           <span>Base URL</span>
