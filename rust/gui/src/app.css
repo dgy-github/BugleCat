@@ -1431,6 +1431,20 @@ main.app { flex-direction: row; }
   font-size: var(--fs-xs);
   line-height: 1.45;
 }
+.catalog-price-source {
+  display: block;
+  margin: 0 0 var(--sp-2);
+  color: var(--ok-deep);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.catalog-price-source.aggregator { color: var(--ink-3); }
+.catalog-aggregator {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line-strong);
+}
+.catalog-model.aggregator { background: var(--paper-2); }
 .catalog-model-actions { display: flex; gap: var(--sp-2); }
 .catalog-select { background: var(--ok); border-color: var(--ok-deep); color: #fff; }
 .catalog-select:hover { background: var(--ok-deep); }

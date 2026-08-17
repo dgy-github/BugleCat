@@ -3,6 +3,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PriceSource {
+    /// 厂商官网公布的直连接口价。
+    OfficialDirect,
+    /// 聚合平台按其自身渠道计费的价格。
+    Aggregator,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CatalogModel {
     pub provider_id: String,
@@ -12,6 +21,7 @@ pub struct CatalogModel {
     pub price_in: f64,
     pub price_out: f64,
     pub price_currency: String,
+    pub price_source: PriceSource,
     pub source_url: String,
     pub updated_at: String,
     pub context_length: Option<u64>,
@@ -55,11 +65,34 @@ fn model(
         price_in,
         price_out,
         price_currency: price_currency.into(),
+        price_source: PriceSource::OfficialDirect,
         source_url: source_url.into(),
         updated_at: UPDATED_AT.into(),
         context_length,
         direct_available: true,
     }
+}
+
+fn aggregator_model(
+    model_id: &str,
+    display_name: &str,
+    price_in: f64,
+    price_out: f64,
+    context_length: Option<u64>,
+) -> CatalogModel {
+    let mut preset = model(
+        "openrouter",
+        model_id,
+        display_name,
+        "https://openrouter.ai/api/v1",
+        price_in,
+        price_out,
+        "USD",
+        OPENROUTER_PRICING,
+        context_length,
+    );
+    preset.price_source = PriceSource::Aggregator;
+    preset
 }
 
 /// A small, maintained set of coding-capable models. Prices are base input and
@@ -293,15 +326,11 @@ pub fn catalog() -> Vec<CatalogProvider> {
         CatalogProvider {
             id: "openrouter".into(),
             name: "OpenRouter".into(),
-            models: vec![model(
-                "openrouter",
+            models: vec![aggregator_model(
                 "openrouter/auto",
                 "OpenRouter 自动路由",
-                "https://openrouter.ai/api/v1",
                 0.0,
                 0.0,
-                "USD",
-                OPENROUTER_PRICING,
                 None,
             )],
         },
@@ -358,6 +387,7 @@ pub fn parse_openrouter_models(json: &str) -> Result<Vec<CatalogModel>, String> 
             price_in: price("prompt"),
             price_out: price("completion"),
             price_currency: "USD".into(),
+            price_source: PriceSource::Aggregator,
             source_url: OPENROUTER_PRICING.into(),
             updated_at: UPDATED_AT.into(),
             context_length: row.get("context_length").and_then(Value::as_u64),
@@ -397,6 +427,25 @@ mod tests {
                 assert!(model.source_url.starts_with("https://"));
             }
         }
+    }
+
+    #[test]
+    fn official_catalog_and_openrouter_catalog_have_distinct_price_sources() {
+        for provider in catalog()
+            .into_iter()
+            .filter(|provider| provider.id != "openrouter")
+        {
+            assert!(provider
+                .models
+                .iter()
+                .all(|model| model.price_source == PriceSource::OfficialDirect));
+        }
+
+        let models = parse_openrouter_models(
+            r#"{"data":[{"id":"vendor/example","pricing":{"prompt":"0.000001","completion":"0.000002"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(models[0].price_source, PriceSource::Aggregator);
     }
 
     #[test]

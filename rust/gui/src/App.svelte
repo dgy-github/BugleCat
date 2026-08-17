@@ -65,6 +65,7 @@
     price_in: number;
     price_out: number;
     price_currency: "CNY" | "USD";
+    price_source: "official_direct" | "aggregator";
     source_url: string;
     updated_at: string;
     context_length?: number | null;
@@ -75,6 +76,12 @@
   let modelCatalog = $state<ModelCatalogResponse | null>(null);
   let catalogRefreshing = $state(false);
   let presetSaving = $state("");
+  const officialProviders = $derived(
+    modelCatalog?.providers.filter((provider) => provider.id !== "openrouter") ?? [],
+  );
+  const openRouterProvider = $derived(
+    modelCatalog?.providers.find((provider) => provider.id === "openrouter") ?? null,
+  );
 
   type Checkpoint = {
     id: string;
@@ -137,6 +144,17 @@
   const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
   const currencySymbol = (currency: "CNY" | "USD") => currency === "USD" ? "$" : "¥";
   const currencyName = (currency: "CNY" | "USD") => currency === "USD" ? "美元" : "人民币";
+  const priceSourceName = (source: CatalogModel["price_source"]) =>
+    source === "official_direct" ? "厂商官方直连价" : "OpenRouter 聚合渠道价";
+  function currentPriceSourceName() {
+    if (!settings) return "";
+    const current = modelCatalog?.providers
+      .flatMap((provider) => provider.models)
+      .find((model) => model.model_id === settings?.model && model.base_url === settings?.base_url);
+    return current
+      ? priceSourceName(current.price_source)
+      : "手动设置的价格，程序无法验证其是否为厂商官方价";
+  }
 
   // ── Collapsible tool output ───────────────────────────────────────────────
   // Large results auto-collapse so a single dump can't bury the conversation.
@@ -746,7 +764,6 @@
       configLocation = loadedLocation;
       modelCatalog = loadedCatalog;
       apiKeyInput = "";
-      void refreshOpenRouterModels();
     } catch (e) {
       messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
@@ -1800,15 +1817,12 @@
         <section class="model-catalog" aria-label="模型厂商目录">
           <div class="catalog-head">
             <div>
-              <strong>模型厂商目录</strong>
-              <p>选择后会自动填写模型、接口、每百万 Token 单价和币种；API 密钥仍需自行配置。</p>
+              <strong>厂商官方直连目录</strong>
+              <p>这里的单价来自各厂商官网，选择后会填写该厂商接口、模型、费用和币种；API 密钥仍需自行配置。</p>
             </div>
-            <button class="catalog-refresh" onclick={refreshOpenRouterModels} disabled={catalogRefreshing}>
-              {catalogRefreshing ? "刷新中…" : "刷新 OpenRouter 全量模型"}
-            </button>
           </div>
           {#if modelCatalog}
-            {#each modelCatalog.providers as provider}
+            {#each officialProviders as provider}
               <div class="catalog-provider">
                 <h4>{provider.name}</h4>
                 <div class="catalog-models">
@@ -1819,21 +1833,57 @@
                         <code>{model.model_id}</code>
                       </div>
                       <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
+                      <span class="catalog-price-source">{priceSourceName(model.price_source)}</span>
                       <div class="catalog-model-actions">
                         <button
                           class="catalog-select"
                           onclick={() => applyModelPreset(provider, model)}
                           disabled={presetSaving === `${provider.id}/${model.model_id}`}
                         >
-                          {presetSaving === `${provider.id}/${model.model_id}` ? "应用中…" : "使用此模型"}
+                          {presetSaving === `${provider.id}/${model.model_id}` ? "应用中…" : "使用官方直连"}
                         </button>
-                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>价格来源</button>
+                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>官方价格来源</button>
                       </div>
                     </article>
                   {/each}
                 </div>
               </div>
             {/each}
+            <div class="catalog-aggregator">
+              <div class="catalog-head">
+                <div>
+                  <strong>OpenRouter 聚合平台（可选）</strong>
+                  <p>按需加载全量模型。这里显示的是经 OpenRouter 调用时的渠道价格，不是原厂官方直连价。</p>
+                </div>
+                <button class="catalog-refresh" onclick={refreshOpenRouterModels} disabled={catalogRefreshing}>
+                  {catalogRefreshing ? "加载中…" : "加载 OpenRouter 聚合模型"}
+                </button>
+              </div>
+              {#if openRouterProvider}
+                <div class="catalog-models">
+                  {#each openRouterProvider.models as model}
+                    <article class:active={settings.model === model.model_id} class:aggregator={true} class="catalog-model">
+                      <div class="catalog-model-name">
+                        <strong>{model.display_name}</strong>
+                        <code>{model.model_id}</code>
+                      </div>
+                      <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
+                      <span class="catalog-price-source aggregator">{priceSourceName(model.price_source)}，非厂商官方报价</span>
+                      <div class="catalog-model-actions">
+                        <button
+                          class="catalog-select"
+                          onclick={() => applyModelPreset(openRouterProvider, model)}
+                          disabled={presetSaving === `${openRouterProvider.id}/${model.model_id}`}
+                        >
+                          {presetSaving === `${openRouterProvider.id}/${model.model_id}` ? "应用中…" : "使用 OpenRouter 渠道"}
+                        </button>
+                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>渠道价格来源</button>
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           {:else}
             <p class="catalog-empty">正在读取模型厂商目录…</p>
           {/if}
@@ -1882,6 +1932,7 @@
             <option value="USD">美元（USD）</option>
           </select>
         </label>
+        <p class="settings-note price-note">当前费用来源：{currentPriceSourceName()}</p>
         <label>
           <span>Base URL</span>
           <input bind:value={settings.base_url} />
