@@ -120,6 +120,7 @@
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   let busy = $state(false);
   let stopping = $state(false);
+  let switchingSession = $state(false);
   // File explorer (workspace tree)
   type DirEntry = { name: string; path: string; is_dir: boolean };
   let filesOpen = $state(false);
@@ -573,10 +574,10 @@
             tokOut += u.completion_tokens || 0;
           }
           streamingIdx = null;
-          busy = false;
+          busy = switchingSession;
           stopping = false;
           refreshSessions();
-          dequeue();
+          if (!switchingSession) dequeue();
           break;
         case "loaded":
           messages = p.messages
@@ -589,6 +590,7 @@
           streamingIdx = null;
           busy = false;
           stopping = false;
+          switchingSession = false;
           refreshSessions(); // keep the session you just left visible in 最近会话
           break;
         case "error":
@@ -596,6 +598,7 @@
           messages.push({ role: "note", text: `错误：${p.message}` });
           busy = false;
           stopping = false;
+          switchingSession = false;
           break;
       }
       scrollDown();
@@ -1122,13 +1125,28 @@
     }
   }
   async function resumeSession(id: string, title = "") {
-    busy = true;
-    sessionTitle = title || "会话";
-    currentSessionId = id;
+    if (switchingSession || id === currentSessionId) return;
+    const previousId = currentSessionId;
+    const previousTitle = sessionTitle;
+    switchingSession = true;
     try {
+      if (busy) {
+        stopping = true;
+        queued = [];
+        approval = null;
+        userQuestion = null;
+        await invoke("stop_generation");
+      }
+      busy = true;
+      sessionTitle = title || "会话";
+      currentSessionId = id;
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
       busy = false;
+      stopping = false;
+      switchingSession = false;
+      currentSessionId = previousId;
+      sessionTitle = previousTitle;
       messages.push({ role: "note", text: `继续会话失败：${e}` });
     }
   }
@@ -1355,7 +1373,7 @@
       {/if}
       {#each orderedSessions as s}
         <div class="recent-item" class:active={s.session_id === currentSessionId} class:archived={s.archived}>
-          <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
+          <button class="recent-main" title={s.snippet || s.title} disabled={switchingSession || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
             <span class="recent-dot">●</span>
             <span class="recent-text">
@@ -1821,7 +1839,7 @@
                 <code>{s.snippet}</code>
               </div>
               <div class="session-actions">
-                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={busy || !s.has_snapshot} title="继续此会话">继续</button>
+                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={switchingSession || !s.has_snapshot} title="继续此会话">继续</button>
                 <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="从此处分叉新会话">⑂ 分叉</button>
                 <button class="plain" onclick={() => openSessionLog(s.session_id)} title="打开会话日志 (JSONL)">日志</button>
                 <button class="plain" onclick={() => openSessionSnapshot(s.session_id)} disabled={!s.has_snapshot} title="打开会话快照">快照</button>

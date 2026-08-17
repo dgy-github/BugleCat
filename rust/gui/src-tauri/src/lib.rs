@@ -1465,6 +1465,25 @@ mod tests {
     }
 
     #[test]
+    fn history_session_can_interrupt_an_active_turn_and_resume_safely() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("disabled={switchingSession || !s.has_snapshot}"));
+        let resume = app
+            .split_once("async function resumeSession")
+            .unwrap()
+            .1
+            .split_once("async function forkSession")
+            .unwrap()
+            .0;
+        assert!(resume.contains("if (busy)"));
+        assert!(resume.contains("await invoke(\"stop_generation\")"));
+        assert!(resume.contains("await invoke(\"resume_session\""));
+        assert!(
+            resume.find("stop_generation").unwrap() < resume.find("resume_session").unwrap()
+        );
+    }
+
+    #[test]
     fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
         let preset = CatalogModel {
             provider_id: "openai".into(),

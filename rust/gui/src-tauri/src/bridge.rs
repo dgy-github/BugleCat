@@ -95,6 +95,10 @@ pub fn request_cancel(
     count + question_count
 }
 
+fn reset_cancel(cancel: &CancelFlag) {
+    cancel.store(false, Ordering::Release);
+}
+
 /// A request from the UI to the agent thread.
 pub enum Command {
     /// A user turn. `images` are absolute paths attached via the file picker;
@@ -499,6 +503,10 @@ pub fn spawn_worker(
                             };
                             let is_cancelled = || cancel.load(Ordering::Acquire);
                             let result = agent.run_turn(user_input, Some(&is_cancelled)).await;
+                            // Cancellation belongs to one turn only. Keeping the
+                            // flag set would instantly cancel prompts after a
+                            // history switch or a manual stop.
+                            reset_cancel(&cancel);
                             let _ = session_index.record_turn(
                                 &session_id,
                                 &workspace,
@@ -861,6 +869,9 @@ mod tests {
         assert!(questions.lock().unwrap().is_empty());
         assert!(matches!(receiver.await.unwrap(), ApprovalDecision::Deny));
         assert_eq!(question_receiver.await.unwrap(), None);
+
+        reset_cancel(&cancel);
+        assert!(!cancel.load(Ordering::Acquire));
     }
 
     #[tokio::test]
