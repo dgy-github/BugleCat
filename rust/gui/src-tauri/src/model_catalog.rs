@@ -36,7 +36,7 @@ pub struct CatalogProvider {
 }
 
 const UPDATED_AT: &str = "2026-08-17";
-const DEEPSEEK_PRICING: &str = "https://api-docs.deepseek.com/quick_start/pricing-details-usd";
+const DEEPSEEK_PRICING: &str = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing";
 const BAILIAN_PRICING: &str = "https://help.aliyun.com/zh/model-studio/model-pricing";
 const ARK_PRICING: &str = "https://www.volcengine.com/product/ark";
 const ZHIPU_PRICING: &str = "https://docs.bigmodel.cn/cn/guide/start/model-overview";
@@ -105,25 +105,25 @@ pub fn catalog() -> Vec<CatalogProvider> {
             models: vec![
                 model(
                     "deepseek",
-                    "deepseek-chat",
-                    "DeepSeek V3（对话）",
-                    "https://api.deepseek.com/v1",
-                    0.27,
-                    1.10,
-                    "USD",
+                    "deepseek-v4-flash",
+                    "DeepSeek V4 Flash",
+                    "https://api.deepseek.com",
+                    1.0,
+                    2.0,
+                    "CNY",
                     DEEPSEEK_PRICING,
-                    Some(64_000),
+                    Some(1_000_000),
                 ),
                 model(
                     "deepseek",
-                    "deepseek-reasoner",
-                    "DeepSeek R1（推理）",
-                    "https://api.deepseek.com/v1",
-                    0.55,
-                    2.19,
-                    "USD",
+                    "deepseek-v4-pro",
+                    "DeepSeek V4 Pro",
+                    "https://api.deepseek.com",
+                    3.0,
+                    6.0,
+                    "CNY",
                     DEEPSEEK_PRICING,
-                    Some(64_000),
+                    Some(1_000_000),
                 ),
             ],
         },
@@ -446,6 +446,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(models[0].price_source, PriceSource::Aggregator);
+    }
+
+    #[test]
+    fn deepseek_official_catalog_uses_v4_models_and_not_retired_aliases() {
+        let deepseek = catalog()
+            .into_iter()
+            .find(|provider| provider.id == "deepseek")
+            .expect("missing DeepSeek provider");
+        let ids = deepseek
+            .models
+            .iter()
+            .map(|model| model.model_id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
+        assert!(deepseek
+            .models
+            .iter()
+            .all(|model| model.price_currency == "CNY"));
+        assert_eq!(deepseek.models[0].price_in, 1.0);
+        assert_eq!(deepseek.models[0].price_out, 2.0);
+        assert_eq!(deepseek.models[1].price_in, 3.0);
+        assert_eq!(deepseek.models[1].price_out, 6.0);
     }
 
     #[test]
