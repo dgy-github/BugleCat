@@ -1965,7 +1965,7 @@
         </p>
         <label>
           <span>图片/文件解析模型</span>
-          <input bind:value={settings.vl_model} placeholder="例如：qwen-vl-max" />
+          <input bind:value={settings.vl_model} placeholder="例如：qwen3.7-plus" />
         </label>
         <label>
           <span>图片/文件解析接口</span>

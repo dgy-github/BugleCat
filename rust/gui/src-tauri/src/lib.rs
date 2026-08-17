@@ -1365,13 +1365,13 @@ mod tests {
     #[test]
     fn settings_snapshot_exposes_vision_parser_without_leaking_its_key() {
         let mut cfg = Config::default();
-        cfg.vl_model = "qwen-vl-max".into();
+        cfg.vl_model = "qwen3.7-plus".into();
         cfg.vl_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1".into();
         cfg.vl_api_key = "secret-vision-key".into();
 
         let settings = settings_from_config(&cfg);
 
-        assert_eq!(settings.vl_model, "qwen-vl-max");
+        assert_eq!(settings.vl_model, "qwen3.7-plus");
         assert_eq!(
             settings.vl_base_url,
             "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -1384,7 +1384,7 @@ mod tests {
     #[test]
     fn image_attachment_requires_an_explicit_parser_model() {
         assert!(validate_image_attachment_route(&[], "").is_ok());
-        assert!(validate_image_attachment_route(&["test.png".into()], "qwen-vl-max").is_ok());
+        assert!(validate_image_attachment_route(&["test.png".into()], "qwen3.7-plus").is_ok());
 
         let error = validate_image_attachment_route(&["test.png".into()], "").unwrap_err();
         assert!(error.contains("图片/文件解析模型"));

@@ -770,6 +770,7 @@ fn image_mime(path: &std::path::Path) -> &'static str {
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
         _ => "image/png",
     }
 }
@@ -830,6 +831,16 @@ mod tests {
             display_path(Path::new(r"\\?\UNC\server\share")),
             r"\\server\share"
         );
+    }
+
+    #[test]
+    fn image_mime_covers_frontend_attachment_formats() {
+        assert_eq!(image_mime(Path::new("attachment.png")), "image/png");
+        assert_eq!(image_mime(Path::new("attachment.jpg")), "image/jpeg");
+        assert_eq!(image_mime(Path::new("attachment.jpeg")), "image/jpeg");
+        assert_eq!(image_mime(Path::new("attachment.gif")), "image/gif");
+        assert_eq!(image_mime(Path::new("attachment.webp")), "image/webp");
+        assert_eq!(image_mime(Path::new("attachment.bmp")), "image/bmp");
     }
 
     #[tokio::test]
