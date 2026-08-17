@@ -1432,6 +1432,9 @@ mod tests {
         let css = include_str!("../../src/app.css");
         assert!(css.contains("--accent:       #0a84ff"));
         assert!(css.contains("backdrop-filter: blur(28px)"));
+        assert!(css.contains(
+            ".menu-backdrop:hover, .menu-backdrop:active, .menu-backdrop:focus-visible"
+        ));
     }
 
     #[test]
