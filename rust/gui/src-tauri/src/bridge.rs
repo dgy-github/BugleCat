@@ -142,6 +142,7 @@ pub enum UiEvent {
         session_id: String,
         models: Vec<String>,
         permission_mode: String,
+        reasoning_effort: String,
         /// True when the workspace is the user's home dir / fs root (not a
         /// project). The UI then prompts for a real workspace and blocks prompts
         /// instead of silently operating there (dangerous under full-access).
@@ -223,6 +224,7 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
                 session_id: session_id.to_string(),
                 models: cfg.available_models,
                 permission_mode: cfg.permission_mode,
+                reasoning_effort: cfg.reasoning_effort,
                 needs_workspace: is_unsafe_workspace(workspace),
             },
         );

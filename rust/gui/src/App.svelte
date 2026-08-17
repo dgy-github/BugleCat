@@ -10,7 +10,7 @@
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; needs_workspace: boolean }
+    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
     | { kind: "assistant_delta"; text: string }
     | { kind: "assistant"; text: string }
     | { kind: "tool_start"; name: string; args: string }
@@ -338,6 +338,29 @@
       messages.push({ role: "note", text: `切换模型失败：${e}` });
     }
   }
+  let reasoningEffort = $state("auto");
+  let reasoningMenuOpen = $state(false);
+  const REASONING_EFFORTS = [
+    { id: "auto", label: "自动" },
+    { id: "off", label: "关闭" },
+    { id: "low", label: "低" },
+    { id: "medium", label: "中" },
+    { id: "high", label: "高" },
+    { id: "max", label: "最高" },
+  ];
+  const reasoningLabel = (id: string) => REASONING_EFFORTS.find((option) => option.id === id)?.label ?? id;
+  async function selectReasoningEffort(id: string) {
+    reasoningMenuOpen = false;
+    if (!id || id === reasoningEffort) return;
+    const previous = reasoningEffort;
+    reasoningEffort = id;
+    try {
+      await invoke("save_settings", { updates: { reasoning_effort: id } });
+    } catch (e) {
+      reasoningEffort = previous;
+      messages.push({ role: "note", text: `切换思考程度失败：${e}` });
+    }
+  }
   // Claude-Code-style permission modes (single composer selector).
   let permissionMode = $state("accept-edits");
   let modeMenuOpen = $state(false);
@@ -427,11 +450,12 @@
     } catch { /* storage is optional */ }
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
-      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
+      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; reasoning_effort: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
       sandboxMode = s.sandbox;
       currentModel = s.model;
       if (s.permission_mode) permissionMode = s.permission_mode;
+      if (s.reasoning_effort) reasoningEffort = s.reasoning_effort;
       priceIn = s.price_in || 0;
       priceOut = s.price_out || 0;
       priceCurrency = s.price_currency || "CNY";
@@ -451,6 +475,7 @@
           currentModel = p.model;
           if (p.models?.length) models = p.models;
           if (p.permission_mode) permissionMode = p.permission_mode;
+          if (p.reasoning_effort) reasoningEffort = p.reasoning_effort;
           // Learn the active session's real id so 最近会话 can mark/return to it.
           if (p.session_id) currentSessionId = p.session_id;
           refreshSessions();
@@ -1360,7 +1385,7 @@
       <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
       <span class="title">{sessionTitle}</span>
       <div class="model-wrap">
-        <button class="model-pill" onclick={() => (modelMenuOpen = !modelMenuOpen)}
+        <button class="model-pill" onclick={() => { reasoningMenuOpen = false; modelMenuOpen = !modelMenuOpen; }}
           disabled={models.length === 0} title="切换模型">
           {currentModel || header} ▾
         </button>
@@ -1372,6 +1397,24 @@
                 onclick={() => selectModel(m)}>
                 <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
                 <span class="opt-name">{m}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="reasoning-wrap">
+        <button class="reasoning-pill" onclick={() => { modelMenuOpen = false; reasoningMenuOpen = !reasoningMenuOpen; }}
+          disabled={busy} title="切换思考程度">
+          思考程度：{reasoningLabel(reasoningEffort)} ▾
+        </button>
+        {#if reasoningMenuOpen}
+          <button class="menu-backdrop" aria-label="关闭" onclick={() => (reasoningMenuOpen = false)}></button>
+          <div class="model-menu reasoning-menu" role="menu">
+            {#each REASONING_EFFORTS as option}
+              <button class="model-opt" role="menuitemradio" aria-checked={option.id === reasoningEffort}
+                onclick={() => selectReasoningEffort(option.id)}>
+                <span class="opt-check">{option.id === reasoningEffort ? "✓" : ""}</span>
+                <span class="opt-name">{option.label}</span>
               </button>
             {/each}
           </div>
@@ -1907,8 +1950,12 @@
         </section>
         <p class="settings-note">权限（沙箱 / 审批）由顶部输入框旁的「权限模式」控制：规划 / 默认 / 自动接受编辑 / 全权放行。</p>
         <label>
-          <span>推理强度</span>
-          <input bind:value={settings.reasoning_effort} placeholder="auto | low | medium | high | max | off" />
+          <span>思考程度</span>
+          <select bind:value={settings.reasoning_effort}>
+            {#each REASONING_EFFORTS as option}
+              <option value={option.id}>{option.label}</option>
+            {/each}
+          </select>
         </label>
         <label>
           <span>模型调用上限</span>

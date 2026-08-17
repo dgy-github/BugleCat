@@ -36,6 +36,7 @@ pub struct Status {
     sandbox: String,
     approval: String,
     permission_mode: String,
+    reasoning_effort: String,
     workspace: String,
     /// Masked (`****1234`) — never the real key.
     api_key: String,
@@ -97,6 +98,7 @@ fn get_status() -> Result<Status, String> {
         sandbox: cfg.sandbox_mode.clone(),
         approval: cfg.approval_policy.clone(),
         permission_mode: cfg.permission_mode.clone(),
+        reasoning_effort: cfg.reasoning_effort.clone(),
         workspace: bridge::display_path(&cfg.workspace),
         api_key: red.get("api_key").cloned().unwrap_or_default(),
         max_iterations: cfg.max_iterations,
@@ -1389,6 +1391,14 @@ mod tests {
         let error = validate_image_attachment_route(&["test.png".into()], "").unwrap_err();
         assert!(error.contains("图片/文件解析模型"));
         assert!(error.contains("设置"));
+    }
+
+    #[test]
+    fn topbar_exposes_reasoning_effort_quick_switch() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("class=\"reasoning-pill\""));
+        assert!(app.contains("思考程度"));
+        assert!(app.contains("selectReasoningEffort"));
     }
 
     #[test]

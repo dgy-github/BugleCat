@@ -1714,9 +1714,9 @@ main.app { flex-direction: row; }
 .tbtn:hover { background: var(--paper-2); color: var(--ink); border-color: var(--line); }
 .tbtn.on { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-line); }
 
-/* ── Topbar model quick-switch ────────────────────────────────────────────── */
-.model-wrap { position: relative; display: inline-block; }
-.model-pill {
+/* ── Topbar model / reasoning quick-switch ───────────────────────────────── */
+.model-wrap, .reasoning-wrap { position: relative; display: inline-block; }
+.model-pill, .reasoning-pill {
   background: var(--paper-2);
   color: var(--ink-2);
   border: 1px solid var(--line-strong);
@@ -1731,9 +1731,10 @@ main.app { flex-direction: row; }
   box-shadow: none;
   cursor: pointer;
 }
-.model-pill:hover:not(:disabled) { background: var(--paper-3); color: var(--ink); box-shadow: none; }
-.model-pill:active { transform: none; }
-.model-pill:disabled { cursor: default; color: var(--ink-3); }
+.reasoning-pill { font-family: var(--font-sans); white-space: nowrap; }
+.model-pill:hover:not(:disabled), .reasoning-pill:hover:not(:disabled) { background: var(--paper-3); color: var(--ink); box-shadow: none; }
+.model-pill:active, .reasoning-pill:active { transform: none; }
+.model-pill:disabled, .reasoning-pill:disabled { cursor: default; color: var(--ink-3); }
 
 /* Workspace pill — always shows the active project dir; click to switch. */
 .ws-pill {
