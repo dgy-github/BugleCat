@@ -6,6 +6,7 @@
 //! for the header.
 
 mod bridge;
+pub mod model_catalog;
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
