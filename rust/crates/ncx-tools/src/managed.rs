@@ -11,6 +11,7 @@ use tokio::process::{Child, ChildStdin};
 use tokio::task::JoinHandle;
 
 use crate::executor::{command_with_env, PolicyExecutor};
+use crate::text_encoding::Utf8StreamDecoder;
 
 const MAX_BUFFERED_BYTES: usize = 1_000_000;
 
@@ -163,16 +164,32 @@ where
 {
     tokio::spawn(async move {
         let mut bytes = vec![0; 4096];
+        let mut decoder = Utf8StreamDecoder::default();
         while let Ok(read) = reader.read(&mut bytes).await {
             if read == 0 {
                 break;
             }
+            let text = decoder.push(&bytes[..read]);
+            if text.is_empty() {
+                continue;
+            }
             let chunk = ProcessOutputChunk {
                 seq: sequence.fetch_add(1, Ordering::Relaxed),
                 stream,
-                text: String::from_utf8_lossy(&bytes[..read]).to_string(),
+                text,
             };
             push_chunk(&mut output.lock().unwrap(), chunk);
+        }
+        let trailing = decoder.finish();
+        if !trailing.is_empty() {
+            push_chunk(
+                &mut output.lock().unwrap(),
+                ProcessOutputChunk {
+                    seq: sequence.fetch_add(1, Ordering::Relaxed),
+                    stream,
+                    text: trailing,
+                },
+            );
         }
     })
 }

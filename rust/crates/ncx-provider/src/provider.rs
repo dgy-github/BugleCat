@@ -21,6 +21,7 @@ use crate::types::{ModelResponse, ProviderError, ToolCall};
 const DEFAULT_STREAM_OPEN_TIMEOUT_S: u64 = 45;
 const STREAM_OPEN_TIMEOUT_MIN_S: u64 = 5;
 const STREAM_OPEN_TIMEOUT_MAX_S: u64 = 300;
+const MAX_SSE_LINE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Bounded override for the streaming response-header wait (seconds).
 pub fn stream_open_timeout_s() -> u64 {
@@ -264,7 +265,7 @@ impl DeepSeekProvider {
         R: FnMut(&str),
     {
         let mut agg = StreamAgg::default();
-        let mut buf = String::new();
+        let mut buf = Vec::new();
         let mut stream = resp.bytes_stream();
 
         while let Some(chunk) = stream.next().await {
@@ -278,28 +279,78 @@ impl DeepSeekProvider {
                     return Err(ProviderError(format!("StreamError: {e}")));
                 }
             };
-            buf.push_str(&String::from_utf8_lossy(&bytes));
-            // SSE events are separated by blank lines; data lines begin "data:".
-            while let Some(nl) = buf.find('\n') {
-                let line = buf[..nl].trim_end_matches('\r').to_string();
-                buf.drain(..=nl);
-                let Some(data) = line.strip_prefix("data:") else {
-                    continue;
-                };
-                let data = data.trim();
-                if data.is_empty() {
-                    continue;
+            match feed_sse_bytes(&mut buf, &bytes, &mut agg, on_content, on_reasoning) {
+                Ok(true) => return Ok(agg.finish()),
+                Ok(false) => {}
+                Err(error) => {
+                    *emitted = !agg.content.is_empty() || !agg.reasoning.is_empty();
+                    return Err(error);
                 }
-                if data == "[DONE]" {
-                    return Ok(agg.finish());
-                }
-                if let Ok(json) = serde_json::from_str::<Value>(data) {
-                    agg.ingest(&json, on_content, on_reasoning);
+            }
+        }
+        if !buf.is_empty() {
+            match feed_sse_bytes(&mut buf, b"\n", &mut agg, on_content, on_reasoning) {
+                Ok(true) => return Ok(agg.finish()),
+                Ok(false) => {}
+                Err(error) => {
+                    *emitted = !agg.content.is_empty() || !agg.reasoning.is_empty();
+                    return Err(error);
                 }
             }
         }
         Ok(agg.finish())
     }
+}
+
+/// Feed raw SSE bytes while preserving UTF-8 sequences that cross arbitrary
+/// HTTP body chunks. Decoding only after a complete line is available avoids
+/// permanently inserting U+FFFD into Chinese model output and session logs.
+fn feed_sse_bytes<C, R>(
+    buffer: &mut Vec<u8>,
+    bytes: &[u8],
+    agg: &mut StreamAgg,
+    on_content: &mut C,
+    on_reasoning: &mut R,
+) -> Result<bool, ProviderError>
+where
+    C: FnMut(&str),
+    R: FnMut(&str),
+{
+    buffer.extend_from_slice(bytes);
+    while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
+        if newline > MAX_SSE_LINE_BYTES {
+            return Err(ProviderError(format!(
+                "StreamError: SSE line exceeds {MAX_SSE_LINE_BYTES} bytes"
+            )));
+        }
+        let mut line = buffer.drain(..=newline).collect::<Vec<_>>();
+        line.pop();
+        if line.last() == Some(&b'\r') {
+            line.pop();
+        }
+        let line = std::str::from_utf8(&line).map_err(|error| {
+            ProviderError(format!("StreamError: invalid UTF-8 SSE line: {error}"))
+        })?;
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data.is_empty() {
+            continue;
+        }
+        if data == "[DONE]" {
+            return Ok(true);
+        }
+        if let Ok(json) = serde_json::from_str::<Value>(data) {
+            agg.ingest(&json, on_content, on_reasoning);
+        }
+    }
+    if buffer.len() > MAX_SSE_LINE_BYTES {
+        return Err(ProviderError(format!(
+            "StreamError: SSE line exceeds {MAX_SSE_LINE_BYTES} bytes"
+        )));
+    }
+    Ok(false)
 }
 
 /// Accumulates streamed chunks into a [`ModelResponse`] — mirrors the aggregation
@@ -528,5 +579,46 @@ mod tests {
         );
         let r = agg.finish();
         assert_eq!(r.tool_calls[0].id, "call_2");
+    }
+
+    #[test]
+    fn sse_decoder_preserves_chinese_split_at_every_byte() {
+        let expected = "工具返回的是自动递归回溯读取。";
+        let event = format!(
+            "data: {}\n\ndata: [DONE]\n\n",
+            json!({"choices": [{"delta": {"content": expected}}]})
+        );
+
+        for split in 0..=event.len() {
+            let mut buffer = Vec::new();
+            let mut agg = StreamAgg::default();
+            let mut streamed = String::new();
+            let mut reasoning = String::new();
+            let mut on_content = |text: &str| streamed.push_str(text);
+            let mut on_reasoning = |text: &str| reasoning.push_str(text);
+
+            let first_done = feed_sse_bytes(
+                &mut buffer,
+                &event.as_bytes()[..split],
+                &mut agg,
+                &mut on_content,
+                &mut on_reasoning,
+            )
+            .unwrap();
+            let second_done = feed_sse_bytes(
+                &mut buffer,
+                &event.as_bytes()[split..],
+                &mut agg,
+                &mut on_content,
+                &mut on_reasoning,
+            )
+            .unwrap();
+            let response = agg.finish();
+
+            assert!(first_done || second_done, "split at byte {split}");
+            assert_eq!(streamed, expected, "split at byte {split}");
+            assert_eq!(response.content, expected, "split at byte {split}");
+            assert!(!response.content.contains('\u{FFFD}'));
+        }
     }
 }

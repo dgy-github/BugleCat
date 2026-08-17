@@ -38,9 +38,10 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 
-const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use the provided tools \
-    (read_file, apply_patch, update_plan) to inspect and edit the workspace. Prefer apply_patch \
-    for edits. Keep responses concise.";
+const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use native workspace tools \
+    (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
+    inspection, and prefer them over shell commands. Use apply_patch for edits and update_plan for \
+    multi-step work. If a path is incomplete, search recursively instead of guessing. Keep responses concise.";
 
 /// Injected into the system prompt when the active permission mode is `plan`.
 const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run state-changing \
@@ -902,6 +903,7 @@ mod tests {
             "grep",
             "grep_literal",
             "glob",
+            "find_files",
             "web_search",
             "web_fetch",
             "list_directory",
@@ -927,6 +929,13 @@ mod tests {
             .execute_with_recovery("glob", &json!({"pattern": "**/*.rs"}))
             .await;
         assert!(discovery.contains("src/lib.rs"), "{discovery}");
+        let literal_discovery = registry
+            .execute_with_recovery(
+                "find_files",
+                &json!({"query": "lib.rs", "exact": true}),
+            )
+            .await;
+        assert!(literal_discovery.contains("src/lib.rs"), "{literal_discovery}");
         let listing = registry
             .execute_with_recovery("list_directory", &json!({"path": "src"}))
             .await;

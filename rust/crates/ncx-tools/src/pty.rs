@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+use crate::text_encoding::Utf8StreamDecoder;
 use crate::PolicyExecutor;
 
 const MAX_BUFFERED_BYTES: usize = 1_000_000;
@@ -160,7 +161,10 @@ fn shell_command() -> CommandBuilder {
     {
         let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
         let mut command = CommandBuilder::new(shell);
+        command.arg("/D");
         command.arg("/Q");
+        command.arg("/K");
+        command.arg("chcp 65001>nul");
         command
     }
     #[cfg(not(windows))]
@@ -179,13 +183,18 @@ fn spawn_reader(
         .spawn(move || {
             let sequence = AtomicU64::new(1);
             let mut bytes = vec![0; 4096];
+            let mut decoder = Utf8StreamDecoder::default();
             while let Ok(read) = reader.read(&mut bytes) {
                 if read == 0 {
                     break;
                 }
+                let text = decoder.push(&bytes[..read]);
+                if text.is_empty() {
+                    continue;
+                }
                 let chunk = PtyOutputChunk {
                     seq: sequence.fetch_add(1, Ordering::Relaxed),
-                    text: String::from_utf8_lossy(&bytes[..read]).to_string(),
+                    text,
                 };
                 // Windows cmd queries the terminal cursor before presenting its
                 // first prompt. A PTY transport must answer this ANSI DSR or the
@@ -198,6 +207,16 @@ fn spawn_reader(
                     }
                 }
                 push_chunk(&mut output.lock().unwrap(), chunk);
+            }
+            let trailing = decoder.finish();
+            if !trailing.is_empty() {
+                push_chunk(
+                    &mut output.lock().unwrap(),
+                    PtyOutputChunk {
+                        seq: sequence.fetch_add(1, Ordering::Relaxed),
+                        text: trailing,
+                    },
+                );
             }
         })
         .expect("PTY reader thread starts");

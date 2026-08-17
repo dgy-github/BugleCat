@@ -35,9 +35,10 @@ use serde_json::{json, Value};
 use args::{parse_args, Args};
 use runner::{LiveRunner, LiveSummarizer};
 
-const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use the provided tools \
-    (read_file, apply_patch, update_plan) to inspect and edit the workspace. Prefer apply_patch \
-    for edits. Keep responses concise.";
+const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use native workspace tools \
+    (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
+    inspection, and prefer them over shell commands. Use apply_patch for edits and update_plan for \
+    multi-step work. If a path is incomplete, search recursively instead of guessing. Keep responses concise.";
 
 /// Injected into the system prompt under `--permission-mode plan`.
 const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run state-changing \

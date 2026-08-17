@@ -16,9 +16,13 @@ pub mod managed;
 pub mod patch;
 pub mod pty;
 pub mod read_file;
+pub mod text_encoding;
 
 pub use detect::looks_read_only;
 pub use executor::{ExecResult, PolicyExecutor};
 pub use managed::{ManagedProcess, ProcessOutputChunk, ProcessSnapshot};
 pub use patch::{apply_patch, parse_patch, ActionType, ApplyOutcome, FileAction, PatchError};
 pub use pty::{PtyOutputChunk, PtyProcess, PtySnapshot};
+pub use text_encoding::{
+    decode_text, decode_text_lossy, DecodedText, TextEncoding, Utf8StreamDecoder,
+};

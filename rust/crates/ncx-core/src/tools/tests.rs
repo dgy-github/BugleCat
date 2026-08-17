@@ -291,6 +291,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn essential_recursive_discovery_tools_are_always_visible() {
+        let ws = tmp_ws("essential_discovery_visibility");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let reg = ToolRegistry::new(ctx);
+        let names = reg
+            .schemas_for_query("请帮我检查这个陌生项目")
+            .into_iter()
+            .filter_map(|schema| schema["function"]["name"].as_str().map(String::from))
+            .collect::<HashSet<_>>();
+
+        for expected in [
+            "find_files",
+            "grep",
+            "glob",
+            "list_directory",
+            "path_info",
+            "read_file",
+        ] {
+            assert!(names.contains(expected), "missing {expected}: {names:?}");
+        }
+    }
+
     fn schema_desc(schemas: &[Value], name: &str) -> Option<String> {
         schemas.iter().find_map(|s| {
             let f = &s["function"];
