@@ -175,6 +175,8 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "context_edit_max_tool_result_chars",
         "price_in",
         "price_out",
+        "price_currency",
+        "available_models",
     ] {
         if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);
@@ -441,6 +443,7 @@ pub(crate) fn load_config_impl(
     let mut merged: BTreeMap<String, String> = BTreeMap::new();
     merged.insert("base_url".into(), DEFAULT_BASE_URL.into());
     merged.insert("model".into(), DEFAULT_MODEL.into());
+    merged.insert("price_currency".into(), "CNY".into());
 
     // Lowest-priority layers (nanocodex wins over deepseek wins over codex).
     let nano_raw = load_toml(&paths.nanocodex);
@@ -509,6 +512,7 @@ pub(crate) fn load_config_impl(
             &["NANOCODEX_CONTEXT_EDIT_TOOL_RESULT_CHARS"],
         ),
         ("available_models", &["NANOCODEX_MODELS"]),
+        ("price_currency", &["NANOCODEX_PRICE_CURRENCY"]),
         ("max_iterations", &["NANOCODEX_MAX_ITERATIONS"]),
         ("max_tool_calls", &["NANOCODEX_MAX_TOOL_CALLS"]),
         (
@@ -662,6 +666,10 @@ pub(crate) fn load_config_impl(
         ),
         price_in: as_float(merged.get("price_in").map(|s| s.as_str()), 0.0),
         price_out: as_float(merged.get("price_out").map(|s| s.as_str()), 0.0),
+        price_currency: merged
+            .get("price_currency")
+            .cloned()
+            .unwrap_or_else(|| "CNY".into()),
         hooks: parse_hooks(&nano_raw),
         mcp_servers: vec![],
     };
@@ -698,6 +706,20 @@ mod tests {
             codex: tmp.join("nope-cx.toml"),
             nanocodex: tmp.join("nope-nano.toml"),
         }
+    }
+
+    #[test]
+    fn legacy_price_config_defaults_to_cny_and_explicit_usd_round_trips() {
+        let tmp = std::env::temp_dir().join("ncx_config_test_price_currency");
+        fs::create_dir_all(&tmp).unwrap();
+        let paths = no_paths(&tmp);
+        write(&paths.nanocodex, "api_key = \"k\"\nprice_in = \"1.25\"\n");
+        let legacy = load_config_impl(Overrides::default(), &paths, &empty_env()).unwrap();
+        assert_eq!(legacy.price_currency, "CNY");
+
+        write(&paths.nanocodex, "api_key = \"k\"\nprice_currency = \"USD\"\n");
+        let usd = load_config_impl(Overrides::default(), &paths, &empty_env()).unwrap();
+        assert_eq!(usd.price_currency, "USD");
     }
 
     #[test]
