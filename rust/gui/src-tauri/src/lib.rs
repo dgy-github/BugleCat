@@ -8,6 +8,8 @@
 mod bridge;
 pub mod model_catalog;
 
+use model_catalog::{catalog, find_preset, parse_openrouter_models, CatalogModel, CatalogProvider};
+
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -43,6 +45,7 @@ pub struct Status {
     context_edit_max_chars: i64,
     price_in: f64,
     price_out: f64,
+    price_currency: String,
 }
 
 /// Tauri managed state: the channel into the agent thread + pending approvals.
@@ -52,6 +55,7 @@ struct AppState {
     questions: PendingQuestionMap,
     question_counter: AtomicU64,
     cancel: CancelFlag,
+    openrouter_models: Mutex<Vec<CatalogModel>>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +105,7 @@ fn get_status() -> Result<Status, String> {
         context_edit_max_chars: cfg.context_edit_max_chars,
         price_in: cfg.price_in,
         price_out: cfg.price_out,
+        price_currency: cfg.price_currency.clone(),
     })
 }
 
@@ -276,6 +281,7 @@ pub struct Settings {
     context_edit_max_tool_result_chars: i64,
     price_in: f64,
     price_out: f64,
+    price_currency: String,
     api_key_masked: String,
     has_api_key: bool,
     available_models: Vec<String>,
@@ -307,6 +313,7 @@ fn get_settings() -> Result<Settings, String> {
         context_edit_max_tool_result_chars: cfg.context_edit_max_tool_result_chars,
         price_in: cfg.price_in,
         price_out: cfg.price_out,
+        price_currency: cfg.price_currency.clone(),
         api_key_masked: masked,
         has_api_key: !cfg.api_key.is_empty(),
         available_models: cfg.available_models.clone(),
@@ -335,6 +342,135 @@ fn save_settings(
     // Apply live (fresh session with the new config).
     let _ = state.tx.send(Command::Reload);
     Ok(())
+}
+
+#[derive(Serialize)]
+struct ModelCatalogResponse {
+    providers: Vec<CatalogProvider>,
+    /// 当实时目录不可用时，前端仍可使用内置目录。
+    stale: bool,
+}
+
+fn catalog_response(openrouter_models: &[CatalogModel], stale: bool) -> ModelCatalogResponse {
+    let mut providers = catalog();
+    if !openrouter_models.is_empty() {
+        if let Some(provider) = providers
+            .iter_mut()
+            .find(|provider| provider.id == "openrouter")
+        {
+            provider.models = openrouter_models.to_vec();
+        }
+    }
+    ModelCatalogResponse { providers, stale }
+}
+
+fn preset_updates<T: AsRef<str>>(
+    preset: &CatalogModel,
+    quick_switch_models: &[T],
+) -> HashMap<&'static str, String> {
+    let available_models = quick_switch_models
+        .iter()
+        .map(|model| model.as_ref())
+        .collect::<Vec<_>>()
+        .join(",");
+    HashMap::from([
+        ("model", preset.model_id.clone()),
+        ("base_url", preset.base_url.clone()),
+        ("price_in", preset.price_in.to_string()),
+        ("price_out", preset.price_out.to_string()),
+        ("price_currency", preset.price_currency.clone()),
+        ("available_models", available_models),
+    ])
+}
+
+fn write_preset(preset: &CatalogModel, quick_switch_models: &[String]) -> Result<(), String> {
+    let updates = preset_updates(preset, quick_switch_models);
+    let borrowed: HashMap<&str, &str> = updates
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let path = ConfigPaths::default().nanocodex;
+    write_nanocodex_config(&borrowed, &path).map_err(|error| error.to_string())
+}
+
+fn provider_models(provider_id: &str, openrouter_models: &[CatalogModel]) -> Vec<CatalogModel> {
+    if provider_id == "openrouter" && !openrouter_models.is_empty() {
+        return openrouter_models.to_vec();
+    }
+    catalog()
+        .into_iter()
+        .find(|provider| provider.id == provider_id)
+        .map(|provider| provider.models)
+        .unwrap_or_default()
+}
+
+/// 返回内置目录，并在有缓存时带上 OpenRouter 的实时模型清单。
+#[tauri::command]
+fn get_model_catalog(state: tauri::State<'_, AppState>) -> Result<ModelCatalogResponse, String> {
+    let cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    Ok(catalog_response(&cached, false))
+}
+
+/// 通过 OpenRouter 公共接口拉取模型和每 Token 费用；接口无需 API 密钥。
+#[tauri::command]
+async fn refresh_openrouter_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<ModelCatalogResponse, String> {
+    let response = reqwest::Client::new()
+        .get("https://openrouter.ai/api/v1/models")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|error| format!("OpenRouter 模型目录请求失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("OpenRouter 模型目录请求失败：{error}"))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("OpenRouter 模型目录读取失败：{error}"))?;
+    let models = parse_openrouter_models(&body)?;
+    let mut cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    *cached = models;
+    Ok(catalog_response(&cached, false))
+}
+
+/// 选择一个模型预设时，统一保存模型、接口、费用币种和当前厂商的快捷模型。
+#[tauri::command]
+fn apply_model_preset(
+    provider_id: String,
+    model_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CatalogModel, String> {
+    let cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    let preset = if provider_id == "openrouter" {
+        cached
+            .iter()
+            .find(|model| model.model_id == model_id)
+            .cloned()
+            .or_else(|| find_preset(&provider_id, &model_id))
+    } else {
+        find_preset(&provider_id, &model_id)
+    }
+    .ok_or_else(|| "未找到所选模型预设，请先刷新 OpenRouter 模型目录".to_string())?;
+    let quick_switch_models = provider_models(&provider_id, &cached)
+        .into_iter()
+        .map(|model| model.model_id)
+        .collect::<Vec<_>>();
+    drop(cached);
+
+    write_preset(&preset, &quick_switch_models)?;
+    // 写入已经成功；重建会话的消息若暂时无法发送，也不能误报为保存失败。
+    let _ = state.tx.send(Command::Reload);
+    Ok(preset)
 }
 
 fn config_location() -> Result<ConfigLocation, String> {
@@ -1093,6 +1229,7 @@ pub fn run() {
             questions,
             question_counter: AtomicU64::new(1_000_000),
             cancel,
+            openrouter_models: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
             // Hand the agent thread an AppHandle (to emit events), the receiver
@@ -1115,6 +1252,9 @@ pub fn run() {
             e2e_ask_question,
             get_settings,
             save_settings,
+            get_model_catalog,
+            refresh_openrouter_models,
+            apply_model_preset,
             get_config_location,
             open_config_file,
             open_config_dir,
@@ -1157,4 +1297,33 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model_catalog::CatalogModel;
+
+    #[test]
+    fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
+        let preset = CatalogModel {
+            provider_id: "openai".into(),
+            model_id: "gpt-5-mini".into(),
+            display_name: "GPT-5 mini".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            price_in: 0.25,
+            price_out: 2.0,
+            price_currency: "USD".into(),
+            source_url: "https://openai.com/api/pricing".into(),
+            updated_at: "2026-08-17".into(),
+            context_length: None,
+            direct_available: true,
+        };
+
+        let updates = preset_updates(&preset, &["gpt-5-mini", "gpt-5"]);
+        assert_eq!(updates["model"], "gpt-5-mini");
+        assert_eq!(updates["base_url"], "https://api.openai.com/v1");
+        assert_eq!(updates["price_currency"], "USD");
+        assert_eq!(updates["available_models"], "gpt-5-mini,gpt-5");
+    }
 }

@@ -67,57 +67,243 @@ fn model(
 pub fn catalog() -> Vec<CatalogProvider> {
     vec![
         CatalogProvider {
-            id: "deepseek".into(), name: "DeepSeek".into(), models: vec![
-                model("deepseek", "deepseek-chat", "DeepSeek V3（对话）", "https://api.deepseek.com/v1", 0.27, 1.10, "USD", DEEPSEEK_PRICING, Some(64_000)),
-                model("deepseek", "deepseek-reasoner", "DeepSeek R1（推理）", "https://api.deepseek.com/v1", 0.55, 2.19, "USD", DEEPSEEK_PRICING, Some(64_000)),
+            id: "deepseek".into(),
+            name: "DeepSeek".into(),
+            models: vec![
+                model(
+                    "deepseek",
+                    "deepseek-chat",
+                    "DeepSeek V3（对话）",
+                    "https://api.deepseek.com/v1",
+                    0.27,
+                    1.10,
+                    "USD",
+                    DEEPSEEK_PRICING,
+                    Some(64_000),
+                ),
+                model(
+                    "deepseek",
+                    "deepseek-reasoner",
+                    "DeepSeek R1（推理）",
+                    "https://api.deepseek.com/v1",
+                    0.55,
+                    2.19,
+                    "USD",
+                    DEEPSEEK_PRICING,
+                    Some(64_000),
+                ),
             ],
         },
         CatalogProvider {
-            id: "bailian".into(), name: "阿里百炼".into(), models: vec![
-                model("bailian", "qwen3-coder-next", "Qwen3 Coder Next", "https://dashscope.aliyuncs.com/compatible-mode/v1", 1.0, 4.0, "CNY", BAILIAN_PRICING, Some(256_000)),
-                model("bailian", "qwen3.8-2.4t-a95b", "Qwen3.8", "https://dashscope.aliyuncs.com/compatible-mode/v1", 12.0, 36.0, "CNY", BAILIAN_PRICING, Some(1_000_000)),
+            id: "bailian".into(),
+            name: "阿里百炼".into(),
+            models: vec![
+                model(
+                    "bailian",
+                    "qwen3-coder-next",
+                    "Qwen3 Coder Next",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    1.0,
+                    4.0,
+                    "CNY",
+                    BAILIAN_PRICING,
+                    Some(256_000),
+                ),
+                model(
+                    "bailian",
+                    "qwen3.8-2.4t-a95b",
+                    "Qwen3.8",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    12.0,
+                    36.0,
+                    "CNY",
+                    BAILIAN_PRICING,
+                    Some(1_000_000),
+                ),
             ],
         },
         CatalogProvider {
-            id: "ark".into(), name: "火山方舟".into(), models: vec![
-                model("ark", "doubao-seed-2-1-pro-260215", "豆包 Seed 2.1 Pro", "https://ark.cn-beijing.volces.com/api/v3", 6.0, 30.0, "CNY", ARK_PRICING, Some(256_000)),
-                model("ark", "doubao-seed-evolving-250715", "豆包 Seed Evolving", "https://ark.cn-beijing.volces.com/api/v3", 6.0, 30.0, "CNY", ARK_PRICING, Some(256_000)),
+            id: "ark".into(),
+            name: "火山方舟".into(),
+            models: vec![
+                model(
+                    "ark",
+                    "doubao-seed-2-1-pro-260215",
+                    "豆包 Seed 2.1 Pro",
+                    "https://ark.cn-beijing.volces.com/api/v3",
+                    6.0,
+                    30.0,
+                    "CNY",
+                    ARK_PRICING,
+                    Some(256_000),
+                ),
+                model(
+                    "ark",
+                    "doubao-seed-evolving-250715",
+                    "豆包 Seed Evolving",
+                    "https://ark.cn-beijing.volces.com/api/v3",
+                    6.0,
+                    30.0,
+                    "CNY",
+                    ARK_PRICING,
+                    Some(256_000),
+                ),
             ],
         },
         CatalogProvider {
-            id: "zhipu".into(), name: "智谱 AI".into(), models: vec![
-                model("zhipu", "glm-5.2", "GLM-5.2", "https://open.bigmodel.cn/api/paas/v4", 10.0, 33.0, "CNY", ZHIPU_PRICING, Some(1_000_000)),
-                model("zhipu", "glm-4.7-flash", "GLM-4.7 Flash（免费）", "https://open.bigmodel.cn/api/paas/v4", 0.0, 0.0, "CNY", ZHIPU_PRICING, None),
+            id: "zhipu".into(),
+            name: "智谱 AI".into(),
+            models: vec![
+                model(
+                    "zhipu",
+                    "glm-5.2",
+                    "GLM-5.2",
+                    "https://open.bigmodel.cn/api/paas/v4",
+                    10.0,
+                    33.0,
+                    "CNY",
+                    ZHIPU_PRICING,
+                    Some(1_000_000),
+                ),
+                model(
+                    "zhipu",
+                    "glm-4.7-flash",
+                    "GLM-4.7 Flash（免费）",
+                    "https://open.bigmodel.cn/api/paas/v4",
+                    0.0,
+                    0.0,
+                    "CNY",
+                    ZHIPU_PRICING,
+                    None,
+                ),
             ],
         },
         CatalogProvider {
-            id: "moonshot".into(), name: "月之暗面 Kimi".into(), models: vec![
-                model("moonshot", "kimi-k2.5", "Kimi K2.5", "https://api.moonshot.cn/v1", 4.0, 16.0, "CNY", MOONSHOT_PRICING, Some(256_000)),
-                model("moonshot", "kimi-k2.5-turbo-preview", "Kimi K2.5 Turbo", "https://api.moonshot.cn/v1", 8.0, 24.0, "CNY", MOONSHOT_PRICING, Some(256_000)),
+            id: "moonshot".into(),
+            name: "月之暗面 Kimi".into(),
+            models: vec![
+                model(
+                    "moonshot",
+                    "kimi-k2.5",
+                    "Kimi K2.5",
+                    "https://api.moonshot.cn/v1",
+                    4.0,
+                    16.0,
+                    "CNY",
+                    MOONSHOT_PRICING,
+                    Some(256_000),
+                ),
+                model(
+                    "moonshot",
+                    "kimi-k2.5-turbo-preview",
+                    "Kimi K2.5 Turbo",
+                    "https://api.moonshot.cn/v1",
+                    8.0,
+                    24.0,
+                    "CNY",
+                    MOONSHOT_PRICING,
+                    Some(256_000),
+                ),
             ],
         },
         CatalogProvider {
-            id: "minimax".into(), name: "MiniMax".into(), models: vec![
-                model("minimax", "MiniMax-M2.7", "MiniMax M2.7", "https://api.minimaxi.com/v1", 2.1, 8.4, "CNY", MINIMAX_PRICING, Some(204_800)),
-                model("minimax", "MiniMax-M2.7-highspeed", "MiniMax M2.7 极速版", "https://api.minimaxi.com/v1", 4.2, 16.8, "CNY", MINIMAX_PRICING, Some(204_800)),
+            id: "minimax".into(),
+            name: "MiniMax".into(),
+            models: vec![
+                model(
+                    "minimax",
+                    "MiniMax-M2.7",
+                    "MiniMax M2.7",
+                    "https://api.minimaxi.com/v1",
+                    2.1,
+                    8.4,
+                    "CNY",
+                    MINIMAX_PRICING,
+                    Some(204_800),
+                ),
+                model(
+                    "minimax",
+                    "MiniMax-M2.7-highspeed",
+                    "MiniMax M2.7 极速版",
+                    "https://api.minimaxi.com/v1",
+                    4.2,
+                    16.8,
+                    "CNY",
+                    MINIMAX_PRICING,
+                    Some(204_800),
+                ),
             ],
         },
         CatalogProvider {
-            id: "openai".into(), name: "OpenAI".into(), models: vec![
-                model("openai", "gpt-5", "GPT-5", "https://api.openai.com/v1", 1.25, 10.0, "USD", OPENAI_PRICING, None),
-                model("openai", "gpt-5-mini", "GPT-5 mini", "https://api.openai.com/v1", 0.25, 2.0, "USD", OPENAI_PRICING, None),
+            id: "openai".into(),
+            name: "OpenAI".into(),
+            models: vec![
+                model(
+                    "openai",
+                    "gpt-5",
+                    "GPT-5",
+                    "https://api.openai.com/v1",
+                    1.25,
+                    10.0,
+                    "USD",
+                    OPENAI_PRICING,
+                    None,
+                ),
+                model(
+                    "openai",
+                    "gpt-5-mini",
+                    "GPT-5 mini",
+                    "https://api.openai.com/v1",
+                    0.25,
+                    2.0,
+                    "USD",
+                    OPENAI_PRICING,
+                    None,
+                ),
             ],
         },
         CatalogProvider {
-            id: "gemini".into(), name: "Google Gemini".into(), models: vec![
-                model("gemini", "gemini-2.5-pro", "Gemini 2.5 Pro", "https://generativelanguage.googleapis.com/v1beta/openai", 1.25, 10.0, "USD", GEMINI_PRICING, Some(1_000_000)),
-                model("gemini", "gemini-2.5-flash", "Gemini 2.5 Flash", "https://generativelanguage.googleapis.com/v1beta/openai", 0.30, 2.50, "USD", GEMINI_PRICING, Some(1_000_000)),
+            id: "gemini".into(),
+            name: "Google Gemini".into(),
+            models: vec![
+                model(
+                    "gemini",
+                    "gemini-2.5-pro",
+                    "Gemini 2.5 Pro",
+                    "https://generativelanguage.googleapis.com/v1beta/openai",
+                    1.25,
+                    10.0,
+                    "USD",
+                    GEMINI_PRICING,
+                    Some(1_000_000),
+                ),
+                model(
+                    "gemini",
+                    "gemini-2.5-flash",
+                    "Gemini 2.5 Flash",
+                    "https://generativelanguage.googleapis.com/v1beta/openai",
+                    0.30,
+                    2.50,
+                    "USD",
+                    GEMINI_PRICING,
+                    Some(1_000_000),
+                ),
             ],
         },
         CatalogProvider {
-            id: "openrouter".into(), name: "OpenRouter".into(), models: vec![
-                model("openrouter", "openrouter/auto", "OpenRouter 自动路由", "https://openrouter.ai/api/v1", 0.0, 0.0, "USD", OPENROUTER_PRICING, None),
-            ],
+            id: "openrouter".into(),
+            name: "OpenRouter".into(),
+            models: vec![model(
+                "openrouter",
+                "openrouter/auto",
+                "OpenRouter 自动路由",
+                "https://openrouter.ai/api/v1",
+                0.0,
+                0.0,
+                "USD",
+                OPENROUTER_PRICING,
+                None,
+            )],
         },
     ]
 }
@@ -126,20 +312,30 @@ pub fn find_preset(provider_id: &str, model_id: &str) -> Option<CatalogModel> {
     catalog()
         .into_iter()
         .find(|provider| provider.id == provider_id)
-        .and_then(|provider| provider.models.into_iter().find(|model| model.model_id == model_id))
+        .and_then(|provider| {
+            provider
+                .models
+                .into_iter()
+                .find(|model| model.model_id == model_id)
+        })
 }
 
 /// Convert OpenRouter's public per-token prices into the per-million-token
 /// display unit used by nanocodex. An absent price is kept as zero (unknown).
 pub fn parse_openrouter_models(json: &str) -> Result<Vec<CatalogModel>, String> {
-    let root: Value = serde_json::from_str(json).map_err(|e| format!("OpenRouter 目录格式错误：{e}"))?;
+    let root: Value =
+        serde_json::from_str(json).map_err(|e| format!("OpenRouter 目录格式错误：{e}"))?;
     let rows = root
         .get("data")
         .and_then(Value::as_array)
         .ok_or_else(|| "OpenRouter 目录缺少 data 数组".to_string())?;
     let mut models = Vec::new();
     for row in rows {
-        let Some(model_id) = row.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
+        let Some(model_id) = row
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        else {
             return Err("OpenRouter 目录存在缺少模型 ID 的条目".into());
         };
         let price = |field: &str| {
@@ -153,7 +349,11 @@ pub fn parse_openrouter_models(json: &str) -> Result<Vec<CatalogModel>, String> 
         models.push(CatalogModel {
             provider_id: "openrouter".into(),
             model_id: model_id.into(),
-            display_name: row.get("name").and_then(Value::as_str).unwrap_or(model_id).into(),
+            display_name: row
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(model_id)
+                .into(),
             base_url: "https://openrouter.ai/api/v1".into(),
             price_in: price("prompt"),
             price_out: price("completion"),
