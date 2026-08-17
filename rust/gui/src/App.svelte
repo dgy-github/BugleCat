@@ -166,8 +166,8 @@
   }
 
   // ── Quiet, grouped tool activity ─────────────────────────────────────────
-  // Routine command lines stay out of the conversation; failures expand
-  // automatically, while every detail remains available on demand.
+  // Routine command lines stay out of the conversation. Every tool stays
+  // collapsed by default, while its parameters and output remain available.
   const lineCount = (s: string = "") => (s ? s.split("\n").length : 0);
   // Classify a finished tool result so the outcome (报错 / 无输出 / N 行) is
   // visible at a glance — a bare "Exit code: 0" otherwise reads as "no info".

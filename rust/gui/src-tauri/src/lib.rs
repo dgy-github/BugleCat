@@ -1465,6 +1465,23 @@ mod tests {
         assert!(item.contains("tool.args"));
         assert!(item.contains("tool.result"));
         assert!(!item.contains("open="));
+
+        let css = include_str!("../../src/app.css");
+        let tool_css = css
+            .split_once("Tool calls")
+            .unwrap()
+            .1
+            .split_once("Composer (footer)")
+            .unwrap()
+            .0;
+        assert!(tool_css.contains("--tool-log-text:"));
+        assert!(tool_css.contains("--tool-log-muted:"));
+        assert!(tool_css.contains("--tool-log-line:"));
+        assert!(tool_css.contains("border-left: 1px solid var(--tool-log-line)"));
+        assert!(tool_css.contains("background: transparent"));
+        assert!(tool_css.contains("color: var(--tool-log-text)"));
+        assert!(tool_css.contains("color: var(--tool-log-muted)"));
+        assert!(!tool_css.contains("border-radius: var(--r-md)"));
     }
 
     #[test]
