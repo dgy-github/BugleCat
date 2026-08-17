@@ -1382,54 +1382,6 @@
     <header class="topbar">
       <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
       <span class="title">{sessionTitle}</span>
-      <div class="model-wrap">
-        <button class="model-pill" onclick={() => { reasoningMenuOpen = false; modelMenuOpen = !modelMenuOpen; }}
-          disabled={models.length === 0} title="切换模型">
-          {currentModel || header} ▾
-        </button>
-        {#if modelMenuOpen}
-          <button class="menu-backdrop" aria-label="关闭" onclick={() => (modelMenuOpen = false)}></button>
-          <div class="model-menu" role="menu">
-            {#each models as m}
-              <button class="model-opt" role="menuitemradio" aria-checked={m === currentModel}
-                onclick={() => selectModel(m)}>
-                <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
-                <span class="opt-name">{m}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      <div class="reasoning-wrap">
-        <button class="reasoning-pill" onclick={() => { modelMenuOpen = false; reasoningMenuOpen = !reasoningMenuOpen; }}
-          disabled={busy} title="切换思考程度">
-          思考程度：{reasoningLabel(reasoningEffort)} ▾
-        </button>
-        {#if reasoningMenuOpen}
-          <button class="menu-backdrop" aria-label="关闭" onclick={() => (reasoningMenuOpen = false)}></button>
-          <div class="model-menu reasoning-menu" role="menu">
-            {#each REASONING_EFFORTS as option}
-              <button class="model-opt" role="menuitemradio" aria-checked={option.id === reasoningEffort}
-                onclick={() => selectReasoningEffort(option.id)}>
-                <span class="opt-check">{option.id === reasoningEffort ? "✓" : ""}</span>
-                <span class="opt-text">
-                  <span class="opt-name">{option.label}</span>
-                  <span class="opt-id">{option.desc}</span>
-                </span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      {#if sandboxMode}<span class="meta">{sandboxMode}</span>{/if}
-      <button
-        class="ws-pill"
-        class:warn={needsWorkspace}
-        onclick={chooseWorkspace}
-        title={needsWorkspace ? "当前在主目录（非项目），点击选择项目目录" : `工作区：${workspace}（点击切换）`}
-      >
-        📁 {needsWorkspace ? "选择项目目录" : wsName || "选择项目目录"}
-      </button>
       {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
       <span class="topbar-actions">
         <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">
@@ -1499,9 +1451,48 @@
 
     <footer>
       <div class="composer-meta">
+        <div class="model-wrap">
+          <button class="model-pill" onclick={() => { modeMenuOpen = false; reasoningMenuOpen = false; modelMenuOpen = !modelMenuOpen; }}
+            disabled={models.length === 0 || busy} title="切换模型">
+            {currentModel || header} ▾
+          </button>
+          {#if modelMenuOpen}
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modelMenuOpen = false)}></button>
+            <div class="model-menu" role="menu">
+              {#each models as m}
+                <button class="model-opt" role="menuitemradio" aria-checked={m === currentModel}
+                  onclick={() => selectModel(m)}>
+                  <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
+                  <span class="opt-name">{m}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <div class="reasoning-wrap">
+          <button class="reasoning-pill" onclick={() => { modeMenuOpen = false; modelMenuOpen = false; reasoningMenuOpen = !reasoningMenuOpen; }}
+            disabled={busy} title="切换 DeepSeek 思考模式">
+            思考：{reasoningLabel(reasoningEffort)} ▾
+          </button>
+          {#if reasoningMenuOpen}
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (reasoningMenuOpen = false)}></button>
+            <div class="model-menu reasoning-menu" role="menu">
+              {#each REASONING_EFFORTS as option}
+                <button class="model-opt" role="menuitemradio" aria-checked={option.id === reasoningEffort}
+                  onclick={() => selectReasoningEffort(option.id)}>
+                  <span class="opt-check">{option.id === reasoningEffort ? "✓" : ""}</span>
+                  <span class="opt-text">
+                    <span class="opt-name">{option.label}</span>
+                    <span class="opt-id">{option.desc}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
         <div class="approval-wrap">
           <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
-            onclick={() => (modeMenuOpen = !modeMenuOpen)}
+            onclick={() => { modelMenuOpen = false; reasoningMenuOpen = false; modeMenuOpen = !modeMenuOpen; }}
             title="权限模式（Claude Code 四态）">
             {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
           </button>
@@ -1519,8 +1510,16 @@
                 </button>
               {/each}
             </div>
-          {/if}
+            {/if}
         </div>
+        <button
+          class="ws-pill"
+          class:warn={needsWorkspace}
+          onclick={chooseWorkspace}
+          title={needsWorkspace ? "当前在主目录（非项目），点击选择项目目录" : `工作区：${workspace}（点击切换）`}
+        >
+          📁 {needsWorkspace ? "选择项目目录" : wsName || "选择项目目录"}
+        </button>
         {#if tokIn || tokOut}
           <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈"}{currencySymbol(priceCurrency)}{fmtCost(cost)}{/if}</span>
         {/if}

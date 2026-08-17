@@ -1406,6 +1406,35 @@ mod tests {
     }
 
     #[test]
+    fn session_controls_live_in_the_composer_with_apple_visual_tokens() {
+        let app = include_str!("../../src/App.svelte");
+        let topbar = app
+            .split_once("<header class=\"topbar\">")
+            .unwrap()
+            .1
+            .split_once("</header>")
+            .unwrap()
+            .0;
+        let composer = app
+            .split_once("<div class=\"composer-meta\">")
+            .unwrap()
+            .1
+            .split_once("{#if queued.length}")
+            .unwrap()
+            .0;
+        assert!(!topbar.contains("model-wrap"));
+        assert!(!topbar.contains("reasoning-wrap"));
+        assert!(!topbar.contains("ws-pill"));
+        assert!(composer.contains("model-wrap"));
+        assert!(composer.contains("reasoning-wrap"));
+        assert!(composer.contains("ws-pill"));
+
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains("--accent:       #0a84ff"));
+        assert!(css.contains("backdrop-filter: blur(28px)"));
+    }
+
+    #[test]
     fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
         let preset = CatalogModel {
             provider_id: "openai".into(),

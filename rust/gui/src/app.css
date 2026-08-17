@@ -1,41 +1,40 @@
 /* ============================================================================
-   nanocodex — Direction A: "Warm editorial / premium paper"
+   nanocodex — Apple-inspired system interface
    A single cohesive system driven by :root custom properties.
-   Sophisticated warm neutrals, one restrained accent, soft layered shadows,
-   comfortable type with strong hierarchy, legible monospace output.
+   Neutral system materials, restrained blue accent, soft depth, and compact
+   controls inspired by macOS without copying platform chrome.
    ========================================================================== */
 
 :root {
-  /* ---- Palette: warm paper + warm-grey ink -------------------------------- */
-  --paper:        #faf7f2;   /* app background (warm off-white) */
-  --paper-2:      #f4efe8;   /* recessed surfaces / tool panels */
-  --paper-3:      #efe8df;   /* deeper tint for nested code */
-  --surface:      #ffffff;   /* raised cards (bubbles, modal, header) */
-  --surface-soft: #fdfbf8;   /* near-white warm card */
+  /* ---- Palette: macOS system neutrals ------------------------------------- */
+  --paper:        #f5f5f7;
+  --paper-2:      #ebebef;
+  --paper-3:      #e3e3e8;
+  --surface:      #ffffff;
+  --surface-soft: #f9f9fb;
 
-  --ink:          #29251f;   /* primary text (warm near-black) */
-  --ink-2:        #5c554c;   /* secondary text */
-  --ink-3:        #8a8278;   /* muted / placeholder */
-  --ink-4:        #b3aaa0;   /* faintest hints */
+  --ink:          #1d1d1f;
+  --ink-2:        #48484a;
+  --ink-3:        #8e8e93;
+  --ink-4:        #aeaeb2;
 
-  --line:         #e7e0d6;   /* hairline borders */
-  --line-strong:  #d8cfc2;   /* input / interactive borders */
+  --line:         rgba(60, 60, 67, 0.12);
+  --line-strong:  rgba(60, 60, 67, 0.22);
 
-  /* Restrained single accent — warm terracotta */
-  --accent:       #c2562b;
+  --accent:       #007aff;
   --accent-ink:   #ffffff;
-  --accent-soft:  #f7e7df;   /* accent tint background */
-  --accent-deep:  #a8461f;   /* hover */
-  --accent-line:  #e9c3b1;
+  --accent-soft:  rgba(0, 122, 255, 0.12);
+  --accent-deep:  #0066d6;
+  --accent-line:  rgba(0, 122, 255, 0.35);
 
   /* Functional hues, desaturated to match the warm system */
-  --ok:           #3f7a4e;
-  --ok-deep:      #356642;
-  --danger:       #b23b32;
-  --warn:         #c08a2b;   /* spinner / running */
+  --ok:           #34c759;
+  --ok-deep:      #248a3d;
+  --danger:       #ff3b30;
+  --warn:         #ff9f0a;
 
   /* ---- Type ---------------------------------------------------------------- */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
                "Menlo", "Consolas", monospace;
 
@@ -57,19 +56,15 @@
   --sp-6: 2rem;
 
   /* ---- Radii --------------------------------------------------------------- */
-  --r-sm: 7px;
-  --r-md: 11px;
-  --r-lg: 16px;
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
   --r-pill: 999px;
 
-  /* ---- Shadows: soft, warm, layered --------------------------------------- */
-  --sh-1: 0 1px 2px rgba(58, 46, 33, 0.05),
-          0 1px 1px rgba(58, 46, 33, 0.04);
-  --sh-2: 0 2px 4px rgba(58, 46, 33, 0.05),
-          0 6px 14px rgba(58, 46, 33, 0.07);
-  --sh-3: 0 4px 10px rgba(58, 46, 33, 0.08),
-          0 18px 44px rgba(46, 35, 22, 0.18);
-  --ring: 0 0 0 3px rgba(194, 86, 43, 0.16);
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --sh-2: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --sh-3: 0 18px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+  --ring: 0 0 0 3px rgba(0, 122, 255, 0.22);
 
   --dur: 140ms;
   --ease: cubic-bezier(0.2, 0.6, 0.25, 1);
@@ -95,9 +90,7 @@ main {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background:
-    radial-gradient(1200px 600px at 80% -10%, rgba(194, 86, 43, 0.035), transparent 60%),
-    var(--paper);
+  background: var(--paper);
 }
 
 /* ============================================================================
@@ -988,42 +981,38 @@ button:disabled {
   }
 }
 
-/* ============================================================================
-   Optional dark variant — tasteful warm graphite paper.
-   Activates automatically when the OS prefers dark; the light theme stays
-   primary. Same custom-property system, no other rules need to change.
-   ========================================================================== */
+/* Dark variant follows macOS neutral graphite with system-blue emphasis. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper:        #1c1916;
-    --paper-2:      #232019;
-    --paper-3:      #2a261f;
-    --surface:      #25211b;
-    --surface-soft: #292419;
+    --paper:        #0d0d0f;
+    --paper-2:      #151518;
+    --paper-3:      #1d1d21;
+    --surface:      #1c1c1e;
+    --surface-soft: #232326;
 
-    --ink:          #f2ece2;
-    --ink-2:        #c5bcae;
-    --ink-3:        #968d7f;
-    --ink-4:        #6f675b;
+    --ink:          #f5f5f7;
+    --ink-2:        #d1d1d6;
+    --ink-3:        #8e8e93;
+    --ink-4:        #636366;
 
-    --line:         #36302a;
-    --line-strong:  #453e35;
+    --line:         rgba(255, 255, 255, 0.08);
+    --line-strong:  rgba(255, 255, 255, 0.15);
 
-    --accent:       #e0703f;
-    --accent-ink:   #1c1916;
-    --accent-soft:  #3a2a22;
-    --accent-deep:  #f0824f;
-    --accent-line:  #5a3d2e;
+    --accent:       #0a84ff;
+    --accent-ink:   #ffffff;
+    --accent-soft:  rgba(10, 132, 255, 0.15);
+    --accent-deep:  #409cff;
+    --accent-line:  rgba(10, 132, 255, 0.42);
 
-    --ok:           #5aa06b;
-    --ok-deep:      #6cb27d;
-    --danger:       #e08078;
-    --warn:         #e0aa55;
+    --ok:           #30d158;
+    --ok-deep:      #32d74b;
+    --danger:       #ff453a;
+    --warn:         #ffd60a;
 
-    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --sh-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 18px rgba(0, 0, 0, 0.4);
-    --sh-3: 0 6px 14px rgba(0, 0, 0, 0.5), 0 24px 54px rgba(0, 0, 0, 0.55);
-    --ring: 0 0 0 3px rgba(224, 112, 63, 0.28);
+    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.34);
+    --sh-2: 0 6px 18px rgba(0, 0, 0, 0.32), 0 1px 4px rgba(0, 0, 0, 0.4);
+    --sh-3: 0 24px 64px rgba(0, 0, 0, 0.58), 0 4px 14px rgba(0, 0, 0, 0.45);
+    --ring: 0 0 0 3px rgba(10, 132, 255, 0.30);
   }
   .user .bubble { color: #fff; }
   .abtns .ok, .restore { color: #14110d; }
@@ -1037,38 +1026,38 @@ button:disabled {
   font-variant-ligatures: none;
 }
 
-/* Dark theme — pure semantic-token swap; every selector already reads these. */
+/* Keep the late synthesis override aligned with the same Apple system tokens. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper:        #1a1713;
-    --paper-2:      #211c17;
-    --paper-3:      #2a241d;
-    --surface:      #231e18;
-    --surface-soft: #271f17;
+    --paper:        #0d0d0f;
+    --paper-2:      #151518;
+    --paper-3:      #1d1d21;
+    --surface:      #1c1c1e;
+    --surface-soft: #232326;
 
-    --ink:          #f2ebe0;
-    --ink-2:        #cabfb0;
-    --ink-3:        #9a8e7e;
-    --ink-4:        #6e6457;
+    --ink:          #f5f5f7;
+    --ink-2:        #d1d1d6;
+    --ink-3:        #8e8e93;
+    --ink-4:        #636366;
 
-    --line:         #332c24;
-    --line-strong:  #463d32;
+    --line:         rgba(255, 255, 255, 0.08);
+    --line-strong:  rgba(255, 255, 255, 0.15);
 
-    --accent:       #d2693c;
+    --accent:       #0a84ff;
     --accent-ink:   #ffffff;
-    --accent-soft:  #3a2317;
-    --accent-deep:  #e07c4c;
-    --accent-line:  #5a3a28;
+    --accent-soft:  rgba(10, 132, 255, 0.15);
+    --accent-deep:  #409cff;
+    --accent-line:  rgba(10, 132, 255, 0.42);
 
-    --ok:           #5fae71;
-    --ok-deep:      #4f9760;
-    --danger:       #e57064;
-    --warn:         #d9a441;
+    --ok:           #30d158;
+    --ok-deep:      #32d74b;
+    --danger:       #ff453a;
+    --warn:         #ffd60a;
 
-    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.30);
-    --sh-2: 0 2px 6px rgba(0, 0, 0, 0.34), 0 8px 18px rgba(0, 0, 0, 0.30);
-    --sh-3: 0 6px 16px rgba(0, 0, 0, 0.42), 0 22px 50px rgba(0, 0, 0, 0.50);
-    --ring: 0 0 0 3px rgba(210, 105, 60, 0.30);
+    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.34);
+    --sh-2: 0 6px 18px rgba(0, 0, 0, 0.32), 0 1px 4px rgba(0, 0, 0, 0.4);
+    --sh-3: 0 24px 64px rgba(0, 0, 0, 0.58), 0 4px 14px rgba(0, 0, 0, 0.45);
+    --ring: 0 0 0 3px rgba(10, 132, 255, 0.30);
   }
   main { background: var(--paper); }
 }
@@ -1794,3 +1783,139 @@ main.app { flex-direction: row; }
 .model-opt:hover { background: var(--paper-2); box-shadow: none; }
 .model-opt:active { transform: none; }
 .model-opt .opt-name { font-size: var(--fs-sm); font-family: var(--font-mono); font-variant-ligatures: none; }
+
+/* ── Apple-inspired material and layout finish ───────────────────────────── */
+body { overflow: hidden; }
+
+.sidebar {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(28px) saturate(1.25);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
+  border-right-color: var(--line);
+  padding: 0.8rem;
+}
+.side-head { min-height: 2.65rem; padding-inline: 0.55rem; }
+.side-brand { font-weight: 700; letter-spacing: -0.025em; }
+.side-collapse, .foot-gear, .foot-ws {
+  background: color-mix(in srgb, var(--surface-soft) 78%, transparent);
+  border-color: var(--line);
+}
+.new-session {
+  min-height: 2.75rem;
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
+  border-color: var(--line);
+  border-radius: var(--r-md);
+  box-shadow: none;
+}
+.new-session:hover, .recent-item:hover, .foot-ws:hover, .foot-gear:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.recent-item { border-radius: var(--r-md); }
+.recent-item.active {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.side-foot { border-top-color: var(--line); padding-top: 0.7rem; }
+
+.topbar {
+  min-height: 3.45rem;
+  padding: 0.65rem 1rem;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  backdrop-filter: blur(28px) saturate(1.25);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
+  box-shadow: 0 1px 0 var(--line);
+}
+.topbar .title { font-size: var(--fs-md); font-weight: 650; letter-spacing: -0.015em; }
+.collapse, .tbtn {
+  width: 2rem;
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  justify-content: center;
+  border-radius: 10px;
+}
+.topbar-actions { gap: 0.2rem; }
+.tbtn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); border-color: transparent; }
+
+.scroll {
+  padding: clamp(1.1rem, 3vw, 2.2rem) clamp(1rem, 5vw, 4.5rem) 2rem;
+  background: var(--paper);
+}
+.bubble { border-radius: 17px; box-shadow: none; }
+.assistant .bubble { background: var(--surface-soft); border-color: var(--line); }
+.user .bubble { border-color: transparent; border-bottom-right-radius: 6px; }
+.tool { border-radius: var(--r-md); background: var(--surface-soft); border-color: var(--line); }
+
+footer {
+  gap: 0.65rem;
+  padding: 0.7rem clamp(1rem, 3vw, 2rem) 1rem;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: blur(28px) saturate(1.25);
+  -webkit-backdrop-filter: blur(28px) saturate(1.25);
+  border-top-color: var(--line);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.06);
+}
+.composer-meta {
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-height: 2rem;
+  padding-inline: 0.15rem;
+}
+.composer-meta .usage { margin-left: auto; }
+.composer-meta .model-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+.model-pill, .reasoning-pill, .approval-pill, .ws-pill {
+  min-height: 1.95rem;
+  padding: 0.25rem 0.72rem;
+  background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
+  color: var(--ink-2);
+  border-color: var(--line-strong);
+  box-shadow: none;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.ws-pill { max-width: min(22rem, 32vw); }
+.model-pill:hover:not(:disabled), .reasoning-pill:hover:not(:disabled),
+.approval-pill:hover, .ws-pill:hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+.approval-pill.danger { background: color-mix(in srgb, var(--danger) 13%, transparent); }
+.model-menu, .approval-menu, .slash-menu {
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  border-color: var(--line-strong);
+  border-radius: 14px;
+  padding: 0.38rem;
+}
+.model-opt, .approval-opt { border-radius: 10px; padding: 0.5rem 0.62rem; }
+.model-opt:hover, .approval-opt:hover { background: var(--accent-soft); }
+
+.composer-row { gap: 0.55rem; }
+textarea {
+  min-height: 3rem;
+  padding: 0.72rem 0.9rem;
+  background: color-mix(in srgb, var(--surface-soft) 90%, transparent);
+  border-color: var(--line-strong);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+textarea:focus { background: var(--surface-soft); border-color: var(--accent); box-shadow: var(--ring); }
+.composer-row > button:not(.stop-btn) { min-height: 3rem; border-radius: 15px; }
+.toolbtn.attach { width: 3rem; padding: 0; justify-content: center; }
+
+.overlay {
+  background: rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.modal, .rightpanel {
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(28px) saturate(1.2);
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
+}
+.modal { border-color: var(--line-strong); border-radius: 20px; }
+.rightpanel { border-left-color: var(--line); }
