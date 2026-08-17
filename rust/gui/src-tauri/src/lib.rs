@@ -1399,6 +1399,10 @@ mod tests {
         assert!(app.contains("class=\"reasoning-pill\""));
         assert!(app.contains("思考程度"));
         assert!(app.contains("selectReasoningEffort"));
+        assert!(app.contains("智能体自动"));
+        assert!(app.contains("智能体增强"));
+        assert!(!app.contains("{ id: \"low\", label:"));
+        assert!(!app.contains("{ id: \"medium\", label:"));
     }
 
     #[test]

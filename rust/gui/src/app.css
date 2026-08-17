@@ -1732,6 +1732,7 @@ main.app { flex-direction: row; }
   cursor: pointer;
 }
 .reasoning-pill { font-family: var(--font-sans); white-space: nowrap; }
+.reasoning-menu { min-width: 320px; }
 .model-pill:hover:not(:disabled), .reasoning-pill:hover:not(:disabled) { background: var(--paper-3); color: var(--ink); box-shadow: none; }
 .model-pill:active, .reasoning-pill:active { transform: none; }
 .model-pill:disabled, .reasoning-pill:disabled { cursor: default; color: var(--ink-3); }

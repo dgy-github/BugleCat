@@ -341,12 +341,10 @@
   let reasoningEffort = $state("auto");
   let reasoningMenuOpen = $state(false);
   const REASONING_EFFORTS = [
-    { id: "auto", label: "自动" },
-    { id: "off", label: "关闭" },
-    { id: "low", label: "低" },
-    { id: "medium", label: "中" },
-    { id: "high", label: "高" },
-    { id: "max", label: "最高" },
+    { id: "auto", label: "智能体自动", desc: "普通请求用高强度，复杂智能体任务自动增强" },
+    { id: "off", label: "关闭思考", desc: "直接回答，不启用思考模式" },
+    { id: "high", label: "深度思考", desc: "启用 DeepSeek high 思考强度" },
+    { id: "max", label: "智能体增强", desc: "启用 DeepSeek max，适合复杂工具任务" },
   ];
   const reasoningLabel = (id: string) => REASONING_EFFORTS.find((option) => option.id === id)?.label ?? id;
   async function selectReasoningEffort(id: string) {
@@ -1414,7 +1412,10 @@
               <button class="model-opt" role="menuitemradio" aria-checked={option.id === reasoningEffort}
                 onclick={() => selectReasoningEffort(option.id)}>
                 <span class="opt-check">{option.id === reasoningEffort ? "✓" : ""}</span>
-                <span class="opt-name">{option.label}</span>
+                <span class="opt-text">
+                  <span class="opt-name">{option.label}</span>
+                  <span class="opt-id">{option.desc}</span>
+                </span>
               </button>
             {/each}
           </div>
