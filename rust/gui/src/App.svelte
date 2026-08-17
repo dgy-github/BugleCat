@@ -108,9 +108,11 @@
   let checkpointLabel = $state("");
   let checkpointBusy = $state(false);
 
+  type ToolEntry = { name: string; args?: string; result?: string };
+  type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; expanded: boolean };
   type Msg =
     | { role: "user" | "assistant" | "note"; text: string }
-    | { role: "tool"; name: string; args?: string; result?: string; collapsed?: boolean };
+    | ToolGroup;
 
   let messages = $state<Msg[]>([]);
   let input = $state("");
@@ -162,18 +164,10 @@
       : "手动设置的价格，程序无法验证其是否为厂商官方价";
   }
 
-  // ── Collapsible tool output ───────────────────────────────────────────────
-  // Large results auto-collapse so a single dump can't bury the conversation.
-  const COLLAPSE_LINES = 12;
-  const COLLAPSE_CHARS = 800;
-  const isLong = (s: string) =>
-    !!s && (s.length > COLLAPSE_CHARS || s.split("\n").length > COLLAPSE_LINES);
+  // ── Quiet, grouped tool activity ─────────────────────────────────────────
+  // Routine command lines stay out of the conversation; failures expand
+  // automatically, while every detail remains available on demand.
   const lineCount = (s: string = "") => (s ? s.split("\n").length : 0);
-  // Multi-line → "N 行"; single long line → "N 字" so a char-triggered collapse isn't mislabeled.
-  const collapsedHint = (s: string = "") => {
-    const lines = lineCount(s);
-    return lines > 1 ? `${lines} 行 · 点击展开` : `${s.length} 字 · 点击展开`;
-  };
   // Classify a finished tool result so the outcome (报错 / 无输出 / N 行) is
   // visible at a glance — a bare "Exit code: 0" otherwise reads as "no info".
   const toolOutcome = (result: string = ""): "err" | "empty" | "ok" => {
@@ -195,6 +189,21 @@
   const toolStatusLabel = (result: string = "") => {
     const oc = toolOutcome(result);
     return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
+  };
+  const groupRunning = (m: ToolGroup) => m.tools.filter((tool) => tool.result === undefined).length;
+  const groupFailed = (m: ToolGroup) => m.tools.filter(
+    (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
+  ).length;
+  const groupFinished = (m: ToolGroup) => m.tools.length - groupRunning(m) - groupFailed(m);
+  const groupStatusLabel = (m: ToolGroup) => {
+    const parts: string[] = [];
+    const finished = groupFinished(m);
+    const failed = groupFailed(m);
+    const running = groupRunning(m);
+    if (finished) parts.push(`${finished} 完成`);
+    if (failed) parts.push(`${failed} 失败`);
+    if (running) parts.push(`${running} 运行中`);
+    return parts.join(" · ");
   };
   // Per-line class for unified-diff coloring.
   const diffLineClass = (ln: string) => {
@@ -307,8 +316,8 @@
       checkpointFiles = { ...checkpointFiles, [id]: [`加载失败：${e}`] };
     }
   }
-  function toggleTool(m: Msg) {
-    if (m.role === "tool" && m.result !== undefined) m.collapsed = !m.collapsed;
+  function toggleToolGroup(m: ToolGroup) {
+    m.expanded = !m.expanded;
   }
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
@@ -509,7 +518,12 @@
             if (m && m.role === "assistant" && m.text.trim() === "") messages.splice(streamingIdx, 1);
           }
           streamingIdx = null;
-          messages.push({ role: "tool", name: p.name, args: p.args });
+          {
+            const last = messages.at(-1);
+            const entry: ToolEntry = { name: p.name, args: p.args };
+            if (last?.role === "tool_group") last.tools.push(entry);
+            else messages.push({ role: "tool_group", tools: [entry], expanded: false });
+          }
           break;
         case "approval":
           approval = { id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
@@ -524,18 +538,27 @@
           questionAnswer = "";
           break;
         case "tool_result": {
-          // Results preserve dispatch order, so pair with the earliest pending call.
-          const pendingIndex = messages.findIndex(
-            (m) => m.role === "tool" && m.name === p.name && m.result === undefined,
-          );
-          if (toolOutcome(p.result) === "err") {
-            if (pendingIndex >= 0) messages.splice(pendingIndex, 1);
-            break;
+          // Results preserve dispatch order, so pair with the earliest pending
+          // call across the compact groups. Failures stay visible and open.
+          let pendingGroup: ToolGroup | undefined;
+          let pendingTool: ToolEntry | undefined;
+          for (const message of messages) {
+            if (message.role !== "tool_group") continue;
+            const candidate = message.tools.find(
+              (tool) => tool.name === p.name && tool.result === undefined,
+            );
+            if (candidate) {
+              pendingGroup = message;
+              pendingTool = candidate;
+              break;
+            }
           }
-          const collapsed = isLong(p.result);
-          const pending = messages[pendingIndex] as Extract<Msg, { role: "tool" }> | undefined;
-          if (pendingIndex >= 0 && pending) { pending.result = p.result; pending.collapsed = collapsed; }
-          else messages.push({ role: "tool", name: p.name, result: p.result, collapsed });
+          if (pendingTool && pendingGroup) pendingTool.result = p.result;
+          else {
+            pendingGroup = { role: "tool_group", tools: [{ name: p.name, result: p.result }], expanded: false };
+            messages.push(pendingGroup);
+          }
+          if (toolOutcome(p.result) === "err") pendingGroup.expanded = true;
           break;
         }
         case "done":
@@ -1416,30 +1439,33 @@
           <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
-        {:else if m.role === "tool"}
-          <div class="tool" class:collapsed={m.collapsed} class:running={m.result === undefined}>
-            <button
-              class="tool-head"
-              onclick={() => toggleTool(m)}
-              disabled={m.result === undefined}
-              aria-expanded={m.result !== undefined && !m.collapsed}
-              title={m.result === undefined ? "运行中…" : m.collapsed ? "展开" : "折叠"}
-            >
-              <span class="tcaret" aria-hidden="true">{m.result === undefined ? "•" : m.collapsed ? "▸" : "▾"}</span>
-              <span class="tname">⚙ {m.name}</span>
-              {#if m.args}<code class="targs">{m.args}</code>{/if}
-              {#if m.result === undefined}
-                <span class="trunning">运行中…</span>
-              {:else}
-                <span class="tstatus {toolOutcome(m.result)}">{toolStatusLabel(m.result)}</span>
-              {/if}
+        {:else if m.role === "tool_group"}
+          <div class="tool-group" class:running={groupRunning(m) > 0} class:error={groupFailed(m) > 0}>
+            <button class="tool-group-head" onclick={() => toggleToolGroup(m)} aria-expanded={m.expanded}>
+              <span class="tcaret" aria-hidden="true">{m.expanded ? "▾" : "▸"}</span>
+              <span class="tool-group-title">执行 {m.tools.length} 项操作</span>
+              <span class="tool-group-status">{groupStatusLabel(m)}</span>
             </button>
-            {#if m.result !== undefined && !m.collapsed}
-              {#if toolOutcome(m.result) === "empty"}
-                <pre class="tresult tempty">（命令无输出 · 退出码 0）</pre>
-              {:else}
-                <pre class="tresult">{m.result}</pre>
-              {/if}
+            {#if m.expanded}
+              <div class="tool-group-list">
+                {#each m.tools as tool, index}
+                  <details class="tool-item" open={tool.result !== undefined && toolOutcome(tool.result) === "err"}>
+                    <summary>
+                      <span class="tool-index">{index + 1}</span>
+                      <span class="tname">{tool.name}</span>
+                      {#if tool.result === undefined}
+                        <span class="trunning">运行中</span>
+                      {:else}
+                        <span class="tstatus {toolOutcome(tool.result)}">{toolStatusLabel(tool.result)}</span>
+                      {/if}
+                    </summary>
+                    {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
+                    {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
+                      <pre class="tool-detail tool-result">{tool.result}</pre>
+                    {/if}
+                  </details>
+                {/each}
+              </div>
             {/if}
           </div>
         {/if}

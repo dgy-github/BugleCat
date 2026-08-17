@@ -326,33 +326,30 @@ header {
 /* ============================================================================
    Tool calls
    ========================================================================== */
-.tool {
+.tool-group {
   font-size: var(--fs-sm);
-  background: var(--paper-2);
-  border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--line-strong); /* visible spine so a run of tool
-                                                blocks doesn't read as empty bars */
+  background: color-mix(in srgb, var(--surface-soft) 86%, transparent);
+  border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: var(--sh-1);
+  box-shadow: none;
   overflow: hidden;
 }
-/* Running tool: amber pulsing spine + caret, so "processing" looks active. */
-.tool.running { border-left-color: var(--warn); background: var(--surface-soft); }
-.tool.running .tcaret { color: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
-/* Clickable header row — fully neutralizes the global accent button. */
-.tool-head {
+.tool-group.running { border-left: 2px solid var(--warn); }
+.tool-group.error { border-left: 2px solid var(--danger); }
+.tool-group.running .tcaret { color: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
+.tool-group-head {
   display: flex;
   align-items: center;
-  gap: var(--sp-1);
+  gap: 0.5rem;
   width: 100%;
-  min-height: auto;
+  min-height: 2.5rem;
   text-align: left;
-  background: none;
+  background: transparent;
   color: var(--ink);
   border: none;
   border-radius: 0;
   box-shadow: none;
-  padding: 0.45rem 0.6rem;
+  padding: 0.5rem 0.7rem;
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: 500;
@@ -360,31 +357,61 @@ header {
   cursor: pointer;
   transition: background var(--dur) var(--ease);
 }
-.tool-head:hover:not(:disabled) { background: var(--paper-3); box-shadow: none; }
-.tool-head:active { transform: none; }
-.tool-head:disabled { cursor: default; }
-.tool-head:focus-visible { outline: none; box-shadow: var(--ring) inset; }
+.tool-group-head:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); box-shadow: none; }
+.tool-group-head:active { transform: none; }
+.tool-group-head:focus-visible { outline: none; box-shadow: var(--ring) inset; }
 .tcaret {
   flex: 0 0 0.9rem;
   text-align: center;
   color: var(--ink-3);
   font-size: var(--fs-xs);
 }
+.tool-group-title { font-weight: 650; color: var(--ink); }
+.tool-group-status {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.tool-group.running .tool-group-status { color: var(--warn); }
+.tool-group.error .tool-group-status { color: var(--danger); }
+.tool-group-list {
+  border-top: 1px solid var(--line);
+  padding: 0.3rem;
+  display: grid;
+  gap: 0.2rem;
+}
+.tool-item {
+  border-radius: 9px;
+  overflow: hidden;
+}
+.tool-item summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.1rem;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  list-style: none;
+}
+.tool-item summary::-webkit-details-marker { display: none; }
+.tool-item summary:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.tool-index {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--ink-3);
+  background: var(--paper-2);
+  font-size: 0.65rem;
+}
 .tname {
   flex: 0 0 auto;
-  font-weight: 650;
-  color: var(--ink);
+  font-weight: 600;
+  color: var(--ink-2);
   letter-spacing: -0.005em;
-}
-.targs {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--ink-3);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .trunning {
   flex: 0 0 auto;
@@ -393,15 +420,6 @@ header {
   font-style: italic;
   animation: pulse 1.1s ease-in-out infinite;
 }
-.tcollapsed-hint {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: var(--sp-2);
-  color: var(--ink-3);
-  font-size: var(--fs-xs);
-  white-space: nowrap;
-}
-/* Outcome chip on a finished tool block (报错 / 无输出 / N 行). */
 .tstatus {
   flex: 0 0 auto;
   margin-left: auto;
@@ -414,12 +432,11 @@ header {
 .tstatus.ok { color: var(--ok); background: rgba(63, 122, 78, 0.1); }
 .tstatus.empty { color: var(--ink-3); background: var(--paper-3); }
 .tstatus.err { color: var(--danger); background: var(--accent-soft); }
-.tresult.tempty { color: var(--ink-3); font-style: italic; }
-.tresult {
+.tool-detail {
   margin: 0;
+  border: 0;
   border-top: 1px solid var(--line);
-  border-radius: 0;
-  max-height: 14rem;
+  max-height: 12rem;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -430,8 +447,10 @@ header {
   background: var(--paper-3);
   padding: 0.55rem 0.65rem;
 }
-.tresult::-webkit-scrollbar { width: 10px; height: 10px; }
-.tresult::-webkit-scrollbar-thumb {
+.tool-args { color: var(--ink-3); }
+.tool-result { border-top-style: dashed; }
+.tool-detail::-webkit-scrollbar { width: 10px; height: 10px; }
+.tool-detail::-webkit-scrollbar-thumb {
   background: var(--line-strong);
   border: 3px solid var(--paper-3);
   border-radius: var(--r-pill);
@@ -1855,7 +1874,7 @@ body { overflow: hidden; }
 .bubble { border-radius: 17px; box-shadow: none; }
 .assistant .bubble { background: var(--surface-soft); border-color: var(--line); }
 .user .bubble { border-color: transparent; border-bottom-right-radius: 6px; }
-.tool { border-radius: var(--r-md); background: var(--surface-soft); border-color: var(--line); }
+.tool-group { border-radius: var(--r-md); background: var(--surface-soft); border-color: var(--line); }
 
 footer {
   gap: 0.65rem;
