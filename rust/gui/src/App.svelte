@@ -703,7 +703,9 @@
     // Images route through the vision pipeline; other files become @mentions.
     const images = attached.filter(isImage);
     const files = attached.filter((p) => !isImage(p));
-    const mentions = files.map((p) => `@${p}`).join(" ");
+    // File-picker paths can contain spaces. Quoted mentions keep each absolute
+    // path as one token for the backend's attachment expander.
+    const mentions = files.map((p) => `@"${p}"`).join(" ");
     const fullText = [text, mentions].filter(Boolean).join("\n");
     const shown = attached.length ? `${text}${text ? "\n" : ""}📎 ${attached.map(baseName).join(", ")}` : text;
     input = "";
