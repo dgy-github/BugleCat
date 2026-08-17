@@ -66,3 +66,6 @@ bench/tasks/gen_*/
 # nanocodex agent runtime state (session log, checkpoints, project memory)
 .nanocodex/
 .ncx/
+
+# 本地隔离工作区
+.worktrees/
