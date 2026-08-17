@@ -1438,11 +1438,9 @@ mod tests {
     }
 
     #[test]
-    fn tool_activity_is_grouped_with_quiet_details_by_default() {
+    fn tool_activity_shows_each_compact_item_with_details_on_demand() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("role: \"tool_group\""));
-        assert!(app.contains("expanded: false"));
-        assert!(app.contains("执行 {m.tools.length} 项操作"));
 
         let group = app
             .split_once("{:else if m.role === \"tool_group\"}")
@@ -1451,17 +1449,22 @@ mod tests {
             .split_once("{#if busy && streamingIdx === null}")
             .unwrap()
             .0;
-        let summary = group
-            .split_once("<button class=\"tool-group-head\"")
+        assert!(group.contains("{#each m.tools as tool}"));
+        assert!(!group.contains("执行 {m.tools.length} 项操作"));
+        let item = group
+            .split_once("<details class=\"tool-event\"")
             .unwrap()
             .1
-            .split_once("</button>")
+            .split_once("</details>")
             .unwrap()
             .0;
+        let summary = item.split_once("</summary>").unwrap().0;
+        assert!(summary.contains("tool.name"));
         assert!(!summary.contains("tool.args"));
-        assert!(!summary.contains("tool.result"));
-        assert!(group.contains("<details"));
-        assert!(group.contains("toolOutcome(tool.result) === \"err\""));
+        assert!(!summary.contains("tool.result}"));
+        assert!(item.contains("tool.args"));
+        assert!(item.contains("tool.result"));
+        assert!(!item.contains("open="));
     }
 
     #[test]

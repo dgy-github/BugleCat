@@ -109,7 +109,7 @@
   let checkpointBusy = $state(false);
 
   type ToolEntry = { name: string; args?: string; result?: string };
-  type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; expanded: boolean };
+  type ToolGroup = { role: "tool_group"; tools: ToolEntry[] };
   type Msg =
     | { role: "user" | "assistant" | "note"; text: string }
     | ToolGroup;
@@ -190,21 +190,6 @@
   const toolStatusLabel = (result: string = "") => {
     const oc = toolOutcome(result);
     return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
-  };
-  const groupRunning = (m: ToolGroup) => m.tools.filter((tool) => tool.result === undefined).length;
-  const groupFailed = (m: ToolGroup) => m.tools.filter(
-    (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
-  ).length;
-  const groupFinished = (m: ToolGroup) => m.tools.length - groupRunning(m) - groupFailed(m);
-  const groupStatusLabel = (m: ToolGroup) => {
-    const parts: string[] = [];
-    const finished = groupFinished(m);
-    const failed = groupFailed(m);
-    const running = groupRunning(m);
-    if (finished) parts.push(`${finished} 完成`);
-    if (failed) parts.push(`${failed} 失败`);
-    if (running) parts.push(`${running} 运行中`);
-    return parts.join(" · ");
   };
   // Per-line class for unified-diff coloring.
   const diffLineClass = (ln: string) => {
@@ -316,9 +301,6 @@
     } catch (e) {
       checkpointFiles = { ...checkpointFiles, [id]: [`加载失败：${e}`] };
     }
-  }
-  function toggleToolGroup(m: ToolGroup) {
-    m.expanded = !m.expanded;
   }
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
@@ -523,7 +505,7 @@
             const last = messages.at(-1);
             const entry: ToolEntry = { name: p.name, args: p.args };
             if (last?.role === "tool_group") last.tools.push(entry);
-            else messages.push({ role: "tool_group", tools: [entry], expanded: false });
+            else messages.push({ role: "tool_group", tools: [entry] });
           }
           break;
         case "approval":
@@ -556,10 +538,9 @@
           }
           if (pendingTool && pendingGroup) pendingTool.result = p.result;
           else {
-            pendingGroup = { role: "tool_group", tools: [{ name: p.name, result: p.result }], expanded: false };
+            pendingGroup = { role: "tool_group", tools: [{ name: p.name, result: p.result }] };
             messages.push(pendingGroup);
           }
-          if (toolOutcome(p.result) === "err") pendingGroup.expanded = true;
           break;
         }
         case "done":
@@ -1458,33 +1439,28 @@
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool_group"}
-          <div class="tool-group" class:running={groupRunning(m) > 0} class:error={groupFailed(m) > 0}>
-            <button class="tool-group-head" onclick={() => toggleToolGroup(m)} aria-expanded={m.expanded}>
-              <span class="tcaret" aria-hidden="true">{m.expanded ? "▾" : "▸"}</span>
-              <span class="tool-group-title">执行 {m.tools.length} 项操作</span>
-              <span class="tool-group-status">{groupStatusLabel(m)}</span>
-            </button>
-            {#if m.expanded}
-              <div class="tool-group-list">
-                {#each m.tools as tool, index}
-                  <details class="tool-item" open={tool.result !== undefined && toolOutcome(tool.result) === "err"}>
-                    <summary>
-                      <span class="tool-index">{index + 1}</span>
-                      <span class="tname">{tool.name}</span>
-                      {#if tool.result === undefined}
-                        <span class="trunning">运行中</span>
-                      {:else}
-                        <span class="tstatus {toolOutcome(tool.result)}">{toolStatusLabel(tool.result)}</span>
-                      {/if}
-                    </summary>
-                    {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
-                    {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
-                      <pre class="tool-detail tool-result">{tool.result}</pre>
-                    {/if}
-                  </details>
-                {/each}
-              </div>
-            {/if}
+          <div class="tool-timeline">
+            {#each m.tools as tool}
+              <details class="tool-event"
+                class:running={tool.result === undefined}
+                class:error={tool.result !== undefined && toolOutcome(tool.result) === "err"}
+              >
+                <summary>
+                  <span class="tool-event-caret" aria-hidden="true">›</span>
+                  <span class="tool-event-icon" aria-hidden="true">⚙</span>
+                  <span class="tname">{tool.name}</span>
+                  {#if tool.result === undefined}
+                    <span class="trunning">运行中</span>
+                  {:else}
+                    <span class="tstatus {toolOutcome(tool.result)}">{toolOutcome(tool.result) === "err" ? "失败" : "完成"}</span>
+                  {/if}
+                </summary>
+                {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
+                {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
+                  <pre class="tool-detail tool-result">{tool.result}</pre>
+                {/if}
+              </details>
+            {/each}
           </div>
         {/if}
       {/each}
