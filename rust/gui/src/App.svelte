@@ -30,6 +30,8 @@
   type Settings = {
     model: string;
     base_url: string;
+    vl_model: string;
+    vl_base_url: string;
     sandbox_mode: string;
     approval_policy: string;
     reasoning_effort: string;
@@ -44,6 +46,8 @@
     price_currency: "CNY" | "USD";
     api_key_masked: string;
     has_api_key: boolean;
+    vl_api_key_masked: string;
+    has_vl_api_key: boolean;
     available_models: string[];
     sandbox_modes: string[];
     approval_policies: string[];
@@ -55,6 +59,7 @@
   let settings = $state<Settings | null>(null);
   let configLocation = $state<ConfigLocation | null>(null);
   let apiKeyInput = $state("");
+  let vlApiKeyInput = $state("");
   let saving = $state(false);
 
   type CatalogModel = {
@@ -765,6 +770,7 @@
       configLocation = loadedLocation;
       modelCatalog = loadedCatalog;
       apiKeyInput = "";
+      vlApiKeyInput = "";
     } catch (e) {
       messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
@@ -835,6 +841,8 @@
     const updates: Record<string, string> = {
       model: settings.model,
       base_url: settings.base_url,
+      vl_model: settings.vl_model,
+      vl_base_url: settings.vl_base_url,
       reasoning_effort: settings.reasoning_effort,
       max_iterations: String(settings.max_iterations),
       max_tool_calls: String(settings.max_tool_calls),
@@ -847,6 +855,7 @@
       price_currency: settings.price_currency,
     };
     if (apiKeyInput.trim()) updates.api_key = apiKeyInput.trim();
+    if (vlApiKeyInput.trim()) updates.vl_api_key = vlApiKeyInput.trim();
     try {
       await invoke("save_settings", { updates });
       priceIn = Number(settings.price_in) || 0; // reflect new rate immediately
@@ -854,6 +863,7 @@
       priceCurrency = settings.price_currency;
       settings = null;
       apiKeyInput = "";
+      vlApiKeyInput = "";
     } catch (e) {
       messages.push({ role: "note", text: `保存设置失败：${e}` });
     }
@@ -1948,6 +1958,25 @@
             type="password"
             bind:value={apiKeyInput}
             placeholder={settings.has_api_key ? `保持当前（${settings.api_key_masked}）` : "设置 API 密钥"}
+          />
+        </label>
+        <p class="settings-note">
+          图片附件会发送到下面的视觉解析模型。接口地址或密钥留空时，会沿用上面的主模型配置。
+        </p>
+        <label>
+          <span>图片/文件解析模型</span>
+          <input bind:value={settings.vl_model} placeholder="例如：qwen-vl-max" />
+        </label>
+        <label>
+          <span>图片/文件解析接口</span>
+          <input bind:value={settings.vl_base_url} placeholder="留空则沿用主模型接口" />
+        </label>
+        <label>
+          <span>解析接口密钥</span>
+          <input
+            type="password"
+            bind:value={vlApiKeyInput}
+            placeholder={settings.has_vl_api_key ? `保持当前（${settings.vl_api_key_masked}）` : "留空则沿用主模型密钥"}
           />
         </label>
         <div class="abtns">

@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ncx_config::{
-    load_config, write_nanocodex_config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
+    load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
 };
 use ncx_core::{
@@ -113,21 +113,38 @@ fn get_status() -> Result<Status, String> {
 /// the file picker (attached as base64 vision blocks); non-image files are
 /// passed by the UI as `@path` tokens inside `text`. Replies arrive as
 /// `ncx://event`s.
+fn validate_image_attachment_route(images: &[String], vl_model: &str) -> Result<(), String> {
+    if !images.is_empty() && vl_model.trim().is_empty() {
+        return Err(
+            "尚未配置图片/文件解析模型。请打开“设置”，填写“图片/文件解析模型”；如果当前模型本身支持图片，可填写与主模型相同的模型名，接口和密钥留空即可沿用主配置。"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn send_prompt(
     text: String,
     images: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let images = images.unwrap_or_default();
+    if !images.is_empty() {
+        let cfg = load_config(Overrides {
+            workspace: std::env::current_dir().ok(),
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string())?;
+        validate_image_attachment_route(&images, &cfg.vl_model)?;
+    }
+
     state
         .cancel
         .store(false, std::sync::atomic::Ordering::Release);
     state
         .tx
-        .send(Command::Prompt {
-            text,
-            images: images.unwrap_or_default(),
-        })
+        .send(Command::Prompt { text, images })
         .map_err(|_| "agent thread is not running".to_string())
 }
 
@@ -282,6 +299,8 @@ fn open_config_dir() -> Result<(), String> {
 pub struct Settings {
     model: String,
     base_url: String,
+    vl_model: String,
+    vl_base_url: String,
     sandbox_mode: String,
     approval_policy: String,
     reasoning_effort: String,
@@ -296,24 +315,20 @@ pub struct Settings {
     price_currency: String,
     api_key_masked: String,
     has_api_key: bool,
+    vl_api_key_masked: String,
+    has_vl_api_key: bool,
     available_models: Vec<String>,
     sandbox_modes: Vec<String>,
     approval_policies: Vec<String>,
 }
 
-/// Read the current settings for the panel (with dropdown option lists).
-#[tauri::command]
-fn get_settings() -> Result<Settings, String> {
-    let workspace = std::env::current_dir().ok();
-    let cfg = load_config(Overrides {
-        workspace,
-        ..Default::default()
-    })
-    .map_err(|e| e.to_string())?;
-    let masked = cfg.redacted().get("api_key").cloned().unwrap_or_default();
-    Ok(Settings {
+fn settings_from_config(cfg: &Config) -> Settings {
+    let redacted = cfg.redacted();
+    Settings {
         model: cfg.model.clone(),
         base_url: cfg.base_url.clone(),
+        vl_model: cfg.vl_model.clone(),
+        vl_base_url: cfg.vl_base_url.clone(),
         sandbox_mode: cfg.sandbox_mode.clone(),
         approval_policy: cfg.approval_policy.clone(),
         reasoning_effort: cfg.reasoning_effort.clone(),
@@ -326,15 +341,29 @@ fn get_settings() -> Result<Settings, String> {
         price_in: cfg.price_in,
         price_out: cfg.price_out,
         price_currency: cfg.price_currency.clone(),
-        api_key_masked: masked,
+        api_key_masked: redacted.get("api_key").cloned().unwrap_or_default(),
         has_api_key: !cfg.api_key.is_empty(),
+        vl_api_key_masked: redacted.get("vl_api_key").cloned().unwrap_or_default(),
+        has_vl_api_key: !cfg.vl_api_key.is_empty(),
         available_models: cfg.available_models.clone(),
         sandbox_modes: VALID_SANDBOX_MODES.iter().map(|s| s.to_string()).collect(),
         approval_policies: VALID_APPROVAL_POLICIES
             .iter()
             .map(|s| s.to_string())
             .collect(),
+    }
+}
+
+/// Read the current settings for the panel (with dropdown option lists).
+#[tauri::command]
+fn get_settings() -> Result<Settings, String> {
+    let workspace = std::env::current_dir().ok();
+    let cfg = load_config(Overrides {
+        workspace,
+        ..Default::default()
     })
+    .map_err(|e| e.to_string())?;
+    Ok(settings_from_config(&cfg))
 }
 
 /// Persist settings to `~/.nanocodex/config.toml`, then rebuild the agent so the
@@ -1331,6 +1360,36 @@ pub fn run() {
 mod tests {
     use super::*;
     use crate::model_catalog::CatalogModel;
+    use ncx_config::Config;
+
+    #[test]
+    fn settings_snapshot_exposes_vision_parser_without_leaking_its_key() {
+        let mut cfg = Config::default();
+        cfg.vl_model = "qwen-vl-max".into();
+        cfg.vl_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1".into();
+        cfg.vl_api_key = "secret-vision-key".into();
+
+        let settings = settings_from_config(&cfg);
+
+        assert_eq!(settings.vl_model, "qwen-vl-max");
+        assert_eq!(
+            settings.vl_base_url,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        );
+        assert!(settings.has_vl_api_key);
+        assert_ne!(settings.vl_api_key_masked, cfg.vl_api_key);
+        assert!(settings.vl_api_key_masked.starts_with("****"));
+    }
+
+    #[test]
+    fn image_attachment_requires_an_explicit_parser_model() {
+        assert!(validate_image_attachment_route(&[], "").is_ok());
+        assert!(validate_image_attachment_route(&["test.png".into()], "qwen-vl-max").is_ok());
+
+        let error = validate_image_attachment_route(&["test.png".into()], "").unwrap_err();
+        assert!(error.contains("图片/文件解析模型"));
+        assert!(error.contains("设置"));
+    }
 
     #[test]
     fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
