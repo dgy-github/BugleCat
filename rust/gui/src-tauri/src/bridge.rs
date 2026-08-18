@@ -379,12 +379,48 @@ impl ApprovalHandler for GuiApprover {
 ///
 /// `seed` reseeds the conversation: `(session_id, messages)` — used by Resume
 /// (keep the id) and Fork (a new id). `None` starts a fresh session.
+fn latest_plan_from_messages(messages: &[Value]) -> Vec<Value> {
+    for message in messages.iter().rev() {
+        let Some(calls) = message.get("tool_calls").and_then(Value::as_array) else {
+            continue;
+        };
+        for call in calls.iter().rev() {
+            let Some(function) = call.get("function") else {
+                continue;
+            };
+            if function.get("name").and_then(Value::as_str) != Some("update_plan") {
+                continue;
+            }
+            let Some(arguments) = function.get("arguments") else {
+                continue;
+            };
+            let parsed = match arguments {
+                Value::String(raw) => serde_json::from_str::<Value>(raw).ok(),
+                Value::Object(_) => Some(arguments.clone()),
+                _ => None,
+            };
+            if let Some(plan) = parsed
+                .as_ref()
+                .and_then(|value| value.get("plan"))
+                .and_then(Value::as_array)
+            {
+                return plan.clone();
+            }
+        }
+    }
+    Vec::new()
+}
+
 fn build_agent(
     approver: Rc<dyn ApprovalHandler>,
     questioner: Rc<dyn UserQuestionHandler>,
     seed: Option<(String, Vec<Value>)>,
     grants: Rc<RefCell<SessionGrants>>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
+    let restored_plan = seed
+        .as_ref()
+        .map(|(_, messages)| latest_plan_from_messages(messages))
+        .unwrap_or_default();
     let workspace = std::env::current_dir().ok();
     let overrides = Overrides {
         workspace,
@@ -420,6 +456,9 @@ fn build_agent(
         .with_skills(skills)
         .with_approver(approver)
         .with_user_question_handler(questioner);
+    if !restored_plan.is_empty() {
+        ctx.plan.replace(restored_plan);
+    }
     let tools = ToolRegistry::new(ctx);
     let log_path = cfg.workspace.join(".nanocodex").join("session.jsonl");
     let (session_id, session) = match seed {
@@ -901,6 +940,40 @@ mod tests {
         assert_eq!(restored[0]["tools"][1]["result"], "Error: patch rejected");
         assert_eq!(restored[1]["role"], "assistant");
         assert_eq!(restored[1]["text"], "处理完成。");
+    }
+
+    #[test]
+    fn restored_session_uses_the_latest_saved_plan() {
+        let messages = vec![
+            json!({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "plan-1",
+                    "type": "function",
+                    "function": {
+                        "name": "update_plan",
+                        "arguments": "{\"plan\":[{\"step\":\"collect\",\"status\":\"in_progress\"}]}"
+                    }
+                }]
+            }),
+            json!({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "plan-2",
+                    "type": "function",
+                    "function": {
+                        "name": "update_plan",
+                        "arguments": "{\"plan\":[{\"step\":\"collect\",\"status\":\"completed\"},{\"step\":\"write PDF\",\"status\":\"in_progress\"}]}"
+                    }
+                }]
+            }),
+        ];
+
+        let plan = latest_plan_from_messages(&messages);
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[0]["status"], "completed");
+        assert_eq!(plan[1]["step"], "write PDF");
+        assert_eq!(plan[1]["status"], "in_progress");
     }
 
     #[test]
