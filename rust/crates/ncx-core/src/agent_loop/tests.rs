@@ -196,7 +196,19 @@ async fn runs_update_plan_and_records_state() {
             r
         },
         ModelResponse {
-            content: "done".into(),
+            content: "half done".into(),
+            ..Default::default()
+        },
+        assistant_toolcall(vec![tc(
+            "p2",
+            "update_plan",
+            json!({"plan": [
+                {"step": "write file", "status": "completed"},
+                {"step": "verify", "status": "completed"},
+            ]}),
+        )]),
+        ModelResponse {
+            content: "all done".into(),
             ..Default::default()
         },
     ]);
@@ -204,9 +216,50 @@ async fn runs_update_plan_and_records_state() {
     let mut loop_ = build(&ws, Box::new(p));
     let r = loop_.run_turn(json!("two step task"), None).await;
     assert_eq!(r.stop_reason, "completed");
+    assert_eq!(r.final_text, "all done");
+    assert_eq!(r.iterations, 4);
     let plan = loop_.tools.ctx.plan.borrow();
     assert_eq!(plan[0]["step"], "write file");
-    assert_eq!(plan[0]["status"], "in_progress");
+    assert_eq!(plan[0]["status"], "completed");
+    assert_eq!(plan[1]["status"], "completed");
+}
+
+#[tokio::test]
+async fn retries_an_empty_response_before_completing() {
+    let p = ScriptedProvider::new(vec![
+        ModelResponse::default(),
+        ModelResponse {
+            content: "done after retry".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("empty_response_retry");
+    let mut loop_ = build(&ws, Box::new(p));
+    let r = loop_.run_turn(json!("finish this task"), None).await;
+
+    assert_eq!(r.stop_reason, "completed");
+    assert_eq!(r.final_text, "done after retry");
+    assert_eq!(r.iterations, 2);
+}
+
+#[tokio::test]
+async fn stops_with_an_error_after_three_empty_responses() {
+    let p = ScriptedProvider::new(vec![
+        ModelResponse::default(),
+        ModelResponse::default(),
+        ModelResponse::default(),
+        ModelResponse {
+            content: "must not be reached".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("repeated_empty_response");
+    let mut loop_ = build(&ws, Box::new(p));
+    let r = loop_.run_turn(json!("finish this task"), None).await;
+
+    assert_eq!(r.stop_reason, "error");
+    assert_eq!(r.iterations, 3);
+    assert!(!r.final_text.trim().is_empty());
 }
 
 #[tokio::test]

@@ -13,11 +13,13 @@ use crate::turn_context::TurnContextRequest;
 
 const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
 const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
+const MAX_CONSECUTIVE_EMPTY_RESPONSES: usize = 3;
 
 #[derive(Default)]
 struct TurnState {
     tools_used: Vec<String>,
     usage: BTreeMap<String, i64>,
+    consecutive_empty_responses: usize,
 }
 
 impl TurnState {
@@ -66,10 +68,13 @@ pub(super) async fn run(
                 Some(response) => response,
                 None => return cancelled_result(agent, iteration + 1, state),
             };
-        if let Some((text, reason)) = finish_response(agent, &response, sink) {
+        if let Some((text, reason)) = finish_response(agent, &response, &mut state, sink) {
             return state.finish(text, iteration + 1, reason);
         }
 
+        if !response.has_tool_calls() {
+            continue;
+        }
         persist_tool_calls(agent, &response);
         if let Some(stop) = tool_dispatch::execute(
             agent,
@@ -167,6 +172,18 @@ async fn request_model(
     let schemas = agent.tools.schemas_for_query(&prompt.tool_query);
     let mut notes = vec![budget_note(agent, iteration + 1, state.tools_used.len())];
     notes.extend(prompt.runtime_notes.clone());
+    if has_unfinished_plan(agent) {
+        notes.push(
+            "The active plan still has pending or in-progress steps. Continue executing it and update the plan; do not end with only a progress report."
+                .to_string(),
+        );
+    }
+    if state.consecutive_empty_responses > 0 {
+        notes.push(
+            "Your previous response was empty. Continue the task with a tool call or a non-empty response."
+                .to_string(),
+        );
+    }
     let (response, edit_stats) = agent.call_model(&schemas, &notes, sink).await;
     add_usage(&mut state.usage, &response.usage);
     trace::model_response(iteration, &response, &edit_stats);
@@ -176,6 +193,7 @@ async fn request_model(
 fn finish_response(
     agent: &mut AgentLoop,
     response: &ModelResponse,
+    state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> Option<(String, &'static str)> {
     if response.finish_reason == "error" {
@@ -188,17 +206,44 @@ fn finish_response(
         return Some((text, "error"));
     }
     if response.has_tool_calls() {
+        state.consecutive_empty_responses = 0;
         return None;
     }
 
     let text = response.content.clone();
+    if text.trim().is_empty() {
+        state.consecutive_empty_responses += 1;
+        if state.consecutive_empty_responses < MAX_CONSECUTIVE_EMPTY_RESPONSES {
+            return None;
+        }
+
+        let error = format!(
+            "模型连续 {} 次返回空内容，任务未被标记为完成。请检查模型服务后重试。",
+            MAX_CONSECUTIVE_EMPTY_RESPONSES
+        );
+        agent.session.add_assistant(&error, None, "");
+        emit(sink, LoopEvent::AssistantText(error.clone()));
+        return Some((error, "error"));
+    }
+
+    state.consecutive_empty_responses = 0;
     agent
         .session
         .add_assistant(&text, None, &response.reasoning);
-    if !text.is_empty() {
-        emit(sink, LoopEvent::AssistantText(text.clone()));
+    emit(sink, LoopEvent::AssistantText(text.clone()));
+    if has_unfinished_plan(agent) {
+        return None;
     }
     Some((text, "completed"))
+}
+
+fn has_unfinished_plan(agent: &AgentLoop) -> bool {
+    agent.tools.ctx.plan.borrow().iter().any(|item| {
+        matches!(
+            item.get("status").and_then(Value::as_str),
+            Some("pending" | "in_progress")
+        )
+    })
 }
 
 fn persist_tool_calls(agent: &mut AgentLoop, response: &ModelResponse) {
