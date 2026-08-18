@@ -235,8 +235,15 @@ impl Session {
                     start += 1;
                 }
                 if start > 0 && start < body.len() {
+                    let retained_user_history = retained_user_history(
+                        &body[..start],
+                        policy.max_chars.saturating_div(3).clamp(256, 8_000),
+                    );
                     stats.dropped_messages = start;
                     body = body[start..].to_vec();
+                    if let Some(history) = retained_user_history {
+                        body.insert(0, history);
+                    }
                 }
             }
         }
@@ -450,6 +457,53 @@ fn total_chars(system: &str, notes: &[String], messages: &[Value]) -> usize {
         + messages.iter().map(json_chars).sum::<usize>()
 }
 
+fn retained_user_history(messages: &[Value], max_chars: usize) -> Option<Value> {
+    let mut retained = Vec::new();
+    let mut used = 0usize;
+    for message in messages.iter().rev() {
+        if role(message) != Some("user") {
+            continue;
+        }
+        let text = message_content_text(message);
+        if text.trim().is_empty() {
+            continue;
+        }
+        let remaining = max_chars.saturating_sub(used);
+        if remaining == 0 {
+            break;
+        }
+        let clipped = text.chars().take(remaining).collect::<String>();
+        used += clipped.chars().count();
+        retained.push(clipped);
+        if retained.len() >= 8 {
+            break;
+        }
+    }
+    if retained.is_empty() {
+        return None;
+    }
+    retained.reverse();
+    Some(json!({
+        "role": "user",
+        "content": format!(
+            "[压缩后保留的用户任务历史]\n{}",
+            retained.join("\n\n")
+        )
+    }))
+}
+
+fn message_content_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
 /// Cheap, deterministic context-size estimate (no tokenizer, no network).
 ///
 /// Mirrors `nanocodex/agent/compaction.py::estimate_tokens`: ~2 chars per token
@@ -636,6 +690,40 @@ mod tests {
         assert!(out.stats.dropped_messages > 0);
         assert!(out.stats.edited_chars < out.stats.original_chars);
         assert_eq!(out.messages[0]["role"], "system");
+    }
+
+    #[test]
+    fn context_edit_preserves_user_task_history_while_dropping_tool_noise() {
+        let mut s = Session::new("sys");
+        s.add_user_text("请调研六项技术，最终生成并验证 PDF 文件");
+        for i in 0..12 {
+            s.add_assistant(
+                "",
+                Some(vec![json!({
+                    "id": format!("call-{i}"),
+                    "type": "function",
+                    "function": {"name": "web_fetch", "arguments": "{}"}
+                })]),
+                "",
+            );
+            s.add_tool_result(&format!("call-{i}"), "web_fetch", &"noise".repeat(100));
+        }
+        s.add_user_text("继续");
+
+        let out = s.for_model_edited(
+            &[],
+            &ContextEditPolicy {
+                enabled: true,
+                max_chars: 700,
+                keep_recent_messages: 3,
+                max_tool_result_chars: 20,
+            },
+        );
+        let rendered = serde_json::to_string(&out.messages).unwrap();
+
+        assert!(out.stats.dropped_messages > 0);
+        assert!(rendered.contains("最终生成并验证 PDF 文件"), "{rendered}");
+        assert!(!rendered.contains(&"noise".repeat(30)), "{rendered}");
     }
 
     #[test]

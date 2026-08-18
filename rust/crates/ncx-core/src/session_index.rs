@@ -145,6 +145,26 @@ impl SessionIndex {
         self.by_id.get(session_id)
     }
 
+    /// Return the newest unarchived snapshot that belongs to `workspace`.
+    /// Used by the desktop app to continue the visible conversation after a
+    /// restart instead of silently creating a second, identically titled task.
+    pub fn latest_resumable_for_workspace(
+        &self,
+        workspace: &Path,
+    ) -> Option<(SessionSummary, Vec<Value>)> {
+        let wanted = normalized_workspace(workspace);
+        self.entries().into_iter().find_map(|summary| {
+            if summary.archived
+                || !summary.has_snapshot
+                || normalized_workspace(Path::new(&summary.workspace)) != wanted
+            {
+                return None;
+            }
+            self.load_snapshot(&summary.session_id)
+                .map(|messages| (summary, messages))
+        })
+    }
+
     pub fn record(&mut self, summary: SessionSummary) {
         self.by_id.insert(summary.session_id.clone(), summary);
         self.save();
@@ -263,6 +283,21 @@ pub fn default_index_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_default();
     home.join(".nanocodex").join("sessions.jsonl")
+}
+
+fn normalized_workspace(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let without_verbatim = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
+    let normalized = PathBuf::from(without_verbatim)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(without_verbatim))
+        .to_string_lossy()
+        .replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized
+    }
 }
 
 pub fn summarize(
@@ -530,6 +565,42 @@ mod tests {
         assert_eq!(entries[0].session_id, "old");
         assert_eq!(entries[0].created_at, "2026-06-01T09:00:00");
         assert_eq!(entries[1].session_id, "new");
+    }
+
+    #[test]
+    fn latest_resumable_session_is_scoped_to_workspace_and_skips_archived() {
+        let dir = tmp_path("latest_resumable");
+        let workspace = dir.join("project");
+        let other_workspace = dir.join("other");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&other_workspace).unwrap();
+        let mut idx = SessionIndex::new(dir.join("sessions.jsonl"));
+
+        for (id, ws, updated, archived) in [
+            ("wanted", workspace.as_path(), "1787000000001", false),
+            ("archived", workspace.as_path(), "1787000000003", true),
+            ("other", other_workspace.as_path(), "1787000000004", false),
+        ] {
+            let session = Session::new("sys");
+            assert!(idx.save_snapshot(id, &session));
+            let mut summary = summarize(
+                id,
+                &ws.display().to_string(),
+                &session.full_messages(),
+                "",
+                Some(updated.into()),
+                None,
+                true,
+            );
+            summary.archived = archived;
+            idx.record(summary);
+        }
+
+        let (summary, messages) = idx
+            .latest_resumable_for_workspace(&workspace)
+            .expect("the latest active session in this workspace");
+        assert_eq!(summary.session_id, "wanted");
+        assert_eq!(messages[0]["role"], "system");
     }
 
     #[test]

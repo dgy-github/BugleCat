@@ -539,11 +539,23 @@ pub fn spawn_worker(
                 if let Some(ws) = load_last_workspace() {
                     let _ = std::env::set_current_dir(&ws);
                 }
+                let startup_seed = std::env::current_dir().ok().and_then(|workspace| {
+                    session_index
+                        .lock()
+                        .ok()
+                        .and_then(|index| index.latest_resumable_for_workspace(&workspace))
+                        .map(|(summary, messages)| (summary.session_id, messages))
+                });
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
                 let (mut agent, mut workspace, mut session_id, mut log_path, _) =
-                    match build_agent(approver.clone(), questioner.clone(), None, grants.clone()) {
+                    match build_agent(
+                        approver.clone(),
+                        questioner.clone(),
+                        startup_seed,
+                        grants.clone(),
+                    ) {
                         Ok(v) => v,
                         Err(e) => {
                             emit(&app, UiEvent::Error { message: e });
@@ -763,7 +775,17 @@ pub fn spawn_worker(
                                 Err(e) => emit(&app, UiEvent::Error { message: e }),
                             }
                         }
-                        Command::RequestReady => emit_ready(&app, &workspace, &session_id),
+                        Command::RequestReady => {
+                            if !agent.session.messages.is_empty() {
+                                emit(
+                                    &app,
+                                    UiEvent::Loaded {
+                                        messages: snapshot_to_ui(&agent.session.messages),
+                                    },
+                                );
+                            }
+                            emit_ready(&app, &workspace, &session_id);
+                        }
                     }
                 }
             });

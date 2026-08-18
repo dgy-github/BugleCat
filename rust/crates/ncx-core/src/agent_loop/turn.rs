@@ -6,6 +6,7 @@ use std::time::Duration;
 use ncx_provider::ModelResponse;
 use serde_json::{json, Value};
 
+use super::deliverable::DeliverableRequirement;
 use super::tool_dispatch::{self, DispatchStop};
 use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent, TurnResult};
 use crate::hooks::{run_matching_hooks, HookEvent};
@@ -22,6 +23,7 @@ const HARD_CONVERGENCE_FAILURES: usize = 6;
 struct TurnState {
     tools_used: Vec<String>,
     tool_failures: usize,
+    deliverable_finish_rejections: usize,
     usage: BTreeMap<String, i64>,
     consecutive_empty_responses: usize,
 }
@@ -41,6 +43,7 @@ impl TurnState {
 struct PromptContext {
     tool_query: String,
     runtime_notes: Vec<String>,
+    deliverable: Option<DeliverableRequirement>,
 }
 
 pub(super) async fn run(
@@ -72,7 +75,7 @@ pub(super) async fn run(
                 Some(response) => response,
                 None => return cancelled_result(agent, iteration + 1, state),
             };
-        if let Some((text, reason)) = finish_response(agent, &response, &mut state, sink) {
+        if let Some((text, reason)) = finish_response(agent, &prompt, &response, &mut state, sink) {
             return state.finish(text, iteration + 1, reason);
         }
 
@@ -163,6 +166,7 @@ async fn prepare_prompt(
         MEMORY_RECALL_MAX_CHARS,
     ));
     Ok(PromptContext {
+        deliverable: DeliverableRequirement::detect(&tool_query, &agent.tools.ctx.workspace),
         tool_query,
         runtime_notes,
     })
@@ -175,8 +179,15 @@ async fn request_model(
     state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> ModelResponse {
+    let deliverable_ready = prompt
+        .deliverable
+        .as_ref()
+        .and_then(|requirement| requirement.completed_path(&agent.tools.ctx.workspace))
+        .is_some();
     let force_convergence = state.tools_used.len() >= HARD_CONVERGENCE_TOOL_CALLS
-        && state.tool_failures >= HARD_CONVERGENCE_FAILURES;
+        && state.tool_failures >= HARD_CONVERGENCE_FAILURES
+        && (prompt.deliverable.is_none() || deliverable_ready)
+        && !has_unfinished_plan(agent);
     let schemas = if force_convergence {
         Vec::new()
     } else {
@@ -189,6 +200,18 @@ async fn request_model(
             .to_string(),
     );
     notes.extend(prompt.runtime_notes.clone());
+    if prompt.deliverable.is_some() && !deliverable_ready {
+        notes.push(
+            "The user explicitly requested a generated PDF deliverable. Do not finish with research or Markdown only. Create or update a valid PDF file in this workspace during this turn, verify it, and include its path in the final answer. An unchanged PDF from an earlier turn does not satisfy this request."
+                .to_string(),
+        );
+    }
+    if state.deliverable_finish_rejections > 0 {
+        notes.push(format!(
+            "Your previous attempt to finish was rejected because no new or updated valid PDF existed. Stop further research and produce the requested PDF now (rejected attempts: {}).",
+            state.deliverable_finish_rejections
+        ));
+    }
     if state.tool_failures >= 4 {
         notes.push(format!(
             "Tool attempts have failed {} times in this turn. Do not repeat the same command syntax or search route; switch to a known-compatible method and use evidence already collected.",
@@ -227,6 +250,7 @@ async fn request_model(
 
 fn finish_response(
     agent: &mut AgentLoop,
+    prompt: &PromptContext,
     response: &ModelResponse,
     state: &mut TurnState,
     sink: &mut Option<EventSink>,
@@ -262,6 +286,16 @@ fn finish_response(
     }
 
     state.consecutive_empty_responses = 0;
+    if prompt.deliverable.is_some()
+        && prompt
+            .deliverable
+            .as_ref()
+            .and_then(|requirement| requirement.completed_path(&agent.tools.ctx.workspace))
+            .is_none()
+    {
+        state.deliverable_finish_rejections += 1;
+        return None;
+    }
     agent
         .session
         .add_assistant(&text, None, &response.reasoning);

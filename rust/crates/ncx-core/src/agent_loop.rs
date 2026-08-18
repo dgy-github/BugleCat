@@ -21,6 +21,7 @@ use crate::turn_context::{TurnContextProvider, TurnContextRegistry};
 const DEFAULT_MAX_PARALLEL_TOOL_CALLS: usize = 8;
 
 mod tool_dispatch;
+mod deliverable;
 mod trace;
 mod turn;
 

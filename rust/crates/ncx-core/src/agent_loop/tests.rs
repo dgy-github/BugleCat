@@ -126,6 +126,53 @@ async fn executes_apply_patch_then_finishes() {
 }
 
 #[tokio::test]
+async fn pdf_creation_request_cannot_finish_until_a_new_valid_pdf_exists() {
+    let ws = tmpdir("pdf_delivery_gate");
+    std::fs::write(ws.join("old.pdf"), b"%PDF-1.4\nold\n%%EOF").unwrap();
+    let patch =
+        "*** Begin Patch\n*** Add File: report.pdf\n+%PDF-1.4\n+/Type /Page\n+%%EOF\n*** End Patch";
+    let provider = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: "资料已经整理好了。".into(),
+            ..Default::default()
+        },
+        assistant_toolcall(vec![tc("pdf-1", "apply_patch", json!({"patch": patch}))]),
+        ModelResponse {
+            content: "PDF 已生成：report.pdf".into(),
+            ..Default::default()
+        },
+    ]);
+    let mut loop_ = build(&ws, Box::new(provider));
+
+    let result = loop_
+        .run_turn(json!("调研这些资料，整理成个 PDF 给我"), None)
+        .await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.iterations, 3);
+    assert!(ws.join("report.pdf").is_file());
+    assert_eq!(result.final_text, "PDF 已生成：report.pdf");
+}
+
+#[tokio::test]
+async fn pdf_read_request_does_not_require_creating_a_new_pdf() {
+    let ws = tmpdir("pdf_read_without_delivery");
+    std::fs::write(ws.join("input.pdf"), b"%PDF-1.4\ninput\n%%EOF").unwrap();
+    let provider = ScriptedProvider::new(vec![ModelResponse {
+        content: "PDF 内容已读取。".into(),
+        ..Default::default()
+    }]);
+    let mut loop_ = build(&ws, Box::new(provider));
+
+    let result = loop_
+        .run_turn(json!("读取并分析 input.pdf 的内容"), None)
+        .await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.iterations, 1);
+}
+
+#[tokio::test]
 async fn emits_events_for_tool_turn() {
     let patch = "*** Begin Patch\n*** Add File: ev.txt\n+hi\n*** End Patch";
     let p = ScriptedProvider::new(vec![
@@ -379,6 +426,44 @@ struct LongFailureProvider {
     saw_convergence_note: Rc<Cell<bool>>,
 }
 
+struct LongPdfDeliveryProvider {
+    calls: Cell<usize>,
+    tools_remained_available: Rc<Cell<bool>>,
+}
+
+#[async_trait(?Send)]
+impl Provider for LongPdfDeliveryProvider {
+    fn model(&self) -> &str {
+        "long-pdf-delivery"
+    }
+
+    async fn chat(&self, _messages: &[Value], tools: &[Value], _r: Option<&str>) -> ModelResponse {
+        let call = self.calls.get();
+        self.calls.set(call + 1);
+        if call < 40 {
+            return assistant_toolcall(vec![tc(
+                &format!("missing-pdf-{call}"),
+                "read_file",
+                json!({"path": format!("missing-pdf-{call}.txt")}),
+            )]);
+        }
+        if call == 40 {
+            self.tools_remained_available.set(!tools.is_empty());
+            return assistant_toolcall(vec![tc(
+                "create-pdf",
+                "apply_patch",
+                json!({
+                    "patch": "*** Begin Patch\n*** Add File: final.pdf\n+%PDF-1.4\n+/Type /Page\n+%%EOF\n*** End Patch"
+                }),
+            )]);
+        }
+        ModelResponse {
+            content: "PDF 已生成：final.pdf".into(),
+            ..Default::default()
+        }
+    }
+}
+
 #[async_trait(?Send)]
 impl Provider for LongFailureProvider {
     fn model(&self) -> &str {
@@ -474,6 +559,26 @@ async fn repeated_tool_failures_force_a_final_answer_without_more_tools() {
     assert!(converged_without_tools.get());
     assert!(saw_convergence_note.get());
     assert_eq!(result.tools_used.len(), 40);
+}
+
+#[tokio::test]
+async fn long_chain_convergence_keeps_tools_until_pdf_is_delivered() {
+    let ws = tmpdir("long_pdf_delivery");
+    let tools_remained_available = Rc::new(Cell::new(false));
+    let provider = LongPdfDeliveryProvider {
+        calls: Cell::new(0),
+        tools_remained_available: tools_remained_available.clone(),
+    };
+    let mut loop_ = build(&ws, Box::new(provider)).with_max_iterations(50);
+
+    let result = loop_
+        .run_turn(json!("调研完成后生成并验证 PDF"), None)
+        .await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert!(tools_remained_available.get());
+    assert!(ws.join("final.pdf").is_file());
+    assert_eq!(result.tools_used.len(), 41);
 }
 
 #[tokio::test]
