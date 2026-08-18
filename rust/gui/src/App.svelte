@@ -996,18 +996,24 @@
   let diffOpenFiles = $state<Record<string, string>>({}); // path -> loaded diff text
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
-  // Pin the active session to the top of 最近会话 so it's always findable.
   let showArchived = $state(false);
-  // Pin the active session to the top; hide archived ones unless toggled (the
-  // active session always stays visible even if archived).
-  const orderedSessions = $derived.by(() => {
-    const visible = sessions.filter(
-      (s) => showArchived || !s.archived || s.session_id === currentSessionId,
-    );
+  // Keep ordinary and archived conversations as two stable sections. The active
+  // conversation is pinned only inside its own section, never above the archive
+  // boundary.
+  const recentSessions = $derived.by(() => {
+    const visible = sessions.filter((s) => !s.archived);
     if (!currentSessionId) return visible;
     return [
       ...visible.filter((s) => s.session_id === currentSessionId),
       ...visible.filter((s) => s.session_id !== currentSessionId),
+    ];
+  });
+  const archivedSessions = $derived.by(() => {
+    const archived = sessions.filter((s) => s.archived);
+    if (!currentSessionId) return archived;
+    return [
+      ...archived.filter((s) => s.session_id === currentSessionId),
+      ...archived.filter((s) => s.session_id !== currentSessionId),
     ];
   });
   const archivedCount = $derived(sessions.filter((s) => s.archived).length);
@@ -1366,18 +1372,7 @@
     </button>
 
     <div class="side-recents">
-      <div class="side-h">
-        最近会话
-        {#if archivedCount}
-          <button class="side-h-toggle" onclick={() => (showArchived = !showArchived)}>
-            {showArchived ? "隐藏归档" : `已归档 ${archivedCount}`}
-          </button>
-        {/if}
-      </div>
-      {#if sessions.length === 0}
-        <div class="side-empty">暂无会话</div>
-      {/if}
-      {#each orderedSessions as s}
+      {#snippet sessionItem(s: SessionRow)}
         <div class="recent-item" class:active={s.session_id === currentSessionId} class:archived={s.archived}>
           <button class="recent-main" title={s.snippet || s.title} disabled={switchingSession || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
@@ -1394,7 +1389,33 @@
           <button class="recent-act" title={s.archived ? "取消归档" : "归档此会话"}
             onclick={() => archiveSession(s.session_id, !s.archived)} aria-label="归档">{s.archived ? "↩" : "🗄"}</button>
         </div>
+      {/snippet}
+
+      <div class="side-h">最近会话</div>
+      {#if recentSessions.length === 0}
+        <div class="side-empty">{archivedCount ? "暂无最近会话" : "暂无会话"}</div>
+      {/if}
+      {#each recentSessions as s}
+        {@render sessionItem(s)}
       {/each}
+
+      {#if archivedCount}
+        <button class="side-archive-toggle" class:open={showArchived}
+          aria-expanded={showArchived} onclick={() => (showArchived = !showArchived)}>
+          <span class="side-archive-main">
+            <span class="side-archive-caret" aria-hidden="true">›</span>
+            <span>已归档</span>
+          </span>
+          <span class="side-archive-count">{archivedCount}</span>
+        </button>
+        {#if showArchived}
+          <div class="side-archived-list">
+            {#each archivedSessions as s}
+              {@render sessionItem(s)}
+            {/each}
+          </div>
+        {/if}
+      {/if}
     </div>
 
     <div class="side-foot">

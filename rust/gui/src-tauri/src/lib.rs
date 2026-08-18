@@ -1524,6 +1524,32 @@ mod tests {
     }
 
     #[test]
+    fn archived_sessions_render_below_recent_sessions() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("sessions.filter((s) => !s.archived)"));
+        assert!(app.contains("sessions.filter((s) => s.archived)"));
+
+        let sidebar = app
+            .split_once("<div class=\"side-recents\">")
+            .unwrap()
+            .1
+            .split_once("<div class=\"side-foot\">")
+            .unwrap()
+            .0;
+        let recent = sidebar.find("{#each recentSessions as s}").unwrap();
+        let archive_toggle = sidebar.find("class=\"side-archive-toggle\"").unwrap();
+        let archived = sidebar.find("{#each archivedSessions as s}").unwrap();
+        assert!(recent < archive_toggle);
+        assert!(archive_toggle < archived);
+        assert!(sidebar.contains("aria-expanded={showArchived}"));
+        assert!(!sidebar.contains("side-h-toggle"));
+
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains(".side-archive-toggle"));
+        assert!(css.contains(".side-archived-list"));
+    }
+
+    #[test]
     fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
         let preset = CatalogModel {
             provider_id: "openai".into(),
