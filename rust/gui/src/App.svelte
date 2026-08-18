@@ -996,6 +996,7 @@
   let diffOpenFiles = $state<Record<string, string>>({}); // path -> loaded diff text
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
+  let showRecent = $state(false);
   let showArchived = $state(false);
   // Keep ordinary and archived conversations as two stable sections. The active
   // conversation is pinned only inside its own section, never above the archive
@@ -1391,13 +1392,24 @@
         </div>
       {/snippet}
 
-      <div class="side-h">最近会话</div>
-      {#if recentSessions.length === 0}
-        <div class="side-empty">{archivedCount ? "暂无最近会话" : "暂无会话"}</div>
+      <button class="side-recent-toggle" class:open={showRecent}
+        aria-expanded={showRecent} onclick={() => (showRecent = !showRecent)}>
+        <span class="side-recent-main">
+          <span class="side-recent-caret" aria-hidden="true">›</span>
+          <span>最近会话</span>
+        </span>
+        <span class="side-recent-count">{recentSessions.length}</span>
+      </button>
+      {#if showRecent}
+        <div class="side-recent-list">
+          {#if recentSessions.length === 0}
+            <div class="side-empty">{archivedCount ? "暂无最近会话" : "暂无会话"}</div>
+          {/if}
+          {#each recentSessions as s}
+            {@render sessionItem(s)}
+          {/each}
+        </div>
       {/if}
-      {#each recentSessions as s}
-        {@render sessionItem(s)}
-      {/each}
 
       {#if archivedCount}
         <button class="side-archive-toggle" class:open={showArchived}

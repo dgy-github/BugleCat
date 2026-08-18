@@ -1247,6 +1247,45 @@ main.app { flex-direction: row; }
   padding: var(--sp-2) var(--sp-2) var(--sp-1);
 }
 .side-empty { color: var(--ink-3); font-size: var(--fs-sm); padding: 0 var(--sp-2); }
+.side-recent-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  background: none;
+  border: 0;
+  box-shadow: none;
+  min-height: auto;
+  padding: var(--sp-2) 0.5rem var(--sp-1);
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+.side-recent-toggle:hover { color: var(--ink-2); background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.side-recent-toggle:active { transform: none; }
+.side-recent-main { display: flex; align-items: center; gap: 0.38rem; }
+.side-recent-caret {
+  width: 0.7rem;
+  color: var(--ink-4);
+  transition: transform var(--dur) var(--ease);
+}
+.side-recent-toggle.open .side-recent-caret { transform: rotate(90deg); }
+.side-recent-count {
+  min-width: 1.25rem;
+  padding: 0.02rem 0.35rem;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--ink-3) 10%, transparent);
+  color: var(--ink-3);
+  font-size: 0.66rem;
+  text-align: center;
+}
+.side-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
 .recent-item { display: flex; align-items: center; border-radius: var(--r-sm); min-width: 0; }
 .recent-item:hover { background: var(--paper); }
 .recent-main {

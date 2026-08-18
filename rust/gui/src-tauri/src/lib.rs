@@ -1542,11 +1542,35 @@ mod tests {
         assert!(recent < archive_toggle);
         assert!(archive_toggle < archived);
         assert!(sidebar.contains("aria-expanded={showArchived}"));
-        assert!(!sidebar.contains("side-h-toggle"));
 
         let css = include_str!("../../src/app.css");
         assert!(css.contains(".side-archive-toggle"));
         assert!(css.contains(".side-archived-list"));
+    }
+
+    #[test]
+    fn recent_sessions_are_collapsible_and_closed_by_default() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("let showRecent = $state(false)"));
+
+        let sidebar = app
+            .split_once("<div class=\"side-recents\">")
+            .unwrap()
+            .1
+            .split_once("<div class=\"side-foot\">")
+            .unwrap()
+            .0;
+        assert!(sidebar.contains("class=\"side-recent-toggle\""));
+        assert!(sidebar.contains("aria-expanded={showRecent}"));
+        assert!(sidebar.contains("onclick={() => (showRecent = !showRecent)}"));
+        assert!(sidebar.contains("{#if showRecent}"));
+        assert!(sidebar.find("{#if showRecent}").unwrap()
+            < sidebar.find("{#each recentSessions as s}").unwrap());
+
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains(".side-recent-toggle"));
+        assert!(css.contains(".side-recent-caret"));
+        assert!(css.contains(".side-recent-list"));
     }
 
     #[test]
