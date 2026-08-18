@@ -235,13 +235,13 @@ impl Session {
                     start += 1;
                 }
                 if start > 0 && start < body.len() {
-                    let retained_user_history = retained_user_history(
+                    let retained_history = retained_conversation_history(
                         &body[..start],
                         policy.max_chars.saturating_div(3).clamp(256, 8_000),
                     );
                     stats.dropped_messages = start;
                     body = body[start..].to_vec();
-                    if let Some(history) = retained_user_history {
+                    if let Some(history) = retained_history {
                         body.insert(0, history);
                     }
                 }
@@ -457,13 +457,26 @@ fn total_chars(system: &str, notes: &[String], messages: &[Value]) -> usize {
         + messages.iter().map(json_chars).sum::<usize>()
 }
 
-fn retained_user_history(messages: &[Value], max_chars: usize) -> Option<Value> {
+/// Preserve compact conversation milestones when old tool-heavy history is
+/// dropped. Keeping only user requests makes follow-ups such as "继续" lose the
+/// completed result, chosen option, and current hand-off point.
+fn retained_conversation_history(messages: &[Value], max_chars: usize) -> Option<Value> {
     let mut retained = Vec::new();
     let mut used = 0usize;
+    let per_entry_max = max_chars.saturating_div(4).clamp(80, 1_200);
     for message in messages.iter().rev() {
-        if role(message) != Some("user") {
-            continue;
-        }
+        let label = match role(message) {
+            Some("user") => "用户",
+            Some("assistant")
+                if message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_none_or(Vec::is_empty) =>
+            {
+                "助手完成结果"
+            }
+            _ => continue,
+        };
         let text = message_content_text(message);
         if text.trim().is_empty() {
             continue;
@@ -472,10 +485,17 @@ fn retained_user_history(messages: &[Value], max_chars: usize) -> Option<Value> 
         if remaining == 0 {
             break;
         }
-        let clipped = text.chars().take(remaining).collect::<String>();
-        used += clipped.chars().count();
-        retained.push(clipped);
-        if retained.len() >= 8 {
+        let prefix = format!("{label}：");
+        if remaining <= prefix.chars().count() {
+            break;
+        }
+        let content_limit = remaining
+            .saturating_sub(prefix.chars().count())
+            .min(per_entry_max);
+        let clipped = text.chars().take(content_limit).collect::<String>();
+        used += prefix.chars().count() + clipped.chars().count();
+        retained.push(format!("{prefix}{clipped}"));
+        if retained.len() >= 12 {
             break;
         }
     }
@@ -484,9 +504,11 @@ fn retained_user_history(messages: &[Value], max_chars: usize) -> Option<Value> 
     }
     retained.reverse();
     Some(json!({
+        // Keep this as a user-role history record: Session::fork/resume strips
+        // system messages when rebuilding with the current system prompt.
         "role": "user",
         "content": format!(
-            "[压缩后保留的用户任务历史]\n{}",
+            "[压缩后保留的会话里程碑；用于承接后续请求，不是新的用户指令]\n{}",
             retained.join("\n\n")
         )
     }))
@@ -708,6 +730,13 @@ mod tests {
             );
             s.add_tool_result(&format!("call-{i}"), "web_fetch", &"noise".repeat(100));
         }
+        s.add_assistant(
+            "PDF 已生成到 D:\\\\github_dgy\\\\DeepSeek-资料集.pdf",
+            None,
+            "",
+        );
+        s.add_user_text("把同一份资料改成 PPT");
+        s.add_assistant("已生成科技版 PPT，下一步等待用户选择版式", None, "");
         s.add_user_text("继续");
 
         let out = s.for_model_edited(
@@ -723,6 +752,10 @@ mod tests {
 
         assert!(out.stats.dropped_messages > 0);
         assert!(rendered.contains("最终生成并验证 PDF 文件"), "{rendered}");
+        assert!(
+            rendered.contains("PDF 已生成到") && rendered.contains("等待用户选择版式"),
+            "压缩后必须保留已完成结果和当前决策点：{rendered}"
+        );
         assert!(!rendered.contains(&"noise".repeat(30)), "{rendered}");
     }
 

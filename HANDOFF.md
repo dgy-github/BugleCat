@@ -292,3 +292,8 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 最近会话侧栏增加“执行中”状态；新建、继续、分叉或切换会话不再调用 `stop_generation`。
 - 验证：GUI Rust 37 项测试与 Vite 生产构建通过；包含并发占用、同会话防重入、目标取消隔离、独立日志和前后端路由契约。
 - 真实 WebView/CDP 集成：A、B 两个会话分别执行 12 秒 shell 任务，侧栏同时观测 `RUNNING_COUNT=2`；两者运行中成功切回 A（仍显示停止按钮），最终 `BOTH_FINISHED`。两个结果分别落到 `18cccdb67fce9ddcb3a01`、`18ccf0037389edf069980` 的独立 snapshot 和 JSONL，均含各自 `SESSION_A_DONE` / `SESSION_B_DONE`。
+## 2026-08-19 长会话上下文承接修复
+- 真实快照核验：会话 `18cccdb67fce9ddcb3a01` 的 22 条用户消息、329 条助手消息均正常持久化；问题不是切换时丢快照。
+- 根因位于 `Session::for_model_edited`：超过上下文预算后只合并旧用户请求，丢弃了旧轮次的最终回答、交付物路径和已选方案，导致“继续处理”没有可承接的完成状态。
+- 现改为保留最多 12 条紧邻的“用户要求 + 助手完成结果”会话里程碑；工具调用、参数、结果和中间工具噪声仍不进入摘要。
+- 回归测试覆盖 PDF 生成结果、PPT 后续决策点和大量工具噪声；`cargo test -p ncx-core` 197 项全部通过。
