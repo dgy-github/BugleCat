@@ -31,6 +31,29 @@ impl Tool for UpdatePlanTool {
         let Some(plan) = args.get("plan").and_then(|v| v.as_array()) else {
             return "Error: 'plan' is required and must be an array.".into();
         };
+        let current = ctx.plan.borrow();
+        let missing_unfinished = current
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.get("status").and_then(Value::as_str),
+                    Some("pending" | "in_progress")
+                )
+            })
+            .filter_map(|item| item.get("step").and_then(Value::as_str))
+            .filter(|step| {
+                !plan
+                    .iter()
+                    .any(|item| item.get("step").and_then(Value::as_str) == Some(*step))
+            })
+            .collect::<Vec<_>>();
+        if !missing_unfinished.is_empty() {
+            return format!(
+                "Error: cannot remove unfinished plan steps: {}. Keep them until they are completed.",
+                missing_unfinished.join(", ")
+            );
+        }
+        drop(current);
         *ctx.plan.borrow_mut() = plan.clone();
         let n = plan.len();
         format!("Plan updated ({n} steps).")

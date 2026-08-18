@@ -263,6 +263,38 @@ async fn stops_with_an_error_after_three_empty_responses() {
 }
 
 #[tokio::test]
+async fn update_plan_cannot_drop_an_unfinished_step() {
+    let ws = tmpdir("plan_keeps_unfinished_steps");
+    let loop_ = build(&ws, Box::new(ScriptedProvider::new(vec![])));
+    let first = loop_
+        .tools
+        .execute_with_recovery(
+            "update_plan",
+            &json!({"plan": [
+                {"step": "generate PDF", "status": "in_progress"},
+            ]}),
+        )
+        .await;
+    assert!(!first.starts_with("Error:"), "{first}");
+
+    let replacement = loop_
+        .tools
+        .execute_with_recovery(
+            "update_plan",
+            &json!({"plan": [
+                {"step": "write Markdown", "status": "completed"},
+            ]}),
+        )
+        .await;
+
+    assert!(replacement.starts_with("Error:"), "{replacement}");
+    let plan = loop_.tools.ctx.plan.borrow();
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan[0]["step"], "generate PDF");
+    assert_eq!(plan[0]["status"], "in_progress");
+}
+
+#[tokio::test]
 async fn stops_at_max_iterations() {
     let looping: Vec<ModelResponse> = (0..20)
         .map(|i| {
