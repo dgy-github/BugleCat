@@ -48,6 +48,16 @@
 3. 实测“PDF 去哪了”“查找已有 PDF”等只读请求，确认不会被创建闸门拦截。
 4. 若继续修改，先确认 `git status --short`，不要提交或还原用户的 `rust/Cargo.lock` 与 `parse_xlsx.py`。
 
+### 追加修复：模型连接中断恢复（2026-08-18）
+
+- 复现现象：DeepSeek 流式请求在底层重试耗尽后返回 `RequestError: error sending request`，Agent 过去会把英文底层错误直接当最终回答并结束当前问题。
+- 当前网络与 `api.deepseek.com:443` 已实测可达，接口返回 401（未携带鉴权的预期响应），因此截图属于短时发送链路失败，不是域名、端口或 Base URL 配置错误。
+- `ncx-core/src/agent_loop/turn.rs` 现在对响应到达前的 `RequestError`/`TimeoutError` 做本轮级恢复：保留同一条用户问题并继续请求，不要求用户重复描述。
+- 连续 3 次本轮级恢复仍失败时才结束，并显示中文可恢复提示；底层英文 `RequestError` 不再作为正常助手回答写入会话。
+- 新增 2 个回归测试，覆盖“首个请求失败、随后成功”和“连续失败后中文结束且不无限重试”。
+- 验证：`ncx-core` **193 通过**；GUI 后端 **25 通过**；Vite 正式构建成功（114 模块）；GNU 正式版和 NSIS 安装包重新生成成功。
+- 最新正式版已启动并确认窗口响应正常；当次进程号为 `38580`。
+
 ## 元信息
 - 最后更新：2026-08-18（顶部“当前进度”为现行状态；下方 2026-06-29 内容保留作历史背景）
 - 分支：**`rust-capability`**（整合线，推 **`origin/gui-merge-featgui`**；`origin/rust-capability` = codex

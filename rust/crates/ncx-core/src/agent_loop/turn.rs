@@ -15,6 +15,7 @@ use crate::turn_context::TurnContextRequest;
 const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
 const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
 const MAX_CONSECUTIVE_EMPTY_RESPONSES: usize = 3;
+const MAX_CONSECUTIVE_TRANSPORT_ERRORS: usize = 3;
 const SOFT_CONVERGENCE_TOOL_CALLS: usize = 32;
 const HARD_CONVERGENCE_TOOL_CALLS: usize = 40;
 const HARD_CONVERGENCE_FAILURES: usize = 6;
@@ -26,6 +27,7 @@ struct TurnState {
     deliverable_finish_rejections: usize,
     usage: BTreeMap<String, i64>,
     consecutive_empty_responses: usize,
+    consecutive_transport_errors: usize,
 }
 
 impl TurnState {
@@ -242,6 +244,12 @@ async fn request_model(
                 .to_string(),
         );
     }
+    if state.consecutive_transport_errors > 0 {
+        notes.push(format!(
+            "The previous model request failed before a response arrived. Continue the same user request without asking them to repeat it (transport retries: {}).",
+            state.consecutive_transport_errors
+        ));
+    }
     let (response, edit_stats) = agent.call_model(&schemas, &notes, sink).await;
     add_usage(&mut state.usage, &response.usage);
     trace::model_response(iteration, &response, &edit_stats);
@@ -255,15 +263,26 @@ fn finish_response(
     state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> Option<(String, &'static str)> {
+    if response.finish_reason == "error" && is_retryable_transport_error(&response.content) {
+        state.consecutive_transport_errors += 1;
+        if state.consecutive_transport_errors < MAX_CONSECUTIVE_TRANSPORT_ERRORS {
+            return None;
+        }
+        let text = "连接模型服务失败，已自动重试多次。当前会话和你的问题都已保留，网络恢复后可以直接重试，无需重新描述任务。".to_string();
+        agent.session.add_assistant(&text, None, "");
+        emit(sink, LoopEvent::AssistantText(text.clone()));
+        return Some((text, "error"));
+    }
     if response.finish_reason == "error" {
         let text = if response.content.is_empty() {
-            "Model call failed.".to_string()
+            "模型服务调用失败，请稍后重试。".to_string()
         } else {
             response.content.clone()
         };
         agent.session.add_assistant(&text, None, "");
         return Some((text, "error"));
     }
+    state.consecutive_transport_errors = 0;
     if response.has_tool_calls() {
         state.consecutive_empty_responses = 0;
         return None;
@@ -304,6 +323,11 @@ fn finish_response(
         return None;
     }
     Some((text, "completed"))
+}
+
+fn is_retryable_transport_error(message: &str) -> bool {
+    let message = message.trim_start();
+    message.starts_with("RequestError:") || message.starts_with("TimeoutError:")
 }
 
 fn has_unfinished_plan(agent: &AgentLoop) -> bool {

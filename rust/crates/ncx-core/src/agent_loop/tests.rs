@@ -329,6 +329,65 @@ async fn retries_an_empty_response_before_completing() {
 }
 
 #[tokio::test]
+async fn retries_a_transport_error_before_completing_the_same_turn() {
+    let p = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: "RequestError: error sending request for url (https://api.deepseek.com/chat/completions)".into(),
+            finish_reason: "error".into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: "可以，我可以制作 PPT。".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("transport_error_retry");
+    let mut loop_ = build(&ws, Box::new(p));
+
+    let result = loop_.run_turn(json!("你能否做 PPT"), None).await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.final_text, "可以，我可以制作 PPT。");
+    assert_eq!(result.iterations, 2);
+    assert!(!loop_.session.messages.iter().any(|message| {
+        message["role"] == "assistant"
+            && message["content"]
+                .as_str()
+                .is_some_and(|text| text.contains("RequestError"))
+    }));
+}
+
+#[tokio::test]
+async fn repeated_transport_errors_end_with_a_chinese_recoverable_message() {
+    let error = || {
+        ModelResponse {
+        content: "RequestError: error sending request for url (https://api.deepseek.com/chat/completions)".into(),
+        finish_reason: "error".into(),
+        ..Default::default()
+    }
+    };
+    let p = ScriptedProvider::new(vec![
+        error(),
+        error(),
+        error(),
+        ModelResponse {
+            content: "must not be reached".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("transport_error_exhausted");
+    let mut loop_ = build(&ws, Box::new(p));
+
+    let result = loop_.run_turn(json!("你能否做 PPT"), None).await;
+
+    assert_eq!(result.stop_reason, "error");
+    assert_eq!(result.iterations, 3);
+    assert!(result.final_text.contains("连接模型服务失败"));
+    assert!(result.final_text.contains("可以直接重试"));
+    assert!(!result.final_text.contains("RequestError"));
+}
+
+#[tokio::test]
 async fn stops_with_an_error_after_three_empty_responses() {
     let p = ScriptedProvider::new(vec![
         ModelResponse::default(),
