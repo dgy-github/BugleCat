@@ -204,6 +204,9 @@
       }
     }
   }
+  function hideCompletedToolActivity(source: Msg[]): Msg[] {
+    return source.filter((message) => message.role !== "tool_group");
+  }
   function toolGroupFailureCount(group: ToolGroup) {
     return group.tools.filter(
       (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
@@ -569,6 +572,7 @@
         }
         case "done":
           settleCompletedToolGroups();
+          messages = hideCompletedToolActivity(messages);
           // The completed reply already arrived as an `assistant` event; only a
           // non-normal stop adds a note.
           if (p.stop_reason !== "completed") {
@@ -603,6 +607,7 @@
               }
               return [];
             });
+          messages = hideCompletedToolActivity(messages);
           streamingIdx = null;
           busy = false;
           stopping = false;
@@ -611,6 +616,7 @@
           break;
         case "error":
           settleCompletedToolGroups();
+          messages = hideCompletedToolActivity(messages);
           streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
           busy = false;

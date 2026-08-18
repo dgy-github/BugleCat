@@ -1489,24 +1489,27 @@ mod tests {
     }
 
     #[test]
-    fn tool_activity_shows_each_compact_item_with_details_on_demand() {
+    fn completed_tool_activity_is_hidden_from_final_and_history_views() {
         let app = include_str!("../../src/App.svelte");
+        let bridge = include_str!("bridge.rs");
         assert!(app.contains("role: \"tool_group\""));
         assert!(app.contains(
             "type ToolGroup = { role: \"tool_group\"; tools: ToolEntry[]; settled: boolean }"
         ));
 
-        let settlement = app
-            .split_once("function settleCompletedToolGroups")
+        let cleanup = app
+            .split_once("function hideCompletedToolActivity")
             .unwrap()
             .1
             .split_once("function toolGroupFailureCount")
             .unwrap()
             .0;
-        assert!(settlement.contains("message.tools.every"));
-        assert!(settlement.contains("message.settled = true"));
-        assert!(app.matches("settleCompletedToolGroups();").count() >= 3);
+        assert!(cleanup.contains("message.role !== \"tool_group\""));
+        assert!(app.matches("hideCompletedToolActivity(messages)").count() >= 3);
+        assert!(bridge.contains("only the execution result and a brief recommended next action"));
+        assert!(bridge.contains("do not recap tool calls, logs, or intermediate process"));
 
+        // Tool logs remain visible while the turn is running.
         let group = app
             .split_once("{:else if m.role === \"tool_group\"}")
             .unwrap()
@@ -1520,20 +1523,9 @@ mod tests {
         assert!(group.contains("已执行 {m.tools.length} 个工具"));
         assert!(group.contains("toolGroupFailureCount(m)"));
         assert!(group.contains("{#each m.tools as tool}"));
-        let item = group
-            .split_once("<details class=\"tool-event\"")
-            .unwrap()
-            .1
-            .split_once("</details>")
-            .unwrap()
-            .0;
-        let summary = item.split_once("</summary>").unwrap().0;
-        assert!(summary.contains("tool.name"));
-        assert!(!summary.contains("tool.args"));
-        assert!(!summary.contains("tool.result}"));
-        assert!(item.contains("tool.args"));
-        assert!(item.contains("tool.result"));
-        assert!(!item.contains("open="));
+        assert!(group.contains("tool.name"));
+        assert!(group.contains("tool.args"));
+        assert!(group.contains("tool.result"));
 
         let css = include_str!("../../src/app.css");
         let tool_css = css
