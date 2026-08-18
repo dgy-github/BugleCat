@@ -3,8 +3,53 @@
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 
+## 当前进度（2026-08-18）
+
+### 当前工作线
+
+- 工作树：`D:\github_dgy\nanocodex\.worktrees\model-provider-catalog`
+- 分支：`feat/model-provider-catalog`
+- 最新提交：`19e296b fix(agent): preserve long task deliverables`
+- 本轮用户原有文件必须保留：`rust/Cargo.lock`（已修改）、`parse_xlsx.py`（未跟踪）。两者均未纳入本轮提交，也不得覆盖或清理。
+- 主工作树 `D:\github_dgy\nanocodex` 另有用户未提交的 GUI 修改；继续开发应留在上述独立工作树，避免混入主工作树改动。
+
+### 本轮问题与根因
+
+- 相同标题的连续会话实际落在不同 session；程序启动时总建新会话，导致新会话无法继承旧会话的 PDF 任务状态。
+- 长链路上下文裁剪只保留近期消息，较早的用户目标会被工具日志挤掉，模型因此持续研究或回答已有 PDF，而不是完成用户要求的新 PDF。
+- Agent 以前没有交付物完成闸门：用户明确要求生成 PDF 时，即使没有创建或更新 PDF，也能用普通文本结束任务。
+- 强制收敛逻辑可能过早移除工具，导致尚未完成的计划或 PDF 任务无法继续执行。
+
+### 已完成修复
+
+- `ncx-core/src/session_index.rs`：按规范化工作目录查找最近一个未归档、且存在快照的可恢复会话。
+- `gui/src-tauri/src/bridge.rs`：启动时恢复当前工作目录最近会话；监听器就绪后发送 `Loaded` 事件，把恢复的历史同步到前端。
+- `ncx-core/src/session.rs`：裁剪长上下文时，额外保留最多 8 条历史用户消息作为“任务历史锚点”，丢弃旧的助手和工具噪声。
+- 新增 `ncx-core/src/agent_loop/deliverable.rs`：识别明确的 PDF 创建请求，记录执行前 PDF 快照，并检查本轮是否创建或更新了有效 PDF。
+- PDF 有效性至少检查 `%PDF-` 文件头和尾部 `%%EOF`；只写文件头、沿用旧 PDF 或只回复路径均不能算完成。
+- `ncx-core/src/agent_loop/turn.rs`：PDF 未交付时禁止文本提前结束，并明确要求模型停止继续研究、实际生成文件；未完成计划或交付物时，长链路收敛不能撤掉工具。
+- PDF 只读、查找或询问类请求不会误触发“必须生成 PDF”的闸门。
+
+### 验证证据
+
+- `cargo test -p ncx-core`：**191 通过，0 失败**。
+- `cargo test -p ncx-gui --manifest-path gui/src-tauri/Cargo.toml`：**25 通过，0 失败**。
+- `npm run build`：成功，Vite 共处理 114 个模块。
+- Windows GNU 正式版构建成功：
+  - 程序：`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\ncx-gui.exe`
+  - 安装包：`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\bundle\nsis\nanocodex_0.1.0_x64-setup.exe`
+- 最新正式版已在本地启动并验证窗口响应正常；启动时进程号为 `28924`（进程号仅是当次运行状态，不应作为后续判断依据）。
+- `git diff --check` 无格式错误，仅有 Windows 换行提示。
+
+### 后续接手建议
+
+1. 用现有长会话继续追问，确认恢复的是同一个 session，且较早的用户目标仍进入模型上下文。
+2. 实测一句明确的“根据以上资料生成一个 PDF”，确认只有新建或更新有效 PDF 后任务才结束。
+3. 实测“PDF 去哪了”“查找已有 PDF”等只读请求，确认不会被创建闸门拦截。
+4. 若继续修改，先确认 `git status --short`，不要提交或还原用户的 `rust/Cargo.lock` 与 `parse_xlsx.py`。
+
 ## 元信息
-- 最后更新：2026-06-29
+- 最后更新：2026-08-18（顶部“当前进度”为现行状态；下方 2026-06-29 内容保留作历史背景）
 - 分支：**`rust-capability`**（整合线，推 **`origin/gui-merge-featgui`**；`origin/rust-capability` = codex
   的独立 GUI 线，**勿覆盖**）。Python 树 `nanocodex/*.py` 不动。
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
