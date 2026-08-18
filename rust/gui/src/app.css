@@ -330,6 +330,7 @@ header {
   --tool-log-text: color-mix(in srgb, var(--ink-3) 82%, transparent);
   --tool-log-muted: color-mix(in srgb, var(--ink-3) 58%, transparent);
   --tool-log-line: color-mix(in srgb, var(--ink-3) 22%, transparent);
+  --tool-log-error: color-mix(in srgb, var(--ink-3) 74%, var(--danger) 26%);
   margin: 0;
   border: 0;
   background: transparent;
@@ -372,7 +373,7 @@ header {
   font-size: 0.7rem;
 }
 .tool-run-status.error {
-  color: color-mix(in srgb, var(--danger) 66%, var(--tool-log-muted));
+  color: var(--tool-log-error);
 }
 .tool-run[open].settled > summary { margin-bottom: 0.08rem; }
 .tool-timeline {
@@ -442,7 +443,7 @@ header {
   animation: pulse 1.1s ease-in-out infinite;
 }
 .tool-event.error .tool-event-icon {
-  color: color-mix(in srgb, var(--danger) 64%, var(--tool-log-muted));
+  color: var(--tool-log-error);
 }
 .tool-event .tname {
   color: var(--tool-log-text);
@@ -471,7 +472,7 @@ header {
 .tstatus.ok,
 .tstatus.empty { color: var(--tool-log-muted); background: transparent; }
 .tstatus.err {
-  color: color-mix(in srgb, var(--danger) 66%, var(--tool-log-muted));
+  color: var(--tool-log-error);
   background: transparent;
 }
 .tool-detail {

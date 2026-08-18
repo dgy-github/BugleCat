@@ -194,6 +194,18 @@ pub enum UiEvent {
 pub struct UiMsg {
     pub role: String,
     pub text: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<UiTool>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct UiTool {
+    #[serde(skip)]
+    call_id: String,
+    pub name: String,
+    pub args: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
 }
 
 pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
@@ -693,45 +705,82 @@ pub fn spawn_worker(
 }
 
 /// Convert snapshot messages (OpenAI shape) into UI transcript entries for the
-/// `loaded` event. Skips the system message; renders tool calls as a note line.
+/// `loaded` event. Consecutive tool calls remain one structured, collapsible
+/// group instead of being mistaken for red error notes by the frontend.
 fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
     let mut out = Vec::new();
+    let mut pending_tools = Vec::new();
+
+    fn flush_tools(out: &mut Vec<UiMsg>, pending: &mut Vec<UiTool>) {
+        if pending.is_empty() {
+            return;
+        }
+        out.push(UiMsg {
+            role: "tool_group".into(),
+            text: String::new(),
+            tools: std::mem::take(pending),
+        });
+    }
+
     for m in messages {
         let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
         let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("");
         match role {
-            "user" => out.push(UiMsg {
-                role: "user".into(),
-                text: content.to_string(),
-            }),
+            "user" => {
+                flush_tools(&mut out, &mut pending_tools);
+                out.push(UiMsg {
+                    role: "user".into(),
+                    text: content.to_string(),
+                    tools: Vec::new(),
+                });
+            }
             "assistant" => {
                 if !content.trim().is_empty() {
+                    flush_tools(&mut out, &mut pending_tools);
                     out.push(UiMsg {
                         role: "assistant".into(),
                         text: content.to_string(),
+                        tools: Vec::new(),
                     });
                 }
                 if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
-                    let names: Vec<String> = calls
-                        .iter()
-                        .filter_map(|c| {
-                            c.get("function")
-                                .and_then(|f| f.get("name"))
-                                .and_then(|n| n.as_str())
-                                .map(String::from)
-                        })
-                        .collect();
-                    if !names.is_empty() {
-                        out.push(UiMsg {
-                            role: "note".into(),
-                            text: format!("⚙ {}", names.join(", ")),
+                    for call in calls {
+                        let Some(function) = call.get("function") else {
+                            continue;
+                        };
+                        let Some(name) = function.get("name").and_then(|v| v.as_str()) else {
+                            continue;
+                        };
+                        pending_tools.push(UiTool {
+                            call_id: call
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            name: name.to_string(),
+                            args: function
+                                .get("arguments")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            result: None,
                         });
                     }
                 }
             }
-            _ => {} // skip system + tool-result messages in the transcript
+            "tool" => {
+                let call_id = m.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(tool) = pending_tools
+                    .iter_mut()
+                    .find(|tool| tool.call_id == call_id)
+                {
+                    tool.result = Some(content.to_string());
+                }
+            }
+            _ => {} // skip system and unsupported snapshot message roles
         }
     }
+    flush_tools(&mut out, &mut pending_tools);
     out
 }
 
@@ -816,6 +865,43 @@ mod tests {
     use super::*;
     use ncx_core::Skill;
     use ncx_sandbox::WORKSPACE_WRITE;
+
+    #[test]
+    fn restored_tool_calls_keep_details_in_one_collapsed_group() {
+        let messages = vec![
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call-shell",
+                        "type": "function",
+                        "function": {"name": "shell", "arguments": "{\"command\":\"dir\"}"}
+                    },
+                    {
+                        "id": "call-patch",
+                        "type": "function",
+                        "function": {"name": "apply_patch", "arguments": "{\"patch\":\"*** Begin Patch\"}"}
+                    }
+                ]
+            }),
+            json!({"role": "tool", "tool_call_id": "call-shell", "content": "Exit code: 0\nfile.txt"}),
+            json!({"role": "tool", "tool_call_id": "call-patch", "content": "Error: patch rejected"}),
+            json!({"role": "assistant", "content": "处理完成。"}),
+        ];
+
+        let restored = serde_json::to_value(snapshot_to_ui(&messages)).unwrap();
+        assert_eq!(restored.as_array().unwrap().len(), 2);
+        assert_eq!(restored[0]["role"], "tool_group");
+        assert_eq!(restored[0]["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(restored[0]["tools"][0]["name"], "shell");
+        assert_eq!(restored[0]["tools"][0]["args"], "{\"command\":\"dir\"}");
+        assert_eq!(restored[0]["tools"][0]["result"], "Exit code: 0\nfile.txt");
+        assert_eq!(restored[0]["tools"][1]["name"], "apply_patch");
+        assert_eq!(restored[0]["tools"][1]["result"], "Error: patch rejected");
+        assert_eq!(restored[1]["role"], "assistant");
+        assert_eq!(restored[1]["text"], "处理完成。");
+    }
 
     #[test]
     fn home_is_unsafe_but_a_project_dir_is_not() {

@@ -18,7 +18,7 @@
     | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
     | { kind: "question"; id: number; question: string; options: string[]; allow_free_text: boolean }
     | { kind: "done"; final_text: string; stop_reason: string; usage: Record<string, number> }
-    | { kind: "loaded"; messages: { role: string; text: string }[] }
+    | { kind: "loaded"; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
     | { kind: "error"; message: string };
 
   type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
@@ -586,12 +586,18 @@
           break;
         case "loaded":
           messages = p.messages
-            .filter((m) => m.text.trim() !== "") // drop empty tool-only assistant turns
-            .map((m) =>
-              m.role === "user" || m.role === "assistant"
-                ? { role: m.role, text: m.text }
-                : { role: "note", text: m.text },
-            );
+            .flatMap((m): Msg[] => {
+              if ((m.role === "user" || m.role === "assistant") && m.text.trim() !== "") {
+                return [{ role: m.role, text: m.text }];
+              }
+              if (m.role === "tool_group" && m.tools?.length) {
+                return [{ role: "tool_group", tools: m.tools, settled: true }];
+              }
+              if (m.role === "note" && m.text.trim() !== "") {
+                return [{ role: "note", text: m.text }];
+              }
+              return [];
+            });
           streamingIdx = null;
           busy = false;
           stopping = false;
