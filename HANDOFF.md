@@ -273,3 +273,12 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
 
 ## 记忆指针（auto-memory）
 rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · rust-tauri-gui-gotchas · rust-orchestrator-capability
+
+## 2026-08-18 会话切换与历史轻量化
+- 后端恢复历史时只向 GUI 投影每轮用户消息与最后一条非空助手回答；工具名、参数、结果和中间播报不再跨后端/UI 边界。
+- Resume/Fork 快照从原先同一路径读取两次改为一次读取，长会话切换减少重复 JSON 解析。
+- 流式文本、工具、审批、提问、完成、恢复和错误事件全部携带 `session_id`；前端只接收当前会话事件，切换后旧任务不能污染新界面与累计用量。
+- 新会话在进入命令队列前分配 ID，并以空消息种子创建；继续共享当前项目目录、规则、skills 和文件，但不会继承旧聊天与未完成计划。
+- 保存设置或应用模型预设改为保留当前会话 ID 重建，不再暗中创建一个前端不知道的新会话；只有切换项目/显式新建才创建空会话。
+- 首轮标题生成改为独立 `ncx-title` 线程，不再阻塞串行 agent 命令队列。
+- 验证：`ncx-core` 197 项、GUI Rust 32 项测试通过，Vite 正式前端构建通过；正式 Tauri 构建在本轮交付前继续执行。

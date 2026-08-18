@@ -256,11 +256,13 @@ fn archive_session(
 
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
-fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn new_session(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let session_id = ncx_core::new_session_id();
     state
         .tx
-        .send(Command::Reload)
-        .map_err(|_| "agent thread is not running".to_string())
+        .send(Command::New(session_id.clone()))
+        .map_err(|_| "agent thread is not running".to_string())?;
+    Ok(session_id)
 }
 
 /// Continue a saved session (reseed the agent from its snapshot, same id).
@@ -395,8 +397,14 @@ fn save_settings(
         .collect();
     let path = ConfigPaths::default().nanocodex;
     write_nanocodex_config(&borrowed, &path).map_err(|e| e.to_string())?;
-    // Apply live (fresh session with the new config).
-    let _ = state.tx.send(Command::Reload);
+    // Apply live while preserving the active conversation/session id. A config
+    // save must not silently turn into an unrelated new chat.
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    let _ = state.tx.send(Command::SetModel(cfg.model));
     Ok(())
 }
 
@@ -541,7 +549,7 @@ fn apply_model_preset(
 
     write_preset(&preset, &quick_switch_models)?;
     // 写入已经成功；重建会话的消息若暂时无法发送，也不能误报为保存失败。
-    let _ = state.tx.send(Command::Reload);
+    let _ = state.tx.send(Command::SetModel(preset.model_id.clone()));
     Ok(preset)
 }
 
@@ -679,6 +687,7 @@ async fn e2e_ask_question(
     bridge::emit(
         &app,
         bridge::UiEvent::Question {
+            session_id: String::new(),
             id,
             question,
             options,
@@ -1483,9 +1492,8 @@ mod tests {
         let css = include_str!("../../src/app.css");
         assert!(css.contains("--accent:       #0a84ff"));
         assert!(css.contains("backdrop-filter: blur(28px)"));
-        assert!(css.contains(
-            ".menu-backdrop:hover, .menu-backdrop:active, .menu-backdrop:focus-visible"
-        ));
+        assert!(css
+            .contains(".menu-backdrop:hover, .menu-backdrop:active, .menu-backdrop:focus-visible"));
     }
 
     #[test]
@@ -1559,6 +1567,28 @@ mod tests {
     }
 
     #[test]
+    fn frontend_rejects_events_from_inactive_sessions() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function acceptsSessionEvent(sessionId: string)"));
+        assert!(app.contains("if (!acceptsSessionEvent(p.session_id)) break"));
+        assert!(app.contains("session_id: string; text: string"));
+    }
+
+    #[test]
+    fn title_generation_does_not_block_the_agent_command_queue() {
+        let bridge = include_str!("bridge.rs");
+        assert!(bridge.contains("spawn_title_generation("));
+        assert!(!bridge.contains("agent.suggest_title(&text).await"));
+    }
+
+    #[test]
+    fn new_session_starts_with_empty_chat_and_plan_context() {
+        let bridge = include_str!("bridge.rs");
+        assert!(bridge.contains("Command::New(id)"));
+        assert!(bridge.contains("Some((id, Vec::new()))"));
+    }
+
+    #[test]
     fn history_session_can_interrupt_an_active_turn_and_resume_safely() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("disabled={switchingSession || !s.has_snapshot}"));
@@ -1572,9 +1602,7 @@ mod tests {
         assert!(resume.contains("if (busy)"));
         assert!(resume.contains("await invoke(\"stop_generation\")"));
         assert!(resume.contains("await invoke(\"resume_session\""));
-        assert!(
-            resume.find("stop_generation").unwrap() < resume.find("resume_session").unwrap()
-        );
+        assert!(resume.find("stop_generation").unwrap() < resume.find("resume_session").unwrap());
     }
 
     #[test]
@@ -1618,8 +1646,10 @@ mod tests {
         assert!(sidebar.contains("aria-expanded={showRecent}"));
         assert!(sidebar.contains("onclick={() => (showRecent = !showRecent)}"));
         assert!(sidebar.contains("{#if showRecent}"));
-        assert!(sidebar.find("{#if showRecent}").unwrap()
-            < sidebar.find("{#each recentSessions as s}").unwrap());
+        assert!(
+            sidebar.find("{#if showRecent}").unwrap()
+                < sidebar.find("{#each recentSessions as s}").unwrap()
+        );
 
         let css = include_str!("../../src/app.css");
         assert!(css.contains(".side-recent-toggle"));

@@ -11,16 +11,16 @@
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
     | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
-    | { kind: "assistant_delta"; text: string }
-    | { kind: "assistant"; text: string }
-    | { kind: "tool_start"; name: string; args: string }
-    | { kind: "tool_result"; name: string; result: string }
-    | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
-    | { kind: "question"; id: number; question: string; options: string[]; allow_free_text: boolean }
-    | { kind: "done"; final_text: string; stop_reason: string; usage: Record<string, number> }
+    | { kind: "assistant_delta"; session_id: string; text: string }
+    | { kind: "assistant"; session_id: string; text: string }
+    | { kind: "tool_start"; session_id: string; name: string; args: string }
+    | { kind: "tool_result"; session_id: string; name: string; result: string }
+    | { kind: "approval"; session_id: string; id: number; command: string; reason: string; cwd: string; details: string }
+    | { kind: "question"; session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean }
+    | { kind: "done"; session_id: string; final_text: string; stop_reason: string; usage: Record<string, number> }
     | { kind: "session_title"; session_id: string; title: string }
-    | { kind: "loaded"; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
-    | { kind: "error"; message: string };
+    | { kind: "loaded"; session_id: string; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
+    | { kind: "error"; session_id: string; message: string };
 
   type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
   let approval = $state<Approval | null>(null);
@@ -481,6 +481,10 @@
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
   }
 
+  function acceptsSessionEvent(sessionId: string) {
+    return sessionId === "" || (currentSessionId !== "" && sessionId === currentSessionId);
+  }
+
   onMount(async () => {
     try {
       const savedWidth = Number(localStorage.getItem("ncx.sidebarWidth"));
@@ -506,6 +510,7 @@
       const p = ev.payload;
       switch (p.kind) {
         case "ready":
+          if (currentSessionId !== "" && p.session_id !== currentSessionId) break;
           header = `${p.model} · ${p.sandbox}`;
           workspace = p.workspace;
           needsWorkspace = p.needs_workspace;
@@ -522,6 +527,7 @@
           refreshSessions();
           break;
         case "assistant_delta":
+          if (!acceptsSessionEvent(p.session_id)) break;
           if (streamingIdx === null) {
             if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
             settleCompletedToolGroups();
@@ -533,6 +539,7 @@
           }
           break;
         case "assistant":
+          if (!acceptsSessionEvent(p.session_id)) break;
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
             if (m && m.role === "assistant") {
@@ -548,6 +555,7 @@
           }
           break;
         case "tool_start":
+          if (!acceptsSessionEvent(p.session_id)) break;
           // A streamed bubble that turned out empty (tool-only turn) leaves no box.
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
@@ -562,9 +570,11 @@
           }
           break;
         case "approval":
+          if (!acceptsSessionEvent(p.session_id)) break;
           approval = { id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
           break;
         case "question":
+          if (!acceptsSessionEvent(p.session_id)) break;
           userQuestion = {
             id: p.id,
             question: p.question,
@@ -574,6 +584,7 @@
           questionAnswer = "";
           break;
         case "tool_result": {
+          if (!acceptsSessionEvent(p.session_id)) break;
           // Results preserve dispatch order, so pair with the earliest pending
           // call across the compact groups. Failures stay visible and open.
           let pendingGroup: ToolGroup | undefined;
@@ -601,6 +612,7 @@
           break;
         }
         case "done":
+          if (!acceptsSessionEvent(p.session_id)) break;
           settleCompletedToolGroups();
           messages = hideCompletedToolActivity(messages);
           // The completed reply already arrived as an `assistant` event; only a
@@ -621,10 +633,12 @@
           if (!switchingSession) dequeue();
           break;
         case "session_title":
-          if (p.session_id === currentSessionId) sessionTitle = p.title;
+          if (!acceptsSessionEvent(p.session_id)) break;
+          sessionTitle = p.title;
           refreshSessions();
           break;
         case "loaded":
+          if (!acceptsSessionEvent(p.session_id)) break;
           messages = p.messages
             .flatMap((m): Msg[] => {
               if ((m.role === "user" || m.role === "assistant") && m.text.trim() !== "") {
@@ -646,6 +660,7 @@
           refreshSessions(); // keep the session you just left visible in 最近会话
           break;
         case "error":
+          if (!acceptsSessionEvent(p.session_id)) break;
           settleCompletedToolGroups();
           messages = hideCompletedToolActivity(messages);
           streamingIdx = null;
@@ -739,23 +754,31 @@
   }
 
   async function chooseWorkspace() {
+    const previousSessionId = currentSessionId;
+    const previousTitle = sessionTitle;
+    const previousMessages = [...messages];
     try {
       const dir = await open({ directory: true, multiple: false });
       if (!dir || Array.isArray(dir)) return;
+      // Reject every event from the old project as soon as the switch starts.
+      currentSessionId = "";
+      messages = [];
+      sessionTitle = "新会话";
+      resetSessionUsage();
+      queued = [];
+      attached = [];
       const set = await invoke<string>("set_workspace", { path: dir });
       workspace = set;
       // Switching project starts a fresh conversation — the old one belongs to
       // the old workspace, and set_workspace already reloaded the agent into a
       // new session. Reset the conversation-scoped UI state to match.
-      messages = [];
-      sessionTitle = "新会话";
-      currentSessionId = "";
-      resetSessionUsage();
-      queued = [];
-      attached = [];
       messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
       refreshSessions();
     } catch (e) {
+      currentSessionId = previousSessionId;
+      sessionTitle = previousTitle;
+      messages = previousMessages;
+      restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `切换工作区失败：${e}` });
     }
   }
@@ -1177,13 +1200,34 @@
     sidebarOpen = !sidebarOpen;
   }
   async function newSession() {
+    if (switchingSession) return;
+    const previousSessionId = currentSessionId;
+    const previousTitle = sessionTitle;
+    const previousMessages = [...messages];
+    switchingSession = true;
+    if (busy) {
+      stopping = true;
+      queued = [];
+      approval = null;
+      userQuestion = null;
+      await invoke("stop_generation").catch(() => {});
+    }
+    busy = true;
     messages = [];
     sessionTitle = "新会话";
     currentSessionId = "";
     resetSessionUsage();
     try {
-      await invoke("new_session");
+      const id = await invoke<string>("new_session");
+      if (currentSessionId === "") currentSessionId = id;
     } catch (e) {
+      busy = false;
+      stopping = false;
+      switchingSession = false;
+      currentSessionId = previousSessionId;
+      sessionTitle = previousTitle;
+      messages = previousMessages;
+      restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `新建会话失败：${e}` });
     }
   }
@@ -1192,6 +1236,9 @@
     const previousId = currentSessionId;
     const previousTitle = sessionTitle;
     switchingSession = true;
+    sessionTitle = title || "会话";
+    currentSessionId = id;
+    restoreSessionUsage(currentSessionId);
     try {
       if (busy) {
         stopping = true;
@@ -1201,9 +1248,6 @@
         await invoke("stop_generation");
       }
       busy = true;
-      sessionTitle = title || "会话";
-      currentSessionId = id;
-      restoreSessionUsage(currentSessionId);
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
       busy = false;
@@ -1216,13 +1260,30 @@
     }
   }
   async function forkSession(id: string, title = "") {
+    if (switchingSession) return;
+    const previousSessionId = currentSessionId;
+    const previousTitle = sessionTitle;
+    switchingSession = true;
+    if (busy) {
+      stopping = true;
+      queued = [];
+      approval = null;
+      userQuestion = null;
+      await invoke("stop_generation").catch(() => {});
+    }
     busy = true;
     sessionTitle = title ? `${title}（分叉）` : "分叉";
+    currentSessionId = "";
+    resetSessionUsage();
     try {
       await invoke("fork_session", { sessionId: id });
-      messages.push({ role: "note", text: "已从该会话分叉出新会话。" });
     } catch (e) {
       busy = false;
+      stopping = false;
+      switchingSession = false;
+      currentSessionId = previousSessionId;
+      sessionTitle = previousTitle;
+      restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `分叉失败：${e}` });
     }
   }

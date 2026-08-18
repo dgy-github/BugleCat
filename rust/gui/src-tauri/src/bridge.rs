@@ -27,10 +27,10 @@ use ncx_config::{
 };
 use ncx_core::{
     discover_skills, expand_file_mentions, load_workspace_instructions, model_provider_from_config,
-    new_session_id, skills_index_block, vision_provider_from_config, AgentLoop,
-    AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest, CheckpointStore,
-    LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext, ToolRegistry,
-    UserQuestionHandler, UserQuestionRequest,
+    new_session_id, skills_index_block, suggest_title_with_provider, vision_provider_from_config,
+    AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
+    CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext,
+    ToolRegistry, UserQuestionHandler, UserQuestionRequest,
 };
 use ncx_sandbox::SandboxPolicy;
 use serde::Serialize;
@@ -111,6 +111,9 @@ pub enum Command {
     /// Rebuild the agent from the (just-saved) config — applies model / sandbox
     /// / key changes live. Starts a fresh session.
     Reload,
+    /// Start a new empty conversation with an id allocated before it enters the
+    /// serial worker queue. Project files remain shared; chat and plans do not.
+    New(String),
     /// Continue a saved session: reseed the agent from its snapshot, keeping the
     /// same session id (future turns append to it).
     Resume(String),
@@ -154,16 +157,25 @@ pub enum UiEvent {
         needs_workspace: bool,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
-    AssistantDelta { text: String },
+    AssistantDelta { session_id: String, text: String },
     /// Assistant's final visible text (finalize the streamed bubble).
-    Assistant { text: String },
+    Assistant { session_id: String, text: String },
     /// A tool is about to run.
-    ToolStart { name: String, args: String },
+    ToolStart {
+        session_id: String,
+        name: String,
+        args: String,
+    },
     /// A tool finished.
-    ToolResult { name: String, result: String },
+    ToolResult {
+        session_id: String,
+        name: String,
+        result: String,
+    },
     /// An escalated action needs the user's yes/no. Answer via the `approve`
     /// command with this `id`.
     Approval {
+        session_id: String,
         id: u64,
         command: String,
         reason: String,
@@ -171,6 +183,7 @@ pub enum UiEvent {
         details: String,
     },
     Question {
+        session_id: String,
         id: u64,
         question: String,
         options: Vec<String>,
@@ -178,6 +191,7 @@ pub enum UiEvent {
     },
     /// The turn finished.
     Done {
+        session_id: String,
         final_text: String,
         stop_reason: String,
         usage: Value,
@@ -186,9 +200,12 @@ pub enum UiEvent {
     SessionTitle { session_id: String, title: String },
     /// A session was resumed/forked — the UI should replace its transcript with
     /// these restored messages.
-    Loaded { messages: Vec<UiMsg> },
+    Loaded {
+        session_id: String,
+        messages: Vec<UiMsg>,
+    },
     /// Fatal setup/turn error.
-    Error { message: String },
+    Error { session_id: String, message: String },
 }
 
 /// A restored conversation message for the `loaded` event.
@@ -196,18 +213,6 @@ pub enum UiEvent {
 pub struct UiMsg {
     pub role: String,
     pub text: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<UiTool>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct UiTool {
-    #[serde(skip)]
-    call_id: String,
-    pub name: String,
-    pub args: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
 }
 
 pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
@@ -220,13 +225,27 @@ fn should_generate_session_title(is_first_turn: bool, stop_reason: &str) -> bool
 
 /// Build the loop's event sink (forwards [`LoopEvent`]s to the frontend). A
 /// fresh one is needed after every (re)build of the agent.
-fn make_sink(app: AppHandle) -> Box<dyn FnMut(LoopEvent)> {
+fn make_sink(app: AppHandle, session_id: String) -> Box<dyn FnMut(LoopEvent)> {
     Box::new(move |ev: LoopEvent| {
         let ui = match ev {
-            LoopEvent::AssistantDelta(text) => UiEvent::AssistantDelta { text },
-            LoopEvent::AssistantText(text) => UiEvent::Assistant { text },
-            LoopEvent::ToolStart { name, args } => UiEvent::ToolStart { name, args },
-            LoopEvent::ToolResult { name, result } => UiEvent::ToolResult { name, result },
+            LoopEvent::AssistantDelta(text) => UiEvent::AssistantDelta {
+                session_id: session_id.clone(),
+                text,
+            },
+            LoopEvent::AssistantText(text) => UiEvent::Assistant {
+                session_id: session_id.clone(),
+                text,
+            },
+            LoopEvent::ToolStart { name, args } => UiEvent::ToolStart {
+                session_id: session_id.clone(),
+                name,
+                args,
+            },
+            LoopEvent::ToolResult { name, result } => UiEvent::ToolResult {
+                session_id: session_id.clone(),
+                name,
+                result,
+            },
         };
         emit(&app, ui);
     })
@@ -331,12 +350,14 @@ fn is_unsafe_against(dir: &std::path::Path, home: Option<&std::path::Path>) -> b
 /// Approval handler that round-trips through the frontend modal.
 struct GuiApprover {
     app: AppHandle,
+    active_session: Arc<Mutex<String>>,
     pending: PendingMap,
     counter: AtomicU64,
 }
 
 struct GuiQuestioner {
     app: AppHandle,
+    active_session: Arc<Mutex<String>>,
     pending: PendingQuestionMap,
     counter: AtomicU64,
 }
@@ -350,6 +371,7 @@ impl UserQuestionHandler for GuiQuestioner {
         emit(
             &self.app,
             UiEvent::Question {
+                session_id: current_session_id(&self.active_session),
                 id,
                 question: request.question,
                 options: request.options,
@@ -369,6 +391,7 @@ impl ApprovalHandler for GuiApprover {
         emit(
             &self.app,
             UiEvent::Approval {
+                session_id: current_session_id(&self.active_session),
                 id,
                 command: req.command,
                 reason: req.reason,
@@ -428,6 +451,54 @@ fn latest_plan_from_messages(messages: &[Value]) -> Vec<Value> {
         }
     }
     Vec::new()
+}
+
+fn current_session_id(active: &Arc<Mutex<String>>) -> String {
+    active.lock().map(|id| id.clone()).unwrap_or_default()
+}
+
+fn set_active_session(active: &Arc<Mutex<String>>, session_id: &str) {
+    if let Ok(mut id) = active.lock() {
+        *id = session_id.to_string();
+    }
+}
+
+fn spawn_title_generation(
+    app: AppHandle,
+    session_index: Arc<Mutex<SessionIndex>>,
+    session_id: String,
+    workspace: PathBuf,
+    request: String,
+) {
+    let _ = std::thread::Builder::new()
+        .name("ncx-title".into())
+        .spawn(move || {
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            rt.block_on(async move {
+                let Ok(cfg) = load_config(Overrides {
+                    workspace: Some(workspace),
+                    ..Default::default()
+                }) else {
+                    return;
+                };
+                let provider = model_provider_from_config(&cfg, cfg.model.clone());
+                let Some(title) = suggest_title_with_provider(&provider, &request).await else {
+                    return;
+                };
+                let persisted = session_index
+                    .lock()
+                    .map(|mut index| index.set_title(&session_id, &title))
+                    .unwrap_or(false);
+                if persisted {
+                    emit(&app, UiEvent::SessionTitle { session_id, title });
+                }
+            });
+        });
 }
 
 fn build_agent(
@@ -532,13 +603,16 @@ pub fn spawn_worker(
                 .expect("agent-thread tokio runtime builds");
 
             rt.block_on(async move {
+                let active_session = Arc::new(Mutex::new(String::new()));
                 let approver: Rc<dyn ApprovalHandler> = Rc::new(GuiApprover {
                     app: app.clone(),
+                    active_session: active_session.clone(),
                     pending: pending.clone(),
                     counter: AtomicU64::new(1),
                 });
                 let questioner: Rc<dyn UserQuestionHandler> = Rc::new(GuiQuestioner {
                     app: app.clone(),
+                    active_session: active_session.clone(),
                     pending: questions.clone(),
                     counter: AtomicU64::new(1),
                 });
@@ -557,20 +631,26 @@ pub fn spawn_worker(
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
-                let (mut agent, mut workspace, mut session_id, mut log_path, _) =
-                    match build_agent(
-                        approver.clone(),
-                        questioner.clone(),
-                        startup_seed,
-                        grants.clone(),
-                    ) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            emit(&app, UiEvent::Error { message: e });
-                            return;
-                        }
-                    };
-                agent.set_event_sink(make_sink(app.clone()));
+                let (mut agent, mut workspace, mut session_id, mut log_path, _) = match build_agent(
+                    approver.clone(),
+                    questioner.clone(),
+                    startup_seed,
+                    grants.clone(),
+                ) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        emit(
+                            &app,
+                            UiEvent::Error {
+                                session_id: String::new(),
+                                message: e,
+                            },
+                        );
+                        return;
+                    }
+                };
+                set_active_session(&active_session, &session_id);
+                agent.set_event_sink(make_sink(app.clone(), session_id.clone()));
                 emit_ready(&app, &workspace, &session_id);
 
                 while let Some(cmd) = rx.recv().await {
@@ -584,7 +664,13 @@ pub fn spawn_worker(
                             let user_input = match build_image_user_input(&expanded, &images) {
                                 Ok(v) => v,
                                 Err(e) => {
-                                    emit(&app, UiEvent::Error { message: e });
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: session_id.clone(),
+                                            message: e,
+                                        },
+                                    );
                                     continue;
                                 }
                             };
@@ -605,6 +691,7 @@ pub fn spawn_worker(
                             emit(
                                 &app,
                                 UiEvent::Done {
+                                    session_id: session_id.clone(),
                                     final_text: result.final_text.clone(),
                                     stop_reason: result.stop_reason.clone(),
                                     usage: serde_json::to_value(&result.usage)
@@ -612,21 +699,47 @@ pub fn spawn_worker(
                                 },
                             );
                             if should_generate_session_title(is_first_turn, &result.stop_reason) {
-                                if let Some(title) = agent.suggest_title(&text).await {
-                                    let persisted = session_index
-                                        .lock()
-                                        .map(|mut index| index.set_title(&session_id, &title))
-                                        .unwrap_or(false);
-                                    if persisted {
-                                        emit(
-                                            &app,
-                                            UiEvent::SessionTitle {
-                                                session_id: session_id.clone(),
-                                                title,
-                                            },
-                                        );
-                                    }
+                                spawn_title_generation(
+                                    app.clone(),
+                                    session_index.clone(),
+                                    session_id.clone(),
+                                    workspace.clone(),
+                                    text.clone(),
+                                );
+                            }
+                        }
+                        Command::New(id) => {
+                            grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            match build_agent(
+                                approver.clone(),
+                                questioner.clone(),
+                                Some((id, Vec::new())),
+                                grants.clone(),
+                            ) {
+                                Ok((a, ws, sid, lp, _)) => {
+                                    agent = a;
+                                    workspace = ws;
+                                    session_id = sid;
+                                    log_path = lp;
+                                    set_active_session(&active_session, &session_id);
+                                    agent
+                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    emit_ready(&app, &workspace, &session_id);
+                                    emit(
+                                        &app,
+                                        UiEvent::Loaded {
+                                            session_id: session_id.clone(),
+                                            messages: Vec::new(),
+                                        },
+                                    );
                                 }
+                                Err(e) => emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: String::new(),
+                                        message: e,
+                                    },
+                                ),
                             }
                         }
                         Command::Reload => {
@@ -642,36 +755,36 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    agent.set_event_sink(make_sink(app.clone()));
+                                    set_active_session(&active_session, &session_id);
+                                    agent
+                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
-                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                                Err(e) => emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: session_id.clone(),
+                                        message: e,
+                                    },
+                                ),
                             }
                         }
-                        Command::Resume(id) | Command::Fork(id)
-                            if session_index
-                                .lock()
-                                .ok()
-                                .and_then(|index| index.load_snapshot(&id))
-                                .is_none() =>
-                        {
-                            emit(
-                                &app,
-                                UiEvent::Error {
-                                    message: format!("no saved snapshot for session {id}"),
-                                },
-                            );
-                        }
                         Command::Resume(id) => {
-                            let (msgs, restored_workspace) = session_index
-                                .lock()
-                                .map(|index| {
-                                    (
-                                        index.load_snapshot(&id).unwrap_or_default(),
-                                        index.get(&id).map(|s| s.workspace.clone()),
-                                    )
+                            let loaded = session_index.lock().ok().and_then(|index| {
+                                index.load_snapshot(&id).map(|messages| {
+                                    (messages, index.get(&id).map(|s| s.workspace.clone()))
                                 })
-                                .unwrap_or_default();
+                            });
+                            let Some((msgs, restored_workspace)) = loaded else {
+                                emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: id.clone(),
+                                        message: format!("no saved snapshot for session {id}"),
+                                    },
+                                );
+                                continue;
+                            };
                             let ui = snapshot_to_ui(&msgs);
                             // Reopen the conversation in ITS original workspace, not
                             // whatever dir we're currently in — otherwise a resumed
@@ -681,7 +794,7 @@ pub fn spawn_worker(
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
-                                Some((id, msgs)),
+                                Some((id.clone(), msgs)),
                                 grants.clone(),
                             ) {
                                 Ok((a, ws, sid, lp, _)) => {
@@ -689,23 +802,43 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    agent.set_event_sink(make_sink(app.clone()));
-                                    emit(&app, UiEvent::Loaded { messages: ui });
+                                    set_active_session(&active_session, &session_id);
+                                    agent
+                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
                                     emit_ready(&app, &workspace, &session_id);
+                                    emit(
+                                        &app,
+                                        UiEvent::Loaded {
+                                            session_id: session_id.clone(),
+                                            messages: ui,
+                                        },
+                                    );
                                 }
-                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                                Err(e) => emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: id,
+                                        message: e,
+                                    },
+                                ),
                             }
                         }
                         Command::Fork(id) => {
-                            let (msgs, restored_workspace) = session_index
-                                .lock()
-                                .map(|index| {
-                                    (
-                                        index.load_snapshot(&id).unwrap_or_default(),
-                                        index.get(&id).map(|s| s.workspace.clone()),
-                                    )
+                            let loaded = session_index.lock().ok().and_then(|index| {
+                                index.load_snapshot(&id).map(|messages| {
+                                    (messages, index.get(&id).map(|s| s.workspace.clone()))
                                 })
-                                .unwrap_or_default();
+                            });
+                            let Some((msgs, restored_workspace)) = loaded else {
+                                emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: id.clone(),
+                                        message: format!("no saved snapshot for session {id}"),
+                                    },
+                                );
+                                continue;
+                            };
                             let ui = snapshot_to_ui(&msgs);
                             restore_session_workspace(restored_workspace.as_deref());
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
@@ -720,11 +853,25 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    agent.set_event_sink(make_sink(app.clone()));
-                                    emit(&app, UiEvent::Loaded { messages: ui });
+                                    set_active_session(&active_session, &session_id);
+                                    agent
+                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
                                     emit_ready(&app, &workspace, &session_id);
+                                    emit(
+                                        &app,
+                                        UiEvent::Loaded {
+                                            session_id: session_id.clone(),
+                                            messages: ui,
+                                        },
+                                    );
                                 }
-                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                                Err(e) => emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: id,
+                                        message: e,
+                                    },
+                                ),
                             }
                         }
                         Command::SetApproval(policy) => {
@@ -765,10 +912,18 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    agent.set_event_sink(make_sink(app.clone()));
+                                    set_active_session(&active_session, &session_id);
+                                    agent
+                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
-                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                                Err(e) => emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: session_id.clone(),
+                                        message: e,
+                                    },
+                                ),
                             }
                         }
                         Command::SetPermissionMode(mode) => {
@@ -797,22 +952,31 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    agent.set_event_sink(make_sink(app.clone()));
+                                    set_active_session(&active_session, &session_id);
+                                    agent
+                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
-                                Err(e) => emit(&app, UiEvent::Error { message: e }),
+                                Err(e) => emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: session_id.clone(),
+                                        message: e,
+                                    },
+                                ),
                             }
                         }
                         Command::RequestReady => {
+                            emit_ready(&app, &workspace, &session_id);
                             if !agent.session.messages.is_empty() {
                                 emit(
                                     &app,
                                     UiEvent::Loaded {
+                                        session_id: session_id.clone(),
                                         messages: snapshot_to_ui(&agent.session.messages),
                                     },
                                 );
                             }
-                            emit_ready(&app, &workspace, &session_id);
                         }
                     }
                 }
@@ -821,84 +985,60 @@ pub fn spawn_worker(
         .expect("spawn ncx-agent thread");
 }
 
-/// Convert snapshot messages (OpenAI shape) into UI transcript entries for the
-/// `loaded` event. Consecutive tool calls remain one structured, collapsible
-/// group instead of being mistaken for red error notes by the frontend.
+/// Convert a full model snapshot into the lightweight visible transcript.
+/// Tool calls/results and intermediate assistant narration stay on disk for
+/// model continuity, but never cross the backend/UI boundary during restore.
 fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
     let mut out = Vec::new();
-    let mut pending_tools = Vec::new();
+    let mut final_assistant: Option<String> = None;
+    let mut saw_user = false;
 
-    fn flush_tools(out: &mut Vec<UiMsg>, pending: &mut Vec<UiTool>) {
-        if pending.is_empty() {
-            return;
+    let flush_final = |out: &mut Vec<UiMsg>, pending: &mut Option<String>| {
+        if let Some(text) = pending.take() {
+            out.push(UiMsg {
+                role: "assistant".into(),
+                text,
+            });
         }
-        out.push(UiMsg {
-            role: "tool_group".into(),
-            text: String::new(),
-            tools: std::mem::take(pending),
-        });
-    }
+    };
 
     for m in messages {
         let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
-        let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        let content = snapshot_text_content(m.get("content"));
         match role {
             "user" => {
-                flush_tools(&mut out, &mut pending_tools);
-                out.push(UiMsg {
-                    role: "user".into(),
-                    text: content.to_string(),
-                    tools: Vec::new(),
-                });
+                flush_final(&mut out, &mut final_assistant);
+                if !content.trim().is_empty() {
+                    out.push(UiMsg {
+                        role: "user".into(),
+                        text: content,
+                    });
+                    saw_user = true;
+                }
             }
             "assistant" => {
-                if !content.trim().is_empty() {
-                    flush_tools(&mut out, &mut pending_tools);
-                    out.push(UiMsg {
-                        role: "assistant".into(),
-                        text: content.to_string(),
-                        tools: Vec::new(),
-                    });
-                }
-                if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
-                    for call in calls {
-                        let Some(function) = call.get("function") else {
-                            continue;
-                        };
-                        let Some(name) = function.get("name").and_then(|v| v.as_str()) else {
-                            continue;
-                        };
-                        pending_tools.push(UiTool {
-                            call_id: call
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            name: name.to_string(),
-                            args: function
-                                .get("arguments")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string(),
-                            result: None,
-                        });
-                    }
+                if saw_user && !content.trim().is_empty() {
+                    final_assistant = Some(content);
                 }
             }
-            "tool" => {
-                let call_id = m.get("tool_call_id").and_then(|v| v.as_str()).unwrap_or("");
-                if let Some(tool) = pending_tools
-                    .iter_mut()
-                    .find(|tool| tool.call_id == call_id)
-                {
-                    tool.result = Some(content.to_string());
-                }
-            }
-            _ => {} // skip system and unsupported snapshot message roles
+            _ => {} // system/tool/unsupported roles never reach restored UI
         }
     }
-    flush_tools(&mut out, &mut pending_tools);
+    flush_final(&mut out, &mut final_assistant);
     out
+}
+
+fn snapshot_text_content(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
 }
 
 fn save_auto_checkpoint(workspace: &std::path::Path, prompt: &str) {
@@ -984,8 +1124,10 @@ mod tests {
     use ncx_sandbox::WORKSPACE_WRITE;
 
     #[test]
-    fn restored_tool_calls_keep_details_in_one_collapsed_group() {
+    fn restored_history_omits_tool_calls_and_results_from_the_ui() {
         let messages = vec![
+            json!({"role": "user", "content": "请处理文件"}),
+            json!({"role": "assistant", "content": "我先检查。"}),
             json!({
                 "role": "assistant",
                 "content": null,
@@ -1009,15 +1151,10 @@ mod tests {
 
         let restored = serde_json::to_value(snapshot_to_ui(&messages)).unwrap();
         assert_eq!(restored.as_array().unwrap().len(), 2);
-        assert_eq!(restored[0]["role"], "tool_group");
-        assert_eq!(restored[0]["tools"].as_array().unwrap().len(), 2);
-        assert_eq!(restored[0]["tools"][0]["name"], "shell");
-        assert_eq!(restored[0]["tools"][0]["args"], "{\"command\":\"dir\"}");
-        assert_eq!(restored[0]["tools"][0]["result"], "Exit code: 0\nfile.txt");
-        assert_eq!(restored[0]["tools"][1]["name"], "apply_patch");
-        assert_eq!(restored[0]["tools"][1]["result"], "Error: patch rejected");
+        assert_eq!(restored[0]["role"], "user");
         assert_eq!(restored[1]["role"], "assistant");
         assert_eq!(restored[1]["text"], "处理完成。");
+        assert!(restored[1].get("tools").is_none());
     }
 
     #[test]
@@ -1095,6 +1232,23 @@ mod tests {
         assert_eq!(event["kind"], "session_title");
         assert_eq!(event["session_id"], "session-1");
         assert_eq!(event["title"], "修复会话标题");
+    }
+
+    #[test]
+    fn every_turn_event_carries_its_session_id() {
+        let event = serde_json::to_value(UiEvent::Assistant {
+            session_id: "session-1".into(),
+            text: "完成".into(),
+        })
+        .unwrap();
+        assert_eq!(event["session_id"], "session-1");
+
+        let loaded = serde_json::to_value(UiEvent::Loaded {
+            session_id: "session-2".into(),
+            messages: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(loaded["session_id"], "session-2");
     }
 
     #[test]
@@ -1210,12 +1364,12 @@ mod tests {
             .await;
         assert!(discovery.contains("src/lib.rs"), "{discovery}");
         let literal_discovery = registry
-            .execute_with_recovery(
-                "find_files",
-                &json!({"query": "lib.rs", "exact": true}),
-            )
+            .execute_with_recovery("find_files", &json!({"query": "lib.rs", "exact": true}))
             .await;
-        assert!(literal_discovery.contains("src/lib.rs"), "{literal_discovery}");
+        assert!(
+            literal_discovery.contains("src/lib.rs"),
+            "{literal_discovery}"
+        );
         let listing = registry
             .execute_with_recovery("list_directory", &json!({"path": "src"}))
             .await;

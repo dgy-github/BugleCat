@@ -220,24 +220,35 @@ impl AgentLoop {
     /// history or tools. Failure is deliberately non-fatal: callers retain the
     /// deterministic title produced by the session index.
     pub async fn suggest_title(&self, user_request: &str) -> Option<String> {
-        let request = bounded_title_source(user_request, 2_400);
-        if request.trim().is_empty() {
-            return None;
-        }
-        let messages = vec![
-            json!({
-                "role": "system",
-                "content": "为工作任务生成简短中文标题。只输出标题，不要解释、引号、Markdown 或句号。标题应为 6 到 18 个汉字左右，使用动宾结构，描述用户最终要完成的结果而不是背景材料；保留关键文件名、分支名、PDF、PPT、Excel 等必要标识。例如：拉取 gui-merge-featgui 分支；修复历史会话切换；整理大模型架构资料 PDF。"
-            }),
-            json!({"role": "user", "content": request}),
-        ];
-        let response = self.provider.chat(&messages, &[], None).await;
-        if response.finish_reason == "error" {
-            return None;
-        }
-        sanitize_generated_title(&response.content)
+        suggest_title_with_provider(self.provider.as_ref(), user_request).await
     }
+}
 
+/// Generate a compact title using an isolated provider call. GUI clients can
+/// run this outside their serial command queue so navigation stays responsive.
+pub async fn suggest_title_with_provider(
+    provider: &dyn Provider,
+    user_request: &str,
+) -> Option<String> {
+    let request = bounded_title_source(user_request, 2_400);
+    if request.trim().is_empty() {
+        return None;
+    }
+    let messages = vec![
+        json!({
+            "role": "system",
+            "content": "为工作任务生成简短中文标题。只输出标题，不要解释、引号、Markdown 或句号。标题应为 6 到 18 个汉字左右，使用动宾结构，描述用户最终要完成的结果而不是背景材料；保留关键文件名、分支名、PDF、PPT、Excel 等必要标识。例如：拉取 gui-merge-featgui 分支；修复历史会话切换；整理大模型架构资料 PDF。"
+        }),
+        json!({"role": "user", "content": request}),
+    ];
+    let response = provider.chat(&messages, &[], None).await;
+    if response.finish_reason == "error" {
+        return None;
+    }
+    sanitize_generated_title(&response.content)
+}
+
+impl AgentLoop {
     async fn call_model(
         &self,
         schemas: &[Value],

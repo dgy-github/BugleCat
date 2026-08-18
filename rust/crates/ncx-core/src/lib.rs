@@ -42,7 +42,9 @@ pub mod turn_context;
 pub mod user_question;
 pub mod workspace_tools;
 
-pub use agent_loop::{AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult};
+pub use agent_loop::{
+    suggest_title_with_provider, AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult,
+};
 pub use checkpoint::{CheckpointMeta, CheckpointStore, RestoreReport};
 pub use custom_commands::{
     custom_command_prompt, expand_custom_command_template, list_custom_commands,
