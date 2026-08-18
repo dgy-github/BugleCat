@@ -326,10 +326,56 @@ header {
 /* ============================================================================
    Tool calls
    ========================================================================== */
-.tool-timeline {
+.tool-run {
   --tool-log-text: color-mix(in srgb, var(--ink-3) 82%, transparent);
   --tool-log-muted: color-mix(in srgb, var(--ink-3) 58%, transparent);
   --tool-log-line: color-mix(in srgb, var(--ink-3) 22%, transparent);
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.tool-run > summary {
+  list-style: none;
+}
+.tool-run > summary::-webkit-details-marker { display: none; }
+.tool-run:not(.settled) > summary { display: none; }
+.tool-run.settled > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 1.85rem;
+  padding: 0.16rem 0.3rem;
+  border-radius: 6px;
+  color: var(--tool-log-muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.tool-run.settled > summary:hover {
+  color: var(--tool-log-text);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+.tool-run.settled > summary:focus-visible { outline: none; box-shadow: var(--ring) inset; }
+.tool-run-caret {
+  width: 0.72rem;
+  color: var(--tool-log-muted);
+  font-size: 0.82rem;
+  line-height: 1;
+  transition: transform var(--dur) var(--ease);
+}
+.tool-run[open] .tool-run-caret { transform: rotate(90deg); }
+.tool-run-icon { color: var(--tool-log-muted); font-size: 0.72rem; }
+.tool-run-label { font-weight: 500; }
+.tool-run-status {
+  margin-left: auto;
+  color: var(--tool-log-muted);
+  font-size: 0.7rem;
+}
+.tool-run-status.error {
+  color: color-mix(in srgb, var(--danger) 66%, var(--tool-log-muted));
+}
+.tool-run[open].settled > summary { margin-bottom: 0.08rem; }
+.tool-timeline {
   display: grid;
   gap: 0.08rem;
   position: relative;

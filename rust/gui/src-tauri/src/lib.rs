@@ -1441,6 +1441,20 @@ mod tests {
     fn tool_activity_shows_each_compact_item_with_details_on_demand() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("role: \"tool_group\""));
+        assert!(app.contains(
+            "type ToolGroup = { role: \"tool_group\"; tools: ToolEntry[]; settled: boolean }"
+        ));
+
+        let settlement = app
+            .split_once("function settleCompletedToolGroups")
+            .unwrap()
+            .1
+            .split_once("function toolGroupFailureCount")
+            .unwrap()
+            .0;
+        assert!(settlement.contains("message.tools.every"));
+        assert!(settlement.contains("message.settled = true"));
+        assert!(app.matches("settleCompletedToolGroups();").count() >= 3);
 
         let group = app
             .split_once("{:else if m.role === \"tool_group\"}")
@@ -1449,8 +1463,12 @@ mod tests {
             .split_once("{#if busy && streamingIdx === null}")
             .unwrap()
             .0;
+        assert!(group.contains("<details class=\"tool-run\""));
+        assert!(group.contains("class:settled={m.settled}"));
+        assert!(group.contains("open={!m.settled}"));
+        assert!(group.contains("已执行 {m.tools.length} 个工具"));
+        assert!(group.contains("toolGroupFailureCount(m)"));
         assert!(group.contains("{#each m.tools as tool}"));
-        assert!(!group.contains("执行 {m.tools.length} 项操作"));
         let item = group
             .split_once("<details class=\"tool-event\"")
             .unwrap()
@@ -1481,6 +1499,8 @@ mod tests {
         assert!(tool_css.contains("background: transparent"));
         assert!(tool_css.contains("color: var(--tool-log-text)"));
         assert!(tool_css.contains("color: var(--tool-log-muted)"));
+        assert!(tool_css.contains(".tool-run:not(.settled) > summary"));
+        assert!(tool_css.contains(".tool-run.settled > summary"));
         assert!(!tool_css.contains("border-radius: var(--r-md)"));
     }
 

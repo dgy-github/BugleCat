@@ -109,7 +109,7 @@
   let checkpointBusy = $state(false);
 
   type ToolEntry = { name: string; args?: string; result?: string };
-  type ToolGroup = { role: "tool_group"; tools: ToolEntry[] };
+  type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boolean };
   type Msg =
     | { role: "user" | "assistant" | "note"; text: string }
     | ToolGroup;
@@ -191,6 +191,23 @@
     const oc = toolOutcome(result);
     return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
   };
+  function settleCompletedToolGroups() {
+    for (const message of messages) {
+      if (
+        message.role === "tool_group" &&
+        !message.settled &&
+        message.tools.length > 0 &&
+        message.tools.every((tool) => tool.result !== undefined)
+      ) {
+        message.settled = true;
+      }
+    }
+  }
+  function toolGroupFailureCount(group: ToolGroup) {
+    return group.tools.filter(
+      (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
+    ).length;
+  }
   // Per-line class for unified-diff coloring.
   const diffLineClass = (ln: string) => {
     if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("diff ") || ln.startsWith("index ")) return "dl-meta";
@@ -473,6 +490,7 @@
         case "assistant_delta":
           if (streamingIdx === null) {
             if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
+            settleCompletedToolGroups();
             messages.push({ role: "assistant", text: p.text });
             streamingIdx = messages.length - 1;
           } else {
@@ -491,6 +509,7 @@
             }
             streamingIdx = null;
           } else if (p.text.trim() !== "") {
+            settleCompletedToolGroups();
             messages.push({ role: "assistant", text: p.text });
           }
           break;
@@ -505,7 +524,7 @@
             const last = messages.at(-1);
             const entry: ToolEntry = { name: p.name, args: p.args };
             if (last?.role === "tool_group") last.tools.push(entry);
-            else messages.push({ role: "tool_group", tools: [entry] });
+            else messages.push({ role: "tool_group", tools: [entry], settled: false });
           }
           break;
         case "approval":
@@ -538,12 +557,17 @@
           }
           if (pendingTool && pendingGroup) pendingTool.result = p.result;
           else {
-            pendingGroup = { role: "tool_group", tools: [{ name: p.name, result: p.result }] };
+            pendingGroup = {
+              role: "tool_group",
+              tools: [{ name: p.name, result: p.result }],
+              settled: false,
+            };
             messages.push(pendingGroup);
           }
           break;
         }
         case "done":
+          settleCompletedToolGroups();
           // The completed reply already arrived as an `assistant` event; only a
           // non-normal stop adds a note.
           if (p.stop_reason !== "completed") {
@@ -575,6 +599,7 @@
           refreshSessions(); // keep the session you just left visible in 最近会话
           break;
         case "error":
+          settleCompletedToolGroups();
           streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
           busy = false;
@@ -1439,29 +1464,41 @@
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
         {:else if m.role === "tool_group"}
-          <div class="tool-timeline">
-            {#each m.tools as tool}
-              <details class="tool-event"
-                class:running={tool.result === undefined}
-                class:error={tool.result !== undefined && toolOutcome(tool.result) === "err"}
-              >
-                <summary>
-                  <span class="tool-event-caret" aria-hidden="true">›</span>
-                  <span class="tool-event-icon" aria-hidden="true">⚙</span>
-                  <span class="tname">{tool.name}</span>
-                  {#if tool.result === undefined}
-                    <span class="trunning">运行中</span>
-                  {:else}
-                    <span class="tstatus {toolOutcome(tool.result)}">{toolOutcome(tool.result) === "err" ? "失败" : "完成"}</span>
+          <details class="tool-run" class:settled={m.settled} open={!m.settled}>
+            <summary>
+              <span class="tool-run-caret" aria-hidden="true">›</span>
+              <span class="tool-run-icon" aria-hidden="true">⌘</span>
+              <span class="tool-run-label">已执行 {m.tools.length} 个工具</span>
+              {#if toolGroupFailureCount(m) > 0}
+                <span class="tool-run-status error">{toolGroupFailureCount(m)} 个失败</span>
+              {:else}
+                <span class="tool-run-status">查看明细</span>
+              {/if}
+            </summary>
+            <div class="tool-timeline">
+              {#each m.tools as tool}
+                <details class="tool-event"
+                  class:running={tool.result === undefined}
+                  class:error={tool.result !== undefined && toolOutcome(tool.result) === "err"}
+                >
+                  <summary>
+                    <span class="tool-event-caret" aria-hidden="true">›</span>
+                    <span class="tool-event-icon" aria-hidden="true">⚙</span>
+                    <span class="tname">{tool.name}</span>
+                    {#if tool.result === undefined}
+                      <span class="trunning">运行中</span>
+                    {:else}
+                      <span class="tstatus {toolOutcome(tool.result)}">{toolOutcome(tool.result) === "err" ? "失败" : "完成"}</span>
+                    {/if}
+                  </summary>
+                  {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
+                  {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
+                    <pre class="tool-detail tool-result">{tool.result}</pre>
                   {/if}
-                </summary>
-                {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
-                {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
-                  <pre class="tool-detail tool-result">{tool.result}</pre>
-                {/if}
-              </details>
-            {/each}
-          </div>
+                </details>
+              {/each}
+            </div>
+          </details>
         {/if}
       {/each}
       {#if busy && streamingIdx === null}
