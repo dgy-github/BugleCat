@@ -131,8 +131,6 @@ pub enum Command {
     /// permission mode). The frontend calls this once its listener is up, since
     /// the agent thread's initial emit can fire before that listener exists.
     RequestReady,
-    /// Archive / unarchive a saved session (persists in the session index).
-    ArchiveSession(String, bool),
 }
 
 /// What the frontend receives on the `ncx://event` channel. `kind` discriminates.
@@ -515,6 +513,7 @@ pub fn spawn_worker(
     pending: PendingMap,
     questions: PendingQuestionMap,
     cancel: CancelFlag,
+    session_index: Arc<Mutex<SessionIndex>>,
 ) {
     std::thread::Builder::new()
         .name("ncx-agent".into())
@@ -543,7 +542,7 @@ pub fn spawn_worker(
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
-                let (mut agent, mut workspace, mut session_id, mut log_path, mut session_index) =
+                let (mut agent, mut workspace, mut session_id, mut log_path, _) =
                     match build_agent(approver.clone(), questioner.clone(), None, grants.clone()) {
                         Ok(v) => v,
                         Err(e) => {
@@ -572,12 +571,14 @@ pub fn spawn_worker(
                             // flag set would instantly cancel prompts after a
                             // history switch or a manual stop.
                             reset_cancel(&cancel);
-                            let _ = session_index.record_turn(
-                                &session_id,
-                                &workspace,
-                                &agent.session,
-                                &log_path,
-                            );
+                            if let Ok(mut index) = session_index.lock() {
+                                let _ = index.record_turn(
+                                    &session_id,
+                                    &workspace,
+                                    &agent.session,
+                                    &log_path,
+                                );
+                            }
                             emit(
                                 &app,
                                 UiEvent::Done {
@@ -596,12 +597,11 @@ pub fn spawn_worker(
                                 None,
                                 grants.clone(),
                             ) {
-                                Ok((a, ws, sid, lp, idx)) => {
+                                Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
@@ -609,7 +609,11 @@ pub fn spawn_worker(
                             }
                         }
                         Command::Resume(id) | Command::Fork(id)
-                            if session_index.load_snapshot(&id).is_none() =>
+                            if session_index
+                                .lock()
+                                .ok()
+                                .and_then(|index| index.load_snapshot(&id))
+                                .is_none() =>
                         {
                             emit(
                                 &app,
@@ -619,14 +623,20 @@ pub fn spawn_worker(
                             );
                         }
                         Command::Resume(id) => {
-                            let msgs = session_index.load_snapshot(&id).unwrap_or_default();
+                            let (msgs, restored_workspace) = session_index
+                                .lock()
+                                .map(|index| {
+                                    (
+                                        index.load_snapshot(&id).unwrap_or_default(),
+                                        index.get(&id).map(|s| s.workspace.clone()),
+                                    )
+                                })
+                                .unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
                             // Reopen the conversation in ITS original workspace, not
                             // whatever dir we're currently in — otherwise a resumed
                             // session runs against the wrong project.
-                            restore_session_workspace(
-                                session_index.get(&id).map(|s| s.workspace.as_str()),
-                            );
+                            restore_session_workspace(restored_workspace.as_deref());
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(
                                 approver.clone(),
@@ -634,12 +644,11 @@ pub fn spawn_worker(
                                 Some((id, msgs)),
                                 grants.clone(),
                             ) {
-                                Ok((a, ws, sid, lp, idx)) => {
+                                Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit(&app, UiEvent::Loaded { messages: ui });
                                     emit_ready(&app, &workspace, &session_id);
@@ -648,11 +657,17 @@ pub fn spawn_worker(
                             }
                         }
                         Command::Fork(id) => {
-                            let msgs = session_index.load_snapshot(&id).unwrap_or_default();
+                            let (msgs, restored_workspace) = session_index
+                                .lock()
+                                .map(|index| {
+                                    (
+                                        index.load_snapshot(&id).unwrap_or_default(),
+                                        index.get(&id).map(|s| s.workspace.clone()),
+                                    )
+                                })
+                                .unwrap_or_default();
                             let ui = snapshot_to_ui(&msgs);
-                            restore_session_workspace(
-                                session_index.get(&id).map(|s| s.workspace.as_str()),
-                            );
+                            restore_session_workspace(restored_workspace.as_deref());
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(
                                 approver.clone(),
@@ -660,12 +675,11 @@ pub fn spawn_worker(
                                 Some((new_session_id(), msgs)),
                                 grants.clone(),
                             ) {
-                                Ok((a, ws, sid, lp, idx)) => {
+                                Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit(&app, UiEvent::Loaded { messages: ui });
                                     emit_ready(&app, &workspace, &session_id);
@@ -695,7 +709,10 @@ pub fn spawn_worker(
                             let mut m = std::collections::HashMap::new();
                             m.insert("model", model.as_str());
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
+                            let msgs = session_index
+                                .lock()
+                                .map(|index| index.load_snapshot(&session_id).unwrap_or_default())
+                                .unwrap_or_default();
                             // Same session → keep the "always allow" grants.
                             match build_agent(
                                 approver.clone(),
@@ -703,12 +720,11 @@ pub fn spawn_worker(
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
                             ) {
-                                Ok((a, ws, sid, lp, idx)) => {
+                                Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
@@ -725,7 +741,10 @@ pub fn spawn_worker(
                             m.insert("sandbox_mode", sandbox);
                             m.insert("approval_policy", approval);
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            let msgs = session_index.load_snapshot(&session_id).unwrap_or_default();
+                            let msgs = session_index
+                                .lock()
+                                .map(|index| index.load_snapshot(&session_id).unwrap_or_default())
+                                .unwrap_or_default();
                             // Same session → keep the "always allow" grants.
                             match build_agent(
                                 approver.clone(),
@@ -733,12 +752,11 @@ pub fn spawn_worker(
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
                             ) {
-                                Ok((a, ws, sid, lp, idx)) => {
+                                Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
                                     log_path = lp;
-                                    session_index = idx;
                                     agent.set_event_sink(make_sink(app.clone()));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
@@ -746,9 +764,6 @@ pub fn spawn_worker(
                             }
                         }
                         Command::RequestReady => emit_ready(&app, &workspace, &session_id),
-                        Command::ArchiveSession(id, archived) => {
-                            session_index.set_archived(&id, archived);
-                        }
                     }
                 }
             });

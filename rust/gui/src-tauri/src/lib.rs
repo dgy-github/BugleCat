@@ -56,6 +56,7 @@ struct AppState {
     questions: PendingQuestionMap,
     question_counter: AtomicU64,
     cancel: CancelFlag,
+    session_index: Arc<Mutex<SessionIndex>>,
     openrouter_models: Mutex<Vec<CatalogModel>>,
 }
 
@@ -229,16 +230,28 @@ fn request_ready(state: tauri::State<'_, AppState>) -> Result<(), String> {
 }
 
 /// Archive (or unarchive) a saved session; persisted in the session index.
+fn archive_session_in_index(
+    index: &Mutex<SessionIndex>,
+    session_id: &str,
+    archived: bool,
+) -> Result<(), String> {
+    let mut index = index
+        .lock()
+        .map_err(|_| "session index lock is poisoned".to_string())?;
+    if index.set_archived(session_id, archived) {
+        Ok(())
+    } else {
+        Err(format!("unknown session {session_id}"))
+    }
+}
+
 #[tauri::command]
 fn archive_session(
     session_id: String,
     archived: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .tx
-        .send(Command::ArchiveSession(session_id, archived))
-        .map_err(|_| "agent thread is not running".to_string())
+    archive_session_in_index(&state.session_index, &session_id, archived)
 }
 
 /// Start a fresh session (rebuild the agent from config — new empty context).
@@ -1096,10 +1109,14 @@ fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_sessions() -> Result<Vec<SessionRow>, String> {
+fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<SessionRow>, String> {
     // entries() already sorts newest-first by parsed epoch (handles mixed
     // ms-epoch / legacy-ISO timestamps); don't re-sort by raw string here.
-    let entries = SessionIndex::default().entries();
+    let entries = state
+        .session_index
+        .lock()
+        .map_err(|_| "session index lock is poisoned".to_string())?
+        .entries();
     Ok(entries
         .into_iter()
         .take(50)
@@ -1279,6 +1296,8 @@ pub fn run() {
     let questions_for_worker = questions.clone();
     let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
     let cancel_for_worker = cancel.clone();
+    let session_index = Arc::new(Mutex::new(SessionIndex::default()));
+    let session_index_for_worker = session_index.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1288,6 +1307,7 @@ pub fn run() {
             questions,
             question_counter: AtomicU64::new(1_000_000),
             cancel,
+            session_index,
             openrouter_models: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
@@ -1299,6 +1319,7 @@ pub fn run() {
                 pending_for_worker,
                 questions_for_worker,
                 cancel_for_worker,
+                session_index_for_worker,
             );
             Ok(())
         })
@@ -1363,6 +1384,36 @@ mod tests {
     use super::*;
     use crate::model_catalog::CatalogModel;
     use ncx_config::Config;
+
+    #[test]
+    fn archiving_persists_without_waiting_for_the_agent_command_queue() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx_archive_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let index_path = root.join("sessions.jsonl");
+        let mut index = SessionIndex::new(index_path.clone());
+        let mut session = ncx_core::Session::new("system");
+        session.add_user_text("other session");
+        index.record_turn(
+            "other-session",
+            &root,
+            &session,
+            &root.join("session.jsonl"),
+        );
+        let shared = Mutex::new(index);
+
+        archive_session_in_index(&shared, "other-session", true).unwrap();
+
+        let reloaded = SessionIndex::new(index_path);
+        assert!(reloaded.get("other-session").unwrap().archived);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn settings_snapshot_exposes_vision_parser_without_leaking_its_key() {
