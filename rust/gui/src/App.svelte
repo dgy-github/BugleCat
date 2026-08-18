@@ -22,10 +22,12 @@
     | { kind: "loaded"; session_id: string; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
     | { kind: "error"; session_id: string; message: string };
 
-  type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
+  type Approval = { session_id: string; id: number; command: string; reason: string; cwd: string; details: string };
   let approval = $state<Approval | null>(null);
-  type UserQuestion = { id: number; question: string; options: string[]; allow_free_text: boolean };
+  const approvalsBySession = new Map<string, Approval>();
+  type UserQuestion = { session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean };
   let userQuestion = $state<UserQuestion | null>(null);
+  const questionsBySession = new Map<string, UserQuestion>();
   let questionAnswer = $state("");
 
   type Settings = {
@@ -116,10 +118,13 @@
     | ToolGroup;
 
   let messages = $state<Msg[]>([]);
+  const sessionMessages = new Map<string, Msg[]>();
   let input = $state("");
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
+  const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
   let busy = $state(false);
+  let runningSessions = $state(new Set<string>());
   let stopping = $state(false);
   let switchingSession = $state(false);
   // File explorer (workspace tree)
@@ -170,6 +175,30 @@
         completion_tokens: tokOut,
       }));
     } catch { /* storage is optional */ }
+  }
+  function addSessionUsage(sessionId: string, usage: Record<string, number>) {
+    if (!sessionId) return;
+    const prompt = usage.prompt_tokens || 0;
+    const completion = usage.completion_tokens || 0;
+    if (sessionId === currentSessionId) {
+      tokIn += prompt;
+      tokOut += completion;
+      persistSessionUsage(sessionId);
+      return;
+    }
+    try {
+      const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
+      localStorage.setItem(sessionUsageKey(sessionId), JSON.stringify({
+        prompt_tokens: (Number(stored?.prompt_tokens) || 0) + prompt,
+        completion_tokens: (Number(stored?.completion_tokens) || 0) + completion,
+      }));
+    } catch { /* storage is optional */ }
+  }
+  function setSessionRunning(sessionId: string, running: boolean) {
+    const next = new Set(runningSessions);
+    if (running) next.add(sessionId);
+    else next.delete(sessionId);
+    runningSessions = next;
   }
   // Per-1M-token prices (from config); 0 = unknown → cost is hidden.
   let priceIn = $state(0);
@@ -521,8 +550,14 @@
           if (p.reasoning_effort) reasoningEffort = p.reasoning_effort;
           // Learn the active session's real id so 最近会话 can mark/return to it.
           if (p.session_id) {
+            const wasUnbound = currentSessionId === "";
             currentSessionId = p.session_id;
             restoreSessionUsage(currentSessionId);
+            if (wasUnbound) {
+              restoreSessionQueue(currentSessionId);
+              restoreSessionPrompts(currentSessionId);
+              restoreSessionMessages(currentSessionId);
+            }
           }
           refreshSessions();
           break;
@@ -570,18 +605,21 @@
           }
           break;
         case "approval":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          approval = { id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
+          {
+            const item: Approval = { session_id: p.session_id, id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
+            approvalsBySession.set(p.session_id, item);
+            if (acceptsSessionEvent(p.session_id)) approval = item;
+          }
           break;
         case "question":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          userQuestion = {
-            id: p.id,
-            question: p.question,
-            options: p.options,
-            allow_free_text: p.allow_free_text,
-          };
-          questionAnswer = "";
+          {
+            const item: UserQuestion = { session_id: p.session_id, id: p.id, question: p.question, options: p.options, allow_free_text: p.allow_free_text };
+            questionsBySession.set(p.session_id, item);
+            if (acceptsSessionEvent(p.session_id)) {
+              userQuestion = item;
+              questionAnswer = "";
+            }
+          }
           break;
         case "tool_result": {
           if (!acceptsSessionEvent(p.session_id)) break;
@@ -612,34 +650,42 @@
           break;
         }
         case "done":
-          if (!acceptsSessionEvent(p.session_id)) break;
+          setSessionRunning(p.session_id, false);
+          addSessionUsage(p.session_id, p.usage || {});
+          if (!acceptsSessionEvent(p.session_id)) {
+            refreshSessions();
+            break;
+          }
           settleCompletedToolGroups();
           messages = hideCompletedToolActivity(messages);
           // The completed reply already arrived as an `assistant` event; only a
-          // non-normal stop adds a note.
-          if (p.stop_reason !== "completed") {
+          // switch can happen in the tiny gap between the final text and Done;
+          // recover that final answer without duplicating the normal path.
+          if (p.stop_reason === "completed" && p.final_text.trim() !== "") {
+            const lastAssistant = [...messages].reverse().find(
+              (message): message is Extract<Msg, { role: "assistant" }> => message.role === "assistant",
+            );
+            if (!lastAssistant || lastAssistant.text !== p.final_text) {
+              messages.push({ role: "assistant", text: p.final_text });
+            }
+          } else if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
-          {
-            const u = p.usage || {};
-            tokIn += u.prompt_tokens || 0;
-            tokOut += u.completion_tokens || 0;
-            persistSessionUsage(currentSessionId);
-          }
           streamingIdx = null;
-          busy = switchingSession;
+          busy = runningSessions.has(currentSessionId);
           stopping = false;
           refreshSessions();
           if (!switchingSession) dequeue();
           break;
         case "session_title":
+          refreshSessions();
           if (!acceptsSessionEvent(p.session_id)) break;
           sessionTitle = p.title;
-          refreshSessions();
           break;
         case "loaded":
           if (!acceptsSessionEvent(p.session_id)) break;
-          messages = p.messages
+          {
+          const restored = p.messages
             .flatMap((m): Msg[] => {
               if ((m.role === "user" || m.role === "assistant") && m.text.trim() !== "") {
                 return [{ role: m.role, text: m.text }];
@@ -652,14 +698,21 @@
               }
               return [];
             });
-          messages = hideCompletedToolActivity(messages);
+          const cached = sessionMessages.get(p.session_id);
+          messages = runningSessions.has(p.session_id) && cached?.length
+            ? cloneMessages(cached)
+            : hideCompletedToolActivity(restored);
+          sessionMessages.set(p.session_id, cloneMessages(messages));
+          }
           streamingIdx = null;
-          busy = false;
+          busy = runningSessions.has(p.session_id);
           stopping = false;
           switchingSession = false;
           refreshSessions(); // keep the session you just left visible in 最近会话
+          if (!busy) dequeue();
           break;
         case "error":
+          setSessionRunning(p.session_id, false);
           if (!acceptsSessionEvent(p.session_id)) break;
           settleCompletedToolGroups();
           messages = hideCompletedToolActivity(messages);
@@ -784,12 +837,15 @@
   }
 
   async function dispatch(text: string, images: string[], shown: string) {
+    const targetSessionId = currentSessionId;
     messages.push({ role: "user", text: shown });
+    setSessionRunning(targetSessionId, true);
     busy = true;
     scrollDown();
     try {
-      await invoke("send_prompt", { text, images });
+      await invoke("send_prompt", { sessionId: targetSessionId, text, images });
     } catch (e) {
+      setSessionRunning(targetSessionId, false);
       messages.push({ role: "note", text: `发送失败：${e}` });
       busy = false;
       stopping = false;
@@ -803,10 +859,12 @@
     // A stop applies to the active turn, so do not start queued follow-ups
     // after its cancellation event arrives.
     queued = [];
+    approvalsBySession.delete(currentSessionId);
+    questionsBySession.delete(currentSessionId);
     approval = null;
     userQuestion = null;
     try {
-      await invoke("stop_generation");
+      await invoke("stop_generation", { sessionId: currentSessionId });
     } catch (e) {
       stopping = false;
       messages.push({ role: "note", text: `停止失败：${e}` });
@@ -866,6 +924,7 @@
   async function decide(decision: "deny" | "once" | "always") {
     if (!approval) return;
     const id = approval.id;
+    approvalsBySession.delete(approval.session_id);
     approval = null;
     try {
       await invoke("approve", { id, decision });
@@ -877,6 +936,7 @@
   async function answerUserQuestion(answer: string | null) {
     if (!userQuestion) return;
     const id = userQuestion.id;
+    questionsBySession.delete(userQuestion.session_id);
     userQuestion = null;
     questionAnswer = "";
     try {
@@ -901,6 +961,31 @@
     } catch (e) {
       messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
+  }
+  function stashSessionQueue(sessionId: string) {
+    if (sessionId) {
+      sessionQueues.set(sessionId, [...queued]);
+      sessionMessages.set(sessionId, cloneMessages(messages));
+    }
+    queued = [];
+    approval = null;
+    userQuestion = null;
+  }
+  function restoreSessionQueue(sessionId: string) {
+    queued = [...(sessionQueues.get(sessionId) || [])];
+  }
+  function restoreSessionPrompts(sessionId: string) {
+    approval = approvalsBySession.get(sessionId) || null;
+    userQuestion = questionsBySession.get(sessionId) || null;
+    questionAnswer = "";
+  }
+  function cloneMessages(items: Msg[]): Msg[] {
+    return items.map((item) => item.role === "tool_group"
+      ? { ...item, tools: item.tools.map((tool) => ({ ...tool })) }
+      : { ...item });
+  }
+  function restoreSessionMessages(sessionId: string) {
+    messages = cloneMessages(sessionMessages.get(sessionId) || []);
   }
 
   async function refreshOpenRouterModels() {
@@ -1204,22 +1289,21 @@
     const previousSessionId = currentSessionId;
     const previousTitle = sessionTitle;
     const previousMessages = [...messages];
+    stashSessionQueue(previousSessionId);
     switchingSession = true;
-    if (busy) {
-      stopping = true;
-      queued = [];
-      approval = null;
-      userQuestion = null;
-      await invoke("stop_generation").catch(() => {});
-    }
-    busy = true;
+    busy = false;
     messages = [];
     sessionTitle = "新会话";
     currentSessionId = "";
     resetSessionUsage();
     try {
       const id = await invoke<string>("new_session");
-      if (currentSessionId === "") currentSessionId = id;
+      if (currentSessionId === "") {
+        currentSessionId = id;
+        restoreSessionQueue(id);
+        restoreSessionPrompts(id);
+        restoreSessionMessages(id);
+      }
     } catch (e) {
       busy = false;
       stopping = false;
@@ -1227,6 +1311,8 @@
       currentSessionId = previousSessionId;
       sessionTitle = previousTitle;
       messages = previousMessages;
+      restoreSessionQueue(previousSessionId);
+      restoreSessionPrompts(previousSessionId);
       restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `新建会话失败：${e}` });
     }
@@ -1235,19 +1321,16 @@
     if (switchingSession || id === currentSessionId) return;
     const previousId = currentSessionId;
     const previousTitle = sessionTitle;
+    stashSessionQueue(previousId);
     switchingSession = true;
     sessionTitle = title || "会话";
     currentSessionId = id;
     restoreSessionUsage(currentSessionId);
+    restoreSessionQueue(id);
+    restoreSessionPrompts(id);
+    restoreSessionMessages(id);
     try {
-      if (busy) {
-        stopping = true;
-        queued = [];
-        approval = null;
-        userQuestion = null;
-        await invoke("stop_generation");
-      }
-      busy = true;
+      busy = runningSessions.has(id);
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
       busy = false;
@@ -1256,6 +1339,8 @@
       currentSessionId = previousId;
       sessionTitle = previousTitle;
       restoreSessionUsage(currentSessionId);
+      restoreSessionQueue(previousId);
+      restoreSessionPrompts(previousId);
       messages.push({ role: "note", text: `继续会话失败：${e}` });
     }
   }
@@ -1263,15 +1348,9 @@
     if (switchingSession) return;
     const previousSessionId = currentSessionId;
     const previousTitle = sessionTitle;
+    stashSessionQueue(previousSessionId);
     switchingSession = true;
-    if (busy) {
-      stopping = true;
-      queued = [];
-      approval = null;
-      userQuestion = null;
-      await invoke("stop_generation").catch(() => {});
-    }
-    busy = true;
+    busy = false;
     sessionTitle = title ? `${title}（分叉）` : "分叉";
     currentSessionId = "";
     resetSessionUsage();
@@ -1284,6 +1363,8 @@
       currentSessionId = previousSessionId;
       sessionTitle = previousTitle;
       restoreSessionUsage(currentSessionId);
+      restoreSessionQueue(previousSessionId);
+      restoreSessionPrompts(previousSessionId);
       messages.push({ role: "note", text: `分叉失败：${e}` });
     }
   }
@@ -1487,18 +1568,18 @@
 
     <div class="side-recents">
       {#snippet sessionItem(s: SessionRow)}
-        <div class="recent-item" class:active={s.session_id === currentSessionId} class:archived={s.archived}>
+        <div class="recent-item" class:active={s.session_id === currentSessionId} class:running={runningSessions.has(s.session_id)} class:archived={s.archived}>
           <button class="recent-main" title={s.snippet || s.title} disabled={switchingSession || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
             <span class="recent-dot">●</span>
             <span class="recent-text">
               <span class="recent-title">{s.title || "（未命名）"}</span>
-              <span class="recent-when">{fmtWhen(s.updated_at)}{s.archived ? " · 已归档" : ""}</span>
+              <span class="recent-when">{runningSessions.has(s.session_id) ? "执行中" : fmtWhen(s.updated_at)}{s.archived ? " · 已归档" : ""}</span>
             </span>
           </button>
-          <button class="recent-act" title="从此处分叉新会话" disabled={busy || !s.has_snapshot}
+          <button class="recent-act" title="从此处分叉新会话" disabled={switchingSession || !s.has_snapshot}
             onclick={() => forkSession(s.session_id, s.title)} aria-label="分叉">⑂</button>
-          <button class="recent-act" title="打开会话日志 (JSONL)" disabled={busy}
+          <button class="recent-act" title="打开会话日志 (JSONL)"
             onclick={() => openSessionLog(s.session_id)} aria-label="打开日志">📄</button>
           <button class="recent-act" title={s.archived ? "取消归档" : "归档此会话"}
             onclick={() => archiveSession(s.session_id, !s.archived)} aria-label="归档">{s.archived ? "↩" : "🗄"}</button>

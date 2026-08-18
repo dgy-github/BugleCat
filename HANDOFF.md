@@ -282,3 +282,13 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 保存设置或应用模型预设改为保留当前会话 ID 重建，不再暗中创建一个前端不知道的新会话；只有切换项目/显式新建才创建空会话。
 - 首轮标题生成改为独立 `ncx-title` 线程，不再阻塞串行 agent 命令队列。
 - 验证：`ncx-core` 197 项、GUI Rust 32 项测试通过，Vite 正式前端构建通过；正式 Tauri 构建在本轮交付前继续执行。
+
+## 2026-08-18 多会话并发执行
+- 修正上一版“切换时停止旧任务”的错误语义：导航/配置协调器不再直接等待 `run_turn`，每个 Prompt 按 `session_id` 分派到独立 `ncx-turn-<session>` OS 线程；切走后原会话继续执行。
+- Prompt 前后端契约增加 `session_id`；不同会话可以并行，同一会话仍禁止重入，后续消息保持该会话内串行。
+- 运行态、取消标记、审批/提问归属、always-allow grants 全部按 session 隔离；停止 A 不会取消、拒绝或清空 B。
+- 每个 session 改写入 `.nanocodex/sessions/<session_id>.jsonl`，避免并发追加同一个审计日志；快照仍由 SessionIndex 分会话持久化。
+- 前端为每个会话缓存正在执行时的可见消息、待发送队列、审批和问题；切回运行中的会话不会丢用户消息，后台完成的 token/费用会记到对应会话。
+- 最近会话侧栏增加“执行中”状态；新建、继续、分叉或切换会话不再调用 `stop_generation`。
+- 验证：GUI Rust 37 项测试与 Vite 生产构建通过；包含并发占用、同会话防重入、目标取消隔离、独立日志和前后端路由契约。
+- 真实 WebView/CDP 集成：A、B 两个会话分别执行 12 秒 shell 任务，侧栏同时观测 `RUNNING_COUNT=2`；两者运行中成功切回 A（仍显示停止按钮），最终 `BOTH_FINISHED`。两个结果分别落到 `18cccdb67fce9ddcb3a01`、`18ccf0037389edf069980` 的独立 snapshot 和 JSONL，均含各自 `SESSION_A_DONE` / `SESSION_B_DONE`。

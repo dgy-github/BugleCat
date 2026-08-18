@@ -15,7 +15,7 @@
 //!   request/response round-trip that crosses the thread boundary mid-turn.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -58,11 +58,17 @@ pub const EVENT: &str = "ncx://event";
 /// Pending approval requests, keyed by id. Shared between the agent thread
 /// (inserts a one-shot sender when asking) and the `approve` command (takes it
 /// to answer). `Send + Sync` so it can live in Tauri state.
-pub type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<ApprovalDecision>>>>;
-pub type PendingQuestionMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Option<String>>>>>;
+pub type PendingMap = Arc<Mutex<HashMap<u64, (String, oneshot::Sender<ApprovalDecision>)>>>;
+pub type PendingQuestionMap = Arc<Mutex<HashMap<u64, (String, oneshot::Sender<Option<String>>)>>>;
 
 /// Shared cooperative cancellation state for the active GUI turn.
 pub type CancelFlag = Arc<AtomicBool>;
+pub type CancelRegistry = Arc<Mutex<HashMap<String, CancelFlag>>>;
+pub type RunningSessions = Arc<Mutex<HashSet<String>>>;
+pub type GrantRegistry = Arc<Mutex<HashMap<String, SessionGrants>>>;
+
+static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
+static QUESTION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Request cancellation and release any approval dialog the turn is waiting on.
 ///
@@ -70,27 +76,18 @@ pub type CancelFlag = Arc<AtomicBool>;
 /// denied is necessary because an approval future otherwise has no opportunity
 /// to observe the flag while it is suspended.
 pub fn request_cancel(
+    session_id: &str,
     cancel: &CancelFlag,
     pending: &PendingMap,
     questions: &PendingQuestionMap,
 ) -> usize {
     cancel.store(true, Ordering::Release);
-    let senders = pending
-        .lock()
-        .unwrap()
-        .drain()
-        .map(|(_, sender)| sender)
-        .collect::<Vec<_>>();
+    let senders = take_session_pending(pending, session_id);
     let count = senders.len();
     for sender in senders {
         let _ = sender.send(ApprovalDecision::Deny);
     }
-    let question_senders = questions
-        .lock()
-        .unwrap()
-        .drain()
-        .map(|(_, sender)| sender)
-        .collect::<Vec<_>>();
+    let question_senders = take_session_questions(questions, session_id);
     let question_count = question_senders.len();
     for sender in question_senders {
         let _ = sender.send(None);
@@ -98,6 +95,35 @@ pub fn request_cancel(
     count + question_count
 }
 
+fn take_session_pending(
+    pending: &PendingMap,
+    session_id: &str,
+) -> Vec<oneshot::Sender<ApprovalDecision>> {
+    let mut pending = pending.lock().unwrap();
+    let ids = pending
+        .iter()
+        .filter_map(|(id, (owner, _))| (owner == session_id).then_some(*id))
+        .collect::<Vec<_>>();
+    ids.into_iter()
+        .filter_map(|id| pending.remove(&id).map(|(_, sender)| sender))
+        .collect()
+}
+
+fn take_session_questions(
+    pending: &PendingQuestionMap,
+    session_id: &str,
+) -> Vec<oneshot::Sender<Option<String>>> {
+    let mut pending = pending.lock().unwrap();
+    let ids = pending
+        .iter()
+        .filter_map(|(id, (owner, _))| (owner == session_id).then_some(*id))
+        .collect::<Vec<_>>();
+    ids.into_iter()
+        .filter_map(|id| pending.remove(&id).map(|(_, sender)| sender))
+        .collect()
+}
+
+#[cfg(test)]
 fn reset_cancel(cancel: &CancelFlag) {
     cancel.store(false, Ordering::Release);
 }
@@ -107,7 +133,11 @@ pub enum Command {
     /// A user turn. `images` are absolute paths attached via the file picker;
     /// each becomes a base64 `image_url` block (vision routing). Non-image files
     /// are passed by the UI as `@path` tokens inside `text` (expanded as mentions).
-    Prompt { text: String, images: Vec<String> },
+    Prompt {
+        session_id: String,
+        text: String,
+        images: Vec<String>,
+    },
     /// Rebuild the agent from the (just-saved) config — applies model / sandbox
     /// / key changes live. Starts a fresh session.
     Reload,
@@ -352,26 +382,28 @@ struct GuiApprover {
     app: AppHandle,
     active_session: Arc<Mutex<String>>,
     pending: PendingMap,
-    counter: AtomicU64,
 }
 
 struct GuiQuestioner {
     app: AppHandle,
     active_session: Arc<Mutex<String>>,
     pending: PendingQuestionMap,
-    counter: AtomicU64,
 }
 
 #[async_trait(?Send)]
 impl UserQuestionHandler for GuiQuestioner {
     async fn request(&self, request: UserQuestionRequest) -> Option<String> {
-        let id = self.counter.fetch_add(1, Ordering::Relaxed);
+        let id = QUESTION_COUNTER.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        let session_id = current_session_id(&self.active_session);
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id, (session_id.clone(), tx));
         emit(
             &self.app,
             UiEvent::Question {
-                session_id: current_session_id(&self.active_session),
+                session_id,
                 id,
                 question: request.question,
                 options: request.options,
@@ -385,13 +417,17 @@ impl UserQuestionHandler for GuiQuestioner {
 #[async_trait(?Send)]
 impl ApprovalHandler for GuiApprover {
     async fn request(&self, req: ApprovalRequest) -> ApprovalDecision {
-        let id = self.counter.fetch_add(1, Ordering::Relaxed);
+        let id = APPROVAL_COUNTER.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        let session_id = current_session_id(&self.active_session);
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id, (session_id.clone(), tx));
         emit(
             &self.app,
             UiEvent::Approval {
-                session_id: current_session_id(&self.active_session),
+                session_id,
                 id,
                 command: req.command,
                 reason: req.reason,
@@ -506,12 +542,13 @@ fn build_agent(
     questioner: Rc<dyn UserQuestionHandler>,
     seed: Option<(String, Vec<Value>)>,
     grants: Rc<RefCell<SessionGrants>>,
+    workspace_override: Option<PathBuf>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
     let restored_plan = seed
         .as_ref()
         .map(|(_, messages)| latest_plan_from_messages(messages))
         .unwrap_or_default();
-    let workspace = std::env::current_dir().ok();
+    let workspace = workspace_override.or_else(|| std::env::current_dir().ok());
     let overrides = Overrides {
         workspace,
         ..Default::default()
@@ -550,16 +587,16 @@ fn build_agent(
         ctx.plan.replace(restored_plan);
     }
     let tools = ToolRegistry::new(ctx);
-    let log_path = cfg.workspace.join(".nanocodex").join("session.jsonl");
-    let (session_id, session) = match seed {
-        Some((id, messages)) => (
-            id,
-            Session::fork(system_prompt, messages, Some(log_path.clone())),
-        ),
-        None => (
-            new_session_id(),
-            Session::with_log(system_prompt, Some(log_path.clone())),
-        ),
+    let (session_id, seed_messages) = match seed {
+        Some((id, messages)) => (id, Some(messages)),
+        None => (new_session_id(), None),
+    };
+    let log_dir = cfg.workspace.join(".nanocodex").join("sessions");
+    std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
+    let log_path = session_log_path(&cfg.workspace, &session_id);
+    let session = match seed_messages {
+        Some(messages) => Session::fork(system_prompt, messages, Some(log_path.clone())),
+        None => Session::with_log(system_prompt, Some(log_path.clone())),
     };
     let agent = runtime_profile
         .apply(AgentLoop::new(Box::new(provider), tools, session))
@@ -573,6 +610,13 @@ fn build_agent(
     ))
 }
 
+fn session_log_path(workspace: &Path, session_id: &str) -> PathBuf {
+    workspace
+        .join(".nanocodex")
+        .join("sessions")
+        .join(format!("{session_id}.jsonl"))
+}
+
 fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
     let mut out = base.to_string();
     for block in blocks {
@@ -584,14 +628,194 @@ fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
     out
 }
 
-/// Spawn the dedicated agent thread. Returns immediately; the thread lives for
-/// the app's lifetime, draining `rx` one prompt at a time (turns are serial).
+#[allow(clippy::too_many_arguments)]
+fn spawn_turn_worker(
+    app: AppHandle,
+    pending: PendingMap,
+    questions: PendingQuestionMap,
+    cancels: CancelRegistry,
+    running: RunningSessions,
+    session_grants: GrantRegistry,
+    session_index: Arc<Mutex<SessionIndex>>,
+    session_id: String,
+    workspace: PathBuf,
+    messages: Vec<Value>,
+    text: String,
+    images: Vec<String>,
+) {
+    let inserted = claim_session(&running, &session_id);
+    if !inserted {
+        emit(
+            &app,
+            UiEvent::Error {
+                session_id,
+                message: "该会话仍在执行中，请等待完成或先停止它。".into(),
+            },
+        );
+        return;
+    }
+
+    let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
+    if let Ok(mut registry) = cancels.lock() {
+        registry.insert(session_id.clone(), cancel.clone());
+    }
+
+    let cleanup_cancels = cancels.clone();
+    let cleanup_running = running.clone();
+    let cleanup_session_id = session_id.clone();
+    let failure_app = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name(format!(
+            "ncx-turn-{}",
+            session_id.chars().take(8).collect::<String>()
+        ))
+        .spawn(move || {
+            let finish = || {
+                if let Ok(mut registry) = cancels.lock() {
+                    registry.remove(&session_id);
+                }
+                if let Ok(mut sessions) = running.lock() {
+                    sessions.remove(&session_id);
+                }
+            };
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                emit(
+                    &app,
+                    UiEvent::Error {
+                        session_id: session_id.clone(),
+                        message: "无法创建会话执行线程。".into(),
+                    },
+                );
+                finish();
+                return;
+            };
+
+            rt.block_on(async {
+                let active_session = Arc::new(Mutex::new(session_id.clone()));
+                let approver: Rc<dyn ApprovalHandler> = Rc::new(GuiApprover {
+                    app: app.clone(),
+                    active_session: active_session.clone(),
+                    pending,
+                });
+                let questioner: Rc<dyn UserQuestionHandler> = Rc::new(GuiQuestioner {
+                    app: app.clone(),
+                    active_session,
+                    pending: questions,
+                });
+                let initial_grants = session_grants
+                    .lock()
+                    .ok()
+                    .and_then(|registry| registry.get(&session_id).cloned())
+                    .unwrap_or_default();
+                let grants = Rc::new(RefCell::new(initial_grants));
+                let built = build_agent(
+                    approver,
+                    questioner,
+                    Some((session_id.clone(), messages)),
+                    grants.clone(),
+                    Some(workspace.clone()),
+                );
+                let (mut agent, _, _, log_path, _) = match built {
+                    Ok(value) => value,
+                    Err(message) => {
+                        emit(
+                            &app,
+                            UiEvent::Error {
+                                session_id: session_id.clone(),
+                                message,
+                            },
+                        );
+                        return;
+                    }
+                };
+                agent.set_event_sink(make_sink(app.clone(), session_id.clone()));
+                let is_first_turn = agent
+                    .session
+                    .messages
+                    .iter()
+                    .all(|message| message.get("role").and_then(Value::as_str) != Some("user"));
+                let expanded = expand_file_mentions(&text, &workspace);
+                save_auto_checkpoint(&workspace, &expanded);
+                let user_input = match build_image_user_input(&expanded, &images) {
+                    Ok(value) => value,
+                    Err(message) => {
+                        emit(
+                            &app,
+                            UiEvent::Error {
+                                session_id: session_id.clone(),
+                                message,
+                            },
+                        );
+                        return;
+                    }
+                };
+                let is_cancelled = || cancel.load(Ordering::Acquire);
+                let result = agent.run_turn(user_input, Some(&is_cancelled)).await;
+                if let Ok(mut registry) = session_grants.lock() {
+                    registry.insert(session_id.clone(), grants.borrow().clone());
+                }
+                if let Ok(mut index) = session_index.lock() {
+                    let _ = index.record_turn(&session_id, &workspace, &agent.session, &log_path);
+                }
+                emit(
+                    &app,
+                    UiEvent::Done {
+                        session_id: session_id.clone(),
+                        final_text: result.final_text.clone(),
+                        stop_reason: result.stop_reason.clone(),
+                        usage: serde_json::to_value(&result.usage).unwrap_or(Value::Null),
+                    },
+                );
+                if should_generate_session_title(is_first_turn, &result.stop_reason) {
+                    spawn_title_generation(
+                        app.clone(),
+                        session_index.clone(),
+                        session_id.clone(),
+                        workspace.clone(),
+                        text,
+                    );
+                }
+            });
+            finish();
+        });
+    if spawned.is_err() {
+        if let Ok(mut registry) = cleanup_cancels.lock() {
+            registry.remove(&cleanup_session_id);
+        }
+        if let Ok(mut sessions) = cleanup_running.lock() {
+            sessions.remove(&cleanup_session_id);
+        }
+        emit(
+            &failure_app,
+            UiEvent::Error {
+                session_id: cleanup_session_id,
+                message: "无法启动会话执行线程。".into(),
+            },
+        );
+    }
+}
+
+fn claim_session(running: &RunningSessions, session_id: &str) -> bool {
+    running
+        .lock()
+        .map(|mut sessions| sessions.insert(session_id.to_string()))
+        .unwrap_or(false)
+}
+
+/// Spawn the lightweight navigation/config coordinator. It drains commands in
+/// order, but each prompt is handed to its own session-scoped turn thread so
+/// different conversations can continue concurrently.
 pub fn spawn_worker(
     app: AppHandle,
     mut rx: UnboundedReceiver<Command>,
     pending: PendingMap,
     questions: PendingQuestionMap,
-    cancel: CancelFlag,
+    cancels: CancelRegistry,
+    running: RunningSessions,
+    session_grants: GrantRegistry,
     session_index: Arc<Mutex<SessionIndex>>,
 ) {
     std::thread::Builder::new()
@@ -608,13 +832,11 @@ pub fn spawn_worker(
                     app: app.clone(),
                     active_session: active_session.clone(),
                     pending: pending.clone(),
-                    counter: AtomicU64::new(1),
                 });
                 let questioner: Rc<dyn UserQuestionHandler> = Rc::new(GuiQuestioner {
                     app: app.clone(),
                     active_session: active_session.clone(),
                     pending: questions.clone(),
-                    counter: AtomicU64::new(1),
                 });
                 // Restore the last chosen workspace so we don't fall back to the
                 // launch cwd (often the user's home) on every start.
@@ -631,82 +853,71 @@ pub fn spawn_worker(
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
-                let (mut agent, mut workspace, mut session_id, mut log_path, _) = match build_agent(
-                    approver.clone(),
-                    questioner.clone(),
-                    startup_seed,
-                    grants.clone(),
-                ) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        emit(
-                            &app,
-                            UiEvent::Error {
-                                session_id: String::new(),
-                                message: e,
-                            },
-                        );
-                        return;
-                    }
-                };
+                let (mut agent, mut workspace, mut session_id, startup_log_path, _) =
+                    match build_agent(
+                        approver.clone(),
+                        questioner.clone(),
+                        startup_seed,
+                        grants.clone(),
+                        None,
+                    ) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            emit(
+                                &app,
+                                UiEvent::Error {
+                                    session_id: String::new(),
+                                    message: e,
+                                },
+                            );
+                            return;
+                        }
+                    };
                 set_active_session(&active_session, &session_id);
                 agent.set_event_sink(make_sink(app.clone(), session_id.clone()));
+                if let Ok(mut index) = session_index.lock() {
+                    let _ = index.record_turn(
+                        &session_id,
+                        &workspace,
+                        &agent.session,
+                        &startup_log_path,
+                    );
+                }
                 emit_ready(&app, &workspace, &session_id);
 
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
-                        Command::Prompt { text, images } => {
-                            let is_first_turn = agent.session.messages.iter().all(|message| {
-                                message.get("role").and_then(Value::as_str) != Some("user")
-                            });
-                            let expanded = expand_file_mentions(&text, &workspace);
-                            save_auto_checkpoint(&workspace, &expanded);
-                            let user_input = match build_image_user_input(&expanded, &images) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    emit(
-                                        &app,
-                                        UiEvent::Error {
-                                            session_id: session_id.clone(),
-                                            message: e,
-                                        },
-                                    );
-                                    continue;
-                                }
-                            };
-                            let is_cancelled = || cancel.load(Ordering::Acquire);
-                            let result = agent.run_turn(user_input, Some(&is_cancelled)).await;
-                            // Cancellation belongs to one turn only. Keeping the
-                            // flag set would instantly cancel prompts after a
-                            // history switch or a manual stop.
-                            reset_cancel(&cancel);
-                            if let Ok(mut index) = session_index.lock() {
-                                let _ = index.record_turn(
-                                    &session_id,
-                                    &workspace,
-                                    &agent.session,
-                                    &log_path,
-                                );
-                            }
-                            emit(
-                                &app,
-                                UiEvent::Done {
-                                    session_id: session_id.clone(),
-                                    final_text: result.final_text.clone(),
-                                    stop_reason: result.stop_reason.clone(),
-                                    usage: serde_json::to_value(&result.usage)
-                                        .unwrap_or(Value::Null),
-                                },
+                        Command::Prompt {
+                            session_id: target_id,
+                            text,
+                            images,
+                        } => {
+                            let (messages, target_workspace) = session_index
+                                .lock()
+                                .map(|index| {
+                                    let messages =
+                                        index.load_snapshot(&target_id).unwrap_or_default();
+                                    let target_workspace = index
+                                        .get(&target_id)
+                                        .map(|summary| PathBuf::from(&summary.workspace))
+                                        .unwrap_or_else(|| workspace.clone());
+                                    (messages, target_workspace)
+                                })
+                                .unwrap_or_else(|_| (Vec::new(), workspace.clone()));
+                            spawn_turn_worker(
+                                app.clone(),
+                                pending.clone(),
+                                questions.clone(),
+                                cancels.clone(),
+                                running.clone(),
+                                session_grants.clone(),
+                                session_index.clone(),
+                                target_id,
+                                target_workspace,
+                                messages,
+                                text,
+                                images,
                             );
-                            if should_generate_session_title(is_first_turn, &result.stop_reason) {
-                                spawn_title_generation(
-                                    app.clone(),
-                                    session_index.clone(),
-                                    session_id.clone(),
-                                    workspace.clone(),
-                                    text.clone(),
-                                );
-                            }
                         }
                         Command::New(id) => {
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
@@ -715,15 +926,23 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((id, Vec::new())),
                                 grants.clone(),
+                                None,
                             ) {
                                 Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
-                                    log_path = lp;
                                     set_active_session(&active_session, &session_id);
                                     agent
                                         .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    if let Ok(mut index) = session_index.lock() {
+                                        let _ = index.record_turn(
+                                            &session_id,
+                                            &workspace,
+                                            &agent.session,
+                                            &lp,
+                                        );
+                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -749,15 +968,23 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 None,
                                 grants.clone(),
+                                None,
                             ) {
                                 Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
-                                    log_path = lp;
                                     set_active_session(&active_session, &session_id);
                                     agent
                                         .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    if let Ok(mut index) = session_index.lock() {
+                                        let _ = index.record_turn(
+                                            &session_id,
+                                            &workspace,
+                                            &agent.session,
+                                            &lp,
+                                        );
+                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                 }
                                 Err(e) => emit(
@@ -796,12 +1023,12 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((id.clone(), msgs)),
                                 grants.clone(),
+                                None,
                             ) {
-                                Ok((a, ws, sid, lp, _)) => {
+                                Ok((a, ws, sid, _, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
-                                    log_path = lp;
                                     set_active_session(&active_session, &session_id);
                                     agent
                                         .set_event_sink(make_sink(app.clone(), session_id.clone()));
@@ -847,15 +1074,23 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((new_session_id(), msgs)),
                                 grants.clone(),
+                                None,
                             ) {
                                 Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
-                                    log_path = lp;
                                     set_active_session(&active_session, &session_id);
                                     agent
                                         .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    if let Ok(mut index) = session_index.lock() {
+                                        let _ = index.record_turn(
+                                            &session_id,
+                                            &workspace,
+                                            &agent.session,
+                                            &lp,
+                                        );
+                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -906,12 +1141,12 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
+                                None,
                             ) {
-                                Ok((a, ws, sid, lp, _)) => {
+                                Ok((a, ws, sid, _, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
-                                    log_path = lp;
                                     set_active_session(&active_session, &session_id);
                                     agent
                                         .set_event_sink(make_sink(app.clone(), session_id.clone()));
@@ -946,12 +1181,12 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
+                                None,
                             ) {
-                                Ok((a, ws, sid, lp, _)) => {
+                                Ok((a, ws, sid, _, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
-                                    log_path = lp;
                                     set_active_session(&active_session, &session_id);
                                     agent
                                         .set_event_sink(make_sink(app.clone(), session_id.clone()));
@@ -968,12 +1203,16 @@ pub fn spawn_worker(
                         }
                         Command::RequestReady => {
                             emit_ready(&app, &workspace, &session_id);
-                            if !agent.session.messages.is_empty() {
+                            let messages = session_index
+                                .lock()
+                                .ok()
+                                .and_then(|index| index.load_snapshot(&session_id));
+                            if let Some(messages) = messages.filter(|items| !items.is_empty()) {
                                 emit(
                                     &app,
                                     UiEvent::Loaded {
                                         session_id: session_id.clone(),
-                                        messages: snapshot_to_ui(&agent.session.messages),
+                                        messages: snapshot_to_ui(&messages),
                                     },
                                 );
                             }
@@ -1294,11 +1533,20 @@ mod tests {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
         let (sender, receiver) = oneshot::channel();
-        pending.lock().unwrap().insert(7, sender);
+        pending
+            .lock()
+            .unwrap()
+            .insert(7, ("session-1".into(), sender));
         let (question_sender, question_receiver) = oneshot::channel();
-        questions.lock().unwrap().insert(8, question_sender);
+        questions
+            .lock()
+            .unwrap()
+            .insert(8, ("session-1".into(), question_sender));
 
-        assert_eq!(request_cancel(&cancel, &pending, &questions), 2);
+        assert_eq!(
+            request_cancel("session-1", &cancel, &pending, &questions),
+            2
+        );
         assert!(cancel.load(Ordering::Acquire));
         assert!(pending.lock().unwrap().is_empty());
         assert!(questions.lock().unwrap().is_empty());
@@ -1307,6 +1555,51 @@ mod tests {
 
         reset_cancel(&cancel);
         assert!(!cancel.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn cancellation_does_not_touch_another_session() {
+        let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+        let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
+        let (first, first_rx) = oneshot::channel();
+        let (second, second_rx) = oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(1, ("session-1".into(), first));
+        pending
+            .lock()
+            .unwrap()
+            .insert(2, ("session-2".into(), second));
+
+        assert_eq!(
+            request_cancel("session-1", &cancel, &pending, &questions),
+            1
+        );
+        assert!(matches!(first_rx.await.unwrap(), ApprovalDecision::Deny));
+        assert!(pending.lock().unwrap().contains_key(&2));
+        let (_, second) = pending.lock().unwrap().remove(&2).unwrap();
+        second.send(ApprovalDecision::Once).unwrap();
+        assert!(matches!(second_rx.await.unwrap(), ApprovalDecision::Once));
+    }
+
+    #[test]
+    fn distinct_sessions_can_run_concurrently_but_one_session_cannot_overlap_itself() {
+        let running: RunningSessions = Arc::new(Mutex::new(HashSet::new()));
+        assert!(claim_session(&running, "session-1"));
+        assert!(claim_session(&running, "session-2"));
+        assert!(!claim_session(&running, "session-1"));
+        assert_eq!(running.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn concurrent_sessions_write_to_distinct_logs() {
+        let workspace = Path::new("D:/workspace");
+        assert_ne!(
+            session_log_path(workspace, "session-1"),
+            session_log_path(workspace, "session-2")
+        );
     }
 
     #[tokio::test]

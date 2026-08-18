@@ -14,7 +14,7 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ncx_config::{
@@ -28,7 +28,10 @@ use ncx_core::{
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-use bridge::{request_cancel, spawn_worker, CancelFlag, Command, PendingMap, PendingQuestionMap};
+use bridge::{
+    request_cancel, spawn_worker, CancelRegistry, Command, GrantRegistry, PendingMap,
+    PendingQuestionMap, RunningSessions,
+};
 
 #[derive(Serialize)]
 pub struct Status {
@@ -55,7 +58,7 @@ struct AppState {
     pending: PendingMap,
     questions: PendingQuestionMap,
     question_counter: AtomicU64,
-    cancel: CancelFlag,
+    cancels: CancelRegistry,
     session_index: Arc<Mutex<SessionIndex>>,
     openrouter_models: Mutex<Vec<CatalogModel>>,
 }
@@ -128,6 +131,7 @@ fn validate_image_attachment_route(images: &[String], vl_model: &str) -> Result<
 
 #[tauri::command]
 fn send_prompt(
+    session_id: String,
     text: String,
     images: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
@@ -143,11 +147,12 @@ fn send_prompt(
     }
 
     state
-        .cancel
-        .store(false, std::sync::atomic::Ordering::Release);
-    state
         .tx
-        .send(Command::Prompt { text, images })
+        .send(Command::Prompt {
+            session_id,
+            text,
+            images,
+        })
         .map_err(|_| "agent thread is not running".to_string())
 }
 
@@ -293,8 +298,15 @@ fn get_workspace() -> Result<String, String> {
 
 /// Stop the active turn. The completion event still owns the final UI reset.
 #[tauri::command]
-fn stop_generation(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    request_cancel(&state.cancel, &state.pending, &state.questions);
+fn stop_generation(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let cancel = state
+        .cancels
+        .lock()
+        .ok()
+        .and_then(|registry| registry.get(&session_id).cloned());
+    if let Some(cancel) = cancel {
+        request_cancel(&session_id, &cancel, &state.pending, &state.questions);
+    }
     Ok(())
 }
 
@@ -642,7 +654,7 @@ fn approve(id: u64, decision: String, state: tauri::State<'_, AppState>) -> Resu
     };
     let sender = state.pending.lock().unwrap().remove(&id);
     match sender {
-        Some(tx) => tx
+        Some((_, tx)) => tx
             .send(dec)
             .map_err(|_| "approval already resolved".to_string()),
         None => Err(format!("no pending approval with id {id}")),
@@ -662,7 +674,7 @@ fn answer_question(
     });
     let sender = state.questions.lock().unwrap().remove(&id);
     match sender {
-        Some(tx) => tx
+        Some((_, tx)) => tx
             .send(answer)
             .map_err(|_| "question already resolved".to_string()),
         None => Err(format!("no pending question with id {id}")),
@@ -683,7 +695,11 @@ async fn e2e_ask_question(
     }
     let id = state.question_counter.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    state.questions.lock().unwrap().insert(id, sender);
+    state
+        .questions
+        .lock()
+        .unwrap()
+        .insert(id, (String::new(), sender));
     bridge::emit(
         &app,
         bridge::UiEvent::Question {
@@ -1303,8 +1319,11 @@ pub fn run() {
     let pending_for_worker = pending.clone();
     let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
     let questions_for_worker = questions.clone();
-    let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
-    let cancel_for_worker = cancel.clone();
+    let cancels: CancelRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let cancels_for_worker = cancels.clone();
+    let running: RunningSessions = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let running_for_worker = running.clone();
+    let session_grants: GrantRegistry = Arc::new(Mutex::new(HashMap::new()));
     let session_index = Arc::new(Mutex::new(SessionIndex::default()));
     let session_index_for_worker = session_index.clone();
 
@@ -1315,7 +1334,7 @@ pub fn run() {
             pending,
             questions,
             question_counter: AtomicU64::new(1_000_000),
-            cancel,
+            cancels,
             session_index,
             openrouter_models: Mutex::new(Vec::new()),
         })
@@ -1327,7 +1346,9 @@ pub fn run() {
                 rx,
                 pending_for_worker,
                 questions_for_worker,
-                cancel_for_worker,
+                cancels_for_worker,
+                running_for_worker,
+                session_grants,
                 session_index_for_worker,
             );
             Ok(())
@@ -1513,7 +1534,7 @@ mod tests {
             .unwrap()
             .0;
         assert!(cleanup.contains("message.role !== \"tool_group\""));
-        assert!(app.matches("hideCompletedToolActivity(messages)").count() >= 3);
+        assert!(app.matches("hideCompletedToolActivity(").count() >= 3);
         assert!(bridge.contains("only the execution result and a brief recommended next action"));
         assert!(bridge.contains("do not recap tool calls, logs, or intermediate process"));
 
@@ -1561,7 +1582,8 @@ mod tests {
         assert!(app.contains("function restoreSessionUsage(sessionId: string)"));
         assert!(app.contains("function persistSessionUsage(sessionId: string)"));
         assert!(app.contains("ncx.sessionUsage."));
-        assert!(app.contains("persistSessionUsage(currentSessionId)"));
+        assert!(app.contains("addSessionUsage(p.session_id"));
+        assert!(app.contains("persistSessionUsage(sessionId)"));
         assert!(app.matches("restoreSessionUsage(currentSessionId)").count() >= 2);
         assert!(app.matches("resetSessionUsage()").count() >= 2);
     }
@@ -1586,10 +1608,49 @@ mod tests {
         let bridge = include_str!("bridge.rs");
         assert!(bridge.contains("Command::New(id)"));
         assert!(bridge.contains("Some((id, Vec::new()))"));
+        let new_branch = bridge
+            .split_once("Command::New(id)")
+            .unwrap()
+            .1
+            .split_once("Command::Reload")
+            .unwrap()
+            .0;
+        assert!(new_branch.contains("index.record_turn("));
+        assert!(
+            new_branch.find("index.record_turn(").unwrap()
+                < new_branch.find("UiEvent::Loaded").unwrap()
+        );
     }
 
     #[test]
-    fn history_session_can_interrupt_an_active_turn_and_resume_safely() {
+    fn prompts_are_dispatched_to_independent_session_workers() {
+        let bridge = include_str!("bridge.rs");
+        let backend = include_str!("lib.rs");
+        let app = include_str!("../../src/App.svelte");
+        assert!(bridge.contains("fn spawn_turn_worker("));
+        assert!(bridge.contains("session_id: target_id"));
+        assert!(bridge.contains("spawn_turn_worker("));
+        assert!(backend.contains("session_id: String"));
+        assert!(app.contains("sessionId: targetSessionId"));
+    }
+
+    #[test]
+    fn switching_sessions_does_not_stop_the_previous_turn() {
+        let app = include_str!("../../src/App.svelte");
+        let resume = app
+            .split_once("async function resumeSession")
+            .unwrap()
+            .1
+            .split_once("async function forkSession")
+            .unwrap()
+            .0;
+        assert!(!resume.contains("stop_generation"));
+        assert!(app.contains("setSessionRunning(targetSessionId, true)"));
+        assert!(app.contains("setSessionRunning(p.session_id, false)"));
+    }
+
+    #[test]
+    fn history_session_switch_keeps_the_active_turn_running() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("disabled={switchingSession || !s.has_snapshot}"));
         let resume = app
@@ -1599,10 +1660,9 @@ mod tests {
             .split_once("async function forkSession")
             .unwrap()
             .0;
-        assert!(resume.contains("if (busy)"));
-        assert!(resume.contains("await invoke(\"stop_generation\")"));
+        assert!(!resume.contains("stop_generation"));
+        assert!(resume.contains("busy = runningSessions.has(id)"));
         assert!(resume.contains("await invoke(\"resume_session\""));
-        assert!(resume.find("stop_generation").unwrap() < resume.find("resume_session").unwrap());
     }
 
     #[test]

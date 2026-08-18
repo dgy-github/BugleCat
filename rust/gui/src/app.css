@@ -1306,6 +1306,7 @@ main.app { flex-direction: row; }
   gap: 0.4rem;
 }
 .recent-dot { color: var(--ink-4); font-size: 0.5rem; flex: 0 0 auto; }
+.recent-item.running .recent-dot { color: var(--accent); }
 .recent-main:hover { color: var(--ink); }
 .recent-main:disabled { color: var(--ink-4); cursor: default; }
 .recent-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
