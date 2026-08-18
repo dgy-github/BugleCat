@@ -144,6 +144,33 @@
   let sandboxMode = $state("");
   let tokIn = $state(0);
   let tokOut = $state(0);
+  const sessionUsageKey = (sessionId: string) => `ncx.sessionUsage.${sessionId}`;
+  function resetSessionUsage() {
+    tokIn = 0;
+    tokOut = 0;
+  }
+  function restoreSessionUsage(sessionId: string) {
+    resetSessionUsage();
+    if (!sessionId) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
+      if (Number.isFinite(stored?.prompt_tokens) && stored.prompt_tokens >= 0) {
+        tokIn = stored.prompt_tokens;
+      }
+      if (Number.isFinite(stored?.completion_tokens) && stored.completion_tokens >= 0) {
+        tokOut = stored.completion_tokens;
+      }
+    } catch { /* missing or invalid local usage is treated as zero */ }
+  }
+  function persistSessionUsage(sessionId: string) {
+    if (!sessionId) return;
+    try {
+      localStorage.setItem(sessionUsageKey(sessionId), JSON.stringify({
+        prompt_tokens: tokIn,
+        completion_tokens: tokOut,
+      }));
+    } catch { /* storage is optional */ }
+  }
   // Per-1M-token prices (from config); 0 = unknown → cost is hidden.
   let priceIn = $state(0);
   let priceOut = $state(0);
@@ -488,7 +515,10 @@
           if (p.permission_mode) permissionMode = p.permission_mode;
           if (p.reasoning_effort) reasoningEffort = p.reasoning_effort;
           // Learn the active session's real id so 最近会话 can mark/return to it.
-          if (p.session_id) currentSessionId = p.session_id;
+          if (p.session_id) {
+            currentSessionId = p.session_id;
+            restoreSessionUsage(currentSessionId);
+          }
           refreshSessions();
           break;
         case "assistant_delta":
@@ -582,6 +612,7 @@
             const u = p.usage || {};
             tokIn += u.prompt_tokens || 0;
             tokOut += u.completion_tokens || 0;
+            persistSessionUsage(currentSessionId);
           }
           streamingIdx = null;
           busy = switchingSession;
@@ -719,8 +750,7 @@
       messages = [];
       sessionTitle = "新会话";
       currentSessionId = "";
-      tokIn = 0;
-      tokOut = 0;
+      resetSessionUsage();
       queued = [];
       attached = [];
       messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
@@ -1150,6 +1180,7 @@
     messages = [];
     sessionTitle = "新会话";
     currentSessionId = "";
+    resetSessionUsage();
     try {
       await invoke("new_session");
     } catch (e) {
@@ -1172,6 +1203,7 @@
       busy = true;
       sessionTitle = title || "会话";
       currentSessionId = id;
+      restoreSessionUsage(currentSessionId);
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
       busy = false;
@@ -1179,6 +1211,7 @@
       switchingSession = false;
       currentSessionId = previousId;
       sessionTitle = previousTitle;
+      restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `继续会话失败：${e}` });
     }
   }

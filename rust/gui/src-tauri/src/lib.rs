@@ -1548,6 +1548,17 @@ mod tests {
     }
 
     #[test]
+    fn session_usage_survives_restart_and_session_switches() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function restoreSessionUsage(sessionId: string)"));
+        assert!(app.contains("function persistSessionUsage(sessionId: string)"));
+        assert!(app.contains("ncx.sessionUsage."));
+        assert!(app.contains("persistSessionUsage(currentSessionId)"));
+        assert!(app.matches("restoreSessionUsage(currentSessionId)").count() >= 2);
+        assert!(app.matches("resetSessionUsage()").count() >= 2);
+    }
+
+    #[test]
     fn history_session_can_interrupt_an_active_turn_and_resume_safely() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("disabled={switchingSession || !s.has_snapshot}"));
