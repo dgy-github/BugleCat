@@ -252,7 +252,10 @@ async fn unfinished_plan_from_previous_turn_does_not_block_a_new_request() {
         .run_turn(json!("old request"), Some(&cancel_after_plan_tool))
         .await;
     assert_eq!(first.stop_reason, "cancelled");
-    assert_eq!(loop_.tools.ctx.plan.borrow()[0]["status"], "in_progress");
+    assert!(
+        loop_.tools.ctx.plan.borrow().is_empty(),
+        "a cancelled turn must retire its plan"
+    );
 
     let second = loop_.run_turn(json!("new request"), None).await;
     assert_eq!(second.stop_reason, "completed");

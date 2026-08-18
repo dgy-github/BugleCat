@@ -115,6 +115,7 @@ async fn request_model_cancellable(
 }
 
 fn cancelled_result(agent: &mut AgentLoop, iterations: usize, state: TurnState) -> TurnResult {
+    retire_active_plan(agent);
     let text = "Stopped by user.".to_string();
     agent.session.add_assistant(&text, None, "");
     state.finish(text, iterations, "cancelled")
@@ -249,6 +250,11 @@ fn has_unfinished_plan(agent: &AgentLoop) -> bool {
     })
 }
 
+fn retire_active_plan(agent: &AgentLoop) {
+    agent.tools.ctx.plan.borrow_mut().clear();
+    agent.tools.ctx.plan_turn_id.set(None);
+}
+
 fn persist_tool_calls(agent: &mut AgentLoop, response: &ModelResponse) {
     let calls: Vec<Value> = response
         .tool_calls
@@ -280,6 +286,7 @@ fn stop_turn(
                 "[interrupted: stopped by user]"
             };
             agent.session.backfill_unanswered_tool_calls(placeholder);
+            retire_active_plan(agent);
             let text = "Stopped by user.".to_string();
             agent.session.add_assistant(&text, None, "");
             state.finish(text, iteration + 1, "cancelled")

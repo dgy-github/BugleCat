@@ -380,7 +380,16 @@ impl ApprovalHandler for GuiApprover {
 /// `seed` reseeds the conversation: `(session_id, messages)` — used by Resume
 /// (keep the id) and Fork (a new id). `None` starts a fresh session.
 fn latest_plan_from_messages(messages: &[Value]) -> Vec<Value> {
+    let mut crossed_turn_boundary = false;
     for message in messages.iter().rev() {
+        if message.get("role").and_then(Value::as_str) == Some("user")
+            || message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|content| content.trim().ends_with("Stopped by user."))
+        {
+            crossed_turn_boundary = true;
+        }
         let Some(calls) = message.get("tool_calls").and_then(Value::as_array) else {
             continue;
         };
@@ -404,7 +413,11 @@ fn latest_plan_from_messages(messages: &[Value]) -> Vec<Value> {
                 .and_then(|value| value.get("plan"))
                 .and_then(Value::as_array)
             {
-                return plan.clone();
+                return if crossed_turn_boundary {
+                    Vec::new()
+                } else {
+                    plan.clone()
+                };
             }
         }
     }
@@ -974,6 +987,28 @@ mod tests {
         assert_eq!(plan[0]["status"], "completed");
         assert_eq!(plan[1]["step"], "write PDF");
         assert_eq!(plan[1]["status"], "in_progress");
+    }
+
+    #[test]
+    fn cancelled_session_does_not_restore_its_unfinished_plan() {
+        let messages = vec![
+            json!({"role": "user", "content": "generate the PDF"}),
+            json!({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "plan-pdf",
+                    "type": "function",
+                    "function": {
+                        "name": "update_plan",
+                        "arguments": "{\"plan\":[{\"step\":\"verify PDF\",\"status\":\"in_progress\"}]}"
+                    }
+                }]
+            }),
+            json!({"role": "tool", "tool_call_id": "plan-pdf", "content": "Plan updated (1 steps)."}),
+            json!({"role": "assistant", "content": "Stopped by user."}),
+        ];
+
+        assert!(latest_plan_from_messages(&messages).is_empty());
     }
 
     #[test]
