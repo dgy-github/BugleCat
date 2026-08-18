@@ -388,6 +388,35 @@ async fn retries_a_transport_error_before_completing_the_same_turn() {
 }
 
 #[tokio::test]
+async fn retries_a_stream_decode_error_before_completing_the_same_turn() {
+    let p = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: "StreamError: error decoding response body".into(),
+            finish_reason: "error".into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: "已恢复并继续完成任务。".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("stream_decode_error_retry");
+    let mut loop_ = build(&ws, Box::new(p));
+
+    let result = loop_.run_turn(json!("继续执行当前任务"), None).await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.final_text, "已恢复并继续完成任务。");
+    assert_eq!(result.iterations, 2);
+    assert!(!loop_.session.messages.iter().any(|message| {
+        message["role"] == "assistant"
+            && message["content"]
+                .as_str()
+                .is_some_and(|text| text.contains("StreamError"))
+    }));
+}
+
+#[tokio::test]
 async fn repeated_transport_errors_end_with_a_chinese_recoverable_message() {
     let error = || {
         ModelResponse {

@@ -327,7 +327,9 @@ fn finish_response(
 
 fn is_retryable_transport_error(message: &str) -> bool {
     let message = message.trim_start();
-    message.starts_with("RequestError:") || message.starts_with("TimeoutError:")
+    message.starts_with("RequestError:")
+        || message.starts_with("TimeoutError:")
+        || message.starts_with("StreamError:")
 }
 
 fn has_unfinished_plan(agent: &AgentLoop) -> bool {

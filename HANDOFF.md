@@ -79,6 +79,13 @@
 - 验证：`ncx-core` **196 通过**；GUI 后端 **27 通过**；Vite 正式构建成功（114 模块）；Windows GNU 正式版与 NSIS 安装包生成成功。
 - OpenAI 官方文档只公开 Codex/ChatGPT 桌面端用于在项目和长期任务间切换，没有公开会话标题生成算法；本实现对齐其用户可见的短任务标题体验，不声称复刻内部实现。
 
+### 追加修复：流式响应解码错误恢复（2026-08-18）
+
+- 复现：模型流式响应中途损坏时，provider 返回 `StreamError: error decoding response body`；旧恢复逻辑只识别 `RequestError` 与 `TimeoutError`，因此英文底层错误直接显示为最终回复。
+- `ncx-core/src/agent_loop/turn.rs` 已将 `StreamError` 纳入同一轮有限恢复：保留当前用户请求并自动重试，最多 3 次；仍失败时只显示中文可恢复提示。
+- 新增回归测试验证流解码错误后第二次请求成功，且 `StreamError` 不会写入会话。
+- 验证：`ncx-core` **197 通过，0 失败**。
+
 ## 元信息
 - 最后更新：2026-08-18（顶部“当前进度”为现行状态；下方 2026-06-29 内容保留作历史背景）
 - 分支：**`rust-capability`**（整合线，推 **`origin/gui-merge-featgui`**；`origin/rust-capability` = codex
