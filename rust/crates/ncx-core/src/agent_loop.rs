@@ -88,6 +88,7 @@ pub struct AgentLoop {
     max_parallel_tool_calls: usize,
     tool_scheduler: Box<dyn ToolScheduler>,
     turn_context: TurnContextRegistry,
+    next_turn_id: u64,
     use_vision_this_turn: bool,
     event_sink: Option<EventSink>,
 }
@@ -106,6 +107,7 @@ impl AgentLoop {
             max_parallel_tool_calls: DEFAULT_MAX_PARALLEL_TOOL_CALLS,
             tool_scheduler: Box::new(BoundedToolScheduler),
             turn_context: TurnContextRegistry::default(),
+            next_turn_id: 0,
             use_vision_this_turn: false,
             event_sink: None,
         }
@@ -240,11 +242,14 @@ impl AgentLoop {
         user_input: Value,
         cancel_check: Option<&dyn Fn() -> bool>,
     ) -> TurnResult {
+        self.next_turn_id = self.next_turn_id.wrapping_add(1).max(1);
+        self.tools.ctx.active_turn_id.set(Some(self.next_turn_id));
         // Take the sink out so the inner loop can emit through a local without
         // borrow-conflicting with `&mut self`; restore it after (one return path).
         let mut sink = self.event_sink.take();
         let result = turn::run(self, user_input, cancel_check, &mut sink).await;
         let result = self.apply_stop_hook(result, &mut sink).await;
+        self.tools.ctx.active_turn_id.set(None);
         self.event_sink = sink;
         result
     }

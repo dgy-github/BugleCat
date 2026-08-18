@@ -225,6 +225,42 @@ async fn runs_update_plan_and_records_state() {
 }
 
 #[tokio::test]
+async fn unfinished_plan_from_previous_turn_does_not_block_a_new_request() {
+    let p = ScriptedProvider::new(vec![
+        assistant_toolcall(vec![tc(
+            "old-plan",
+            "update_plan",
+            json!({"plan": [
+                {"step": "old task", "status": "in_progress"},
+            ]}),
+        )]),
+        ModelResponse {
+            content: "new request done".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("plan_is_scoped_to_turn");
+    let mut loop_ = build(&ws, Box::new(p)).with_max_iterations(2);
+    let checks = Cell::new(0u32);
+    let cancel_after_plan_tool = || {
+        let current = checks.get();
+        checks.set(current + 1);
+        current >= 2
+    };
+
+    let first = loop_
+        .run_turn(json!("old request"), Some(&cancel_after_plan_tool))
+        .await;
+    assert_eq!(first.stop_reason, "cancelled");
+    assert_eq!(loop_.tools.ctx.plan.borrow()[0]["status"], "in_progress");
+
+    let second = loop_.run_turn(json!("new request"), None).await;
+    assert_eq!(second.stop_reason, "completed");
+    assert_eq!(second.final_text, "new request done");
+    assert_eq!(second.iterations, 1);
+}
+
+#[tokio::test]
 async fn retries_an_empty_response_before_completing() {
     let p = ScriptedProvider::new(vec![
         ModelResponse::default(),

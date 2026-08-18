@@ -238,6 +238,9 @@ fn finish_response(
 }
 
 fn has_unfinished_plan(agent: &AgentLoop) -> bool {
+    if agent.tools.ctx.plan_turn_id.get() != agent.tools.ctx.active_turn_id.get() {
+        return false;
+    }
     agent.tools.ctx.plan.borrow().iter().any(|item| {
         matches!(
             item.get("status").and_then(Value::as_str),

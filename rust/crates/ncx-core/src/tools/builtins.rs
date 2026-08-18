@@ -31,6 +31,10 @@ impl Tool for UpdatePlanTool {
         let Some(plan) = args.get("plan").and_then(|v| v.as_array()) else {
             return "Error: 'plan' is required and must be an array.".into();
         };
+        let active_turn = ctx.active_turn_id.get();
+        if active_turn.is_some() && ctx.plan_turn_id.get() != active_turn {
+            ctx.plan.borrow_mut().clear();
+        }
         let current = ctx.plan.borrow();
         let missing_unfinished = current
             .iter()
@@ -55,6 +59,7 @@ impl Tool for UpdatePlanTool {
         }
         drop(current);
         *ctx.plan.borrow_mut() = plan.clone();
+        ctx.plan_turn_id.set(active_turn);
         let n = plan.len();
         format!("Plan updated ({n} steps).")
     }

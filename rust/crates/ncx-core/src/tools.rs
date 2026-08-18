@@ -5,7 +5,7 @@
 //! Single-threaded by design (the REPL runs on a current-thread runtime), so
 //! shared mutable state (the plan) uses `Rc<RefCell<Ã¢â‚¬Â¦>>`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -114,6 +114,11 @@ pub struct ToolContext {
     pub timeout_s: u64,
     /// Shared mutable plan state for `update_plan` / the CLI to read.
     pub plan: Rc<RefCell<Vec<Value>>>,
+    /// Turn that owns `plan`. A plan may remain visible after its turn ends,
+    /// but it must never constrain a different user turn.
+    pub plan_turn_id: Rc<Cell<Option<u64>>>,
+    /// User turn currently being executed by the agent loop.
+    pub active_turn_id: Rc<Cell<Option<u64>>>,
     /// Optional approval prompt. `None` = no prompting (escalations then rely on
     /// the policy alone, i.e. an out-of-sandbox write simply fails).
     pub approver: Option<Rc<dyn ApprovalHandler>>,
@@ -154,6 +159,8 @@ impl ToolContext {
             session_grants: Rc::new(RefCell::new(SessionGrants::default())),
             timeout_s: 120,
             plan: Rc::new(RefCell::new(Vec::new())),
+            plan_turn_id: Rc::new(Cell::new(None)),
+            active_turn_id: Rc::new(Cell::new(None)),
             approver: None,
             user_question_handler: None,
             lsp_provider: None,
