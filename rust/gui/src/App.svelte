@@ -18,6 +18,7 @@
     | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
     | { kind: "question"; id: number; question: string; options: string[]; allow_free_text: boolean }
     | { kind: "done"; final_text: string; stop_reason: string; usage: Record<string, number> }
+    | { kind: "session_title"; session_id: string; title: string }
     | { kind: "loaded"; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
     | { kind: "error"; message: string };
 
@@ -584,6 +585,10 @@
           refreshSessions();
           if (!switchingSession) dequeue();
           break;
+        case "session_title":
+          if (p.session_id === currentSessionId) sessionTitle = p.title;
+          refreshSessions();
+          break;
         case "loaded":
           messages = p.messages
             .flatMap((m): Msg[] => {
@@ -1126,6 +1131,8 @@
   async function refreshSessions() {
     try {
       sessions = await invoke<SessionRow[]>("list_sessions");
+      const current = sessions.find((session) => session.session_id === currentSessionId);
+      if (current) sessionTitle = current.title || "会话";
     } catch {
       /* index may not exist yet */
     }

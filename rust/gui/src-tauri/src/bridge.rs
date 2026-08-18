@@ -180,6 +180,8 @@ pub enum UiEvent {
         stop_reason: String,
         usage: Value,
     },
+    /// A compact title was generated and persisted for a newly completed session.
+    SessionTitle { session_id: String, title: String },
     /// A session was resumed/forked — the UI should replace its transcript with
     /// these restored messages.
     Loaded { messages: Vec<UiMsg> },
@@ -208,6 +210,10 @@ pub struct UiTool {
 
 pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
     let _ = app.emit(EVENT, ev);
+}
+
+fn should_generate_session_title(is_first_turn: bool, stop_reason: &str) -> bool {
+    is_first_turn && stop_reason == "completed"
 }
 
 /// Build the loop's event sink (forwards [`LoopEvent`]s to the frontend). A
@@ -568,6 +574,9 @@ pub fn spawn_worker(
                 while let Some(cmd) = rx.recv().await {
                     match cmd {
                         Command::Prompt { text, images } => {
+                            let is_first_turn = agent.session.messages.iter().all(|message| {
+                                message.get("role").and_then(Value::as_str) != Some("user")
+                            });
                             let expanded = expand_file_mentions(&text, &workspace);
                             save_auto_checkpoint(&workspace, &expanded);
                             let user_input = match build_image_user_input(&expanded, &images) {
@@ -594,12 +603,29 @@ pub fn spawn_worker(
                             emit(
                                 &app,
                                 UiEvent::Done {
-                                    final_text: result.final_text,
-                                    stop_reason: result.stop_reason,
+                                    final_text: result.final_text.clone(),
+                                    stop_reason: result.stop_reason.clone(),
                                     usage: serde_json::to_value(&result.usage)
                                         .unwrap_or(Value::Null),
                                 },
                             );
+                            if should_generate_session_title(is_first_turn, &result.stop_reason) {
+                                if let Some(title) = agent.suggest_title(&text).await {
+                                    let persisted = session_index
+                                        .lock()
+                                        .map(|mut index| index.set_title(&session_id, &title))
+                                        .unwrap_or(false);
+                                    if persisted {
+                                        emit(
+                                            &app,
+                                            UiEvent::SessionTitle {
+                                                session_id: session_id.clone(),
+                                                title,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
                         }
                         Command::Reload => {
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
@@ -1046,6 +1072,27 @@ mod tests {
         ];
 
         assert!(latest_plan_from_messages(&messages).is_empty());
+    }
+
+    #[test]
+    fn title_generation_only_runs_after_a_completed_first_turn() {
+        assert!(should_generate_session_title(true, "completed"));
+        assert!(!should_generate_session_title(false, "completed"));
+        assert!(!should_generate_session_title(true, "cancelled"));
+        assert!(!should_generate_session_title(true, "error"));
+    }
+
+    #[test]
+    fn session_title_event_uses_the_frontend_contract() {
+        let event = serde_json::to_value(UiEvent::SessionTitle {
+            session_id: "session-1".into(),
+            title: "修复会话标题".into(),
+        })
+        .unwrap();
+
+        assert_eq!(event["kind"], "session_title");
+        assert_eq!(event["session_id"], "session-1");
+        assert_eq!(event["title"], "修复会话标题");
     }
 
     #[test]

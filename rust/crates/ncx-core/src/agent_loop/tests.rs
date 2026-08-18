@@ -103,6 +103,36 @@ async fn returns_final_text_without_tools() {
 }
 
 #[tokio::test]
+async fn suggests_a_short_task_oriented_session_title() {
+    let p = ScriptedProvider::new(vec![ModelResponse {
+        content: "标题：**整理大模型架构资料 PDF。**\n不要输出这一行".into(),
+        ..Default::default()
+    }]);
+    let ws = tmpdir("session_title");
+    let loop_ = build(&ws, Box::new(p));
+
+    let title = loop_
+        .suggest_title(
+            "这里是一大段 MoE、GRPO、Engram 等背景资料，帮我分析并上网搜集详细资料，整理成通俗易懂的 PDF。",
+        )
+        .await;
+
+    assert_eq!(title.as_deref(), Some("整理大模型架构资料 PDF"));
+}
+
+#[tokio::test]
+async fn rejects_an_invalid_generated_session_title() {
+    let p = ScriptedProvider::new(vec![ModelResponse {
+        content: "这是一段超过限制而且没有遵守只输出短标题要求的模型回答，它不应该被保存为会话标题，因为侧栏会再次变得很难阅读".into(),
+        ..Default::default()
+    }]);
+    let ws = tmpdir("invalid_session_title");
+    let loop_ = build(&ws, Box::new(p));
+
+    assert_eq!(loop_.suggest_title("修复登录问题").await, None);
+}
+
+#[tokio::test]
 async fn executes_apply_patch_then_finishes() {
     let patch = "*** Begin Patch\n*** Add File: out.txt\n+hello\n*** End Patch";
     let p = ScriptedProvider::new(vec![

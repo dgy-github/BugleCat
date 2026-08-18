@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use crate::session::{redact_image_data, Session};
 
-const TITLE_MAX: usize = 120;
+const TITLE_MAX: usize = 36;
 const SNIPPET_MAX: usize = 200;
 
 static SESSION_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -177,7 +177,22 @@ impl SessionIndex {
         session: &Session,
         log_path: &Path,
     ) -> SessionSummary {
+        self.record_turn_with_title(session_id, workspace, session, log_path, None)
+    }
+
+    pub fn record_turn_with_title(
+        &mut self,
+        session_id: &str,
+        workspace: &Path,
+        session: &Session,
+        log_path: &Path,
+        title_override: Option<&str>,
+    ) -> SessionSummary {
         let prior_created = self.by_id.get(session_id).map(|s| s.created_at.clone());
+        let prior_title = self.by_id.get(session_id).and_then(|summary| {
+            (summary.user_messages > 0 && !summary.title.trim().is_empty())
+                .then(|| summary.title.clone())
+        });
         let prior_archived = self
             .by_id
             .get(session_id)
@@ -193,9 +208,31 @@ impl SessionIndex {
             prior_created.as_deref(),
             saved,
         );
+        if let Some(title) = title_override
+            .filter(|title| !title.trim().is_empty())
+            .map(|title| clip(title, TITLE_MAX))
+            .or(prior_title)
+        {
+            summary.title = title;
+        }
         summary.archived = prior_archived; // archiving survives new turns
         self.record(summary.clone());
         summary
+    }
+
+    pub fn set_title(&mut self, session_id: &str, title: &str) -> bool {
+        let title = clip(title, TITLE_MAX);
+        if title.is_empty() {
+            return false;
+        }
+        match self.by_id.get_mut(session_id) {
+            Some(summary) => {
+                summary.title = title;
+                self.save();
+                true
+            }
+            None => false,
+        }
     }
 
     /// Set a session's archived flag (persists). Returns false if unknown.
@@ -323,7 +360,7 @@ pub fn summarize(
                 if title.is_empty() {
                     let text = first_text(msg.get("content"));
                     if !text.is_empty() && !text.starts_with("[Earlier conversation") {
-                        title = clip(&text, TITLE_MAX);
+                        title = fallback_title(&text);
                     }
                 }
             }
@@ -396,6 +433,29 @@ fn clip(text: &str, limit: usize) -> String {
     }
     let take = limit.saturating_sub(3);
     format!("{}...", collapsed.chars().take(take).collect::<String>())
+}
+
+fn fallback_title(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let markers = [
+        "可以帮我",
+        "请帮我",
+        "请你",
+        "帮我",
+        "麻烦",
+        "能否",
+        "我需要",
+        "我想",
+        "请",
+    ];
+    let request = markers
+        .iter()
+        .filter_map(|marker| collapsed.rfind(marker).map(|index| (index, *marker)))
+        .max_by_key(|(index, _)| *index)
+        .map(|(index, marker)| collapsed[index + marker.len()..].trim())
+        .filter(|request| !request.is_empty())
+        .unwrap_or(&collapsed);
+    clip(request, TITLE_MAX)
 }
 
 fn redact_messages(messages: &[Value], placeholder: &str) -> Vec<Value> {
@@ -526,6 +586,31 @@ mod tests {
         assert_eq!(s.recent_tools, vec!["read_file"]);
         assert_eq!(s.created_at, "2026-06-01T10:00:00");
         assert!(s.has_snapshot);
+    }
+
+    #[test]
+    fn generated_title_is_persisted_and_survives_later_turns() {
+        let path = tmp_path("generated_title").join("sessions.jsonl");
+        let mut idx = SessionIndex::new(path);
+        let workspace = PathBuf::from("/project");
+        let log_path = workspace.join("session.jsonl");
+        let mut session = Session::new("sys");
+        session.add_user(json!("这里是很长的背景资料，帮我整理成 PDF"));
+        session.add_assistant("完成", None, "");
+
+        let first = idx.record_turn_with_title(
+            "sid",
+            &workspace,
+            &session,
+            &log_path,
+            Some("整理背景资料 PDF"),
+        );
+        assert_eq!(first.title, "整理背景资料 PDF");
+
+        session.add_user(json!("再补充一页"));
+        session.add_assistant("已补充", None, "");
+        let second = idx.record_turn("sid", &workspace, &session, &log_path);
+        assert_eq!(second.title, "整理背景资料 PDF");
     }
 
     #[test]
