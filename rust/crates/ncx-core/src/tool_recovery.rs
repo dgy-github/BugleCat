@@ -71,10 +71,24 @@ impl ToolFailureClass {
 /// Classify the existing string result contract without changing public tool APIs.
 pub fn classify_tool_result(result: &str) -> Option<ToolFailureClass> {
     let text = result.trim().to_ascii_lowercase();
-    if !(text.starts_with("error:") || text.starts_with("[interrupted:")) {
+    let failed_exit = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("exit code:"))
+        .filter_map(|code| code.trim().parse::<i32>().ok())
+        .any(|code| code != 0);
+    let exhausted_not_found_recovery = text.starts_with("[recovery:")
+        && text.contains("after notfound")
+        && (text.contains("\"count\":0") || text.contains("\"matches\":[]"));
+    if !(text.starts_with("error:")
+        || text.starts_with("[interrupted:")
+        || failed_exit
+        || exhausted_not_found_recovery)
+    {
         return None;
     }
-    let class = if text.contains("unknown tool") {
+    let class = if exhausted_not_found_recovery {
+        ToolFailureClass::NotFound
+    } else if text.contains("unknown tool") {
         ToolFailureClass::UnknownTool
     } else if text.contains("stopped by user")
         || text.contains("cancelled")
@@ -260,6 +274,20 @@ mod tests {
         assert_eq!(
             classify_tool_result("[interrupted: stopped by user mid-command]"),
             Some(ToolFailureClass::Cancelled)
+        );
+        assert_eq!(
+            classify_tool_result("STDERR: bad command\n\nExit code: 1"),
+            Some(ToolFailureClass::Execution)
+        );
+        assert_eq!(
+            classify_tool_result(
+                "[recovery: read_file -> find_files after notfound]\n{\"count\":0,\"matches\":[],\"query\":\"missing.txt\"}"
+            ),
+            Some(ToolFailureClass::NotFound)
+        );
+        assert_eq!(
+            classify_tool_result("warning on stderr\n\nExit code: 0"),
+            None
         );
     }
 

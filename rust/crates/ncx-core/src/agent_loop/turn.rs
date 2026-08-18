@@ -14,10 +14,14 @@ use crate::turn_context::TurnContextRequest;
 const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
 const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
 const MAX_CONSECUTIVE_EMPTY_RESPONSES: usize = 3;
+const SOFT_CONVERGENCE_TOOL_CALLS: usize = 32;
+const HARD_CONVERGENCE_TOOL_CALLS: usize = 40;
+const HARD_CONVERGENCE_FAILURES: usize = 6;
 
 #[derive(Default)]
 struct TurnState {
     tools_used: Vec<String>,
+    tool_failures: usize,
     usage: BTreeMap<String, i64>,
     consecutive_empty_responses: usize,
 }
@@ -80,6 +84,7 @@ pub(super) async fn run(
             agent,
             &response.tool_calls,
             &mut state.tools_used,
+            &mut state.tool_failures,
             cancel,
             sink,
         )
@@ -170,9 +175,38 @@ async fn request_model(
     state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> ModelResponse {
-    let schemas = agent.tools.schemas_for_query(&prompt.tool_query);
+    let force_convergence = state.tools_used.len() >= HARD_CONVERGENCE_TOOL_CALLS
+        && state.tool_failures >= HARD_CONVERGENCE_FAILURES;
+    let schemas = if force_convergence {
+        Vec::new()
+    } else {
+        agent.tools.schemas_for_query(&prompt.tool_query)
+    };
     let mut notes = vec![budget_note(agent, iteration + 1, state.tools_used.len())];
+    #[cfg(windows)]
+    notes.push(
+        "Runtime platform: Windows. The shell tool runs through Windows cmd.exe. Never use heredoc (<<), tail, head, or wc. Put multiline Python in a temporary script via apply_patch, or use PowerShell-compatible commands."
+            .to_string(),
+    );
     notes.extend(prompt.runtime_notes.clone());
+    if state.tool_failures >= 4 {
+        notes.push(format!(
+            "Tool attempts have failed {} times in this turn. Do not repeat the same command syntax or search route; switch to a known-compatible method and use evidence already collected.",
+            state.tool_failures
+        ));
+    }
+    if state.tools_used.len() >= SOFT_CONVERGENCE_TOOL_CALLS {
+        notes.push(
+            "The turn has crossed the soft tool-call limit. Stop opening new research branches; close only essential gaps and prepare the final answer from existing evidence."
+                .to_string(),
+        );
+    }
+    if force_convergence {
+        notes.push(
+            "Too many tool calls and failures have accumulated. You have no tools for this call: converge now and provide the best final answer from existing evidence, clearly noting any remaining uncertainty."
+                .to_string(),
+        );
+    }
     if has_unfinished_plan(agent) {
         notes.push(
             "The active plan still has pending or in-progress steps. Continue executing it and update the plan; do not end with only a progress report."

@@ -84,6 +84,22 @@ impl ShellTool {
         // workspace-write: escalate only if the workdir itself isn't writable.
         !ctx.policy.can_write(workdir)
     }
+
+    #[cfg(windows)]
+    fn incompatible_windows_syntax(command: &str) -> bool {
+        if command.contains("<<") {
+            return true;
+        }
+        command.split_whitespace().any(|token| {
+            matches!(
+                token
+                    .trim_matches(|c: char| "|&;()\"'".contains(c))
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "tail" | "head" | "wc"
+            )
+        })
+    }
 }
 
 #[async_trait(?Send)]
@@ -113,6 +129,10 @@ impl Tool for ShellTool {
         let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
             return "Error: 'command' is required and must be a string.".into();
         };
+        #[cfg(windows)]
+        if ShellTool::incompatible_windows_syntax(command) {
+            return "Error: Windows shell is cmd.exe and does not support heredoc (<<) or Unix tail/head/wc commands. Write multiline code to a temporary script with apply_patch, use PowerShell Get-Content -Tail/Select-Object, or run a single-line command. Do not retry the same syntax.".into();
+        }
         let workdir = resolve_shell_workdir(ctx, args);
         if !workdir.exists() {
             return format!(

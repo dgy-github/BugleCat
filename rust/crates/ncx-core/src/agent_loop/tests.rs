@@ -373,6 +373,45 @@ struct CountingProvider {
     calls: Rc<Cell<usize>>,
 }
 
+struct LongFailureProvider {
+    calls: Cell<usize>,
+    converged_without_tools: Rc<Cell<bool>>,
+    saw_convergence_note: Rc<Cell<bool>>,
+}
+
+#[async_trait(?Send)]
+impl Provider for LongFailureProvider {
+    fn model(&self) -> &str {
+        "long-failure"
+    }
+
+    async fn chat(&self, messages: &[Value], tools: &[Value], _r: Option<&str>) -> ModelResponse {
+        let call = self.calls.get();
+        self.calls.set(call + 1);
+        if call < 40 {
+            return assistant_toolcall(vec![tc(
+                &format!("missing-{call}"),
+                "read_file",
+                json!({"path": format!("missing-{call}.txt")}),
+            )]);
+        }
+
+        self.converged_without_tools.set(tools.is_empty());
+        self.saw_convergence_note
+            .set(messages.iter().any(|message| {
+                message.get("role").and_then(Value::as_str) == Some("system")
+                    && message
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .is_some_and(|content| content.contains("converge now"))
+            }));
+        ModelResponse {
+            content: "final answer from existing evidence".into(),
+            ..Default::default()
+        }
+    }
+}
+
 struct StaticContextProvider;
 
 #[async_trait(?Send)]
@@ -397,6 +436,44 @@ impl Provider for CountingProvider {
             ..Default::default()
         }
     }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn model_receives_the_windows_shell_contract() {
+    let ws = tmpdir("windows_shell_contract");
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut loop_ = build(&ws, Box::new(CapturingProvider { seen: seen.clone() }));
+
+    loop_.run_turn(json!("inspect files"), None).await;
+
+    assert!(seen.borrow().iter().any(|message| {
+        message["role"] == "system"
+            && message["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Windows cmd.exe")
+    }));
+}
+
+#[tokio::test]
+async fn repeated_tool_failures_force_a_final_answer_without_more_tools() {
+    let ws = tmpdir("long_failure_convergence");
+    let converged_without_tools = Rc::new(Cell::new(false));
+    let saw_convergence_note = Rc::new(Cell::new(false));
+    let provider = LongFailureProvider {
+        calls: Cell::new(0),
+        converged_without_tools: converged_without_tools.clone(),
+        saw_convergence_note: saw_convergence_note.clone(),
+    };
+    let mut loop_ = build(&ws, Box::new(provider)).with_max_iterations(50);
+
+    let result = loop_.run_turn(json!("research carefully"), None).await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert!(converged_without_tools.get());
+    assert!(saw_convergence_note.get());
+    assert_eq!(result.tools_used.len(), 40);
 }
 
 #[tokio::test]

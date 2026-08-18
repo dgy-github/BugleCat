@@ -3,6 +3,7 @@
 use ncx_provider::ToolCall;
 
 use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent};
+use crate::tool_recovery::classify_tool_result;
 
 pub(super) enum DispatchStop {
     Cancelled { before_next_tool: bool },
@@ -13,6 +14,7 @@ pub(super) async fn execute(
     agent: &mut AgentLoop,
     calls: &[ToolCall],
     tools_used: &mut Vec<String>,
+    tool_failures: &mut usize,
     cancel: Option<&dyn Fn() -> bool>,
     sink: &mut Option<EventSink>,
 ) -> Option<DispatchStop> {
@@ -32,10 +34,27 @@ pub(super) async fn execute(
         }
 
         if starts_parallel_run(agent, calls, index) {
-            index =
-                execute_read_batch(agent, calls, index, remaining, tools_used, cancel, sink).await;
+            index = execute_read_batch(
+                agent,
+                calls,
+                index,
+                remaining,
+                tools_used,
+                tool_failures,
+                cancel,
+                sink,
+            )
+            .await;
         } else {
-            execute_serial(agent, &calls[index], tools_used, cancel, sink).await;
+            execute_serial(
+                agent,
+                &calls[index],
+                tools_used,
+                tool_failures,
+                cancel,
+                sink,
+            )
+            .await;
             index += 1;
         }
 
@@ -60,6 +79,7 @@ async fn execute_read_batch(
     mut index: usize,
     remaining: usize,
     tools_used: &mut Vec<String>,
+    tool_failures: &mut usize,
     cancel: Option<&dyn Fn() -> bool>,
     sink: &mut Option<EventSink>,
 ) -> usize {
@@ -82,6 +102,9 @@ async fn execute_read_batch(
         let result = results.get(position).cloned().unwrap_or_else(|| {
             "Error: tool scheduler returned no result for this call.".to_string()
         });
+        if classify_tool_result(&result).is_some() {
+            *tool_failures += 1;
+        }
         record_tool_result(agent, sink, call, result);
     }
     index
@@ -91,6 +114,7 @@ async fn execute_serial(
     agent: &mut AgentLoop,
     call: &ToolCall,
     tools_used: &mut Vec<String>,
+    tool_failures: &mut usize,
     cancel: Option<&dyn Fn() -> bool>,
     sink: &mut Option<EventSink>,
 ) {
@@ -100,6 +124,9 @@ async fn execute_serial(
         .execute_one(&agent.tools, call, cancel)
         .await;
     trace::tool_result(&call.name, &result);
+    if classify_tool_result(&result).is_some() {
+        *tool_failures += 1;
+    }
     record_tool_result(agent, sink, call, result);
 }
 
