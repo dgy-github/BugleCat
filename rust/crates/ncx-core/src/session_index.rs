@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-use crate::session::{redact_image_data, Session};
+use crate::session::{redact_image_data, Session, COMPACTED_HISTORY_PREFIX};
 
 const TITLE_MAX: usize = 36;
 const SNIPPET_MAX: usize = 200;
@@ -356,9 +356,12 @@ pub fn summarize(
     for msg in messages {
         match msg.get("role").and_then(|v| v.as_str()) {
             Some("user") => {
+                let text = first_text(msg.get("content"));
+                if text.starts_with(COMPACTED_HISTORY_PREFIX) {
+                    continue;
+                }
                 user_messages += 1;
                 if title.is_empty() {
-                    let text = first_text(msg.get("content"));
                     if !text.is_empty() && !text.starts_with("[Earlier conversation") {
                         title = fallback_title(&text);
                     }
@@ -558,6 +561,7 @@ mod tests {
     fn msgs() -> Vec<Value> {
         vec![
             json!({"role": "system", "content": "sys"}),
+            json!({"role": "user", "content": format!("{COMPACTED_HISTORY_PREFIX}；测试]\n用户：旧任务")}),
             json!({"role": "user", "content": "fix login"}),
             json!({"role": "assistant", "content": "looking", "tool_calls": [
                 {"id": "1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}

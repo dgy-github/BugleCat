@@ -302,3 +302,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 新增独立 `StreamDelta::Reasoning` → `LoopEvent::ReasoningDelta` → `UiEvent::ReasoningDelta` 事件链，且所有事件继续绑定 `session_id`。
 - 前端运行时自动展开“思考过程”，本轮模型响应结束后折叠保留、可手动查看；它与工具日志分开，工具输入/结果和历史恢复过滤规则不变。
 - 验证：`ncx-core` 197 项、`ncx-gui` 38 项、Vite 生产构建全部通过。
+## 2026-08-19 自动上下文压缩持久化
+- 之前 `for_model_edited` 只构造临时发送视图，完整工具噪声仍写入日志/快照；长会话每轮都会重复裁剪，没有真正的自动压缩触发。
+- 现在每次模型调用前检查 `context_edit_max_chars`：未超限不动；超限后调用 `Session::compact_if_needed`，把会话里程碑物化进 `Session.messages` 并立即重写 JSONL，任务结束后保存到全局快照。
+- 压缩保留用户要求、助手完成结果、文件路径、当前计划和最近消息；清理旧工具调用噪声。内部压缩摘要不计作用户问数，历史恢复只显示淡色压缩标记。
+- 新增 session-scoped `ContextCompacted` UI 事件，显示压缩前后字符数、清理消息数和工具结果数；后台并发会话不会串事件。
+- 验证：`ncx-core` 198 项、`ncx-gui` 40 项、Vite 生产构建全部通过。

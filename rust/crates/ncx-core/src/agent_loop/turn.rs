@@ -70,6 +70,10 @@ pub(super) async fn run(
             return cancelled_result(agent, iteration + 1, state);
         }
 
+        if let Some(stats) = agent.session.compact_if_needed(&agent.context_edit) {
+            emit(sink, LoopEvent::ContextCompacted(stats));
+        }
+
         let response =
             match request_model_cancellable(agent, &prompt, iteration, &mut state, sink, cancel)
                 .await

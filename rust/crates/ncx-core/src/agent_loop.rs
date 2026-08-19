@@ -62,6 +62,8 @@ pub enum LoopEvent {
     /// A streamed chunk from the model's explicit reasoning channel. It is
     /// rendered separately from user-visible answers and tool execution logs.
     ReasoningDelta(String),
+    /// Old tool-heavy history was compacted and persisted before a model call.
+    ContextCompacted(ContextEditStats),
     /// The assistant's final visible text for this step. The UI finalizes the
     /// streamed bubble with this authoritative text (or creates one if no deltas).
     AssistantText(String),

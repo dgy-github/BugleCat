@@ -67,7 +67,9 @@ pub use runtime_profile::{
     RuntimePermissionProfile,
 };
 pub use rust_analyzer::RustAnalyzerProvider;
-pub use session::{estimate_tokens, ContextEditPolicy, ContextEditStats, Session};
+pub use session::{
+    estimate_tokens, ContextEditPolicy, ContextEditStats, Session, COMPACTED_HISTORY_PREFIX,
+};
 pub use session_index::{new_session_id, SessionIndex, SessionSummary};
 pub use session_query_tools::session_query_tools;
 pub use skills::{discover_skills, skills_index_block, Skill};

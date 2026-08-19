@@ -13,6 +13,7 @@
     | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
     | { kind: "assistant_delta"; session_id: string; text: string }
     | { kind: "reasoning_delta"; session_id: string; text: string }
+    | { kind: "context_compacted"; session_id: string; original_chars: number; edited_chars: number; dropped_messages: number; compressed_tool_results: number }
     | { kind: "assistant"; session_id: string; text: string }
     | { kind: "tool_start"; session_id: string; name: string; args: string }
     | { kind: "tool_result"; session_id: string; name: string; result: string }
@@ -116,7 +117,7 @@
   type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boolean };
   type ReasoningMsg = { role: "reasoning"; text: string; settled: boolean };
   type Msg =
-    | { role: "user" | "assistant" | "note"; text: string }
+    | { role: "user" | "assistant" | "note" | "compact"; text: string }
     | ReasoningMsg
     | ToolGroup;
 
@@ -595,6 +596,13 @@
             if (m?.role === "reasoning") m.text += p.text;
           }
           break;
+        case "context_compacted":
+          if (!acceptsSessionEvent(p.session_id)) break;
+          messages.push({
+            role: "compact",
+            text: `已自动压缩上下文：${p.original_chars.toLocaleString()} → ${p.edited_chars.toLocaleString()} 字符，清理 ${p.dropped_messages} 条旧消息和 ${p.compressed_tool_results} 条工具结果；关键要求、完成结果和当前计划已保留。`,
+          });
+          break;
         case "assistant":
           if (!acceptsSessionEvent(p.session_id)) break;
           settleReasoning();
@@ -720,6 +728,9 @@
               }
               if (m.role === "note" && m.text.trim() !== "") {
                 return [{ role: "note", text: m.text }];
+              }
+              if (m.role === "compact" && m.text.trim() !== "") {
+                return [{ role: "compact", text: m.text }];
               }
               return [];
             });
@@ -1717,6 +1728,8 @@
           <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
+        {:else if m.role === "compact"}
+          <div class="msg compact"><span aria-hidden="true">◇</span>{m.text}</div>
         {:else if m.role === "reasoning"}
           <details class="reasoning-run" class:settled={m.settled} open={!m.settled}>
             <summary>

@@ -30,7 +30,7 @@ use ncx_core::{
     new_session_id, skills_index_block, suggest_title_with_provider, vision_provider_from_config,
     AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
     CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext,
-    ToolRegistry, UserQuestionHandler, UserQuestionRequest,
+    ToolRegistry, UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
 use ncx_sandbox::SandboxPolicy;
 use serde::Serialize;
@@ -190,6 +190,13 @@ pub enum UiEvent {
     AssistantDelta { session_id: String, text: String },
     /// A chunk from the provider's explicit reasoning stream.
     ReasoningDelta { session_id: String, text: String },
+    ContextCompacted {
+        session_id: String,
+        original_chars: usize,
+        edited_chars: usize,
+        dropped_messages: usize,
+        compressed_tool_results: usize,
+    },
     /// Assistant's final visible text (finalize the streamed bubble).
     Assistant { session_id: String, text: String },
     /// A tool is about to run.
@@ -267,6 +274,13 @@ fn make_sink(app: AppHandle, session_id: String) -> Box<dyn FnMut(LoopEvent)> {
             LoopEvent::ReasoningDelta(text) => UiEvent::ReasoningDelta {
                 session_id: session_id.clone(),
                 text,
+            },
+            LoopEvent::ContextCompacted(stats) => UiEvent::ContextCompacted {
+                session_id: session_id.clone(),
+                original_chars: stats.original_chars,
+                edited_chars: stats.edited_chars,
+                dropped_messages: stats.dropped_messages,
+                compressed_tool_results: stats.compressed_tool_results,
             },
             LoopEvent::AssistantText(text) => UiEvent::Assistant {
                 session_id: session_id.clone(),
@@ -1253,6 +1267,13 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
         match role {
             "user" => {
                 flush_final(&mut out, &mut final_assistant);
+                if content.starts_with(COMPACTED_HISTORY_PREFIX) {
+                    out.push(UiMsg {
+                        role: "compact".into(),
+                        text: "较早的会话内容已自动压缩，关键要求和完成结果已保留。".into(),
+                    });
+                    continue;
+                }
                 if !content.trim().is_empty() {
                     out.push(UiMsg {
                         role: "user".into(),
@@ -1403,6 +1424,27 @@ mod tests {
     }
 
     #[test]
+    fn restored_history_replaces_internal_compaction_summary_with_a_marker() {
+        let messages = vec![
+            json!({
+                "role": "user",
+                "content": format!("{COMPACTED_HISTORY_PREFIX}；测试]\n用户：旧要求\n助手完成结果：secret detail")
+            }),
+            json!({"role": "user", "content": "继续"}),
+            json!({"role": "assistant", "content": "处理完成。"}),
+        ];
+
+        let restored = serde_json::to_value(snapshot_to_ui(&messages)).unwrap();
+        assert_eq!(restored[0]["role"], "compact");
+        assert!(!restored[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("secret detail"));
+        assert_eq!(restored[1]["text"], "继续");
+        assert_eq!(restored[2]["text"], "处理完成。");
+    }
+
+    #[test]
     fn restored_session_uses_the_latest_saved_plan() {
         let messages = vec![
             json!({
@@ -1494,6 +1536,17 @@ mod tests {
         })
         .unwrap();
         assert_eq!(loaded["session_id"], "session-2");
+
+        let compacted = serde_json::to_value(UiEvent::ContextCompacted {
+            session_id: "session-3".into(),
+            original_chars: 200_000,
+            edited_chars: 80_000,
+            dropped_messages: 30,
+            compressed_tool_results: 12,
+        })
+        .unwrap();
+        assert_eq!(compacted["kind"], "context_compacted");
+        assert_eq!(compacted["session_id"], "session-3");
     }
 
     #[test]

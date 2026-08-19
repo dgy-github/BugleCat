@@ -266,6 +266,53 @@ async fn persists_reasoning_on_tool_call_turn() {
 }
 
 #[tokio::test]
+async fn long_history_is_automatically_compacted_before_the_next_model_call() {
+    let ws = tmpdir("automatic_context_compaction");
+    let provider = ScriptedProvider::new(vec![ModelResponse {
+        content: "已承接压缩后的上下文。".into(),
+        ..Default::default()
+    }]);
+    let mut loop_ = build(&ws, Box::new(provider));
+    for i in 0..20 {
+        loop_.session.add_user_text(&format!(
+            "旧任务 {i}：生成并验证交付物 {}",
+            "背景".repeat(30)
+        ));
+        loop_.session.add_assistant(
+            &format!("旧任务 {i} 已完成，文件位于 report-{i}.pdf"),
+            None,
+            "",
+        );
+    }
+    loop_.context_edit = ContextEditPolicy {
+        enabled: true,
+        max_chars: 900,
+        keep_recent_messages: 4,
+        max_tool_result_chars: 40,
+    };
+    let events = Rc::new(RefCell::new(Vec::<LoopEvent>::new()));
+    let sink = events.clone();
+    loop_.set_event_sink(Box::new(move |event| sink.borrow_mut().push(event)));
+    let before = loop_.session.messages.len();
+
+    let result = loop_.run_turn(json!("继续处理刚才的交付物"), None).await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert!(
+        loop_.session.messages.len() < before,
+        "超过阈值后应把压缩结果写回会话，而不是只生成临时发送视图"
+    );
+    let rendered = serde_json::to_string(&loop_.session.messages).unwrap();
+    assert!(rendered.contains("压缩后保留的会话里程碑"));
+    assert!(rendered.contains("report-"));
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        LoopEvent::ContextCompacted(stats)
+            if stats.dropped_messages > 0 && stats.edited_chars < stats.original_chars
+    )));
+}
+
+#[tokio::test]
 async fn runs_update_plan_and_records_state() {
     let p = ScriptedProvider::new(vec![
         {

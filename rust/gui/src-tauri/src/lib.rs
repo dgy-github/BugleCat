@@ -1594,6 +1594,22 @@ mod tests {
     }
 
     #[test]
+    fn automatic_context_compaction_is_visible_and_session_scoped() {
+        let app = include_str!("../../src/App.svelte");
+        let css = include_str!("../../src/app.css");
+        let bridge = include_str!("bridge.rs");
+        let core = include_str!("../../../crates/ncx-core/src/agent_loop/turn.rs");
+
+        assert!(core.contains("agent.session.compact_if_needed"));
+        assert!(bridge.contains("UiEvent::ContextCompacted"));
+        assert!(app.contains("case \"context_compacted\":"));
+        assert!(app.contains("acceptsSessionEvent(p.session_id)"));
+        assert!(app.contains("已自动压缩上下文"));
+        assert!(app.contains("role: \"compact\""));
+        assert!(css.contains(".compact"));
+    }
+
+    #[test]
     fn session_usage_survives_restart_and_session_switches() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("function restoreSessionUsage(sessionId: string)"));

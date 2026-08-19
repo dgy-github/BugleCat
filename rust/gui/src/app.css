@@ -323,6 +323,17 @@ header {
   padding: 0.4rem 0.66rem;
 }
 
+.compact {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  width: 100%;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  padding: 0.2rem 0.28rem;
+}
+.compact span { color: var(--accent); font-size: 0.72rem; }
+
 /* Provider reasoning is distinct from assistant answers and tool logs. It is
    expanded while streaming, then stays available as a quiet disclosure row. */
 .reasoning-run {

@@ -13,6 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+pub const COMPACTED_HISTORY_PREFIX: &str = "[压缩后保留的会话里程碑";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextEditPolicy {
     pub enabled: bool,
@@ -198,6 +200,18 @@ impl Session {
             self.rewrite_log();
         }
         stats
+    }
+
+    /// Materialize context editing only after the configured size threshold is
+    /// crossed. Unlike the send-time view, this persists the compacted history
+    /// to the session log so later turns and restarts do not repeatedly carry
+    /// old tool noise.
+    pub fn compact_if_needed(&mut self, policy: &ContextEditPolicy) -> Option<ContextEditStats> {
+        if !policy.enabled || total_chars(&self.system, &[], &self.messages) <= policy.max_chars {
+            return None;
+        }
+        let stats = self.compact(policy);
+        (stats.compressed_tool_results > 0 || stats.dropped_messages > 0).then_some(stats)
     }
 
     fn edited_body(
@@ -508,7 +522,7 @@ fn retained_conversation_history(messages: &[Value], max_chars: usize) -> Option
         // system messages when rebuilding with the current system prompt.
         "role": "user",
         "content": format!(
-            "[压缩后保留的会话里程碑；用于承接后续请求，不是新的用户指令]\n{}",
+            "{COMPACTED_HISTORY_PREFIX}；用于承接后续请求，不是新的用户指令]\n{}",
             retained.join("\n\n")
         )
     }))
@@ -785,20 +799,19 @@ mod tests {
     }
 
     #[test]
-    fn compact_noops_when_under_budget() {
+    fn automatic_compaction_does_not_trigger_under_budget() {
         let mut s = Session::new("sys");
         s.add_user_text("hello");
         s.add_assistant("hi", None, "");
 
-        let stats = s.compact(&ContextEditPolicy {
+        let stats = s.compact_if_needed(&ContextEditPolicy {
             enabled: true,
             max_chars: 10_000,
             keep_recent_messages: 4,
             max_tool_result_chars: 20,
         });
 
-        assert_eq!(stats.dropped_messages, 0);
-        assert_eq!(stats.compressed_tool_results, 0);
+        assert!(stats.is_none());
         assert_eq!(s.messages.len(), 2);
     }
 
