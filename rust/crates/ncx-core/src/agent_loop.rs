@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use crate::hooks::{run_matching_hooks, HookEvent};
 pub use crate::model_provider::Provider;
+use crate::model_provider::StreamDelta;
 use crate::runtime_profile::AgentRuntimeProfile;
 use crate::session::{ContextEditPolicy, ContextEditStats, Session};
 use crate::tool_scheduler::{BoundedToolScheduler, ToolScheduler};
@@ -58,6 +59,9 @@ pub enum LoopEvent {
     /// A streamed chunk of assistant text (token delta). The UI appends it to the
     /// in-progress assistant bubble.
     AssistantDelta(String),
+    /// A streamed chunk from the model's explicit reasoning channel. It is
+    /// rendered separately from user-visible answers and tool execution logs.
+    ReasoningDelta(String),
     /// The assistant's final visible text for this step. The UI finalizes the
     /// streamed bubble with this authoritative text (or creates one if no deltas).
     AssistantText(String),
@@ -264,8 +268,12 @@ impl AgentLoop {
         // from self, so this does not conflict with the &self provider borrow.
         let response = self
             .active_provider()
-            .chat_streaming(&edited.messages, schemas, effort, &mut |delta: String| {
-                emit(sink, LoopEvent::AssistantDelta(delta));
+            .chat_streaming(&edited.messages, schemas, effort, &mut |delta| {
+                let event = match delta {
+                    StreamDelta::Content(text) => LoopEvent::AssistantDelta(text),
+                    StreamDelta::Reasoning(text) => LoopEvent::ReasoningDelta(text),
+                };
+                emit(sink, event);
             })
             .await;
         (response, edited.stats)

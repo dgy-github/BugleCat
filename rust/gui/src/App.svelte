@@ -12,6 +12,7 @@
   type UiEvent =
     | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
     | { kind: "assistant_delta"; session_id: string; text: string }
+    | { kind: "reasoning_delta"; session_id: string; text: string }
     | { kind: "assistant"; session_id: string; text: string }
     | { kind: "tool_start"; session_id: string; name: string; args: string }
     | { kind: "tool_result"; session_id: string; name: string; result: string }
@@ -113,8 +114,10 @@
 
   type ToolEntry = { name: string; args?: string; result?: string };
   type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boolean };
+  type ReasoningMsg = { role: "reasoning"; text: string; settled: boolean };
   type Msg =
     | { role: "user" | "assistant" | "note"; text: string }
+    | ReasoningMsg
     | ToolGroup;
 
   let messages = $state<Msg[]>([]);
@@ -124,6 +127,7 @@
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
   let busy = $state(false);
+  let reasoningIdx = $state<number | null>(null);
   let runningSessions = $state(new Set<string>());
   let stopping = $state(false);
   let switchingSession = $state(false);
@@ -259,6 +263,12 @@
         message.settled = true;
       }
     }
+  }
+  function settleReasoning() {
+    if (reasoningIdx === null) return;
+    const message = messages[reasoningIdx];
+    if (message?.role === "reasoning") message.settled = true;
+    reasoningIdx = null;
   }
   function hideCompletedToolActivity(source: Msg[]): Msg[] {
     return source.filter((message) => message.role !== "tool_group");
@@ -563,6 +573,7 @@
           break;
         case "assistant_delta":
           if (!acceptsSessionEvent(p.session_id)) break;
+          settleReasoning();
           if (streamingIdx === null) {
             if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
             settleCompletedToolGroups();
@@ -573,8 +584,20 @@
             if (m && m.role === "assistant") m.text += p.text;
           }
           break;
+        case "reasoning_delta":
+          if (!acceptsSessionEvent(p.session_id) || p.text === "") break;
+          if (reasoningIdx === null) {
+            settleCompletedToolGroups();
+            messages.push({ role: "reasoning", text: p.text, settled: false });
+            reasoningIdx = messages.length - 1;
+          } else {
+            const m = messages[reasoningIdx];
+            if (m?.role === "reasoning") m.text += p.text;
+          }
+          break;
         case "assistant":
           if (!acceptsSessionEvent(p.session_id)) break;
+          settleReasoning();
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
             if (m && m.role === "assistant") {
@@ -591,6 +614,7 @@
           break;
         case "tool_start":
           if (!acceptsSessionEvent(p.session_id)) break;
+          settleReasoning();
           // A streamed bubble that turned out empty (tool-only turn) leaves no box.
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
@@ -657,6 +681,7 @@
             break;
           }
           settleCompletedToolGroups();
+          settleReasoning();
           messages = hideCompletedToolActivity(messages);
           // The completed reply already arrived as an `assistant` event; only a
           // switch can happen in the tiny gap between the final text and Done;
@@ -705,6 +730,7 @@
           sessionMessages.set(p.session_id, cloneMessages(messages));
           }
           streamingIdx = null;
+          reasoningIdx = null;
           busy = runningSessions.has(p.session_id);
           stopping = false;
           switchingSession = false;
@@ -715,6 +741,7 @@
           setSessionRunning(p.session_id, false);
           if (!acceptsSessionEvent(p.session_id)) break;
           settleCompletedToolGroups();
+          settleReasoning();
           messages = hideCompletedToolActivity(messages);
           streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
@@ -1690,6 +1717,15 @@
           <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
         {:else if m.role === "note"}
           <div class="msg note">{m.text}</div>
+        {:else if m.role === "reasoning"}
+          <details class="reasoning-run" class:settled={m.settled} open={!m.settled}>
+            <summary>
+              <span class="reasoning-caret" aria-hidden="true">›</span>
+              <span class="reasoning-label">思考过程</span>
+              <span class="reasoning-status">{m.settled ? "查看" : "思考中…"}</span>
+            </summary>
+            <div class="reasoning-content md">{@html renderMarkdown(m.text)}</div>
+          </details>
         {:else if m.role === "tool_group"}
           <details class="tool-run" class:settled={m.settled} open={!m.settled}>
             <summary>
@@ -1728,7 +1764,7 @@
           </details>
         {/if}
       {/each}
-      {#if busy && streamingIdx === null}
+      {#if busy && streamingIdx === null && reasoningIdx === null}
         <div class="thinking"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span> 思考中…</div>
       {/if}
     </div>

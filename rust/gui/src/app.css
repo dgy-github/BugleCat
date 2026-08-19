@@ -323,6 +323,43 @@ header {
   padding: 0.4rem 0.66rem;
 }
 
+/* Provider reasoning is distinct from assistant answers and tool logs. It is
+   expanded while streaming, then stays available as a quiet disclosure row. */
+.reasoning-run {
+  margin: 0;
+  border: 0;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+.reasoning-run > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  width: fit-content;
+  min-height: 1.8rem;
+  padding: 0.14rem 0.24rem;
+  border-radius: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+.reasoning-run > summary::-webkit-details-marker { display: none; }
+.reasoning-run > summary:hover { color: var(--ink-2); background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.reasoning-caret { width: 0.72rem; transition: transform var(--dur) var(--ease); }
+.reasoning-run[open] .reasoning-caret { transform: rotate(90deg); }
+.reasoning-label { font-weight: 550; }
+.reasoning-status { color: var(--ink-4); font-size: var(--fs-xs); }
+.reasoning-content {
+  max-width: 78%;
+  margin: 0.12rem 0 0.38rem 1.14rem;
+  padding: 0.5rem 0.68rem;
+  border-left: 2px solid var(--line);
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
+.reasoning-content > :first-child { margin-top: 0; }
+.reasoning-content > :last-child { margin-bottom: 0; }
+
 /* ============================================================================
    Tool calls
    ========================================================================== */

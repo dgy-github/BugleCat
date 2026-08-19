@@ -244,6 +244,9 @@ async fn persists_reasoning_on_tool_call_turn() {
     ]);
     let ws = tmpdir("reasoning");
     let mut loop_ = build(&ws, Box::new(p));
+    let events = Rc::new(RefCell::new(Vec::<LoopEvent>::new()));
+    let sink = events.clone();
+    loop_.set_event_sink(Box::new(move |event| sink.borrow_mut().push(event)));
     loop_.run_turn(json!("create reasoned.txt"), None).await;
     let m = loop_
         .session
@@ -255,6 +258,11 @@ async fn persists_reasoning_on_tool_call_turn() {
         m["reasoning_content"],
         "I need to create a file before answering."
     );
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        LoopEvent::ReasoningDelta(text)
+            if text == "I need to create a file before answering."
+    )));
 }
 
 #[tokio::test]

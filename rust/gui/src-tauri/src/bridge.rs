@@ -188,6 +188,8 @@ pub enum UiEvent {
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
     AssistantDelta { session_id: String, text: String },
+    /// A chunk from the provider's explicit reasoning stream.
+    ReasoningDelta { session_id: String, text: String },
     /// Assistant's final visible text (finalize the streamed bubble).
     Assistant { session_id: String, text: String },
     /// A tool is about to run.
@@ -259,6 +261,10 @@ fn make_sink(app: AppHandle, session_id: String) -> Box<dyn FnMut(LoopEvent)> {
     Box::new(move |ev: LoopEvent| {
         let ui = match ev {
             LoopEvent::AssistantDelta(text) => UiEvent::AssistantDelta {
+                session_id: session_id.clone(),
+                text,
+            },
+            LoopEvent::ReasoningDelta(text) => UiEvent::ReasoningDelta {
                 session_id: session_id.clone(),
                 text,
             },

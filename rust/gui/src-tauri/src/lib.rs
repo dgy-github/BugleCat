@@ -1543,7 +1543,7 @@ mod tests {
             .split_once("{:else if m.role === \"tool_group\"}")
             .unwrap()
             .1
-            .split_once("{#if busy && streamingIdx === null}")
+            .split_once("{#if busy && streamingIdx === null && reasoningIdx === null}")
             .unwrap()
             .0;
         assert!(group.contains("<details class=\"tool-run\""));
@@ -1574,6 +1574,23 @@ mod tests {
         assert!(tool_css.contains(".tool-run:not(.settled) > summary"));
         assert!(tool_css.contains(".tool-run.settled > summary"));
         assert!(!tool_css.contains("border-radius: var(--r-md)"));
+    }
+
+    #[test]
+    fn model_reasoning_is_visible_separately_from_tool_activity() {
+        let app = include_str!("../../src/App.svelte");
+        let css = include_str!("../../src/app.css");
+        let bridge = include_str!("bridge.rs");
+        let core = include_str!("../../../crates/ncx-core/src/agent_loop.rs");
+        let provider = include_str!("../../../crates/ncx-core/src/model_provider.rs");
+
+        assert!(provider.contains("StreamDelta::Reasoning"));
+        assert!(core.contains("ReasoningDelta(String)"));
+        assert!(bridge.contains("UiEvent::ReasoningDelta"));
+        assert!(app.contains("case \"reasoning_delta\":"));
+        assert!(app.contains("role: \"reasoning\""));
+        assert!(app.contains("思考过程"));
+        assert!(css.contains(".reasoning-run"));
     }
 
     #[test]

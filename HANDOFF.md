@@ -297,3 +297,8 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 根因位于 `Session::for_model_edited`：超过上下文预算后只合并旧用户请求，丢弃了旧轮次的最终回答、交付物路径和已选方案，导致“继续处理”没有可承接的完成状态。
 - 现改为保留最多 12 条紧邻的“用户要求 + 助手完成结果”会话里程碑；工具调用、参数、结果和中间工具噪声仍不进入摘要。
 - 回归测试覆盖 PDF 生成结果、PPT 后续决策点和大量工具噪声；`cargo test -p ncx-core` 197 项全部通过。
+## 2026-08-19 DeepSeek 思考过程恢复显示
+- 根因：`ncx-provider` 已解析并持有 `reasoning_content`，但 `ncx-core::Provider::chat_streaming` 只向上层暴露正文回调，DeepSeek 适配器把 reasoning 回调写成 `|_| {}`，GUI 因而永远收不到思考内容。
+- 新增独立 `StreamDelta::Reasoning` → `LoopEvent::ReasoningDelta` → `UiEvent::ReasoningDelta` 事件链，且所有事件继续绑定 `session_id`。
+- 前端运行时自动展开“思考过程”，本轮模型响应结束后折叠保留、可手动查看；它与工具日志分开，工具输入/结果和历史恢复过滤规则不变。
+- 验证：`ncx-core` 197 项、`ncx-gui` 38 项、Vite 生产构建全部通过。
