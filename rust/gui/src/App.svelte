@@ -145,6 +145,11 @@
     if (body === "") return "empty";
     return "ok";
   };
+  // Notes carry both status ("已切换工作区…") and failures ("发送失败：…"). Only the
+  // latter earns the alarm styling — a column of red boxes for routine status was
+  // what made the transcript unreadable.
+  const NOTE_ERROR = /(失败|错误|无法|不可用|Error|error)/;
+  const noteTone = (text: string) => (NOTE_ERROR.test(text) ? "err" : "info");
   const toolStatusLabel = (result: string = "") => {
     const oc = toolOutcome(result);
     return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
@@ -1312,7 +1317,10 @@
         {:else if m.role === "assistant"}
           <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
         {:else if m.role === "note"}
-          <div class="msg note">{m.text}</div>
+          <div class="msg note {noteTone(m.text)}">
+            <span class="note-ic" aria-hidden="true">{noteTone(m.text) === "err" ? "⚠" : "ℹ"}</span>
+            <span class="note-text">{m.text}</span>
+          </div>
         {:else if m.role === "tool"}
           <div class="tool" class:collapsed={m.collapsed} class:running={m.result === undefined}>
             <button
@@ -1347,33 +1355,6 @@
     </div>
 
     <footer>
-      <div class="composer-meta">
-        <div class="approval-wrap">
-          <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
-            onclick={() => (modeMenuOpen = !modeMenuOpen)}
-            title="权限模式（Claude Code 四态）">
-            {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
-          </button>
-          {#if modeMenuOpen}
-            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
-            <div class="approval-menu" role="menu">
-              {#each PERMISSION_MODES as opt}
-                <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === opt.id}
-                  onclick={() => selectMode(opt.id)}>
-                  <span class="opt-check">{permissionMode === opt.id ? "✓" : ""}</span>
-                  <span class="opt-text">
-                    <span class="opt-name">{modeIcon(opt.id)} {opt.label}</span>
-                    <span class="opt-id">{opt.desc}</span>
-                  </span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
-        {#if tokIn || tokOut}
-          <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈¥"}{fmtCost(cost)}{/if}</span>
-        {/if}
-      </div>
       {#if queued.length}
         <div class="attachments">
           {#each queued as q, i}
@@ -1412,21 +1393,52 @@
           <button class="plain" onclick={chooseWorkspace}>选择项目目录</button>
         </div>
       {/if}
-      <div class="composer-row">
-        <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">📎</button>
+      <div class="composer">
         <textarea
           bind:value={input}
           onkeydown={onKey}
           oninput={() => { if (input.startsWith("/")) slashIdx = 0; }}
           onpaste={handlePaste}
-          placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"}
+          placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行）"}
           rows="2"
         ></textarea>
-        <button class="stop-btn" class:visible={busy} onclick={stopGeneration}
-          disabled={!busy || stopping} title="停止生成" aria-label="停止生成" tabindex={busy ? 0 : -1}>■</button>
-        <button onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
-          {busy ? "排队" : "发送"}
-        </button>
+        <div class="composer-bar">
+          <button class="iconbtn" title="添加文件/图片（也可 Ctrl+V 粘贴）" onclick={attachFiles} aria-label="添加文件">📎</button>
+          <div class="approval-wrap">
+            <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
+              onclick={() => (modeMenuOpen = !modeMenuOpen)}
+              title="权限模式（Claude Code 四态）">
+              {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
+            </button>
+            {#if modeMenuOpen}
+              <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
+              <div class="approval-menu" role="menu">
+                {#each PERMISSION_MODES as opt}
+                  <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === opt.id}
+                    onclick={() => selectMode(opt.id)}>
+                    <span class="opt-check">{permissionMode === opt.id ? "✓" : ""}</span>
+                    <span class="opt-text">
+                      <span class="opt-name">{modeIcon(opt.id)} {opt.label}</span>
+                      <span class="opt-id">{opt.desc}</span>
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          {#if tokIn || tokOut}
+            <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈¥"}{fmtCost(cost)}{/if}</span>
+          {/if}
+          <span class="composer-spacer"></span>
+          <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+          {#if busy}
+            <button class="stop-btn" onclick={stopGeneration}
+              disabled={stopping} title="停止生成" aria-label="停止生成">■</button>
+          {/if}
+          <button class="send-btn" onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
+            {busy ? "排队" : "发送"}
+          </button>
+        </div>
       </div>
     </footer>
   </section>

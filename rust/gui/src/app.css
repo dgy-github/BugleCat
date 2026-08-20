@@ -146,30 +146,11 @@ header {
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 /* ---- Header control cluster --------------------------------------------- */
-.toolbtn {
-  background: var(--surface);
-  color: var(--ink-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  padding: 0.34rem 0.6rem;
-  font-size: var(--fs-sm);
-  font-weight: 550;
-  line-height: 1.15;
-  cursor: pointer;
-  box-shadow: var(--sh-1);
-  transition: background var(--dur) var(--ease),
-              border-color var(--dur) var(--ease),
-              color var(--dur) var(--ease),
-              transform var(--dur) var(--ease);
-}
-.toolbtn:hover,
 .plain:hover {
   background: var(--paper-2);
   border-color: var(--line-strong);
   color: var(--ink);
 }
-.toolbtn:active { transform: translateY(0.5px); }
-.toolbtn:focus-visible,
 .gear:focus-visible {
   outline: none;
   box-shadow: var(--ring);
@@ -318,16 +299,31 @@ header {
 }
 .bubble.md table.md-table th { background: var(--paper-2); font-weight: 650; }
 
-/* note: rendered as <div class="msg note"> — status / error line */
+/* note: rendered as <div class="msg note info|err"> — a system line, not a message.
+   Sits centered and quiet so a run of them reads as margin notes; only `.err`
+   raises its voice. */
 .note {
-  display: block;
-  width: 100%;
-  color: var(--danger);
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  align-self: center;
+  max-width: 46rem;
   font-size: var(--fs-sm);
-  background: rgba(178, 59, 50, 0.06);
-  border: 1px solid rgba(178, 59, 50, 0.18);
+  line-height: var(--lh-body);
   border-radius: var(--r-sm);
-  padding: 0.4rem 0.66rem;
+  padding: 0.3rem 0.7rem;
+}
+.note .note-ic { flex: 0 0 auto; font-size: var(--fs-xs); opacity: 0.8; }
+.note .note-text { min-width: 0; word-break: break-word; }
+.note.info {
+  color: var(--ink-3);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+}
+.note.err {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, transparent);
 }
 
 /* ============================================================================
@@ -492,33 +488,93 @@ footer {
 }
 .chipx:hover { background: var(--accent-soft); color: var(--accent-deep); }
 
-/* The actual input line: 📎 + textarea + Send */
-.composer-row {
+/* ── Composer card: textarea above, a single control bar below ─────────────── */
+.composer {
   display: flex;
-  align-items: flex-end;
-  gap: var(--sp-2);
+  flex-direction: column;
+  gap: var(--sp-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: var(--sh-1);
+  padding: var(--sp-2) var(--sp-2) 0.35rem;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+              background var(--dur) var(--ease);
+}
+.composer:focus-within {
+  border-color: var(--accent-line);
+  background: var(--surface);
+  box-shadow: var(--ring);
+}
+/* The textarea is only the typing surface now; the card carries the chrome. */
+.composer textarea,
+.composer textarea:focus {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0.25rem 0.35rem;
+  max-height: 12rem;
+  overflow-y: auto;
 }
 
-.stop-btn {
-  flex: 0 0 2.25rem;
-  width: 2.25rem;
-  height: 2.25rem;
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 2rem;
+}
+.composer-spacer { flex: 1 1 auto; }
+/* Lowest-priority item in the bar: truncates before anything else moves. */
+.composer-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-4);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.iconbtn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  min-height: auto;
   padding: 0;
-  border: 1px solid var(--line-strong);
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-3);
+  font-size: 0.95rem;
+  box-shadow: none;
+  cursor: pointer;
+}
+.iconbtn:hover { background: var(--paper-2); color: var(--ink); border-color: var(--line); box-shadow: none; }
+.iconbtn:active { transform: none; }
+
+.send-btn {
+  flex: 0 0 auto;
+  min-height: 1.95rem;
+  padding: 0 0.95rem;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+}
+.stop-btn {
+  flex: 0 0 auto;
+  width: 1.95rem;
+  height: 1.95rem;
+  padding: 0;
+  font-size: 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
   background: var(--surface);
   color: var(--danger);
   box-shadow: var(--sh-1);
   cursor: pointer;
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease);
+  min-height: auto;
 }
-.stop-btn.visible {
-  visibility: visible;
-  opacity: 1;
-}
-.stop-btn.visible:hover { background: var(--accent-soft); }
+.stop-btn:hover { background: var(--accent-soft); }
 .stop-btn:disabled { cursor: default; }
 
 /* ── Workspace warning (cwd is home/root — prompts blocked) ────────────────── */
@@ -1323,7 +1379,6 @@ main.app { flex-direction: row; }
 .collapse:hover { background: var(--paper); color: var(--ink); }
 
 /* ── Approval policy pill (composer) ─────────────────────────────────────── */
-.composer-meta { display: flex; align-items: center; gap: var(--sp-2); }
 .approval-pill {
   background: var(--accent-soft);
   color: var(--accent-deep);
@@ -1685,3 +1740,112 @@ main.app { flex-direction: row; }
 .model-opt:hover { background: var(--paper-2); box-shadow: none; }
 .model-opt:active { transform: none; }
 .model-opt .opt-name { font-size: var(--fs-sm); font-family: var(--font-mono); font-variant-ligatures: none; }
+
+/* ============================================================================
+   Layout pass: reading column, calmer topbar, flexible right panel
+   The window can be 2000px wide; transcript text and the composer must not
+   stretch with it, or every line becomes a ruler-length scan.
+   ========================================================================== */
+:root { --col: 54rem; }
+
+/* ---- Reading column ------------------------------------------------------ */
+.scroll {
+  padding: var(--sp-5) var(--sp-5) var(--sp-6);
+  gap: var(--sp-4);
+}
+.scroll > .msg,
+.scroll > .tool,
+.scroll > .thinking {
+  width: 100%;
+  max-width: var(--col);
+  margin-inline: auto;
+}
+/* Notes are asides, not messages — keep them narrower than the column. */
+.scroll > .msg.note { max-width: 44rem; }
+.thinking { padding-left: 0.25rem; }
+
+/* ---- Composer shares the same column ------------------------------------- */
+footer {
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
+  gap: var(--sp-2);
+}
+footer > * {
+  width: 100%;
+  max-width: var(--col);
+  margin-inline: auto;
+}
+
+/* ---- Topbar: one calm row that degrades gracefully ----------------------- */
+.topbar {
+  gap: var(--sp-2);
+  padding: 0.55rem var(--sp-4);
+  min-height: 2.9rem;
+}
+.topbar .title {
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: var(--sp-1);
+}
+.topbar .meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 12rem;
+  font-size: var(--fs-xs);
+  border-color: transparent;
+  background: none;
+  padding: 2px 0;
+}
+.topbar .model-pill,
+.topbar .ws-pill { max-width: 14rem; }
+.topbar-actions { flex: 0 0 auto; gap: 1px; padding-left: var(--sp-2); }
+
+/* Narrow windows drop the least load-bearing pills first. */
+@media (max-width: 1100px) {
+  .topbar .meta { display: none; }
+  .topbar .title { max-width: 10rem; }
+}
+@media (max-width: 900px) {
+  .composer-hint { display: none; }
+}
+
+/* ---- Right panel: proportional, never a wall ----------------------------- */
+/* Never shrinks below a usable reading width; the chat column yields instead. */
+.rightpanel {
+  flex: 0 0 clamp(300px, 30vw, 440px);
+  width: clamp(300px, 30vw, 440px);
+  max-width: 46vw;
+}
+.rp-head {
+  padding: 0.5rem var(--sp-3);
+  min-height: 2.9rem;
+}
+.rp-head .plain {
+  min-height: auto;
+  padding: 0.22rem 0.55rem;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.rp-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  letter-spacing: 0.01em;
+}
+.rp-actions { flex: 0 0 auto; gap: var(--sp-1); }
+.rp-body { padding: var(--sp-3); }
+/* Panel forms were laid out for a 620px modal; they need to fold at 320px. */
+.rightpanel .checkpoint-create {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+}
+.rightpanel .checkpoint-create input { font-size: var(--fs-sm); padding: 0.4rem 0.5rem; }
+.rightpanel .checkpoint-create button { min-height: 2rem; padding: 0 0.7rem; font-size: var(--fs-sm); }
+.rightpanel .checkpoint-list { max-height: none; }
+.rightpanel .wt-list { max-height: none; }
+.rightpanel .fx-preview { max-height: none; }
