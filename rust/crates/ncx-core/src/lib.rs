@@ -22,6 +22,7 @@ pub mod memory;
 pub mod mentions;
 pub mod model_provider;
 pub mod orchestrator;
+pub mod plugins;
 pub mod process_tools;
 pub mod project_instructions;
 pub mod prompt;
@@ -60,6 +61,7 @@ pub use mentions::{expand_file_mentions, find_mentions};
 pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
+pub use plugins::{HarnessPlugin, PluginHost, PluginRegistry};
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;
 pub use runtime_profile::{

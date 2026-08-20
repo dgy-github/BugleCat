@@ -296,6 +296,11 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Install a named Harness plugin bundle into this registry.
+    pub fn install_plugin(&mut self, plugin: &dyn crate::plugins::HarnessPlugin) {
+        plugin.install(&mut crate::plugins::PluginHost::new(self));
+    }
+
     /// Build the default in-process tool registry.
     pub fn new(ctx: ToolContext) -> Self {
         let mut reg = ToolRegistry {
