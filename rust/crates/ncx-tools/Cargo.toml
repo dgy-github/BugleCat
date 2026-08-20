@@ -9,6 +9,7 @@ rust-version.workspace = true
 ncx-sandbox = { path = "../ncx-sandbox" }
 tokio = { version = "1", features = ["process", "time", "io-util", "rt", "macros"] }
 portable-pty = "0.9.0"
+encoding_rs = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

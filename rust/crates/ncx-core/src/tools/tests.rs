@@ -291,6 +291,47 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_shell_rejects_posix_only_syntax_before_execution() {
+        let ws = tmp_ws("shell_windows_syntax");
+        let ctx = ToolContext::new(
+            ws,
+            SandboxPolicy::new(ncx_sandbox::DANGER_FULL_ACCESS, Path::new(".")),
+        );
+
+        for command in ["python - <<'EOF'\nprint('x')\nEOF", "echo ok | tail -1"] {
+            let out = ShellTool
+                .execute(&ctx, &json!({ "command": command }))
+                .await;
+            assert!(out.starts_with("Error: Windows shell"), "{out}");
+            assert!(out.contains("temporary script"), "{out}");
+        }
+    }
+
+    #[test]
+    fn essential_recursive_discovery_tools_are_always_visible() {
+        let ws = tmp_ws("essential_discovery_visibility");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let reg = ToolRegistry::new(ctx);
+        let names = reg
+            .schemas_for_query("请帮我检查这个陌生项目")
+            .into_iter()
+            .filter_map(|schema| schema["function"]["name"].as_str().map(String::from))
+            .collect::<HashSet<_>>();
+
+        for expected in [
+            "find_files",
+            "grep",
+            "glob",
+            "list_directory",
+            "path_info",
+            "read_file",
+        ] {
+            assert!(names.contains(expected), "missing {expected}: {names:?}");
+        }
+    }
+
     fn schema_desc(schemas: &[Value], name: &str) -> Option<String> {
         schemas.iter().find_map(|s| {
             let f = &s["function"];

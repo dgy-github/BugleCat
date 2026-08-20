@@ -5,7 +5,7 @@
 //! Single-threaded by design (the REPL runs on a current-thread runtime), so
 //! shared mutable state (the plan) uses `Rc<RefCell<Ã¢â‚¬Â¦>>`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -14,7 +14,9 @@ use async_trait::async_trait;
 use ncx_config::HookConfig;
 pub use ncx_sandbox::ApprovalRequest;
 use ncx_sandbox::{Approver, Decision, SandboxPolicy, DANGER_FULL_ACCESS, ON_FAILURE};
-use ncx_tools::{apply_patch, looks_read_only, parse_patch, read_file as rf, PolicyExecutor};
+use ncx_tools::{
+    apply_patch, decode_text, looks_read_only, parse_patch, read_file as rf, PolicyExecutor,
+};
 use serde_json::{json, Value};
 
 use crate::genome::Genome;
@@ -26,11 +28,12 @@ use crate::skills::Skill;
 use crate::terminal_tools::TerminalManager;
 use crate::tool_middleware::{ToolMiddleware, ToolMiddlewareDecision};
 use crate::tool_recovery::{
-    classify_tool_result, fallback_call, infer_capabilities, ToolCapability,
+    classify_tool_result, fallback_call, infer_capabilities, resolve_unique_missing_read,
+    ToolCapability,
 };
 use crate::user_question::UserQuestionHandler;
 
-const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 16;
+const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 20;
 const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
     "read_file",
     "apply_patch",
@@ -40,6 +43,9 @@ const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
     "skill",
     "list_directory",
     "path_info",
+    "find_files",
+    "grep",
+    "glob",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +114,11 @@ pub struct ToolContext {
     pub timeout_s: u64,
     /// Shared mutable plan state for `update_plan` / the CLI to read.
     pub plan: Rc<RefCell<Vec<Value>>>,
+    /// Turn that owns `plan`. A plan may remain visible after its turn ends,
+    /// but it must never constrain a different user turn.
+    pub plan_turn_id: Rc<Cell<Option<u64>>>,
+    /// User turn currently being executed by the agent loop.
+    pub active_turn_id: Rc<Cell<Option<u64>>>,
     /// Optional approval prompt. `None` = no prompting (escalations then rely on
     /// the policy alone, i.e. an out-of-sandbox write simply fails).
     pub approver: Option<Rc<dyn ApprovalHandler>>,
@@ -148,6 +159,8 @@ impl ToolContext {
             session_grants: Rc::new(RefCell::new(SessionGrants::default())),
             timeout_s: 120,
             plan: Rc::new(RefCell::new(Vec::new())),
+            plan_turn_id: Rc::new(Cell::new(None)),
+            active_turn_id: Rc::new(Cell::new(None)),
             approver: None,
             user_question_handler: None,
             lsp_provider: None,
@@ -300,6 +313,7 @@ impl ToolRegistry {
         reg.register(Box::new(crate::search::GrepTool));
         reg.register(Box::new(crate::search::GrepLiteralTool));
         reg.register(Box::new(crate::search::GlobTool));
+        reg.register(Box::new(crate::search::FindFilesTool));
         reg.register(Box::new(crate::search::WebSearchTool));
         reg.register(Box::new(crate::search::WebFetchTool));
         reg.register(Box::new(crate::workspace_tools::ListDirectoryTool));
@@ -551,6 +565,19 @@ impl ToolRegistry {
         };
         if !self.is_read_only(name) {
             return first;
+        }
+
+        if name == "read_file" && failure == crate::tool_recovery::ToolFailureClass::NotFound {
+            if let Some((resolved, recovered_args)) =
+                resolve_unique_missing_read(&self.ctx.workspace, args)
+            {
+                let recovered = self.execute_attempt(name, &recovered_args).await;
+                if classify_tool_result(&recovered).is_none() {
+                    return format!(
+                        "[recovery: recursively resolved missing file to {resolved}]\n{recovered}"
+                    );
+                }
+            }
         }
 
         let mut latest = first.clone();

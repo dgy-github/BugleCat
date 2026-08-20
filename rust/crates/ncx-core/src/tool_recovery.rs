@@ -1,6 +1,7 @@
 //! Capability routing and conservative recovery for model-facing tools.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -70,10 +71,24 @@ impl ToolFailureClass {
 /// Classify the existing string result contract without changing public tool APIs.
 pub fn classify_tool_result(result: &str) -> Option<ToolFailureClass> {
     let text = result.trim().to_ascii_lowercase();
-    if !(text.starts_with("error:") || text.starts_with("[interrupted:")) {
+    let failed_exit = text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("exit code:"))
+        .filter_map(|code| code.trim().parse::<i32>().ok())
+        .any(|code| code != 0);
+    let exhausted_not_found_recovery = text.starts_with("[recovery:")
+        && text.contains("after notfound")
+        && (text.contains("\"count\":0") || text.contains("\"matches\":[]"));
+    if !(text.starts_with("error:")
+        || text.starts_with("[interrupted:")
+        || failed_exit
+        || exhausted_not_found_recovery)
+    {
         return None;
     }
-    let class = if text.contains("unknown tool") {
+    let class = if exhausted_not_found_recovery {
+        ToolFailureClass::NotFound
+    } else if text.contains("unknown tool") {
         ToolFailureClass::UnknownTool
     } else if text.contains("stopped by user")
         || text.contains("cancelled")
@@ -196,8 +211,41 @@ pub fn fallback_call(
             let path = args.get("path")?.as_str()?;
             Some(("list_directory", json!({"path": path, "depth": 1})))
         }
+        ("read_file", ToolFailureClass::NotFound) => {
+            let path = args.get("path")?.as_str()?;
+            let basename = Path::new(path).file_name()?.to_string_lossy();
+            Some((
+                "find_files",
+                json!({"query": basename, "exact": true, "max_results": 20}),
+            ))
+        }
         _ => None,
     }
+}
+
+/// Resolve a missing `read_file` request only when recursive basename search
+/// produces exactly one candidate. Ambiguous matches are deliberately left to
+/// `find_files` so recovery never guesses which source file the model meant.
+pub fn resolve_unique_missing_read(workspace: &Path, args: &Value) -> Option<(String, Value)> {
+    let requested = args.get("path")?.as_str()?;
+    let requested_path = PathBuf::from(requested);
+    if requested_path.is_absolute() {
+        return None;
+    }
+    let basename = requested_path
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
+    let candidates = crate::search::find_files_by_name(workspace, &basename, true, 2);
+    if candidates.len() != 1 {
+        return None;
+    }
+    let resolved = candidates.into_iter().next()?;
+    let mut recovered_args = args.clone();
+    recovered_args
+        .as_object_mut()?
+        .insert("path".to_string(), Value::String(resolved.clone()));
+    Some((resolved, recovered_args))
 }
 
 #[cfg(test)]
@@ -226,6 +274,20 @@ mod tests {
         assert_eq!(
             classify_tool_result("[interrupted: stopped by user mid-command]"),
             Some(ToolFailureClass::Cancelled)
+        );
+        assert_eq!(
+            classify_tool_result("STDERR: bad command\n\nExit code: 1"),
+            Some(ToolFailureClass::Execution)
+        );
+        assert_eq!(
+            classify_tool_result(
+                "[recovery: read_file -> find_files after notfound]\n{\"count\":0,\"matches\":[],\"query\":\"missing.txt\"}"
+            ),
+            Some(ToolFailureClass::NotFound)
+        );
+        assert_eq!(
+            classify_tool_result("warning on stderr\n\nExit code: 0"),
+            None
         );
     }
 
@@ -272,6 +334,81 @@ mod tests {
 
         assert!(result.contains("read_file -> list_directory"), "{result}");
         assert!(result.contains("value.txt"), "{result}");
+    }
+
+    #[tokio::test]
+    async fn registry_reads_utf16_and_gb18030_files_without_mojibake() {
+        let root = fixture("legacy_encoding");
+        let utf16 = "UTF16 中文\n"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut utf16_with_bom = vec![0xFF, 0xFE];
+        utf16_with_bom.extend(utf16);
+        std::fs::write(root.join("nested/utf16.txt"), utf16_with_bom).unwrap();
+        std::fs::write(
+            root.join("nested/gb18030.txt"),
+            [0xD6, 0xD0, 0xCE, 0xC4, 0xC4, 0xDA, 0xC8, 0xDD, b'\n'],
+        )
+        .unwrap();
+        let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(READ_ONLY, &root));
+        let registry = ToolRegistry::new(ctx);
+
+        let utf16_result = registry
+            .execute_with_recovery("read_file", &json!({"path": "nested/utf16.txt"}))
+            .await;
+        let gb18030_result = registry
+            .execute_with_recovery("read_file", &json!({"path": "nested/gb18030.txt"}))
+            .await;
+
+        assert!(utf16_result.contains("UTF16 中文"), "{utf16_result}");
+        assert!(gb18030_result.contains("中文内容"), "{gb18030_result}");
+    }
+
+    #[tokio::test]
+    async fn registry_backtracks_unique_missing_read_by_basename() {
+        let root = fixture("recursive_read");
+        let deep = root.join("中文目录/第二层/第三层");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::create_dir_all(root.join(".nanocodex/checkpoints/snapshot")).unwrap();
+        std::fs::write(deep.join("唯一配置.toml"), "answer = 42\n").unwrap();
+        std::fs::write(
+            root.join(".nanocodex/checkpoints/snapshot/唯一配置.toml"),
+            "stale = true\n",
+        )
+        .unwrap();
+        let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(READ_ONLY, &root));
+        let registry = ToolRegistry::new(ctx);
+
+        let result = registry
+            .execute_with_recovery("read_file", &json!({"path": "唯一配置.toml"}))
+            .await;
+
+        assert!(result.contains("answer = 42"), "{result}");
+        assert!(
+            result.contains("中文目录/第二层/第三层/唯一配置.toml"),
+            "{result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_does_not_guess_when_recursive_read_is_ambiguous() {
+        let root = fixture("ambiguous_read");
+        std::fs::create_dir_all(root.join("first")).unwrap();
+        std::fs::create_dir_all(root.join("second/deep")).unwrap();
+        std::fs::write(root.join("first/config.toml"), "owner = 'first'\n").unwrap();
+        std::fs::write(root.join("second/deep/config.toml"), "owner = 'second'\n").unwrap();
+        let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(READ_ONLY, &root));
+        let registry = ToolRegistry::new(ctx);
+
+        let result = registry
+            .execute_with_recovery("read_file", &json!({"path": "config.toml"}))
+            .await;
+
+        assert!(result.contains("read_file -> find_files"), "{result}");
+        assert!(result.contains("first/config.toml"), "{result}");
+        assert!(result.contains("second/deep/config.toml"), "{result}");
+        assert!(!result.contains("owner ="), "{result}");
     }
 
     struct FlakyReadTool {

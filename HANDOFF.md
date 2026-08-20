@@ -3,8 +3,105 @@
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 
+## 当前进度（2026-08-18）
+
+### 当前工作线
+
+- 工作树：`D:\github_dgy\nanocodex\.worktrees\model-provider-catalog`
+- 分支：`feat/model-provider-catalog`
+- 最新提交：`19e296b fix(agent): preserve long task deliverables`
+- 本轮用户原有文件必须保留：`rust/Cargo.lock`（已修改）、`parse_xlsx.py`（未跟踪）。两者均未纳入本轮提交，也不得覆盖或清理。
+- 主工作树 `D:\github_dgy\nanocodex` 另有用户未提交的 GUI 修改；继续开发应留在上述独立工作树，避免混入主工作树改动。
+
+### 本轮问题与根因
+
+- 相同标题的连续会话实际落在不同 session；程序启动时总建新会话，导致新会话无法继承旧会话的 PDF 任务状态。
+- 长链路上下文裁剪只保留近期消息，较早的用户目标会被工具日志挤掉，模型因此持续研究或回答已有 PDF，而不是完成用户要求的新 PDF。
+- Agent 以前没有交付物完成闸门：用户明确要求生成 PDF 时，即使没有创建或更新 PDF，也能用普通文本结束任务。
+- 强制收敛逻辑可能过早移除工具，导致尚未完成的计划或 PDF 任务无法继续执行。
+
+### 已完成修复
+
+- `ncx-core/src/session_index.rs`：按规范化工作目录查找最近一个未归档、且存在快照的可恢复会话。
+- `gui/src-tauri/src/bridge.rs`：启动时恢复当前工作目录最近会话；监听器就绪后发送 `Loaded` 事件，把恢复的历史同步到前端。
+- `ncx-core/src/session.rs`：裁剪长上下文时，额外保留最多 8 条历史用户消息作为“任务历史锚点”，丢弃旧的助手和工具噪声。
+- 新增 `ncx-core/src/agent_loop/deliverable.rs`：识别明确的 PDF 创建请求，记录执行前 PDF 快照，并检查本轮是否创建或更新了有效 PDF。
+- PDF 有效性至少检查 `%PDF-` 文件头和尾部 `%%EOF`；只写文件头、沿用旧 PDF 或只回复路径均不能算完成。
+- `ncx-core/src/agent_loop/turn.rs`：PDF 未交付时禁止文本提前结束，并明确要求模型停止继续研究、实际生成文件；未完成计划或交付物时，长链路收敛不能撤掉工具。
+- PDF 只读、查找或询问类请求不会误触发“必须生成 PDF”的闸门。
+
+### 验证证据
+
+- `cargo test -p ncx-core`：**191 通过，0 失败**。
+- `cargo test -p ncx-gui --manifest-path gui/src-tauri/Cargo.toml`：**25 通过，0 失败**。
+- `npm run build`：成功，Vite 共处理 114 个模块。
+- Windows GNU 正式版构建成功：
+  - 程序：`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\ncx-gui.exe`
+  - 安装包：`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\bundle\nsis\nanocodex_0.1.0_x64-setup.exe`
+- 最新正式版已在本地启动并验证窗口响应正常；启动时进程号为 `28924`（进程号仅是当次运行状态，不应作为后续判断依据）。
+- `git diff --check` 无格式错误，仅有 Windows 换行提示。
+
+### 后续接手建议
+
+1. 用现有长会话继续追问，确认恢复的是同一个 session，且较早的用户目标仍进入模型上下文。
+2. 实测一句明确的“根据以上资料生成一个 PDF”，确认只有新建或更新有效 PDF 后任务才结束。
+3. 实测“PDF 去哪了”“查找已有 PDF”等只读请求，确认不会被创建闸门拦截。
+4. 若继续修改，先确认 `git status --short`，不要提交或还原用户的 `rust/Cargo.lock` 与 `parse_xlsx.py`。
+
+### 追加修复：模型连接中断恢复（2026-08-18）
+
+- 复现现象：DeepSeek 流式请求在底层重试耗尽后返回 `RequestError: error sending request`，Agent 过去会把英文底层错误直接当最终回答并结束当前问题。
+- 当前网络与 `api.deepseek.com:443` 已实测可达，接口返回 401（未携带鉴权的预期响应），因此截图属于短时发送链路失败，不是域名、端口或 Base URL 配置错误。
+- `ncx-core/src/agent_loop/turn.rs` 现在对响应到达前的 `RequestError`/`TimeoutError` 做本轮级恢复：保留同一条用户问题并继续请求，不要求用户重复描述。
+- 连续 3 次本轮级恢复仍失败时才结束，并显示中文可恢复提示；底层英文 `RequestError` 不再作为正常助手回答写入会话。
+- 新增 2 个回归测试，覆盖“首个请求失败、随后成功”和“连续失败后中文结束且不无限重试”。
+- 验证：`ncx-core` **193 通过**；GUI 后端 **25 通过**；Vite 正式构建成功（114 模块）；GNU 正式版和 NSIS 安装包重新生成成功。
+- 最新正式版已启动并确认窗口响应正常；当次进程号为 `38580`。
+
+### 全局技能：阿里百炼文生图（2026-08-18）
+
+- 技能位置：`C:\Users\25376\.ncx\skills\aliyun-image-generation`，属于 nanocodex 全局技能，打开任意工作区都可发现。
+- 技能名：`aliyun-image-generation`；触发场景包括画图、文生图、生成图片、海报、插画、产品图和视觉素材。
+- 执行脚本：`scripts/generate_image.py`，纯 Python 标准库实现；默认模型 `qwen-image-3.0`，高质量可选 `qwen-image-3.0-pro`。
+- 密钥从 `C:\Users\25376\Desktop\qw_key.txt` 自动选取第二个 `sk-ws-...` 工作空间密钥；第一行 `sk-sp-...` Token Plan 密钥不用于文生图，完整密钥不会进入日志、仓库或命令参数。
+- 第二个密钥已确认能枚举中国区百炼 239 个模型，包含 `qwen-image-3.0`、`qwen-image-3.0-pro`、`wan2.7-image`、`z-image-turbo` 等图片模型。
+- 接口约束：该密钥拒绝异步任务调用，且百炼兼容接口没有 `/images/generations`；脚本使用已验证成功的中国区百炼同步原生多模态生成接口。
+- 验证：4 项离线测试通过；真实执行脚本生成 879264 字节 PNG，文件头和实际渲染均正常。测试图：`artifacts\aliyun-skill-live-test.png`。
+- nanocodex 已在技能创建后重启，新进程号为 `38516`，窗口响应正常。
+
+### 追加修复：任务化会话标题（2026-08-18）
+
+- 根因：会话索引直接截取第一条用户消息，长背景会变成冗长标题；模型生成标题后 GUI 顶部也没有从当前会话索引同步。
+- `ncx-core/src/agent_loop.rs` 新增独立标题概括：不携带会话历史或工具，只让当前模型输出约 6–18 字的动宾任务标题；失败不影响正文任务。
+- `ncx-core/src/session_index.rs` 将标题上限收紧到 36 字，支持持久化模型标题并在后续轮次保持；模型失败时使用本地任务片段作为后备。
+- GUI 仅在首轮任务正常完成后生成标题；取消、错误和后续轮次不会重复触发。后端发送 `session_title` 事件，前端同步当前顶部标题并刷新侧栏。
+- 已将两个历史异常长标题（`18cccdb67fce9ddcb3a01`、`18ccc576322ce5047e281`）迁移为“整理大模型架构资料 PDF”，并确认会话索引仍可完整解析。
+- 验证：`ncx-core` **196 通过**；GUI 后端 **27 通过**；Vite 正式构建成功（114 模块）；Windows GNU 正式版与 NSIS 安装包生成成功。
+- OpenAI 官方文档只公开 Codex/ChatGPT 桌面端用于在项目和长期任务间切换，没有公开会话标题生成算法；本实现对齐其用户可见的短任务标题体验，不声称复刻内部实现。
+
+### 追加修复：流式响应解码错误恢复（2026-08-18）
+
+- 复现：模型流式响应中途损坏时，provider 返回 `StreamError: error decoding response body`；旧恢复逻辑只识别 `RequestError` 与 `TimeoutError`，因此英文底层错误直接显示为最终回复。
+- `ncx-core/src/agent_loop/turn.rs` 已将 `StreamError` 纳入同一轮有限恢复：保留当前用户请求并自动重试，最多 3 次；仍失败时只显示中文可恢复提示。
+- 新增回归测试验证流解码错误后第二次请求成功，且 `StreamError` 不会写入会话。
+- 验证：`ncx-core` **197 通过，0 失败**。
+
+### 追加调整：完成后隐藏工具过程（2026-08-18）
+
+- 用户最终确认的展示规则：任务执行中允许实时显示工具名称、参数和输出；任务结束后不保留任何工具过程记录，历史会话也不回放工具过程。
+- `gui/src/App.svelte` 新增完成态清理：收到 `done`、`error` 或 `loaded` 后过滤全部 `tool_group`，只保留用户消息、最终助手结果和必要错误提示；磁盘会话日志不删除，仍可用于审计和调试。
+- GUI system prompt 要求最终回复只包含执行结果和简短的下一步建议，不复述工具调用、日志或中间过程。
+- 验证：GUI 后端 **27 通过**；Vite 正式构建成功（114 模块）。
+
+### 追加修复：累计用量与费用跨重启保留（2026-08-18）
+
+- 根因：顶部累计费用依赖前端内存中的 `tokIn/tokOut`，重启后归零；旧版本未将 usage 写入会话日志，因此已丢失的历史数无法准确反推。
+- 现在每轮完成后按 `session_id` 持久保存输入/输出 token；应用启动、恢复历史会话时自动加载，新建会话和切换工作区时正确清零，避免串会话。
+- 费用仍按当前配置的每百万 Token 输入/输出单价和币种计算；从本版本开始的数据可跨重启保留。
+- 验证：GUI 后端 **28 通过**；Vite 正式构建成功（114 模块）。
+
 ## 元信息
-- 最后更新：2026-06-29
+- 最后更新：2026-08-18（顶部“当前进度”为现行状态；下方 2026-06-29 内容保留作历史背景）
 - 分支：**`rust-capability`**（整合线，推 **`origin/gui-merge-featgui`**；`origin/rust-capability` = codex
   的独立 GUI 线，**勿覆盖**）。Python 树 `nanocodex/*.py` 不动。
 - remote：`origin` → https://github.com/dgy-github/nanocodex.git（凭据已配）
@@ -176,3 +273,44 @@ fitness 做闭环进化。**只训 Rust 版 `ncx.exe`**；权重不动，纯 API
 
 ## 记忆指针（auto-memory）
 rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · rust-tauri-gui-gotchas · rust-orchestrator-capability
+
+## 2026-08-18 会话切换与历史轻量化
+- 后端恢复历史时只向 GUI 投影每轮用户消息与最后一条非空助手回答；工具名、参数、结果和中间播报不再跨后端/UI 边界。
+- Resume/Fork 快照从原先同一路径读取两次改为一次读取，长会话切换减少重复 JSON 解析。
+- 流式文本、工具、审批、提问、完成、恢复和错误事件全部携带 `session_id`；前端只接收当前会话事件，切换后旧任务不能污染新界面与累计用量。
+- 新会话在进入命令队列前分配 ID，并以空消息种子创建；继续共享当前项目目录、规则、skills 和文件，但不会继承旧聊天与未完成计划。
+- 保存设置或应用模型预设改为保留当前会话 ID 重建，不再暗中创建一个前端不知道的新会话；只有切换项目/显式新建才创建空会话。
+- 首轮标题生成改为独立 `ncx-title` 线程，不再阻塞串行 agent 命令队列。
+- 验证：`ncx-core` 197 项、GUI Rust 32 项测试通过，Vite 正式前端构建通过；正式 Tauri 构建在本轮交付前继续执行。
+
+## 2026-08-18 多会话并发执行
+- 修正上一版“切换时停止旧任务”的错误语义：导航/配置协调器不再直接等待 `run_turn`，每个 Prompt 按 `session_id` 分派到独立 `ncx-turn-<session>` OS 线程；切走后原会话继续执行。
+- Prompt 前后端契约增加 `session_id`；不同会话可以并行，同一会话仍禁止重入，后续消息保持该会话内串行。
+- 运行态、取消标记、审批/提问归属、always-allow grants 全部按 session 隔离；停止 A 不会取消、拒绝或清空 B。
+- 每个 session 改写入 `.nanocodex/sessions/<session_id>.jsonl`，避免并发追加同一个审计日志；快照仍由 SessionIndex 分会话持久化。
+- 前端为每个会话缓存正在执行时的可见消息、待发送队列、审批和问题；切回运行中的会话不会丢用户消息，后台完成的 token/费用会记到对应会话。
+- 最近会话侧栏增加“执行中”状态；新建、继续、分叉或切换会话不再调用 `stop_generation`。
+- 验证：GUI Rust 37 项测试与 Vite 生产构建通过；包含并发占用、同会话防重入、目标取消隔离、独立日志和前后端路由契约。
+- 真实 WebView/CDP 集成：A、B 两个会话分别执行 12 秒 shell 任务，侧栏同时观测 `RUNNING_COUNT=2`；两者运行中成功切回 A（仍显示停止按钮），最终 `BOTH_FINISHED`。两个结果分别落到 `18cccdb67fce9ddcb3a01`、`18ccf0037389edf069980` 的独立 snapshot 和 JSONL，均含各自 `SESSION_A_DONE` / `SESSION_B_DONE`。
+## 2026-08-19 长会话上下文承接修复
+- 真实快照核验：会话 `18cccdb67fce9ddcb3a01` 的 22 条用户消息、329 条助手消息均正常持久化；问题不是切换时丢快照。
+- 根因位于 `Session::for_model_edited`：超过上下文预算后只合并旧用户请求，丢弃了旧轮次的最终回答、交付物路径和已选方案，导致“继续处理”没有可承接的完成状态。
+- 现改为保留最多 12 条紧邻的“用户要求 + 助手完成结果”会话里程碑；工具调用、参数、结果和中间工具噪声仍不进入摘要。
+- 回归测试覆盖 PDF 生成结果、PPT 后续决策点和大量工具噪声；`cargo test -p ncx-core` 197 项全部通过。
+## 2026-08-19 DeepSeek 思考过程恢复显示
+- 根因：`ncx-provider` 已解析并持有 `reasoning_content`，但 `ncx-core::Provider::chat_streaming` 只向上层暴露正文回调，DeepSeek 适配器把 reasoning 回调写成 `|_| {}`，GUI 因而永远收不到思考内容。
+- 新增独立 `StreamDelta::Reasoning` → `LoopEvent::ReasoningDelta` → `UiEvent::ReasoningDelta` 事件链，且所有事件继续绑定 `session_id`。
+- 前端“思考过程”始终默认折叠、可手动查看；仅保留最近 4000 字并使用纯文本渲染，避免长推理逐 token Markdown 重排拖卡界面。它与工具日志分开，工具输入/结果和历史恢复过滤规则不变。
+- 验证：`ncx-core` 197 项、`ncx-gui` 38 项、Vite 生产构建全部通过。
+## 2026-08-19 自动上下文压缩持久化
+- 之前 `for_model_edited` 只构造临时发送视图，完整工具噪声仍写入日志/快照；长会话每轮都会重复裁剪，没有真正的自动压缩触发。
+- 现在每次模型调用前检查 `context_edit_max_chars`：未超限不动；超限后调用 `Session::compact_if_needed`，把会话里程碑物化进 `Session.messages` 并立即重写 JSONL，任务结束后保存到全局快照。
+- 压缩保留用户要求、助手完成结果、文件路径、当前计划和最近消息；清理旧工具调用噪声。内部压缩摘要不计作用户问数，历史恢复只显示淡色压缩标记。
+- 新增 session-scoped `ContextCompacted` UI 事件，显示压缩前后字符数、清理消息数和工具结果数；后台并发会话不会串事件。
+- 验证：`ncx-core` 198 项、`ncx-gui` 40 项、Vite 生产构建全部通过。
+
+## 2026-08-19 长思考卡顿与停止按钮
+- 根因一：思考流运行时强制展开，每个增量都重新做 Markdown 渲染；长链路会持续放大 DOM 和主线程开销。
+- 根因二：点击停止后按钮被 `stopping` 状态禁用；即使后端取消已按会话直接触发，界面仍让用户感觉无法再次停止。
+- 现在思考默认折叠、纯文本、最多保留最近 4000 字并限制展开高度；停止按钮在任务真正结束前保持可点击，可重复发送当前会话的直接取消请求。
+- 完成态进一步按整个会话逐轮收口：执行中可临时显示思考和中间播报；收到 `done` 后，每一轮都保留用户消息和该轮最后的正式回答，清掉各轮中间播报，而不是只整理或只保留最后一轮。

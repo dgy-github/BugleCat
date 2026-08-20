@@ -16,7 +16,7 @@ use crate::tools::{Tool, ToolContext};
 const DEFAULT_LIST_LIMIT: usize = 200;
 const MAX_LIST_LIMIT: usize = 1_000;
 const DEFAULT_LIST_DEPTH: usize = 1;
-const MAX_LIST_DEPTH: usize = 5;
+const MAX_LIST_DEPTH: usize = 25;
 
 /// List a directory tree through native filesystem APIs.
 pub struct ListDirectoryTool;

@@ -24,16 +24,33 @@ pub fn find_mentions(text: &str) -> Vec<String> {
         if chars[i] == '@' {
             let at_boundary = i == 0 || chars[i - 1].is_whitespace();
             if at_boundary {
-                let mut j = i + 1;
-                while j < chars.len() && !chars[j].is_whitespace() && chars[j] != '@' {
-                    j += 1;
-                }
-                let raw: String = chars[i + 1..j].iter().collect();
-                let tok = raw.trim_end_matches(TRIM_TRAILING).to_string();
+                let quoted = chars.get(i + 1).copied().filter(|c| *c == '"' || *c == '\'');
+                let (raw, next) = if let Some(quote) = quoted {
+                    let mut j = i + 2;
+                    while j < chars.len() && chars[j] != quote {
+                        j += 1;
+                    }
+                    if j == chars.len() {
+                        i += 1;
+                        continue;
+                    }
+                    (chars[i + 2..j].iter().collect::<String>(), j + 1)
+                } else {
+                    let mut j = i + 1;
+                    while j < chars.len() && !chars[j].is_whitespace() && chars[j] != '@' {
+                        j += 1;
+                    }
+                    (chars[i + 1..j].iter().collect::<String>(), j)
+                };
+                let tok = if quoted.is_some() {
+                    raw
+                } else {
+                    raw.trim_end_matches(TRIM_TRAILING).to_string()
+                };
                 if !tok.is_empty() {
                     out.push(tok);
                 }
-                i = j;
+                i = next;
                 continue;
             }
         }
@@ -116,6 +133,14 @@ mod tests {
             vec!["src/a.py", "b.txt"]
         );
         assert_eq!(find_mentions("mail me@example.com"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn quoted_mention_supports_attachment_paths_with_spaces() {
+        assert_eq!(
+            find_mentions(r#"查看 @"C:\Users\Demo\My File.txt""#),
+            vec![r"C:\Users\Demo\My File.txt"]
+        );
     }
 
     #[test]

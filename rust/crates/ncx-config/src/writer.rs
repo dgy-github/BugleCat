@@ -30,6 +30,8 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "context_edit_max_tool_result_chars",
     "price_in",
     "price_out",
+    "price_currency",
+    "available_models",
 ];
 
 /// Escape a string for a TOML basic (double-quoted) string value.
@@ -138,6 +140,27 @@ mod tests {
         );
         assert_eq!(parsed["model"].as_str().unwrap(), "deepseek-v4-pro");
         assert_eq!(parsed["fast_model"].as_str().unwrap(), "deepseek-chat");
+    }
+
+    #[test]
+    fn writer_persists_currency_and_available_models() {
+        let tmp = std::env::temp_dir().join("ncx_writer_test_price_currency");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let target = tmp.join("config.toml");
+        let _ = std::fs::remove_file(&target);
+
+        write_nanocodex_config(
+            &map(&[
+                ("price_currency", "USD"),
+                ("available_models", "gpt-5,gpt-5-mini"),
+            ]),
+            &target,
+        )
+        .unwrap();
+
+        let parsed: toml::Value = std::fs::read_to_string(target).unwrap().parse().unwrap();
+        assert_eq!(parsed["price_currency"].as_str(), Some("USD"));
+        assert_eq!(parsed["available_models"].as_str(), Some("gpt-5,gpt-5-mini"));
     }
 
     #[test]

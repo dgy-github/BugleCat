@@ -6,6 +6,7 @@ use std::time::Duration;
 use ncx_provider::ModelResponse;
 use serde_json::{json, Value};
 
+use super::deliverable::DeliverableRequirement;
 use super::tool_dispatch::{self, DispatchStop};
 use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent, TurnResult};
 use crate::hooks::{run_matching_hooks, HookEvent};
@@ -13,11 +14,20 @@ use crate::turn_context::TurnContextRequest;
 
 const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
 const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
+const MAX_CONSECUTIVE_EMPTY_RESPONSES: usize = 3;
+const MAX_CONSECUTIVE_TRANSPORT_ERRORS: usize = 3;
+const SOFT_CONVERGENCE_TOOL_CALLS: usize = 32;
+const HARD_CONVERGENCE_TOOL_CALLS: usize = 40;
+const HARD_CONVERGENCE_FAILURES: usize = 6;
 
 #[derive(Default)]
 struct TurnState {
     tools_used: Vec<String>,
+    tool_failures: usize,
+    deliverable_finish_rejections: usize,
     usage: BTreeMap<String, i64>,
+    consecutive_empty_responses: usize,
+    consecutive_transport_errors: usize,
 }
 
 impl TurnState {
@@ -35,6 +45,7 @@ impl TurnState {
 struct PromptContext {
     tool_query: String,
     runtime_notes: Vec<String>,
+    deliverable: Option<DeliverableRequirement>,
 }
 
 pub(super) async fn run(
@@ -59,6 +70,10 @@ pub(super) async fn run(
             return cancelled_result(agent, iteration + 1, state);
         }
 
+        if let Some(stats) = agent.session.compact_if_needed(&agent.context_edit) {
+            emit(sink, LoopEvent::ContextCompacted(stats));
+        }
+
         let response =
             match request_model_cancellable(agent, &prompt, iteration, &mut state, sink, cancel)
                 .await
@@ -66,15 +81,19 @@ pub(super) async fn run(
                 Some(response) => response,
                 None => return cancelled_result(agent, iteration + 1, state),
             };
-        if let Some((text, reason)) = finish_response(agent, &response, sink) {
+        if let Some((text, reason)) = finish_response(agent, &prompt, &response, &mut state, sink) {
             return state.finish(text, iteration + 1, reason);
         }
 
+        if !response.has_tool_calls() {
+            continue;
+        }
         persist_tool_calls(agent, &response);
         if let Some(stop) = tool_dispatch::execute(
             agent,
             &response.tool_calls,
             &mut state.tools_used,
+            &mut state.tool_failures,
             cancel,
             sink,
         )
@@ -110,6 +129,7 @@ async fn request_model_cancellable(
 }
 
 fn cancelled_result(agent: &mut AgentLoop, iterations: usize, state: TurnState) -> TurnResult {
+    retire_active_plan(agent);
     let text = "Stopped by user.".to_string();
     agent.session.add_assistant(&text, None, "");
     state.finish(text, iterations, "cancelled")
@@ -152,6 +172,7 @@ async fn prepare_prompt(
         MEMORY_RECALL_MAX_CHARS,
     ));
     Ok(PromptContext {
+        deliverable: DeliverableRequirement::detect(&tool_query, &agent.tools.ctx.workspace),
         tool_query,
         runtime_notes,
     })
@@ -164,9 +185,75 @@ async fn request_model(
     state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> ModelResponse {
-    let schemas = agent.tools.schemas_for_query(&prompt.tool_query);
+    let deliverable_ready = prompt
+        .deliverable
+        .as_ref()
+        .and_then(|requirement| requirement.completed_path(&agent.tools.ctx.workspace))
+        .is_some();
+    let force_convergence = state.tools_used.len() >= HARD_CONVERGENCE_TOOL_CALLS
+        && state.tool_failures >= HARD_CONVERGENCE_FAILURES
+        && (prompt.deliverable.is_none() || deliverable_ready)
+        && !has_unfinished_plan(agent);
+    let schemas = if force_convergence {
+        Vec::new()
+    } else {
+        agent.tools.schemas_for_query(&prompt.tool_query)
+    };
     let mut notes = vec![budget_note(agent, iteration + 1, state.tools_used.len())];
+    #[cfg(windows)]
+    notes.push(
+        "Runtime platform: Windows. The shell tool runs through Windows cmd.exe. Never use heredoc (<<), tail, head, or wc. Put multiline Python in a temporary script via apply_patch, or use PowerShell-compatible commands."
+            .to_string(),
+    );
     notes.extend(prompt.runtime_notes.clone());
+    if prompt.deliverable.is_some() && !deliverable_ready {
+        notes.push(
+            "The user explicitly requested a generated PDF deliverable. Do not finish with research or Markdown only. Create or update a valid PDF file in this workspace during this turn, verify it, and include its path in the final answer. An unchanged PDF from an earlier turn does not satisfy this request."
+                .to_string(),
+        );
+    }
+    if state.deliverable_finish_rejections > 0 {
+        notes.push(format!(
+            "Your previous attempt to finish was rejected because no new or updated valid PDF existed. Stop further research and produce the requested PDF now (rejected attempts: {}).",
+            state.deliverable_finish_rejections
+        ));
+    }
+    if state.tool_failures >= 4 {
+        notes.push(format!(
+            "Tool attempts have failed {} times in this turn. Do not repeat the same command syntax or search route; switch to a known-compatible method and use evidence already collected.",
+            state.tool_failures
+        ));
+    }
+    if state.tools_used.len() >= SOFT_CONVERGENCE_TOOL_CALLS {
+        notes.push(
+            "The turn has crossed the soft tool-call limit. Stop opening new research branches; close only essential gaps and prepare the final answer from existing evidence."
+                .to_string(),
+        );
+    }
+    if force_convergence {
+        notes.push(
+            "Too many tool calls and failures have accumulated. You have no tools for this call: converge now and provide the best final answer from existing evidence, clearly noting any remaining uncertainty."
+                .to_string(),
+        );
+    }
+    if has_unfinished_plan(agent) {
+        notes.push(
+            "The active plan still has pending or in-progress steps. Continue executing it and update the plan; do not end with only a progress report."
+                .to_string(),
+        );
+    }
+    if state.consecutive_empty_responses > 0 {
+        notes.push(
+            "Your previous response was empty. Continue the task with a tool call or a non-empty response."
+                .to_string(),
+        );
+    }
+    if state.consecutive_transport_errors > 0 {
+        notes.push(format!(
+            "The previous model request failed before a response arrived. Continue the same user request without asking them to repeat it (transport retries: {}).",
+            state.consecutive_transport_errors
+        ));
+    }
     let (response, edit_stats) = agent.call_model(&schemas, &notes, sink).await;
     add_usage(&mut state.usage, &response.usage);
     trace::model_response(iteration, &response, &edit_stats);
@@ -175,30 +262,95 @@ async fn request_model(
 
 fn finish_response(
     agent: &mut AgentLoop,
+    prompt: &PromptContext,
     response: &ModelResponse,
+    state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> Option<(String, &'static str)> {
+    if response.finish_reason == "error" && is_retryable_transport_error(&response.content) {
+        state.consecutive_transport_errors += 1;
+        if state.consecutive_transport_errors < MAX_CONSECUTIVE_TRANSPORT_ERRORS {
+            return None;
+        }
+        let text = "连接模型服务失败，已自动重试多次。当前会话和你的问题都已保留，网络恢复后可以直接重试，无需重新描述任务。".to_string();
+        agent.session.add_assistant(&text, None, "");
+        emit(sink, LoopEvent::AssistantText(text.clone()));
+        return Some((text, "error"));
+    }
     if response.finish_reason == "error" {
         let text = if response.content.is_empty() {
-            "Model call failed.".to_string()
+            "模型服务调用失败，请稍后重试。".to_string()
         } else {
             response.content.clone()
         };
         agent.session.add_assistant(&text, None, "");
         return Some((text, "error"));
     }
+    state.consecutive_transport_errors = 0;
     if response.has_tool_calls() {
+        state.consecutive_empty_responses = 0;
         return None;
     }
 
     let text = response.content.clone();
+    if text.trim().is_empty() {
+        state.consecutive_empty_responses += 1;
+        if state.consecutive_empty_responses < MAX_CONSECUTIVE_EMPTY_RESPONSES {
+            return None;
+        }
+
+        let error = format!(
+            "模型连续 {} 次返回空内容，任务未被标记为完成。请检查模型服务后重试。",
+            MAX_CONSECUTIVE_EMPTY_RESPONSES
+        );
+        agent.session.add_assistant(&error, None, "");
+        emit(sink, LoopEvent::AssistantText(error.clone()));
+        return Some((error, "error"));
+    }
+
+    state.consecutive_empty_responses = 0;
+    if prompt.deliverable.is_some()
+        && prompt
+            .deliverable
+            .as_ref()
+            .and_then(|requirement| requirement.completed_path(&agent.tools.ctx.workspace))
+            .is_none()
+    {
+        state.deliverable_finish_rejections += 1;
+        return None;
+    }
     agent
         .session
         .add_assistant(&text, None, &response.reasoning);
-    if !text.is_empty() {
-        emit(sink, LoopEvent::AssistantText(text.clone()));
+    emit(sink, LoopEvent::AssistantText(text.clone()));
+    if has_unfinished_plan(agent) {
+        return None;
     }
     Some((text, "completed"))
+}
+
+fn is_retryable_transport_error(message: &str) -> bool {
+    let message = message.trim_start();
+    message.starts_with("RequestError:")
+        || message.starts_with("TimeoutError:")
+        || message.starts_with("StreamError:")
+}
+
+fn has_unfinished_plan(agent: &AgentLoop) -> bool {
+    if agent.tools.ctx.plan_turn_id.get() != agent.tools.ctx.active_turn_id.get() {
+        return false;
+    }
+    agent.tools.ctx.plan.borrow().iter().any(|item| {
+        matches!(
+            item.get("status").and_then(Value::as_str),
+            Some("pending" | "in_progress")
+        )
+    })
+}
+
+fn retire_active_plan(agent: &AgentLoop) {
+    agent.tools.ctx.plan.borrow_mut().clear();
+    agent.tools.ctx.plan_turn_id.set(None);
 }
 
 fn persist_tool_calls(agent: &mut AgentLoop, response: &ModelResponse) {
@@ -232,6 +384,7 @@ fn stop_turn(
                 "[interrupted: stopped by user]"
             };
             agent.session.backfill_unanswered_tool_calls(placeholder);
+            retire_active_plan(agent);
             let text = "Stopped by user.".to_string();
             agent.session.add_assistant(&text, None, "");
             state.finish(text, iteration + 1, "cancelled")

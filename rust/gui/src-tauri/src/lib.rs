@@ -6,16 +6,19 @@
 //! for the header.
 
 mod bridge;
+pub mod model_catalog;
+
+use model_catalog::{catalog, find_preset, parse_openrouter_models, CatalogModel, CatalogProvider};
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ncx_config::{
-    load_config, write_nanocodex_config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
+    load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
 };
 use ncx_core::{
@@ -25,7 +28,10 @@ use ncx_core::{
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-use bridge::{request_cancel, spawn_worker, CancelFlag, Command, PendingMap, PendingQuestionMap};
+use bridge::{
+    request_cancel, spawn_worker, CancelRegistry, Command, GrantRegistry, PendingMap,
+    PendingQuestionMap, RunningSessions,
+};
 
 #[derive(Serialize)]
 pub struct Status {
@@ -33,6 +39,7 @@ pub struct Status {
     sandbox: String,
     approval: String,
     permission_mode: String,
+    reasoning_effort: String,
     workspace: String,
     /// Masked (`****1234`) — never the real key.
     api_key: String,
@@ -42,6 +49,7 @@ pub struct Status {
     context_edit_max_chars: i64,
     price_in: f64,
     price_out: f64,
+    price_currency: String,
 }
 
 /// Tauri managed state: the channel into the agent thread + pending approvals.
@@ -50,7 +58,9 @@ struct AppState {
     pending: PendingMap,
     questions: PendingQuestionMap,
     question_counter: AtomicU64,
-    cancel: CancelFlag,
+    cancels: CancelRegistry,
+    session_index: Arc<Mutex<SessionIndex>>,
+    openrouter_models: Mutex<Vec<CatalogModel>>,
 }
 
 #[derive(Serialize)]
@@ -92,6 +102,7 @@ fn get_status() -> Result<Status, String> {
         sandbox: cfg.sandbox_mode.clone(),
         approval: cfg.approval_policy.clone(),
         permission_mode: cfg.permission_mode.clone(),
+        reasoning_effort: cfg.reasoning_effort.clone(),
         workspace: bridge::display_path(&cfg.workspace),
         api_key: red.get("api_key").cloned().unwrap_or_default(),
         max_iterations: cfg.max_iterations,
@@ -100,6 +111,7 @@ fn get_status() -> Result<Status, String> {
         context_edit_max_chars: cfg.context_edit_max_chars,
         price_in: cfg.price_in,
         price_out: cfg.price_out,
+        price_currency: cfg.price_currency.clone(),
     })
 }
 
@@ -107,20 +119,39 @@ fn get_status() -> Result<Status, String> {
 /// the file picker (attached as base64 vision blocks); non-image files are
 /// passed by the UI as `@path` tokens inside `text`. Replies arrive as
 /// `ncx://event`s.
+fn validate_image_attachment_route(images: &[String], vl_model: &str) -> Result<(), String> {
+    if !images.is_empty() && vl_model.trim().is_empty() {
+        return Err(
+            "尚未配置图片/文件解析模型。请打开“设置”，填写“图片/文件解析模型”；如果当前模型本身支持图片，可填写与主模型相同的模型名，接口和密钥留空即可沿用主配置。"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn send_prompt(
+    session_id: String,
     text: String,
     images: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .cancel
-        .store(false, std::sync::atomic::Ordering::Release);
+    let images = images.unwrap_or_default();
+    if !images.is_empty() {
+        let cfg = load_config(Overrides {
+            workspace: std::env::current_dir().ok(),
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string())?;
+        validate_image_attachment_route(&images, &cfg.vl_model)?;
+    }
+
     state
         .tx
         .send(Command::Prompt {
+            session_id,
             text,
-            images: images.unwrap_or_default(),
+            images,
         })
         .map_err(|_| "agent thread is not running".to_string())
 }
@@ -166,6 +197,18 @@ fn set_sandbox(mode: String, state: tauri::State<'_, AppState>) -> Result<(), St
 /// Switch the active model (persists + rebuilds keeping the current transcript).
 #[tauri::command]
 fn set_model(model: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    if let Some(preset) = find_preset_by_model_id(&model, &cached) {
+        let quick_switch_models = provider_models(&preset.provider_id, &cached)
+            .into_iter()
+            .map(|item| item.model_id)
+            .collect::<Vec<_>>();
+        drop(cached);
+        write_preset(&preset, &quick_switch_models)?;
+    }
     state
         .tx
         .send(Command::SetModel(model))
@@ -192,25 +235,39 @@ fn request_ready(state: tauri::State<'_, AppState>) -> Result<(), String> {
 }
 
 /// Archive (or unarchive) a saved session; persisted in the session index.
+fn archive_session_in_index(
+    index: &Mutex<SessionIndex>,
+    session_id: &str,
+    archived: bool,
+) -> Result<(), String> {
+    let mut index = index
+        .lock()
+        .map_err(|_| "session index lock is poisoned".to_string())?;
+    if index.set_archived(session_id, archived) {
+        Ok(())
+    } else {
+        Err(format!("unknown session {session_id}"))
+    }
+}
+
 #[tauri::command]
 fn archive_session(
     session_id: String,
     archived: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .tx
-        .send(Command::ArchiveSession(session_id, archived))
-        .map_err(|_| "agent thread is not running".to_string())
+    archive_session_in_index(&state.session_index, &session_id, archived)
 }
 
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
-fn new_session(state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn new_session(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let session_id = ncx_core::new_session_id();
     state
         .tx
-        .send(Command::Reload)
-        .map_err(|_| "agent thread is not running".to_string())
+        .send(Command::New(session_id.clone()))
+        .map_err(|_| "agent thread is not running".to_string())?;
+    Ok(session_id)
 }
 
 /// Continue a saved session (reseed the agent from its snapshot, same id).
@@ -241,8 +298,15 @@ fn get_workspace() -> Result<String, String> {
 
 /// Stop the active turn. The completion event still owns the final UI reset.
 #[tauri::command]
-fn stop_generation(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    request_cancel(&state.cancel, &state.pending, &state.questions);
+fn stop_generation(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let cancel = state
+        .cancels
+        .lock()
+        .ok()
+        .and_then(|registry| registry.get(&session_id).cloned());
+    if let Some(cancel) = cancel {
+        request_cancel(&session_id, &cancel, &state.pending, &state.questions);
+    }
     Ok(())
 }
 
@@ -264,6 +328,8 @@ fn open_config_dir() -> Result<(), String> {
 pub struct Settings {
     model: String,
     base_url: String,
+    vl_model: String,
+    vl_base_url: String,
     sandbox_mode: String,
     approval_policy: String,
     reasoning_effort: String,
@@ -275,26 +341,23 @@ pub struct Settings {
     context_edit_max_tool_result_chars: i64,
     price_in: f64,
     price_out: f64,
+    price_currency: String,
     api_key_masked: String,
     has_api_key: bool,
+    vl_api_key_masked: String,
+    has_vl_api_key: bool,
     available_models: Vec<String>,
     sandbox_modes: Vec<String>,
     approval_policies: Vec<String>,
 }
 
-/// Read the current settings for the panel (with dropdown option lists).
-#[tauri::command]
-fn get_settings() -> Result<Settings, String> {
-    let workspace = std::env::current_dir().ok();
-    let cfg = load_config(Overrides {
-        workspace,
-        ..Default::default()
-    })
-    .map_err(|e| e.to_string())?;
-    let masked = cfg.redacted().get("api_key").cloned().unwrap_or_default();
-    Ok(Settings {
+fn settings_from_config(cfg: &Config) -> Settings {
+    let redacted = cfg.redacted();
+    Settings {
         model: cfg.model.clone(),
         base_url: cfg.base_url.clone(),
+        vl_model: cfg.vl_model.clone(),
+        vl_base_url: cfg.vl_base_url.clone(),
         sandbox_mode: cfg.sandbox_mode.clone(),
         approval_policy: cfg.approval_policy.clone(),
         reasoning_effort: cfg.reasoning_effort.clone(),
@@ -306,15 +369,30 @@ fn get_settings() -> Result<Settings, String> {
         context_edit_max_tool_result_chars: cfg.context_edit_max_tool_result_chars,
         price_in: cfg.price_in,
         price_out: cfg.price_out,
-        api_key_masked: masked,
+        price_currency: cfg.price_currency.clone(),
+        api_key_masked: redacted.get("api_key").cloned().unwrap_or_default(),
         has_api_key: !cfg.api_key.is_empty(),
+        vl_api_key_masked: redacted.get("vl_api_key").cloned().unwrap_or_default(),
+        has_vl_api_key: !cfg.vl_api_key.is_empty(),
         available_models: cfg.available_models.clone(),
         sandbox_modes: VALID_SANDBOX_MODES.iter().map(|s| s.to_string()).collect(),
         approval_policies: VALID_APPROVAL_POLICIES
             .iter()
             .map(|s| s.to_string())
             .collect(),
+    }
+}
+
+/// Read the current settings for the panel (with dropdown option lists).
+#[tauri::command]
+fn get_settings() -> Result<Settings, String> {
+    let workspace = std::env::current_dir().ok();
+    let cfg = load_config(Overrides {
+        workspace,
+        ..Default::default()
     })
+    .map_err(|e| e.to_string())?;
+    Ok(settings_from_config(&cfg))
 }
 
 /// Persist settings to `~/.nanocodex/config.toml`, then rebuild the agent so the
@@ -331,9 +409,160 @@ fn save_settings(
         .collect();
     let path = ConfigPaths::default().nanocodex;
     write_nanocodex_config(&borrowed, &path).map_err(|e| e.to_string())?;
-    // Apply live (fresh session with the new config).
-    let _ = state.tx.send(Command::Reload);
+    // Apply live while preserving the active conversation/session id. A config
+    // save must not silently turn into an unrelated new chat.
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
+    let _ = state.tx.send(Command::SetModel(cfg.model));
     Ok(())
+}
+
+#[derive(Serialize)]
+struct ModelCatalogResponse {
+    providers: Vec<CatalogProvider>,
+    /// 当实时目录不可用时，前端仍可使用内置目录。
+    stale: bool,
+}
+
+fn catalog_response(openrouter_models: &[CatalogModel], stale: bool) -> ModelCatalogResponse {
+    let mut providers = catalog();
+    if !openrouter_models.is_empty() {
+        if let Some(provider) = providers
+            .iter_mut()
+            .find(|provider| provider.id == "openrouter")
+        {
+            provider.models = openrouter_models.to_vec();
+        }
+    }
+    ModelCatalogResponse { providers, stale }
+}
+
+fn preset_updates<T: AsRef<str>>(
+    preset: &CatalogModel,
+    quick_switch_models: &[T],
+) -> HashMap<&'static str, String> {
+    let available_models = quick_switch_models
+        .iter()
+        .map(|model| model.as_ref())
+        .collect::<Vec<_>>()
+        .join(",");
+    HashMap::from([
+        ("model", preset.model_id.clone()),
+        ("base_url", preset.base_url.clone()),
+        ("price_in", preset.price_in.to_string()),
+        ("price_out", preset.price_out.to_string()),
+        ("price_currency", preset.price_currency.clone()),
+        ("available_models", available_models),
+    ])
+}
+
+fn write_preset(preset: &CatalogModel, quick_switch_models: &[String]) -> Result<(), String> {
+    let updates = preset_updates(preset, quick_switch_models);
+    let borrowed: HashMap<&str, &str> = updates
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let path = ConfigPaths::default().nanocodex;
+    write_nanocodex_config(&borrowed, &path).map_err(|error| error.to_string())
+}
+
+fn provider_models(provider_id: &str, openrouter_models: &[CatalogModel]) -> Vec<CatalogModel> {
+    if provider_id == "openrouter" && !openrouter_models.is_empty() {
+        return openrouter_models.to_vec();
+    }
+    catalog()
+        .into_iter()
+        .find(|provider| provider.id == provider_id)
+        .map(|provider| provider.models)
+        .unwrap_or_default()
+}
+
+fn find_preset_by_model_id(
+    model_id: &str,
+    openrouter_models: &[CatalogModel],
+) -> Option<CatalogModel> {
+    openrouter_models
+        .iter()
+        .find(|model| model.model_id == model_id)
+        .cloned()
+        .or_else(|| {
+            catalog()
+                .into_iter()
+                .flat_map(|provider| provider.models)
+                .find(|model| model.model_id == model_id)
+        })
+}
+
+/// 返回内置目录，并在有缓存时带上 OpenRouter 的实时模型清单。
+#[tauri::command]
+fn get_model_catalog(state: tauri::State<'_, AppState>) -> Result<ModelCatalogResponse, String> {
+    let cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    Ok(catalog_response(&cached, false))
+}
+
+/// 通过 OpenRouter 公共接口拉取模型和每 Token 费用；接口无需 API 密钥。
+#[tauri::command]
+async fn refresh_openrouter_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<ModelCatalogResponse, String> {
+    let response = reqwest::Client::new()
+        .get("https://openrouter.ai/api/v1/models")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|error| format!("OpenRouter 模型目录请求失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("OpenRouter 模型目录请求失败：{error}"))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("OpenRouter 模型目录读取失败：{error}"))?;
+    let models = parse_openrouter_models(&body)?;
+    let mut cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    *cached = models;
+    Ok(catalog_response(&cached, false))
+}
+
+/// 选择一个模型预设时，统一保存模型、接口、费用币种和当前厂商的快捷模型。
+#[tauri::command]
+fn apply_model_preset(
+    provider_id: String,
+    model_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CatalogModel, String> {
+    let cached = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    let preset = if provider_id == "openrouter" {
+        cached
+            .iter()
+            .find(|model| model.model_id == model_id)
+            .cloned()
+            .or_else(|| find_preset(&provider_id, &model_id))
+    } else {
+        find_preset(&provider_id, &model_id)
+    }
+    .ok_or_else(|| "未找到所选模型预设，请先刷新 OpenRouter 模型目录".to_string())?;
+    let quick_switch_models = provider_models(&provider_id, &cached)
+        .into_iter()
+        .map(|model| model.model_id)
+        .collect::<Vec<_>>();
+    drop(cached);
+
+    write_preset(&preset, &quick_switch_models)?;
+    // 写入已经成功；重建会话的消息若暂时无法发送，也不能误报为保存失败。
+    let _ = state.tx.send(Command::SetModel(preset.model_id.clone()));
+    Ok(preset)
 }
 
 fn config_location() -> Result<ConfigLocation, String> {
@@ -425,7 +654,7 @@ fn approve(id: u64, decision: String, state: tauri::State<'_, AppState>) -> Resu
     };
     let sender = state.pending.lock().unwrap().remove(&id);
     match sender {
-        Some(tx) => tx
+        Some((_, tx)) => tx
             .send(dec)
             .map_err(|_| "approval already resolved".to_string()),
         None => Err(format!("no pending approval with id {id}")),
@@ -445,7 +674,7 @@ fn answer_question(
     });
     let sender = state.questions.lock().unwrap().remove(&id);
     match sender {
-        Some(tx) => tx
+        Some((_, tx)) => tx
             .send(answer)
             .map_err(|_| "question already resolved".to_string()),
         None => Err(format!("no pending question with id {id}")),
@@ -466,10 +695,15 @@ async fn e2e_ask_question(
     }
     let id = state.question_counter.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = tokio::sync::oneshot::channel();
-    state.questions.lock().unwrap().insert(id, sender);
+    state
+        .questions
+        .lock()
+        .unwrap()
+        .insert(id, (String::new(), sender));
     bridge::emit(
         &app,
         bridge::UiEvent::Question {
+            session_id: String::new(),
             id,
             question,
             options,
@@ -900,10 +1134,14 @@ fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_sessions() -> Result<Vec<SessionRow>, String> {
+fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<SessionRow>, String> {
     // entries() already sorts newest-first by parsed epoch (handles mixed
     // ms-epoch / legacy-ISO timestamps); don't re-sort by raw string here.
-    let entries = SessionIndex::default().entries();
+    let entries = state
+        .session_index
+        .lock()
+        .map_err(|_| "session index lock is poisoned".to_string())?
+        .entries();
     Ok(entries
         .into_iter()
         .take(50)
@@ -1081,8 +1319,13 @@ pub fn run() {
     let pending_for_worker = pending.clone();
     let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
     let questions_for_worker = questions.clone();
-    let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
-    let cancel_for_worker = cancel.clone();
+    let cancels: CancelRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let cancels_for_worker = cancels.clone();
+    let running: RunningSessions = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let running_for_worker = running.clone();
+    let session_grants: GrantRegistry = Arc::new(Mutex::new(HashMap::new()));
+    let session_index = Arc::new(Mutex::new(SessionIndex::default()));
+    let session_index_for_worker = session_index.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1091,7 +1334,9 @@ pub fn run() {
             pending,
             questions,
             question_counter: AtomicU64::new(1_000_000),
-            cancel,
+            cancels,
+            session_index,
+            openrouter_models: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
             // Hand the agent thread an AppHandle (to emit events), the receiver
@@ -1101,7 +1346,10 @@ pub fn run() {
                 rx,
                 pending_for_worker,
                 questions_for_worker,
-                cancel_for_worker,
+                cancels_for_worker,
+                running_for_worker,
+                session_grants,
+                session_index_for_worker,
             );
             Ok(())
         })
@@ -1114,6 +1362,9 @@ pub fn run() {
             e2e_ask_question,
             get_settings,
             save_settings,
+            get_model_catalog,
+            refresh_openrouter_models,
+            apply_model_preset,
             get_config_location,
             open_config_file,
             open_config_dir,
@@ -1156,4 +1407,415 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model_catalog::CatalogModel;
+    use ncx_config::Config;
+
+    #[test]
+    fn archiving_persists_without_waiting_for_the_agent_command_queue() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx_archive_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let index_path = root.join("sessions.jsonl");
+        let mut index = SessionIndex::new(index_path.clone());
+        let mut session = ncx_core::Session::new("system");
+        session.add_user_text("other session");
+        index.record_turn(
+            "other-session",
+            &root,
+            &session,
+            &root.join("session.jsonl"),
+        );
+        let shared = Mutex::new(index);
+
+        archive_session_in_index(&shared, "other-session", true).unwrap();
+
+        let reloaded = SessionIndex::new(index_path);
+        assert!(reloaded.get("other-session").unwrap().archived);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn settings_snapshot_exposes_vision_parser_without_leaking_its_key() {
+        let mut cfg = Config::default();
+        cfg.vl_model = "qwen3.7-plus".into();
+        cfg.vl_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1".into();
+        cfg.vl_api_key = "secret-vision-key".into();
+
+        let settings = settings_from_config(&cfg);
+
+        assert_eq!(settings.vl_model, "qwen3.7-plus");
+        assert_eq!(
+            settings.vl_base_url,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        );
+        assert!(settings.has_vl_api_key);
+        assert_ne!(settings.vl_api_key_masked, cfg.vl_api_key);
+        assert!(settings.vl_api_key_masked.starts_with("****"));
+    }
+
+    #[test]
+    fn image_attachment_requires_an_explicit_parser_model() {
+        assert!(validate_image_attachment_route(&[], "").is_ok());
+        assert!(validate_image_attachment_route(&["test.png".into()], "qwen3.7-plus").is_ok());
+
+        let error = validate_image_attachment_route(&["test.png".into()], "").unwrap_err();
+        assert!(error.contains("图片/文件解析模型"));
+        assert!(error.contains("设置"));
+    }
+
+    #[test]
+    fn topbar_exposes_reasoning_effort_quick_switch() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("class=\"reasoning-pill\""));
+        assert!(app.contains("思考程度"));
+        assert!(app.contains("selectReasoningEffort"));
+        assert!(app.contains("智能体自动"));
+        assert!(app.contains("智能体增强"));
+        assert!(!app.contains("{ id: \"low\", label:"));
+        assert!(!app.contains("{ id: \"medium\", label:"));
+    }
+
+    #[test]
+    fn session_controls_live_in_the_composer_with_apple_visual_tokens() {
+        let app = include_str!("../../src/App.svelte");
+        let topbar = app
+            .split_once("<header class=\"topbar\">")
+            .unwrap()
+            .1
+            .split_once("</header>")
+            .unwrap()
+            .0;
+        let composer = app
+            .split_once("<div class=\"composer-meta\">")
+            .unwrap()
+            .1
+            .split_once("{#if queued.length}")
+            .unwrap()
+            .0;
+        assert!(!topbar.contains("model-wrap"));
+        assert!(!topbar.contains("reasoning-wrap"));
+        assert!(!topbar.contains("ws-pill"));
+        assert!(composer.contains("model-wrap"));
+        assert!(composer.contains("reasoning-wrap"));
+        assert!(composer.contains("ws-pill"));
+
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains("--accent:       #0a84ff"));
+        assert!(css.contains("backdrop-filter: blur(28px)"));
+        assert!(css
+            .contains(".menu-backdrop:hover, .menu-backdrop:active, .menu-backdrop:focus-visible"));
+    }
+
+    #[test]
+    fn completed_tool_activity_is_hidden_from_final_and_history_views() {
+        let app = include_str!("../../src/App.svelte");
+        let bridge = include_str!("bridge.rs");
+        assert!(app.contains("role: \"tool_group\""));
+        assert!(app.contains(
+            "type ToolGroup = { role: \"tool_group\"; tools: ToolEntry[]; settled: boolean }"
+        ));
+
+        let cleanup = app
+            .split_once("function hideCompletedToolActivity")
+            .unwrap()
+            .1
+            .split_once("function toolGroupFailureCount")
+            .unwrap()
+            .0;
+        assert!(cleanup.contains("message.role !== \"tool_group\""));
+        assert!(app.matches("hideCompletedToolActivity(").count() >= 3);
+        assert!(bridge.contains("only the execution result and a brief recommended next action"));
+        assert!(bridge.contains("do not recap tool calls, logs, or intermediate process"));
+
+        // Tool logs remain visible while the turn is running.
+        let group = app
+            .split_once("{:else if m.role === \"tool_group\"}")
+            .unwrap()
+            .1
+            .split_once("{#if busy && streamingIdx === null && reasoningIdx === null}")
+            .unwrap()
+            .0;
+        assert!(group.contains("<details class=\"tool-run\""));
+        assert!(group.contains("class:settled={m.settled}"));
+        assert!(group.contains("open={!m.settled}"));
+        assert!(group.contains("已执行 {m.tools.length} 个工具"));
+        assert!(group.contains("toolGroupFailureCount(m)"));
+        assert!(group.contains("{#each m.tools as tool}"));
+        assert!(group.contains("tool.name"));
+        assert!(group.contains("tool.args"));
+        assert!(group.contains("tool.result"));
+
+        let css = include_str!("../../src/app.css");
+        let tool_css = css
+            .split_once("Tool calls")
+            .unwrap()
+            .1
+            .split_once("Composer (footer)")
+            .unwrap()
+            .0;
+        assert!(tool_css.contains("--tool-log-text:"));
+        assert!(tool_css.contains("--tool-log-muted:"));
+        assert!(tool_css.contains("--tool-log-line:"));
+        assert!(tool_css.contains("border-left: 1px solid var(--tool-log-line)"));
+        assert!(tool_css.contains("background: transparent"));
+        assert!(tool_css.contains("color: var(--tool-log-text)"));
+        assert!(tool_css.contains("color: var(--tool-log-muted)"));
+        assert!(tool_css.contains(".tool-run:not(.settled) > summary"));
+        assert!(tool_css.contains(".tool-run.settled > summary"));
+        assert!(!tool_css.contains("border-radius: var(--r-md)"));
+    }
+
+    #[test]
+    fn model_reasoning_is_visible_separately_from_tool_activity() {
+        let app = include_str!("../../src/App.svelte");
+        let css = include_str!("../../src/app.css");
+        let bridge = include_str!("bridge.rs");
+        let core = include_str!("../../../crates/ncx-core/src/agent_loop.rs");
+        let provider = include_str!("../../../crates/ncx-core/src/model_provider.rs");
+
+        assert!(provider.contains("StreamDelta::Reasoning"));
+        assert!(core.contains("ReasoningDelta(String)"));
+        assert!(bridge.contains("UiEvent::ReasoningDelta"));
+        assert!(app.contains("case \"reasoning_delta\":"));
+        assert!(app.contains("role: \"reasoning\""));
+        assert!(app.contains("思考过程"));
+        assert!(css.contains(".reasoning-run"));
+    }
+
+    #[test]
+    fn reasoning_stays_collapsed_and_bounded_while_streaming() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("REASONING_DISPLAY_MAX_CHARS"));
+        assert!(app.contains("appendReasoning(m.text, p.text)"));
+        assert!(app.contains("<details class=\"reasoning-run\" class:settled={m.settled}>") );
+        assert!(!app.contains(
+            "<details class=\"reasoning-run\" class:settled={m.settled} open={!m.settled}>"
+        ));
+        assert!(app.contains("<pre class=\"reasoning-content\">{m.text}</pre>"));
+    }
+
+    #[test]
+    fn completed_turn_removes_transient_reasoning_cards() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function removeReasoningMessages()"));
+        assert!(app.contains("removeReasoningMessages();\n          messages = hideCompletedToolActivity(messages);"));
+        assert!(app.contains("case \"done\":"));
+        assert!(app.contains("case \"error\":"));
+        assert!(app.contains("sessionMessages.set(p.session_id, cloneMessages(messages));"));
+        assert!(app.contains("message.role !== \"reasoning\""));
+        assert!(app.contains("message.role !== \"tool_group\""));
+    }
+
+    #[test]
+    fn completed_turn_keeps_prior_history_and_only_its_final_conclusion() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function keepConversationConclusions(finalText: string)"));
+        assert!(app.contains("if (pendingAnswer) compacted.push(pendingAnswer);"));
+        assert!(app.contains("compacted.push({ ...message });"));
+        assert!(app.contains("pendingAnswer = { ...message };"));
+        assert!(app.contains("keepConversationConclusions(p.final_text);"));
+    }
+
+    #[test]
+    fn stop_button_remains_retryable_until_turn_finishes() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("if (!busy) return;"));
+        assert!(app.contains(
+            "disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"
+        ));
+        assert!(!app.contains("if (!busy || stopping) return;"));
+    }
+
+    #[test]
+    fn automatic_context_compaction_is_visible_and_session_scoped() {
+        let app = include_str!("../../src/App.svelte");
+        let css = include_str!("../../src/app.css");
+        let bridge = include_str!("bridge.rs");
+        let core = include_str!("../../../crates/ncx-core/src/agent_loop/turn.rs");
+
+        assert!(core.contains("agent.session.compact_if_needed"));
+        assert!(bridge.contains("UiEvent::ContextCompacted"));
+        assert!(app.contains("case \"context_compacted\":"));
+        assert!(app.contains("acceptsSessionEvent(p.session_id)"));
+        assert!(app.contains("已自动压缩上下文"));
+        assert!(app.contains("role: \"compact\""));
+        assert!(css.contains(".compact"));
+    }
+
+    #[test]
+    fn session_usage_survives_restart_and_session_switches() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function restoreSessionUsage(sessionId: string)"));
+        assert!(app.contains("function persistSessionUsage(sessionId: string)"));
+        assert!(app.contains("ncx.sessionUsage."));
+        assert!(app.contains("addSessionUsage(p.session_id"));
+        assert!(app.contains("persistSessionUsage(sessionId)"));
+        assert!(app.matches("restoreSessionUsage(currentSessionId)").count() >= 2);
+        assert!(app.matches("resetSessionUsage()").count() >= 2);
+    }
+
+    #[test]
+    fn frontend_rejects_events_from_inactive_sessions() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function acceptsSessionEvent(sessionId: string)"));
+        assert!(app.contains("if (!acceptsSessionEvent(p.session_id)) break"));
+        assert!(app.contains("session_id: string; text: string"));
+    }
+
+    #[test]
+    fn title_generation_does_not_block_the_agent_command_queue() {
+        let bridge = include_str!("bridge.rs");
+        assert!(bridge.contains("spawn_title_generation("));
+        assert!(!bridge.contains("agent.suggest_title(&text).await"));
+    }
+
+    #[test]
+    fn new_session_starts_with_empty_chat_and_plan_context() {
+        let bridge = include_str!("bridge.rs");
+        assert!(bridge.contains("Command::New(id)"));
+        assert!(bridge.contains("Some((id, Vec::new()))"));
+        let new_branch = bridge
+            .split_once("Command::New(id)")
+            .unwrap()
+            .1
+            .split_once("Command::Reload")
+            .unwrap()
+            .0;
+        assert!(new_branch.contains("index.record_turn("));
+        assert!(
+            new_branch.find("index.record_turn(").unwrap()
+                < new_branch.find("UiEvent::Loaded").unwrap()
+        );
+    }
+
+    #[test]
+    fn prompts_are_dispatched_to_independent_session_workers() {
+        let bridge = include_str!("bridge.rs");
+        let backend = include_str!("lib.rs");
+        let app = include_str!("../../src/App.svelte");
+        assert!(bridge.contains("fn spawn_turn_worker("));
+        assert!(bridge.contains("session_id: target_id"));
+        assert!(bridge.contains("spawn_turn_worker("));
+        assert!(backend.contains("session_id: String"));
+        assert!(app.contains("sessionId: targetSessionId"));
+    }
+
+    #[test]
+    fn switching_sessions_does_not_stop_the_previous_turn() {
+        let app = include_str!("../../src/App.svelte");
+        let resume = app
+            .split_once("async function resumeSession")
+            .unwrap()
+            .1
+            .split_once("async function forkSession")
+            .unwrap()
+            .0;
+        assert!(!resume.contains("stop_generation"));
+        assert!(app.contains("setSessionRunning(targetSessionId, true)"));
+        assert!(app.contains("setSessionRunning(p.session_id, false)"));
+    }
+
+    #[test]
+    fn history_session_switch_keeps_the_active_turn_running() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("disabled={switchingSession || !s.has_snapshot}"));
+        let resume = app
+            .split_once("async function resumeSession")
+            .unwrap()
+            .1
+            .split_once("async function forkSession")
+            .unwrap()
+            .0;
+        assert!(!resume.contains("stop_generation"));
+        assert!(resume.contains("busy = runningSessions.has(id)"));
+        assert!(resume.contains("await invoke(\"resume_session\""));
+    }
+
+    #[test]
+    fn archived_sessions_render_below_recent_sessions() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("sessions.filter((s) => !s.archived)"));
+        assert!(app.contains("sessions.filter((s) => s.archived)"));
+
+        let sidebar = app
+            .split_once("<div class=\"side-recents\">")
+            .unwrap()
+            .1
+            .split_once("<div class=\"side-foot\">")
+            .unwrap()
+            .0;
+        let recent = sidebar.find("{#each recentSessions as s}").unwrap();
+        let archive_toggle = sidebar.find("class=\"side-archive-toggle\"").unwrap();
+        let archived = sidebar.find("{#each archivedSessions as s}").unwrap();
+        assert!(recent < archive_toggle);
+        assert!(archive_toggle < archived);
+        assert!(sidebar.contains("aria-expanded={showArchived}"));
+
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains(".side-archive-toggle"));
+        assert!(css.contains(".side-archived-list"));
+    }
+
+    #[test]
+    fn recent_sessions_are_collapsible_and_closed_by_default() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("let showRecent = $state(false)"));
+
+        let sidebar = app
+            .split_once("<div class=\"side-recents\">")
+            .unwrap()
+            .1
+            .split_once("<div class=\"side-foot\">")
+            .unwrap()
+            .0;
+        assert!(sidebar.contains("class=\"side-recent-toggle\""));
+        assert!(sidebar.contains("aria-expanded={showRecent}"));
+        assert!(sidebar.contains("onclick={() => (showRecent = !showRecent)}"));
+        assert!(sidebar.contains("{#if showRecent}"));
+        assert!(
+            sidebar.find("{#if showRecent}").unwrap()
+                < sidebar.find("{#each recentSessions as s}").unwrap()
+        );
+
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains(".side-recent-toggle"));
+        assert!(css.contains(".side-recent-caret"));
+        assert!(css.contains(".side-recent-list"));
+    }
+
+    #[test]
+    fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
+        let preset = CatalogModel {
+            provider_id: "openai".into(),
+            model_id: "gpt-5-mini".into(),
+            display_name: "GPT-5 mini".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            price_in: 0.25,
+            price_out: 2.0,
+            price_currency: "USD".into(),
+            price_source: crate::model_catalog::PriceSource::OfficialDirect,
+            pricing_note: None,
+            source_url: "https://openai.com/api/pricing".into(),
+            updated_at: "2026-08-17".into(),
+            context_length: None,
+            direct_available: true,
+        };
+
+        let updates = preset_updates(&preset, &["gpt-5-mini", "gpt-5"]);
+        assert_eq!(updates["model"], "gpt-5-mini");
+        assert_eq!(updates["base_url"], "https://api.openai.com/v1");
+        assert_eq!(updates["price_currency"], "USD");
+        assert_eq!(updates["available_models"], "gpt-5-mini,gpt-5");
+    }
 }

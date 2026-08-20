@@ -4,6 +4,12 @@ use async_trait::async_trait;
 use ncx_provider::{DeepSeekProvider, ModelResponse};
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamDelta {
+    Content(String),
+    Reasoning(String),
+}
+
 /// Minimal async chat interface driven by [`crate::AgentLoop`].
 ///
 /// `?Send` allows implementations to hold single-threaded providers and test
@@ -26,11 +32,14 @@ pub trait Provider {
         messages: &[Value],
         tools: &[Value],
         reasoning_effort: Option<&str>,
-        on_content: &mut dyn FnMut(String),
+        on_delta: &mut dyn FnMut(StreamDelta),
     ) -> ModelResponse {
         let response = self.chat(messages, tools, reasoning_effort).await;
+        if response.finish_reason != "error" && !response.reasoning.is_empty() {
+            on_delta(StreamDelta::Reasoning(response.reasoning.clone()));
+        }
         if response.finish_reason != "error" && !response.content.is_empty() {
-            on_content(response.content.clone());
+            on_delta(StreamDelta::Content(response.content.clone()));
         }
         response
     }
@@ -62,9 +71,10 @@ impl Provider for DeepSeekProvider {
         messages: &[Value],
         tools: &[Value],
         reasoning_effort: Option<&str>,
-        on_content: &mut dyn FnMut(String),
+        on_delta: &mut dyn FnMut(StreamDelta),
     ) -> ModelResponse {
         let tools = (!tools.is_empty()).then_some(tools);
+        let on_delta = std::cell::RefCell::new(on_delta);
         match DeepSeekProvider::chat_stream(
             self,
             messages,
@@ -72,8 +82,10 @@ impl Provider for DeepSeekProvider {
             None,
             None,
             reasoning_effort,
-            |content: &str| on_content(content.to_string()),
-            |_| {},
+            |content: &str| (on_delta.borrow_mut())(StreamDelta::Content(content.to_string())),
+            |reasoning: &str| {
+                (on_delta.borrow_mut())(StreamDelta::Reasoning(reasoning.to_string()))
+            },
         )
         .await
         {

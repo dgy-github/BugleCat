@@ -17,6 +17,8 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::text_encoding::decode_text_lossy;
+
 const MAX_OUTPUT: usize = 16_000;
 
 /// Outcome of a single sandboxed command.
@@ -144,8 +146,8 @@ impl PolicyExecutor {
                 let code = status.ok().and_then(|s| s.code()).unwrap_or(1);
                 ExecResult {
                     exit_code: code,
-                    stdout: String::from_utf8_lossy(&out).to_string(),
-                    stderr: String::from_utf8_lossy(&err).to_string(),
+                    stdout: decode_text_lossy(&out),
+                    stderr: decode_text_lossy(&err),
                     ..Default::default()
                 }
             }
@@ -197,7 +199,9 @@ fn base_command(command: &str) -> Command {
     {
         let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
         let mut c = Command::new(comspec);
-        c.arg("/C").arg(command);
+        c.arg("/D")
+            .arg("/C")
+            .arg(format!("chcp 65001>nul & {command}"));
         c
     }
     #[cfg(not(windows))]
@@ -241,6 +245,8 @@ fn build_env() -> HashMap<String, String> {
         env.insert("TMP".into(), get("TMP", &format!("{sysroot}\\Temp")));
         env.insert("PYTHONUNBUFFERED".into(), "1".into());
         env.insert("PYTHONIOENCODING".into(), "utf-8".into());
+        env.insert("PYTHONUTF8".into(), "1".into());
+        env.insert("LANG".into(), "C.UTF-8".into());
     }
     #[cfg(not(windows))]
     {
@@ -418,6 +424,22 @@ mod tests {
             "stdout: {:?}",
             result.stdout
         );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_shell_preserves_chinese_output() {
+        let result = PolicyExecutor::new()
+            .run("echo 中文路径与工具输出", &std::env::temp_dir(), 30)
+            .await;
+
+        assert!(result.ok(), "{}", result.render());
+        assert!(
+            result.stdout.contains("中文路径与工具输出"),
+            "stdout: {:?}",
+            result.stdout
+        );
+        assert!(!result.stdout.contains('\u{FFFD}'), "{:?}", result.stdout);
     }
 
     #[tokio::test]

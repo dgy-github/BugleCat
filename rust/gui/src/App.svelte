@@ -10,26 +10,33 @@
 
   // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
   type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; needs_workspace: boolean }
-    | { kind: "assistant_delta"; text: string }
-    | { kind: "assistant"; text: string }
-    | { kind: "tool_start"; name: string; args: string }
-    | { kind: "tool_result"; name: string; result: string }
-    | { kind: "approval"; id: number; command: string; reason: string; cwd: string; details: string }
-    | { kind: "question"; id: number; question: string; options: string[]; allow_free_text: boolean }
-    | { kind: "done"; final_text: string; stop_reason: string; usage: Record<string, number> }
-    | { kind: "loaded"; messages: { role: string; text: string }[] }
-    | { kind: "error"; message: string };
+    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
+    | { kind: "assistant_delta"; session_id: string; text: string }
+    | { kind: "reasoning_delta"; session_id: string; text: string }
+    | { kind: "context_compacted"; session_id: string; original_chars: number; edited_chars: number; dropped_messages: number; compressed_tool_results: number }
+    | { kind: "assistant"; session_id: string; text: string }
+    | { kind: "tool_start"; session_id: string; name: string; args: string }
+    | { kind: "tool_result"; session_id: string; name: string; result: string }
+    | { kind: "approval"; session_id: string; id: number; command: string; reason: string; cwd: string; details: string }
+    | { kind: "question"; session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean }
+    | { kind: "done"; session_id: string; final_text: string; stop_reason: string; usage: Record<string, number> }
+    | { kind: "session_title"; session_id: string; title: string }
+    | { kind: "loaded"; session_id: string; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
+    | { kind: "error"; session_id: string; message: string };
 
-  type Approval = { id: number; command: string; reason: string; cwd: string; details: string };
+  type Approval = { session_id: string; id: number; command: string; reason: string; cwd: string; details: string };
   let approval = $state<Approval | null>(null);
-  type UserQuestion = { id: number; question: string; options: string[]; allow_free_text: boolean };
+  const approvalsBySession = new Map<string, Approval>();
+  type UserQuestion = { session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean };
   let userQuestion = $state<UserQuestion | null>(null);
+  const questionsBySession = new Map<string, UserQuestion>();
   let questionAnswer = $state("");
 
   type Settings = {
     model: string;
     base_url: string;
+    vl_model: string;
+    vl_base_url: string;
     sandbox_mode: string;
     approval_policy: string;
     reasoning_effort: string;
@@ -41,8 +48,11 @@
     context_edit_max_tool_result_chars: number;
     price_in: number;
     price_out: number;
+    price_currency: "CNY" | "USD";
     api_key_masked: string;
     has_api_key: boolean;
+    vl_api_key_masked: string;
+    has_vl_api_key: boolean;
     available_models: string[];
     sandbox_modes: string[];
     approval_policies: string[];
@@ -54,7 +64,35 @@
   let settings = $state<Settings | null>(null);
   let configLocation = $state<ConfigLocation | null>(null);
   let apiKeyInput = $state("");
+  let vlApiKeyInput = $state("");
   let saving = $state(false);
+
+  type CatalogModel = {
+    provider_id: string;
+    model_id: string;
+    display_name: string;
+    base_url: string;
+    price_in: number;
+    price_out: number;
+    price_currency: "CNY" | "USD";
+    price_source: "official_direct" | "aggregator";
+    pricing_note: string | null;
+    source_url: string;
+    updated_at: string;
+    context_length?: number | null;
+    direct_available: boolean;
+  };
+  type CatalogProvider = { id: string; name: string; models: CatalogModel[] };
+  type ModelCatalogResponse = { providers: CatalogProvider[]; stale: boolean };
+  let modelCatalog = $state<ModelCatalogResponse | null>(null);
+  let catalogRefreshing = $state(false);
+  let presetSaving = $state("");
+  const officialProviders = $derived(
+    modelCatalog?.providers.filter((provider) => provider.id !== "openrouter") ?? [],
+  );
+  const openRouterProvider = $derived(
+    modelCatalog?.providers.find((provider) => provider.id === "openrouter") ?? null,
+  );
 
   type Checkpoint = {
     id: string;
@@ -75,16 +113,27 @@
   let checkpointLabel = $state("");
   let checkpointBusy = $state(false);
 
+  type ToolEntry = { name: string; args?: string; result?: string };
+  type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boolean };
+  type ReasoningMsg = { role: "reasoning"; text: string; settled: boolean };
   type Msg =
-    | { role: "user" | "assistant" | "note"; text: string }
-    | { role: "tool"; name: string; args?: string; result?: string; collapsed?: boolean };
+    | { role: "user" | "assistant" | "note" | "compact"; text: string }
+    | ReasoningMsg
+    | ToolGroup;
 
   let messages = $state<Msg[]>([]);
+  const sessionMessages = new Map<string, Msg[]>();
   let input = $state("");
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
+  const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
   let busy = $state(false);
+  let reasoningIdx = $state<number | null>(null);
+  const REASONING_DISPLAY_MAX_CHARS = 4000;
+  const REASONING_OMITTED = "\n\n…较长思考已省略，仅保留最近内容…\n\n";
+  let runningSessions = $state(new Set<string>());
   let stopping = $state(false);
+  let switchingSession = $state(false);
   // File explorer (workspace tree)
   type DirEntry = { name: string; path: string; is_dir: boolean };
   let filesOpen = $state(false);
@@ -107,26 +156,83 @@
   let sandboxMode = $state("");
   let tokIn = $state(0);
   let tokOut = $state(0);
+  const sessionUsageKey = (sessionId: string) => `ncx.sessionUsage.${sessionId}`;
+  function resetSessionUsage() {
+    tokIn = 0;
+    tokOut = 0;
+  }
+  function restoreSessionUsage(sessionId: string) {
+    resetSessionUsage();
+    if (!sessionId) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
+      if (Number.isFinite(stored?.prompt_tokens) && stored.prompt_tokens >= 0) {
+        tokIn = stored.prompt_tokens;
+      }
+      if (Number.isFinite(stored?.completion_tokens) && stored.completion_tokens >= 0) {
+        tokOut = stored.completion_tokens;
+      }
+    } catch { /* missing or invalid local usage is treated as zero */ }
+  }
+  function persistSessionUsage(sessionId: string) {
+    if (!sessionId) return;
+    try {
+      localStorage.setItem(sessionUsageKey(sessionId), JSON.stringify({
+        prompt_tokens: tokIn,
+        completion_tokens: tokOut,
+      }));
+    } catch { /* storage is optional */ }
+  }
+  function addSessionUsage(sessionId: string, usage: Record<string, number>) {
+    if (!sessionId) return;
+    const prompt = usage.prompt_tokens || 0;
+    const completion = usage.completion_tokens || 0;
+    if (sessionId === currentSessionId) {
+      tokIn += prompt;
+      tokOut += completion;
+      persistSessionUsage(sessionId);
+      return;
+    }
+    try {
+      const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
+      localStorage.setItem(sessionUsageKey(sessionId), JSON.stringify({
+        prompt_tokens: (Number(stored?.prompt_tokens) || 0) + prompt,
+        completion_tokens: (Number(stored?.completion_tokens) || 0) + completion,
+      }));
+    } catch { /* storage is optional */ }
+  }
+  function setSessionRunning(sessionId: string, running: boolean) {
+    const next = new Set(runningSessions);
+    if (running) next.add(sessionId);
+    else next.delete(sessionId);
+    runningSessions = next;
+  }
   // Per-1M-token prices (from config); 0 = unknown → cost is hidden.
   let priceIn = $state(0);
   let priceOut = $state(0);
+  let priceCurrency = $state<"CNY" | "USD">("CNY");
   const cost = $derived((tokIn / 1e6) * priceIn + (tokOut / 1e6) * priceOut);
   let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
+  const currencySymbol = (currency: "CNY" | "USD") => currency === "USD" ? "$" : "¥";
+  const currencyName = (currency: "CNY" | "USD") => currency === "USD" ? "美元" : "人民币";
+  const priceSourceName = (source: CatalogModel["price_source"]) =>
+    source === "official_direct" ? "厂商官方直连价" : "OpenRouter 聚合渠道价";
+  function currentPriceSourceName() {
+    if (!settings) return "";
+    const current = modelCatalog?.providers
+      .flatMap((provider) => provider.models)
+      .find((model) => model.model_id === settings?.model && model.base_url === settings?.base_url);
+    return current
+      ? priceSourceName(current.price_source)
+      : "手动设置的价格，程序无法验证其是否为厂商官方价";
+  }
 
-  // ── Collapsible tool output ───────────────────────────────────────────────
-  // Large results auto-collapse so a single dump can't bury the conversation.
-  const COLLAPSE_LINES = 12;
-  const COLLAPSE_CHARS = 800;
-  const isLong = (s: string) =>
-    !!s && (s.length > COLLAPSE_CHARS || s.split("\n").length > COLLAPSE_LINES);
+  // ── Quiet, grouped tool activity ─────────────────────────────────────────
+  // Routine command lines stay out of the conversation. Every tool stays
+  // collapsed by default, while its parameters and output remain available.
   const lineCount = (s: string = "") => (s ? s.split("\n").length : 0);
-  // Multi-line → "N 行"; single long line → "N 字" so a char-triggered collapse isn't mislabeled.
-  const collapsedHint = (s: string = "") => {
-    const lines = lineCount(s);
-    return lines > 1 ? `${lines} 行 · 点击展开` : `${s.length} 字 · 点击展开`;
-  };
   // Classify a finished tool result so the outcome (报错 / 无输出 / N 行) is
   // visible at a glance — a bare "Exit code: 0" otherwise reads as "no info".
   const toolOutcome = (result: string = ""): "err" | "empty" | "ok" => {
@@ -145,15 +251,63 @@
     if (body === "") return "empty";
     return "ok";
   };
-  // Notes carry both status ("已切换工作区…") and failures ("发送失败：…"). Only the
-  // latter earns the alarm styling — a column of red boxes for routine status was
-  // what made the transcript unreadable.
-  const NOTE_ERROR = /(失败|错误|无法|不可用|Error|error)/;
-  const noteTone = (text: string) => (NOTE_ERROR.test(text) ? "err" : "info");
   const toolStatusLabel = (result: string = "") => {
     const oc = toolOutcome(result);
     return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
   };
+  function settleCompletedToolGroups() {
+    for (const message of messages) {
+      if (
+        message.role === "tool_group" &&
+        !message.settled &&
+        message.tools.length > 0 &&
+        message.tools.every((tool) => tool.result !== undefined)
+      ) {
+        message.settled = true;
+      }
+    }
+  }
+  function settleReasoning() {
+    if (reasoningIdx === null) return;
+    const message = messages[reasoningIdx];
+    if (message?.role === "reasoning") message.settled = true;
+    reasoningIdx = null;
+  }
+  function removeReasoningMessages() {
+    messages = messages.filter((message) => message.role !== "reasoning");
+    reasoningIdx = null;
+  }
+  function keepConversationConclusions(finalText: string) {
+    const compacted: Msg[] = [];
+    let pendingAnswer: Extract<Msg, { role: "assistant" }> | null = null;
+    for (const message of messages) {
+      if (message.role === "user") {
+        if (pendingAnswer) compacted.push(pendingAnswer);
+        compacted.push({ ...message });
+        pendingAnswer = null;
+      } else if (message.role === "assistant") {
+        // Intermediate narrations are replaced until the next user turn.
+        pendingAnswer = { ...message };
+      }
+    }
+    if (finalText.trim() !== "") pendingAnswer = { role: "assistant", text: finalText };
+    if (pendingAnswer) compacted.push(pendingAnswer);
+    messages = compacted;
+  }
+  function appendReasoning(previous: string, delta: string): string {
+    const combined = previous + delta;
+    if (combined.length <= REASONING_DISPLAY_MAX_CHARS) return combined;
+    const tailLength = REASONING_DISPLAY_MAX_CHARS - REASONING_OMITTED.length;
+    return REASONING_OMITTED + combined.slice(-tailLength);
+  }
+  function hideCompletedToolActivity(source: Msg[]): Msg[] {
+    return source.filter((message) => message.role !== "tool_group");
+  }
+  function toolGroupFailureCount(group: ToolGroup) {
+    return group.tools.filter(
+      (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
+    ).length;
+  }
   // Per-line class for unified-diff coloring.
   const diffLineClass = (ln: string) => {
     if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("diff ") || ln.startsWith("index ")) return "dl-meta";
@@ -265,9 +419,6 @@
       checkpointFiles = { ...checkpointFiles, [id]: [`加载失败：${e}`] };
     }
   }
-  function toggleTool(m: Msg) {
-    if (m.role === "tool" && m.result !== undefined) m.collapsed = !m.collapsed;
-  }
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
@@ -284,9 +435,37 @@
     currentModel = m; // optimistic; `ready` will confirm
     try {
       await invoke("set_model", { model: m });
+      try {
+        const updated = await invoke<Settings>("get_settings");
+        models = updated.available_models;
+        priceIn = updated.price_in || 0;
+        priceOut = updated.price_out || 0;
+        priceCurrency = updated.price_currency || "CNY";
+      } catch { /* 模型已切换，费用显示将在下一次状态刷新时同步 */ }
     } catch (e) {
       currentModel = prev;
       messages.push({ role: "note", text: `切换模型失败：${e}` });
+    }
+  }
+  let reasoningEffort = $state("auto");
+  let reasoningMenuOpen = $state(false);
+  const REASONING_EFFORTS = [
+    { id: "auto", label: "智能体自动", desc: "普通请求用高强度，复杂智能体任务自动增强" },
+    { id: "off", label: "关闭思考", desc: "直接回答，不启用思考模式" },
+    { id: "high", label: "深度思考", desc: "启用 DeepSeek high 思考强度" },
+    { id: "max", label: "智能体增强", desc: "启用 DeepSeek max，适合复杂工具任务" },
+  ];
+  const reasoningLabel = (id: string) => REASONING_EFFORTS.find((option) => option.id === id)?.label ?? id;
+  async function selectReasoningEffort(id: string) {
+    reasoningMenuOpen = false;
+    if (!id || id === reasoningEffort) return;
+    const previous = reasoningEffort;
+    reasoningEffort = id;
+    try {
+      await invoke("save_settings", { updates: { reasoning_effort: id } });
+    } catch (e) {
+      reasoningEffort = previous;
+      messages.push({ role: "note", text: `切换思考程度失败：${e}` });
     }
   }
   // Claude-Code-style permission modes (single composer selector).
@@ -371,6 +550,10 @@
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
   }
 
+  function acceptsSessionEvent(sessionId: string) {
+    return sessionId === "" || (currentSessionId !== "" && sessionId === currentSessionId);
+  }
+
   onMount(async () => {
     try {
       const savedWidth = Number(localStorage.getItem("ncx.sidebarWidth"));
@@ -378,13 +561,15 @@
     } catch { /* storage is optional */ }
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
-      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; price_in: number; price_out: number }>("get_status");
+      const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; reasoning_effort: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
       sandboxMode = s.sandbox;
       currentModel = s.model;
       if (s.permission_mode) permissionMode = s.permission_mode;
+      if (s.reasoning_effort) reasoningEffort = s.reasoning_effort;
       priceIn = s.price_in || 0;
       priceOut = s.price_out || 0;
+      priceCurrency = s.price_currency || "CNY";
     } catch (e) {
       header = "配置错误";
     }
@@ -394,6 +579,7 @@
       const p = ev.payload;
       switch (p.kind) {
         case "ready":
+          if (currentSessionId !== "" && p.session_id !== currentSessionId) break;
           header = `${p.model} · ${p.sandbox}`;
           workspace = p.workspace;
           needsWorkspace = p.needs_workspace;
@@ -401,13 +587,26 @@
           currentModel = p.model;
           if (p.models?.length) models = p.models;
           if (p.permission_mode) permissionMode = p.permission_mode;
+          if (p.reasoning_effort) reasoningEffort = p.reasoning_effort;
           // Learn the active session's real id so 最近会话 can mark/return to it.
-          if (p.session_id) currentSessionId = p.session_id;
+          if (p.session_id) {
+            const wasUnbound = currentSessionId === "";
+            currentSessionId = p.session_id;
+            restoreSessionUsage(currentSessionId);
+            if (wasUnbound) {
+              restoreSessionQueue(currentSessionId);
+              restoreSessionPrompts(currentSessionId);
+              restoreSessionMessages(currentSessionId);
+            }
+          }
           refreshSessions();
           break;
         case "assistant_delta":
+          if (!acceptsSessionEvent(p.session_id)) break;
+          settleReasoning();
           if (streamingIdx === null) {
             if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
+            settleCompletedToolGroups();
             messages.push({ role: "assistant", text: p.text });
             streamingIdx = messages.length - 1;
           } else {
@@ -415,7 +614,27 @@
             if (m && m.role === "assistant") m.text += p.text;
           }
           break;
+        case "reasoning_delta":
+          if (!acceptsSessionEvent(p.session_id) || p.text === "") break;
+          if (reasoningIdx === null) {
+            settleCompletedToolGroups();
+            messages.push({ role: "reasoning", text: appendReasoning("", p.text), settled: false });
+            reasoningIdx = messages.length - 1;
+          } else {
+            const m = messages[reasoningIdx];
+            if (m?.role === "reasoning") m.text = appendReasoning(m.text, p.text);
+          }
+          break;
+        case "context_compacted":
+          if (!acceptsSessionEvent(p.session_id)) break;
+          messages.push({
+            role: "compact",
+            text: `已自动压缩上下文：${p.original_chars.toLocaleString()} → ${p.edited_chars.toLocaleString()} 字符，清理 ${p.dropped_messages} 条旧消息和 ${p.compressed_tool_results} 条工具结果；关键要求、完成结果和当前计划已保留。`,
+          });
+          break;
         case "assistant":
+          if (!acceptsSessionEvent(p.session_id)) break;
+          settleReasoning();
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
             if (m && m.role === "assistant") {
@@ -426,80 +645,147 @@
             }
             streamingIdx = null;
           } else if (p.text.trim() !== "") {
+            settleCompletedToolGroups();
             messages.push({ role: "assistant", text: p.text });
           }
           break;
         case "tool_start":
+          if (!acceptsSessionEvent(p.session_id)) break;
+          settleReasoning();
           // A streamed bubble that turned out empty (tool-only turn) leaves no box.
           if (streamingIdx !== null) {
             const m = messages[streamingIdx];
             if (m && m.role === "assistant" && m.text.trim() === "") messages.splice(streamingIdx, 1);
           }
           streamingIdx = null;
-          messages.push({ role: "tool", name: p.name, args: p.args });
+          {
+            const last = messages.at(-1);
+            const entry: ToolEntry = { name: p.name, args: p.args };
+            if (last?.role === "tool_group") last.tools.push(entry);
+            else messages.push({ role: "tool_group", tools: [entry], settled: false });
+          }
           break;
         case "approval":
-          approval = { id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
+          {
+            const item: Approval = { session_id: p.session_id, id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
+            approvalsBySession.set(p.session_id, item);
+            if (acceptsSessionEvent(p.session_id)) approval = item;
+          }
           break;
         case "question":
-          userQuestion = {
-            id: p.id,
-            question: p.question,
-            options: p.options,
-            allow_free_text: p.allow_free_text,
-          };
-          questionAnswer = "";
+          {
+            const item: UserQuestion = { session_id: p.session_id, id: p.id, question: p.question, options: p.options, allow_free_text: p.allow_free_text };
+            questionsBySession.set(p.session_id, item);
+            if (acceptsSessionEvent(p.session_id)) {
+              userQuestion = item;
+              questionAnswer = "";
+            }
+          }
           break;
         case "tool_result": {
-          // Results preserve dispatch order, so pair with the earliest pending call.
-          const pendingIndex = messages.findIndex(
-            (m) => m.role === "tool" && m.name === p.name && m.result === undefined,
-          );
-          if (toolOutcome(p.result) === "err") {
-            if (pendingIndex >= 0) messages.splice(pendingIndex, 1);
-            break;
+          if (!acceptsSessionEvent(p.session_id)) break;
+          // Results preserve dispatch order, so pair with the earliest pending
+          // call across the compact groups. Failures stay visible and open.
+          let pendingGroup: ToolGroup | undefined;
+          let pendingTool: ToolEntry | undefined;
+          for (const message of messages) {
+            if (message.role !== "tool_group") continue;
+            const candidate = message.tools.find(
+              (tool) => tool.name === p.name && tool.result === undefined,
+            );
+            if (candidate) {
+              pendingGroup = message;
+              pendingTool = candidate;
+              break;
+            }
           }
-          const collapsed = isLong(p.result);
-          const pending = messages[pendingIndex] as Extract<Msg, { role: "tool" }> | undefined;
-          if (pendingIndex >= 0 && pending) { pending.result = p.result; pending.collapsed = collapsed; }
-          else messages.push({ role: "tool", name: p.name, result: p.result, collapsed });
+          if (pendingTool && pendingGroup) pendingTool.result = p.result;
+          else {
+            pendingGroup = {
+              role: "tool_group",
+              tools: [{ name: p.name, result: p.result }],
+              settled: false,
+            };
+            messages.push(pendingGroup);
+          }
           break;
         }
         case "done":
-          // The completed reply already arrived as an `assistant` event; only a
-          // non-normal stop adds a note.
-          if (p.stop_reason !== "completed") {
+          setSessionRunning(p.session_id, false);
+          addSessionUsage(p.session_id, p.usage || {});
+          if (!acceptsSessionEvent(p.session_id)) {
+            refreshSessions();
+            break;
+          }
+          settleCompletedToolGroups();
+          settleReasoning();
+          removeReasoningMessages();
+          messages = hideCompletedToolActivity(messages);
+          if (p.stop_reason === "completed") {
+            keepConversationConclusions(p.final_text);
+          } else if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
-          {
-            const u = p.usage || {};
-            tokIn += u.prompt_tokens || 0;
-            tokOut += u.completion_tokens || 0;
-          }
           streamingIdx = null;
-          busy = false;
+          // Keep the completed conclusion in the per-session cache; only the
+          // transient reasoning cards are removed from the visible transcript.
+          sessionMessages.set(p.session_id, cloneMessages(messages));
+          busy = runningSessions.has(currentSessionId);
           stopping = false;
           refreshSessions();
-          dequeue();
+          if (!switchingSession) dequeue();
+          break;
+        case "session_title":
+          refreshSessions();
+          if (!acceptsSessionEvent(p.session_id)) break;
+          sessionTitle = p.title;
           break;
         case "loaded":
-          messages = p.messages
-            .filter((m) => m.text.trim() !== "") // drop empty tool-only assistant turns
-            .map((m) =>
-              m.role === "user" || m.role === "assistant"
-                ? { role: m.role, text: m.text }
-                : { role: "note", text: m.text },
-            );
+          if (!acceptsSessionEvent(p.session_id)) break;
+          {
+          const restored = p.messages
+            .flatMap((m): Msg[] => {
+              if ((m.role === "user" || m.role === "assistant") && m.text.trim() !== "") {
+                return [{ role: m.role, text: m.text }];
+              }
+              if (m.role === "tool_group" && m.tools?.length) {
+                return [{ role: "tool_group", tools: m.tools, settled: true }];
+              }
+              if (m.role === "note" && m.text.trim() !== "") {
+                return [{ role: "note", text: m.text }];
+              }
+              if (m.role === "compact" && m.text.trim() !== "") {
+                return [{ role: "compact", text: m.text }];
+              }
+              return [];
+            });
+          const cached = sessionMessages.get(p.session_id);
+          messages = runningSessions.has(p.session_id) && cached?.length
+            ? cloneMessages(cached)
+            : hideCompletedToolActivity(restored);
+          sessionMessages.set(p.session_id, cloneMessages(messages));
+          }
           streamingIdx = null;
-          busy = false;
+          reasoningIdx = null;
+          busy = runningSessions.has(p.session_id);
           stopping = false;
+          switchingSession = false;
           refreshSessions(); // keep the session you just left visible in 最近会话
+          if (!busy) dequeue();
           break;
         case "error":
+          setSessionRunning(p.session_id, false);
+          if (!acceptsSessionEvent(p.session_id)) break;
+          settleCompletedToolGroups();
+          settleReasoning();
+          removeReasoningMessages();
+          messages = hideCompletedToolActivity(messages);
           streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
+          sessionMessages.set(p.session_id, cloneMessages(messages));
           busy = false;
           stopping = false;
+          switchingSession = false;
           break;
       }
       scrollDown();
@@ -586,35 +872,45 @@
   }
 
   async function chooseWorkspace() {
+    const previousSessionId = currentSessionId;
+    const previousTitle = sessionTitle;
+    const previousMessages = [...messages];
     try {
       const dir = await open({ directory: true, multiple: false });
       if (!dir || Array.isArray(dir)) return;
+      // Reject every event from the old project as soon as the switch starts.
+      currentSessionId = "";
+      messages = [];
+      sessionTitle = "新会话";
+      resetSessionUsage();
+      queued = [];
+      attached = [];
       const set = await invoke<string>("set_workspace", { path: dir });
       workspace = set;
       // Switching project starts a fresh conversation — the old one belongs to
       // the old workspace, and set_workspace already reloaded the agent into a
       // new session. Reset the conversation-scoped UI state to match.
-      messages = [];
-      sessionTitle = "新会话";
-      currentSessionId = "";
-      tokIn = 0;
-      tokOut = 0;
-      queued = [];
-      attached = [];
       messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
       refreshSessions();
     } catch (e) {
+      currentSessionId = previousSessionId;
+      sessionTitle = previousTitle;
+      messages = previousMessages;
+      restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `切换工作区失败：${e}` });
     }
   }
 
   async function dispatch(text: string, images: string[], shown: string) {
+    const targetSessionId = currentSessionId;
     messages.push({ role: "user", text: shown });
+    setSessionRunning(targetSessionId, true);
     busy = true;
     scrollDown();
     try {
-      await invoke("send_prompt", { text, images });
+      await invoke("send_prompt", { sessionId: targetSessionId, text, images });
     } catch (e) {
+      setSessionRunning(targetSessionId, false);
       messages.push({ role: "note", text: `发送失败：${e}` });
       busy = false;
       stopping = false;
@@ -623,15 +919,17 @@
   }
 
   async function stopGeneration() {
-    if (!busy || stopping) return;
+    if (!busy) return;
     stopping = true;
     // A stop applies to the active turn, so do not start queued follow-ups
     // after its cancellation event arrives.
     queued = [];
+    approvalsBySession.delete(currentSessionId);
+    questionsBySession.delete(currentSessionId);
     approval = null;
     userQuestion = null;
     try {
-      await invoke("stop_generation");
+      await invoke("stop_generation", { sessionId: currentSessionId });
     } catch (e) {
       stopping = false;
       messages.push({ role: "note", text: `停止失败：${e}` });
@@ -653,7 +951,9 @@
     // Images route through the vision pipeline; other files become @mentions.
     const images = attached.filter(isImage);
     const files = attached.filter((p) => !isImage(p));
-    const mentions = files.map((p) => `@${p}`).join(" ");
+    // File-picker paths can contain spaces. Quoted mentions keep each absolute
+    // path as one token for the backend's attachment expander.
+    const mentions = files.map((p) => `@"${p}"`).join(" ");
     const fullText = [text, mentions].filter(Boolean).join("\n");
     const shown = attached.length ? `${text}${text ? "\n" : ""}📎 ${attached.map(baseName).join(", ")}` : text;
     input = "";
@@ -689,6 +989,7 @@
   async function decide(decision: "deny" | "once" | "always") {
     if (!approval) return;
     const id = approval.id;
+    approvalsBySession.delete(approval.session_id);
     approval = null;
     try {
       await invoke("approve", { id, decision });
@@ -700,6 +1001,7 @@
   async function answerUserQuestion(answer: string | null) {
     if (!userQuestion) return;
     const id = userQuestion.id;
+    questionsBySession.delete(userQuestion.session_id);
     userQuestion = null;
     questionAnswer = "";
     try {
@@ -711,16 +1013,85 @@
 
   async function openSettings() {
     try {
-      const [loadedSettings, loadedLocation] = await Promise.all([
+      const [loadedSettings, loadedLocation, loadedCatalog] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ConfigLocation>("get_config_location"),
+        invoke<ModelCatalogResponse>("get_model_catalog"),
       ]);
       settings = loadedSettings;
       configLocation = loadedLocation;
+      modelCatalog = loadedCatalog;
       apiKeyInput = "";
+      vlApiKeyInput = "";
     } catch (e) {
       messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
+  }
+  function stashSessionQueue(sessionId: string) {
+    if (sessionId) {
+      sessionQueues.set(sessionId, [...queued]);
+      sessionMessages.set(sessionId, cloneMessages(messages));
+    }
+    queued = [];
+    approval = null;
+    userQuestion = null;
+  }
+  function restoreSessionQueue(sessionId: string) {
+    queued = [...(sessionQueues.get(sessionId) || [])];
+  }
+  function restoreSessionPrompts(sessionId: string) {
+    approval = approvalsBySession.get(sessionId) || null;
+    userQuestion = questionsBySession.get(sessionId) || null;
+    questionAnswer = "";
+  }
+  function cloneMessages(items: Msg[]): Msg[] {
+    return items.map((item) => item.role === "tool_group"
+      ? { ...item, tools: item.tools.map((tool) => ({ ...tool })) }
+      : { ...item });
+  }
+  function restoreSessionMessages(sessionId: string) {
+    messages = cloneMessages(sessionMessages.get(sessionId) || []);
+  }
+
+  async function refreshOpenRouterModels() {
+    catalogRefreshing = true;
+    try {
+      modelCatalog = await invoke<ModelCatalogResponse>("refresh_openrouter_models");
+    } catch (e) {
+      messages.push({ role: "note", text: `OpenRouter 模型目录刷新失败：${e}` });
+    }
+    catalogRefreshing = false;
+  }
+
+  async function applyModelPreset(provider: CatalogProvider, model: CatalogModel) {
+    if (!settings) return;
+    presetSaving = `${provider.id}/${model.model_id}`;
+    try {
+      const selected = await invoke<CatalogModel>("apply_model_preset", {
+        providerId: provider.id,
+        modelId: model.model_id,
+      });
+      settings.model = selected.model_id;
+      settings.base_url = selected.base_url;
+      settings.price_in = selected.price_in;
+      settings.price_out = selected.price_out;
+      settings.price_currency = selected.price_currency;
+      settings.available_models = provider.models.map((item) => item.model_id);
+      currentModel = selected.model_id;
+      models = settings.available_models;
+      priceIn = selected.price_in;
+      priceOut = selected.price_out;
+      priceCurrency = selected.price_currency;
+    } catch (e) {
+      messages.push({ role: "note", text: `应用模型预设失败：${e}` });
+    }
+    presetSaving = "";
+  }
+
+  function openPriceSource(url: string) {
+    invoke("open_url", { url }).catch((e) =>
+      messages.push({ role: "note", text: `打开价格来源失败：${e}` }),
+    );
   }
 
   async function openConfigFile() {
@@ -747,6 +1118,8 @@
     const updates: Record<string, string> = {
       model: settings.model,
       base_url: settings.base_url,
+      vl_model: settings.vl_model,
+      vl_base_url: settings.vl_base_url,
       reasoning_effort: settings.reasoning_effort,
       max_iterations: String(settings.max_iterations),
       max_tool_calls: String(settings.max_tool_calls),
@@ -756,16 +1129,20 @@
       context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),
       price_in: String(settings.price_in),
       price_out: String(settings.price_out),
+      price_currency: settings.price_currency,
     };
     if (apiKeyInput.trim()) updates.api_key = apiKeyInput.trim();
+    if (vlApiKeyInput.trim()) updates.vl_api_key = vlApiKeyInput.trim();
     try {
       await invoke("save_settings", { updates });
       priceIn = Number(settings.price_in) || 0; // reflect new rate immediately
       priceOut = Number(settings.price_out) || 0;
+      priceCurrency = settings.price_currency;
       settings = null;
       apiKeyInput = "";
+      vlApiKeyInput = "";
     } catch (e) {
-      messages.push({ role: "note", text: `Save failed: ${e}` });
+      messages.push({ role: "note", text: `保存设置失败：${e}` });
     }
     saving = false;
   }
@@ -839,18 +1216,25 @@
   let diffOpenFiles = $state<Record<string, string>>({}); // path -> loaded diff text
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
-  // Pin the active session to the top of 最近会话 so it's always findable.
+  let showRecent = $state(false);
   let showArchived = $state(false);
-  // Pin the active session to the top; hide archived ones unless toggled (the
-  // active session always stays visible even if archived).
-  const orderedSessions = $derived.by(() => {
-    const visible = sessions.filter(
-      (s) => showArchived || !s.archived || s.session_id === currentSessionId,
-    );
+  // Keep ordinary and archived conversations as two stable sections. The active
+  // conversation is pinned only inside its own section, never above the archive
+  // boundary.
+  const recentSessions = $derived.by(() => {
+    const visible = sessions.filter((s) => !s.archived);
     if (!currentSessionId) return visible;
     return [
       ...visible.filter((s) => s.session_id === currentSessionId),
       ...visible.filter((s) => s.session_id !== currentSessionId),
+    ];
+  });
+  const archivedSessions = $derived.by(() => {
+    const archived = sessions.filter((s) => s.archived);
+    if (!currentSessionId) return archived;
+    return [
+      ...archived.filter((s) => s.session_id === currentSessionId),
+      ...archived.filter((s) => s.session_id !== currentSessionId),
     ];
   });
   const archivedCount = $derived(sessions.filter((s) => s.archived).length);
@@ -956,6 +1340,8 @@
   async function refreshSessions() {
     try {
       sessions = await invoke<SessionRow[]>("list_sessions");
+      const current = sessions.find((session) => session.session_id === currentSessionId);
+      if (current) sessionTitle = current.title || "会话";
     } catch {
       /* index may not exist yet */
     }
@@ -964,34 +1350,86 @@
     sidebarOpen = !sidebarOpen;
   }
   async function newSession() {
+    if (switchingSession) return;
+    const previousSessionId = currentSessionId;
+    const previousTitle = sessionTitle;
+    const previousMessages = [...messages];
+    stashSessionQueue(previousSessionId);
+    switchingSession = true;
+    busy = false;
     messages = [];
     sessionTitle = "新会话";
     currentSessionId = "";
+    resetSessionUsage();
     try {
-      await invoke("new_session");
+      const id = await invoke<string>("new_session");
+      if (currentSessionId === "") {
+        currentSessionId = id;
+        restoreSessionQueue(id);
+        restoreSessionPrompts(id);
+        restoreSessionMessages(id);
+      }
     } catch (e) {
+      busy = false;
+      stopping = false;
+      switchingSession = false;
+      currentSessionId = previousSessionId;
+      sessionTitle = previousTitle;
+      messages = previousMessages;
+      restoreSessionQueue(previousSessionId);
+      restoreSessionPrompts(previousSessionId);
+      restoreSessionUsage(currentSessionId);
       messages.push({ role: "note", text: `新建会话失败：${e}` });
     }
   }
   async function resumeSession(id: string, title = "") {
-    busy = true;
+    if (switchingSession || id === currentSessionId) return;
+    const previousId = currentSessionId;
+    const previousTitle = sessionTitle;
+    stashSessionQueue(previousId);
+    switchingSession = true;
     sessionTitle = title || "会话";
     currentSessionId = id;
+    restoreSessionUsage(currentSessionId);
+    restoreSessionQueue(id);
+    restoreSessionPrompts(id);
+    restoreSessionMessages(id);
     try {
+      busy = runningSessions.has(id);
       await invoke("resume_session", { sessionId: id });
     } catch (e) {
       busy = false;
+      stopping = false;
+      switchingSession = false;
+      currentSessionId = previousId;
+      sessionTitle = previousTitle;
+      restoreSessionUsage(currentSessionId);
+      restoreSessionQueue(previousId);
+      restoreSessionPrompts(previousId);
       messages.push({ role: "note", text: `继续会话失败：${e}` });
     }
   }
   async function forkSession(id: string, title = "") {
-    busy = true;
+    if (switchingSession) return;
+    const previousSessionId = currentSessionId;
+    const previousTitle = sessionTitle;
+    stashSessionQueue(previousSessionId);
+    switchingSession = true;
+    busy = false;
     sessionTitle = title ? `${title}（分叉）` : "分叉";
+    currentSessionId = "";
+    resetSessionUsage();
     try {
       await invoke("fork_session", { sessionId: id });
-      messages.push({ role: "note", text: "已从该会话分叉出新会话。" });
     } catch (e) {
       busy = false;
+      stopping = false;
+      switchingSession = false;
+      currentSessionId = previousSessionId;
+      sessionTitle = previousTitle;
+      restoreSessionUsage(currentSessionId);
+      restoreSessionQueue(previousSessionId);
+      restoreSessionPrompts(previousSessionId);
       messages.push({ role: "note", text: `分叉失败：${e}` });
     }
   }
@@ -1082,7 +1520,7 @@
     else messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" });
   }
   function cmdUsage() {
-    const c = priceIn || priceOut ? ` · ≈¥${fmtCost(cost)}` : "";
+    const c = priceIn || priceOut ? ` · ≈${currencySymbol(priceCurrency)}${fmtCost(cost)}` : "";
     messages.push({ role: "note", text: `本会话用量：输入 ${tokIn} / 输出 ${tokOut} tokens${c}` });
   }
   async function cmdMcp() {
@@ -1194,35 +1632,61 @@
     </button>
 
     <div class="side-recents">
-      <div class="side-h">
-        最近会话
-        {#if archivedCount}
-          <button class="side-h-toggle" onclick={() => (showArchived = !showArchived)}>
-            {showArchived ? "隐藏归档" : `已归档 ${archivedCount}`}
-          </button>
-        {/if}
-      </div>
-      {#if sessions.length === 0}
-        <div class="side-empty">暂无会话</div>
-      {/if}
-      {#each orderedSessions as s}
-        <div class="recent-item" class:active={s.session_id === currentSessionId} class:archived={s.archived}>
-          <button class="recent-main" title={s.snippet || s.title} disabled={busy || !s.has_snapshot}
+      {#snippet sessionItem(s: SessionRow)}
+        <div class="recent-item" class:active={s.session_id === currentSessionId} class:running={runningSessions.has(s.session_id)} class:archived={s.archived}>
+          <button class="recent-main" title={s.snippet || s.title} disabled={switchingSession || !s.has_snapshot}
             onclick={() => resumeSession(s.session_id, s.title)}>
             <span class="recent-dot">●</span>
             <span class="recent-text">
               <span class="recent-title">{s.title || "（未命名）"}</span>
-              <span class="recent-when">{fmtWhen(s.updated_at)}{s.archived ? " · 已归档" : ""}</span>
+              <span class="recent-when">{runningSessions.has(s.session_id) ? "执行中" : fmtWhen(s.updated_at)}{s.archived ? " · 已归档" : ""}</span>
             </span>
           </button>
-          <button class="recent-act" title="从此处分叉新会话" disabled={busy || !s.has_snapshot}
+          <button class="recent-act" title="从此处分叉新会话" disabled={switchingSession || !s.has_snapshot}
             onclick={() => forkSession(s.session_id, s.title)} aria-label="分叉">⑂</button>
-          <button class="recent-act" title="打开会话日志 (JSONL)" disabled={busy}
+          <button class="recent-act" title="打开会话日志 (JSONL)"
             onclick={() => openSessionLog(s.session_id)} aria-label="打开日志">📄</button>
           <button class="recent-act" title={s.archived ? "取消归档" : "归档此会话"}
             onclick={() => archiveSession(s.session_id, !s.archived)} aria-label="归档">{s.archived ? "↩" : "🗄"}</button>
         </div>
-      {/each}
+      {/snippet}
+
+      <button class="side-recent-toggle" class:open={showRecent}
+        aria-expanded={showRecent} onclick={() => (showRecent = !showRecent)}>
+        <span class="side-recent-main">
+          <span class="side-recent-caret" aria-hidden="true">›</span>
+          <span>最近会话</span>
+        </span>
+        <span class="side-recent-count">{recentSessions.length}</span>
+      </button>
+      {#if showRecent}
+        <div class="side-recent-list">
+          {#if recentSessions.length === 0}
+            <div class="side-empty">{archivedCount ? "暂无最近会话" : "暂无会话"}</div>
+          {/if}
+          {#each recentSessions as s}
+            {@render sessionItem(s)}
+          {/each}
+        </div>
+      {/if}
+
+      {#if archivedCount}
+        <button class="side-archive-toggle" class:open={showArchived}
+          aria-expanded={showArchived} onclick={() => (showArchived = !showArchived)}>
+          <span class="side-archive-main">
+            <span class="side-archive-caret" aria-hidden="true">›</span>
+            <span>已归档</span>
+          </span>
+          <span class="side-archive-count">{archivedCount}</span>
+        </button>
+        {#if showArchived}
+          <div class="side-archived-list">
+            {#each archivedSessions as s}
+              {@render sessionItem(s)}
+            {/each}
+          </div>
+        {/if}
+      {/if}
     </div>
 
     <div class="side-foot">
@@ -1257,33 +1721,6 @@
     <header class="topbar">
       <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
       <span class="title">{sessionTitle}</span>
-      <div class="model-wrap">
-        <button class="model-pill" onclick={() => (modelMenuOpen = !modelMenuOpen)}
-          disabled={models.length === 0} title="切换模型">
-          {currentModel || header} ▾
-        </button>
-        {#if modelMenuOpen}
-          <button class="menu-backdrop" aria-label="关闭" onclick={() => (modelMenuOpen = false)}></button>
-          <div class="model-menu" role="menu">
-            {#each models as m}
-              <button class="model-opt" role="menuitemradio" aria-checked={m === currentModel}
-                onclick={() => selectModel(m)}>
-                <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
-                <span class="opt-name">{m}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      {#if sandboxMode}<span class="meta">{sandboxMode}</span>{/if}
-      <button
-        class="ws-pill"
-        class:warn={needsWorkspace}
-        onclick={chooseWorkspace}
-        title={needsWorkspace ? "当前在主目录（非项目），点击选择项目目录" : `工作区：${workspace}（点击切换）`}
-      >
-        📁 {needsWorkspace ? "选择项目目录" : wsName || "选择项目目录"}
-      </button>
       {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
       <span class="topbar-actions">
         <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">
@@ -1317,44 +1754,136 @@
         {:else if m.role === "assistant"}
           <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
         {:else if m.role === "note"}
-          <div class="msg note {noteTone(m.text)}">
-            <span class="note-ic" aria-hidden="true">{noteTone(m.text) === "err" ? "⚠" : "ℹ"}</span>
-            <span class="note-text">{m.text}</span>
-          </div>
-        {:else if m.role === "tool"}
-          <div class="tool" class:collapsed={m.collapsed} class:running={m.result === undefined}>
-            <button
-              class="tool-head"
-              onclick={() => toggleTool(m)}
-              disabled={m.result === undefined}
-              aria-expanded={m.result !== undefined && !m.collapsed}
-              title={m.result === undefined ? "运行中…" : m.collapsed ? "展开" : "折叠"}
-            >
-              <span class="tcaret" aria-hidden="true">{m.result === undefined ? "•" : m.collapsed ? "▸" : "▾"}</span>
-              <span class="tname">⚙ {m.name}</span>
-              {#if m.args}<code class="targs">{m.args}</code>{/if}
-              {#if m.result === undefined}
-                <span class="trunning">运行中…</span>
+          <div class="msg note">{m.text}</div>
+        {:else if m.role === "compact"}
+          <div class="msg compact"><span aria-hidden="true">◇</span>{m.text}</div>
+        {:else if m.role === "reasoning"}
+          <details class="reasoning-run" class:settled={m.settled}>
+            <summary>
+              <span class="reasoning-caret" aria-hidden="true">›</span>
+              <span class="reasoning-label">思考过程</span>
+              <span class="reasoning-status">{m.settled ? "查看" : "思考中…"}</span>
+            </summary>
+            <pre class="reasoning-content">{m.text}</pre>
+          </details>
+        {:else if m.role === "tool_group"}
+          <details class="tool-run" class:settled={m.settled} open={!m.settled}>
+            <summary>
+              <span class="tool-run-caret" aria-hidden="true">›</span>
+              <span class="tool-run-icon" aria-hidden="true">⌘</span>
+              <span class="tool-run-label">已执行 {m.tools.length} 个工具</span>
+              {#if toolGroupFailureCount(m) > 0}
+                <span class="tool-run-status error">{toolGroupFailureCount(m)} 个失败</span>
               {:else}
-                <span class="tstatus {toolOutcome(m.result)}">{toolStatusLabel(m.result)}</span>
+                <span class="tool-run-status">查看明细</span>
               {/if}
-            </button>
-            {#if m.result !== undefined && !m.collapsed}
-              {#if toolOutcome(m.result) === "empty"}
-                <pre class="tresult tempty">（命令无输出 · 退出码 0）</pre>
-              {:else}
-                <pre class="tresult">{m.result}</pre>
-              {/if}
-            {/if}
-          </div>
+            </summary>
+            <div class="tool-timeline">
+              {#each m.tools as tool}
+                <details class="tool-event"
+                  class:running={tool.result === undefined}
+                  class:error={tool.result !== undefined && toolOutcome(tool.result) === "err"}
+                >
+                  <summary>
+                    <span class="tool-event-caret" aria-hidden="true">›</span>
+                    <span class="tool-event-icon" aria-hidden="true">⚙</span>
+                    <span class="tname">{tool.name}</span>
+                    {#if tool.result === undefined}
+                      <span class="trunning">运行中</span>
+                    {:else}
+                      <span class="tstatus {toolOutcome(tool.result)}">{toolOutcome(tool.result) === "err" ? "失败" : "完成"}</span>
+                    {/if}
+                  </summary>
+                  {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
+                  {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
+                    <pre class="tool-detail tool-result">{tool.result}</pre>
+                  {/if}
+                </details>
+              {/each}
+            </div>
+          </details>
         {/if}
       {/each}
-      {#if busy && streamingIdx === null}
+      {#if busy && streamingIdx === null && reasoningIdx === null}
         <div class="thinking"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span> 思考中…</div>
       {/if}
     </div>
 
     <footer>
+      <div class="composer-meta">
+        <div class="model-wrap">
+          <button class="model-pill" onclick={() => { modeMenuOpen = false; reasoningMenuOpen = false; modelMenuOpen = !modelMenuOpen; }}
+            disabled={models.length === 0 || busy} title="切换模型">
+            {currentModel || header} ▾
+          </button>
+          {#if modelMenuOpen}
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modelMenuOpen = false)}></button>
+            <div class="model-menu" role="menu">
+              {#each models as m}
+                <button class="model-opt" role="menuitemradio" aria-checked={m === currentModel}
+                  onclick={() => selectModel(m)}>
+                  <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
+                  <span class="opt-name">{m}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <div class="reasoning-wrap">
+          <button class="reasoning-pill" onclick={() => { modeMenuOpen = false; modelMenuOpen = false; reasoningMenuOpen = !reasoningMenuOpen; }}
+            disabled={busy} title="切换 DeepSeek 思考模式">
+            思考：{reasoningLabel(reasoningEffort)} ▾
+          </button>
+          {#if reasoningMenuOpen}
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (reasoningMenuOpen = false)}></button>
+            <div class="model-menu reasoning-menu" role="menu">
+              {#each REASONING_EFFORTS as option}
+                <button class="model-opt" role="menuitemradio" aria-checked={option.id === reasoningEffort}
+                  onclick={() => selectReasoningEffort(option.id)}>
+                  <span class="opt-check">{option.id === reasoningEffort ? "✓" : ""}</span>
+                  <span class="opt-text">
+                    <span class="opt-name">{option.label}</span>
+                    <span class="opt-id">{option.desc}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+        <div class="approval-wrap">
+          <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
+            onclick={() => { modelMenuOpen = false; reasoningMenuOpen = false; modeMenuOpen = !modeMenuOpen; }}
+            title="权限模式（Claude Code 四态）">
+            {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
+          </button>
+          {#if modeMenuOpen}
+            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
+            <div class="approval-menu" role="menu">
+              {#each PERMISSION_MODES as opt}
+                <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === opt.id}
+                  onclick={() => selectMode(opt.id)}>
+                  <span class="opt-check">{permissionMode === opt.id ? "✓" : ""}</span>
+                  <span class="opt-text">
+                    <span class="opt-name">{modeIcon(opt.id)} {opt.label}</span>
+                    <span class="opt-id">{opt.desc}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+            {/if}
+        </div>
+        <button
+          class="ws-pill"
+          class:warn={needsWorkspace}
+          onclick={chooseWorkspace}
+          title={needsWorkspace ? "当前在主目录（非项目），点击选择项目目录" : `工作区：${workspace}（点击切换）`}
+        >
+          📁 {needsWorkspace ? "选择项目目录" : wsName || "选择项目目录"}
+        </button>
+        {#if tokIn || tokOut}
+          <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈"}{currencySymbol(priceCurrency)}{fmtCost(cost)}{/if}</span>
+        {/if}
+      </div>
       {#if queued.length}
         <div class="attachments">
           {#each queued as q, i}
@@ -1393,52 +1922,21 @@
           <button class="plain" onclick={chooseWorkspace}>选择项目目录</button>
         </div>
       {/if}
-      <div class="composer">
+      <div class="composer-row">
+        <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">📎</button>
         <textarea
           bind:value={input}
           onkeydown={onKey}
           oninput={() => { if (input.startsWith("/")) slashIdx = 0; }}
           onpaste={handlePaste}
-          placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行）"}
+          placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"}
           rows="2"
         ></textarea>
-        <div class="composer-bar">
-          <button class="iconbtn" title="添加文件/图片（也可 Ctrl+V 粘贴）" onclick={attachFiles} aria-label="添加文件">📎</button>
-          <div class="approval-wrap">
-            <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
-              onclick={() => (modeMenuOpen = !modeMenuOpen)}
-              title="权限模式（Claude Code 四态）">
-              {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
-            </button>
-            {#if modeMenuOpen}
-              <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
-              <div class="approval-menu" role="menu">
-                {#each PERMISSION_MODES as opt}
-                  <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === opt.id}
-                    onclick={() => selectMode(opt.id)}>
-                    <span class="opt-check">{permissionMode === opt.id ? "✓" : ""}</span>
-                    <span class="opt-text">
-                      <span class="opt-name">{modeIcon(opt.id)} {opt.label}</span>
-                      <span class="opt-id">{opt.desc}</span>
-                    </span>
-                  </button>
-                {/each}
-              </div>
-            {/if}
-          </div>
-          {#if tokIn || tokOut}
-            <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈¥"}{fmtCost(cost)}{/if}</span>
-          {/if}
-          <span class="composer-spacer"></span>
-          <span class="composer-hint">Enter 发送 · Shift+Enter 换行</span>
-          {#if busy}
-            <button class="stop-btn" onclick={stopGeneration}
-              disabled={stopping} title="停止生成" aria-label="停止生成">■</button>
-          {/if}
-          <button class="send-btn" onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
-            {busy ? "排队" : "发送"}
-          </button>
-        </div>
+        <button class="stop-btn" class:visible={busy} onclick={stopGeneration}
+          disabled={!busy} title={stopping ? "再次停止" : "停止生成"} aria-label="停止生成" tabindex={busy ? 0 : -1}>■</button>
+        <button onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
+          {busy ? "排队" : "发送"}
+        </button>
       </div>
     </footer>
   </section>
@@ -1657,7 +2155,7 @@
                 <code>{s.snippet}</code>
               </div>
               <div class="session-actions">
-                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={busy || !s.has_snapshot} title="继续此会话">继续</button>
+                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={switchingSession || !s.has_snapshot} title="继续此会话">继续</button>
                 <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="从此处分叉新会话">⑂ 分叉</button>
                 <button class="plain" onclick={() => openSessionLog(s.session_id)} title="打开会话日志 (JSONL)">日志</button>
                 <button class="plain" onclick={() => openSessionSnapshot(s.session_id)} disabled={!s.has_snapshot} title="打开会话快照">快照</button>
@@ -1732,10 +2230,92 @@
             {#each settings.available_models as m}<option value={m}>{m}</option>{/each}
           </select>
         </label>
+        <section class="model-catalog" aria-label="模型厂商目录">
+          <div class="catalog-head">
+            <div>
+              <strong>厂商官方直连目录</strong>
+              <p>这里的单价来自各厂商官网，选择后会填写该厂商接口、模型、费用和币种；显示的是当前公开输入/输出价，缓存、长上下文阶梯和限时价格会单独说明；API 密钥仍需自行配置。</p>
+            </div>
+          </div>
+          {#if modelCatalog}
+            {#each officialProviders as provider}
+              <div class="catalog-provider">
+                <h4>{provider.name}</h4>
+                <div class="catalog-models">
+                  {#each provider.models as model}
+                    <article class:active={settings.model === model.model_id} class="catalog-model">
+                      <div class="catalog-model-name">
+                        <strong>{model.display_name}</strong>
+                        <code>{model.model_id}</code>
+                      </div>
+                      <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
+                      <span class="catalog-price-source">{priceSourceName(model.price_source)}</span>
+                      <small class="catalog-audit-note">已按官网核验：{model.updated_at}</small>
+                      {#if model.pricing_note}
+                        <small class="catalog-pricing-note">{model.pricing_note}</small>
+                      {/if}
+                      <div class="catalog-model-actions">
+                        <button
+                          class="catalog-select"
+                          onclick={() => applyModelPreset(provider, model)}
+                          disabled={presetSaving === `${provider.id}/${model.model_id}`}
+                        >
+                          {presetSaving === `${provider.id}/${model.model_id}` ? "应用中…" : "使用官方直连"}
+                        </button>
+                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>官方价格来源</button>
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+            <div class="catalog-aggregator">
+              <div class="catalog-head">
+                <div>
+                  <strong>OpenRouter 聚合平台（可选）</strong>
+                  <p>按需加载全量模型。这里显示的是经 OpenRouter 调用时的渠道价格，不是原厂官方直连价。</p>
+                </div>
+                <button class="catalog-refresh" onclick={refreshOpenRouterModels} disabled={catalogRefreshing}>
+                  {catalogRefreshing ? "加载中…" : "加载 OpenRouter 聚合模型"}
+                </button>
+              </div>
+              {#if openRouterProvider}
+                <div class="catalog-models">
+                  {#each openRouterProvider.models as model}
+                    <article class:active={settings.model === model.model_id} class:aggregator={true} class="catalog-model">
+                      <div class="catalog-model-name">
+                        <strong>{model.display_name}</strong>
+                        <code>{model.model_id}</code>
+                      </div>
+                      <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
+                      <span class="catalog-price-source aggregator">{priceSourceName(model.price_source)}，非厂商官方报价</span>
+                      <div class="catalog-model-actions">
+                        <button
+                          class="catalog-select"
+                          onclick={() => applyModelPreset(openRouterProvider, model)}
+                          disabled={presetSaving === `${openRouterProvider.id}/${model.model_id}`}
+                        >
+                          {presetSaving === `${openRouterProvider.id}/${model.model_id}` ? "应用中…" : "使用 OpenRouter 渠道"}
+                        </button>
+                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>渠道价格来源</button>
+                      </div>
+                    </article>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {:else}
+            <p class="catalog-empty">正在读取模型厂商目录…</p>
+          {/if}
+        </section>
         <p class="settings-note">权限（沙箱 / 审批）由顶部输入框旁的「权限模式」控制：规划 / 默认 / 自动接受编辑 / 全权放行。</p>
         <label>
-          <span>推理强度</span>
-          <input bind:value={settings.reasoning_effort} placeholder="auto | low | medium | high | max | off" />
+          <span>思考程度</span>
+          <select bind:value={settings.reasoning_effort}>
+            {#each REASONING_EFFORTS as option}
+              <option value={option.id}>{option.label}</option>
+            {/each}
+          </select>
         </label>
         <label>
           <span>模型调用上限</span>
@@ -1762,13 +2342,21 @@
           <input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} />
         </label>
         <label>
-          <span>输入单价 ¥/百万</span>
+          <span>输入单价 {currencySymbol(settings.price_currency)}/百万</span>
           <input type="number" min="0" step="0.01" bind:value={settings.price_in} placeholder="0 = 不计费" />
         </label>
         <label>
-          <span>输出单价 ¥/百万</span>
+          <span>输出单价 {currencySymbol(settings.price_currency)}/百万</span>
           <input type="number" min="0" step="0.01" bind:value={settings.price_out} placeholder="0 = 不计费" />
         </label>
+        <label>
+          <span>价格币种</span>
+          <select bind:value={settings.price_currency}>
+            <option value="CNY">人民币（CNY）</option>
+            <option value="USD">美元（USD）</option>
+          </select>
+        </label>
+        <p class="settings-note price-note">当前费用来源：{currentPriceSourceName()}</p>
         <label>
           <span>Base URL</span>
           <input bind:value={settings.base_url} />
@@ -1779,6 +2367,25 @@
             type="password"
             bind:value={apiKeyInput}
             placeholder={settings.has_api_key ? `保持当前（${settings.api_key_masked}）` : "设置 API 密钥"}
+          />
+        </label>
+        <p class="settings-note">
+          图片附件会发送到下面的视觉解析模型。接口地址或密钥留空时，会沿用上面的主模型配置。
+        </p>
+        <label>
+          <span>图片/文件解析模型</span>
+          <input bind:value={settings.vl_model} placeholder="例如：qwen3.7-plus" />
+        </label>
+        <label>
+          <span>图片/文件解析接口</span>
+          <input bind:value={settings.vl_base_url} placeholder="留空则沿用主模型接口" />
+        </label>
+        <label>
+          <span>解析接口密钥</span>
+          <input
+            type="password"
+            bind:value={vlApiKeyInput}
+            placeholder={settings.has_vl_api_key ? `保持当前（${settings.vl_api_key_masked}）` : "留空则沿用主模型密钥"}
           />
         </label>
         <div class="abtns">

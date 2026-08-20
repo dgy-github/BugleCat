@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use ncx_tools::decode_text;
 use regex::Regex;
 use serde_json::{json, Value};
 
@@ -21,12 +22,15 @@ const IGNORE_DIRS: &[&str] = &[
     "target",
     "node_modules",
     ".ncx",
+    ".nanocodex",
+    ".worktrees",
     "dist",
     ".venv",
     "__pycache__",
 ];
 /// Safety caps so a search can't run away on a giant tree.
 const MAX_FILES: usize = 20_000;
+const MAX_ENTRIES: usize = 100_000;
 const MAX_FILE_BYTES: usize = 2_000_000;
 const DEFAULT_MAX_RESULTS: usize = 200;
 
@@ -35,14 +39,21 @@ const DEFAULT_MAX_RESULTS: usize = 200;
 pub fn walk_files(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    let mut visited = 0usize;
+    'walk: while let Some(dir) = stack.pop() {
         if out.len() >= MAX_FILES {
             break;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
         };
-        for entry in rd.flatten() {
+        let mut entries = rd.flatten().collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
+        for entry in entries.into_iter().rev() {
+            visited += 1;
+            if visited > MAX_ENTRIES {
+                break 'walk;
+            }
             let p = entry.path();
             let Ok(ft) = entry.file_type() else { continue };
             if ft.is_dir() {
@@ -59,6 +70,7 @@ pub fn walk_files(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
+    out.sort_by(|left, right| rel_slash(root, left).cmp(&rel_slash(root, right)));
     out
 }
 
@@ -111,6 +123,7 @@ pub fn grep(
     path_glob: Option<&str>,
     max_results: usize,
 ) -> Result<String, String> {
+    let max_results = max_results.clamp(1, 1_000);
     let re = Regex::new(pattern).map_err(|e| format!("invalid regex: {e}"))?;
     let path_re = path_glob.map(glob_to_regex);
     let mut hits: Vec<String> = Vec::new();
@@ -135,13 +148,13 @@ pub fn grep(
         let Ok(bytes) = std::fs::read(&f) else {
             continue;
         };
-        let Ok(text) = std::str::from_utf8(&bytes) else {
+        let Ok(decoded) = decode_text(&bytes) else {
             continue;
         }; // skip binary
         scanned += 1;
-        for (n, line) in text.lines().enumerate() {
+        for (n, line) in decoded.text.lines().enumerate() {
             if re.is_match(line) {
-                let shown = if line.len() > 300 { &line[..300] } else { line };
+                let shown = truncate_chars(line, 300);
                 hits.push(format!("{rel}:{}: {}", n + 1, shown.trim_end()));
                 if hits.len() >= max_results {
                     break;
@@ -163,6 +176,13 @@ pub fn grep(
     Ok(out)
 }
 
+fn truncate_chars(text: &str, max_chars: usize) -> &str {
+    match text.char_indices().nth(max_chars) {
+        Some((index, _)) => &text[..index],
+        None => text,
+    }
+}
+
 /// Literal text search with the same result contract as [`grep`].
 pub fn grep_literal(
     root: &Path,
@@ -175,6 +195,7 @@ pub fn grep_literal(
 
 /// glob: filenames matching a pattern → newline list of `rel/path` (capped).
 pub fn glob(root: &Path, pattern: &str, max_results: usize) -> String {
+    let max_results = max_results.clamp(1, 1_000);
     let re = glob_to_regex(pattern);
     let mut hits: Vec<String> = Vec::new();
     for f in walk_files(root) {
@@ -192,6 +213,33 @@ pub fn glob(root: &Path, pattern: &str, max_results: usize) -> String {
         hits.sort();
         hits.join("\n")
     }
+}
+
+/// Recursively find files by exact basename or path substring. Results are
+/// workspace-relative, normalized with forward slashes, sorted, and bounded.
+pub fn find_files_by_name(
+    root: &Path,
+    query: &str,
+    exact: bool,
+    max_results: usize,
+) -> Vec<String> {
+    let query_folded = query.to_lowercase();
+    let mut matches = walk_files(root)
+        .into_iter()
+        .filter_map(|path| {
+            let relative = rel_slash(root, &path);
+            let matched = if exact {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().to_lowercase() == query_folded)
+            } else {
+                relative.to_lowercase().contains(&query_folded)
+            };
+            matched.then_some(relative)
+        })
+        .collect::<Vec<_>>();
+    matches.sort();
+    matches.truncate(max_results.clamp(1, MAX_FILES));
+    matches
 }
 
 // ── tools ─────────────────────────────────────────────────────────────────────
@@ -319,6 +367,78 @@ impl Tool for GlobTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
         glob(&ctx.workspace, pattern, max)
+    }
+}
+
+/// `find_files` — recursive, literal filename discovery without glob syntax.
+pub struct FindFilesTool;
+
+#[async_trait(?Send)]
+impl Tool for FindFilesTool {
+    fn name(&self) -> &str {
+        "find_files"
+    }
+
+    fn description(&self) -> &str {
+        "Recursively find files by literal filename or path substring. Use this when a path is \
+         incomplete, a file is nested deeply, or glob syntax is unnecessary. Exact mode matches \
+         basenames only. The scan skips .git, target, node_modules, dist, and virtual environments."
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Literal filename or path fragment to find."
+                },
+                "exact": {
+                    "type": "boolean",
+                    "description": "Match the complete basename (case-insensitive) instead of a path substring."
+                },
+                "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum paths returned (default 100)."
+                }
+            },
+            "required": ["query"]
+        })
+    }
+
+    fn read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        let Some(query) = args.get("query").and_then(Value::as_str) else {
+            return "Error: 'query' is required and must be a string.".into();
+        };
+        if query.trim().is_empty() {
+            return "Error: 'query' must not be empty.".into();
+        }
+        if !ctx.policy.can_read(&ctx.workspace) {
+            return "Error: reading the workspace is not allowed under the sandbox policy.".into();
+        }
+        let exact = args.get("exact").and_then(Value::as_bool).unwrap_or(false);
+        let max_results = args
+            .get("max_results")
+            .and_then(Value::as_u64)
+            .unwrap_or(100)
+            .clamp(1, 1_000) as usize;
+        let mut matches = find_files_by_name(&ctx.workspace, query, exact, max_results + 1);
+        let truncated = matches.len() > max_results;
+        matches.truncate(max_results);
+        json!({
+            "query": query,
+            "exact": exact,
+            "matches": matches,
+            "count": matches.len(),
+            "truncated": truncated
+        })
+        .to_string()
     }
 }
 
@@ -503,12 +623,84 @@ mod tests {
     }
 
     #[test]
+    fn grep_finds_gb18030_chinese_text_in_deep_directory() {
+        let d = fixture("gb18030");
+        let nested = d.join("中文目录/第二层/第三层");
+        std::fs::create_dir_all(&nested).unwrap();
+        // “中文内容” encoded as GB18030/GBK, followed by a newline.
+        std::fs::write(
+            nested.join("旧编码.txt"),
+            [0xD6, 0xD0, 0xCE, 0xC4, 0xC4, 0xDA, 0xC8, 0xDD, b'\n'],
+        )
+        .unwrap();
+
+        let out = grep_literal(&d, "中文内容", None, 200).unwrap();
+
+        assert!(out.contains("中文目录/第二层/第三层/旧编码.txt:1"), "{out}");
+    }
+
+    #[test]
+    fn grep_truncates_long_unicode_lines_without_panicking() {
+        let d = fixture("unicode_truncate");
+        std::fs::write(d.join("src/chinese.txt"), "中".repeat(400)).unwrap();
+
+        let out = grep(&d, "中", None, 200).unwrap();
+
+        assert!(out.contains("src/chinese.txt:1"), "{out}");
+    }
+
+    #[test]
     fn glob_lists_rs_files_skipping_ignored() {
         let d = fixture("glob");
         let out = glob(&d, "**/*.rs", 200);
         assert!(out.contains("src/main.rs"));
         assert!(out.contains("src/util.rs"));
         assert!(!out.contains("junk.rs")); // target/ ignored
+    }
+
+    #[tokio::test]
+    async fn find_files_recurses_through_chinese_paths_and_skips_generated_dirs() {
+        use ncx_sandbox::{SandboxPolicy, READ_ONLY};
+
+        let d = fixture("find_files");
+        std::fs::create_dir_all(d.join("中文目录/二级/三级")).unwrap();
+        std::fs::create_dir_all(d.join(".nanocodex/checkpoints/snapshot")).unwrap();
+        std::fs::write(d.join("中文目录/二级/三级/配置文件.toml"), "x=1").unwrap();
+        std::fs::write(d.join("target/配置文件.toml"), "ignored=1").unwrap();
+        std::fs::write(
+            d.join(".nanocodex/checkpoints/snapshot/配置文件.toml"),
+            "ignored=2",
+        )
+        .unwrap();
+        let ctx = ToolContext::new(d.clone(), SandboxPolicy::new(READ_ONLY, &d));
+
+        let out = FindFilesTool
+            .execute(&ctx, &json!({"query": "配置文件.toml", "exact": true}))
+            .await;
+
+        assert!(out.contains("中文目录/二级/三级/配置文件.toml"), "{out}");
+        assert!(!out.contains("target/配置文件.toml"), "{out}");
+        assert!(!out.contains(".nanocodex"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn find_files_reports_when_results_are_truncated() {
+        use ncx_sandbox::{SandboxPolicy, READ_ONLY};
+
+        let d = fixture("find_files_truncated");
+        for index in 0..3 {
+            std::fs::write(d.join(format!("src/match-{index}.txt")), "x").unwrap();
+        }
+        let ctx = ToolContext::new(d.clone(), SandboxPolicy::new(READ_ONLY, &d));
+
+        let out = FindFilesTool
+            .execute(&ctx, &json!({"query": "match-", "max_results": 2}))
+            .await;
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(parsed["count"], 2);
+        assert_eq!(parsed["truncated"], true);
+        assert_eq!(parsed["matches"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

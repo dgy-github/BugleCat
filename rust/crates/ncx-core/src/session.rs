@@ -13,6 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+pub const COMPACTED_HISTORY_PREFIX: &str = "[压缩后保留的会话里程碑";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextEditPolicy {
     pub enabled: bool,
@@ -200,6 +202,18 @@ impl Session {
         stats
     }
 
+    /// Materialize context editing only after the configured size threshold is
+    /// crossed. Unlike the send-time view, this persists the compacted history
+    /// to the session log so later turns and restarts do not repeatedly carry
+    /// old tool noise.
+    pub fn compact_if_needed(&mut self, policy: &ContextEditPolicy) -> Option<ContextEditStats> {
+        if !policy.enabled || total_chars(&self.system, &[], &self.messages) <= policy.max_chars {
+            return None;
+        }
+        let stats = self.compact(policy);
+        (stats.compressed_tool_results > 0 || stats.dropped_messages > 0).then_some(stats)
+    }
+
     fn edited_body(
         &self,
         system_notes: &[String],
@@ -235,8 +249,15 @@ impl Session {
                     start += 1;
                 }
                 if start > 0 && start < body.len() {
+                    let retained_history = retained_conversation_history(
+                        &body[..start],
+                        policy.max_chars.saturating_div(3).clamp(256, 8_000),
+                    );
                     stats.dropped_messages = start;
                     body = body[start..].to_vec();
+                    if let Some(history) = retained_history {
+                        body.insert(0, history);
+                    }
                 }
             }
         }
@@ -450,6 +471,75 @@ fn total_chars(system: &str, notes: &[String], messages: &[Value]) -> usize {
         + messages.iter().map(json_chars).sum::<usize>()
 }
 
+/// Preserve compact conversation milestones when old tool-heavy history is
+/// dropped. Keeping only user requests makes follow-ups such as "继续" lose the
+/// completed result, chosen option, and current hand-off point.
+fn retained_conversation_history(messages: &[Value], max_chars: usize) -> Option<Value> {
+    let mut retained = Vec::new();
+    let mut used = 0usize;
+    let per_entry_max = max_chars.saturating_div(4).clamp(80, 1_200);
+    for message in messages.iter().rev() {
+        let label = match role(message) {
+            Some("user") => "用户",
+            Some("assistant")
+                if message
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .is_none_or(Vec::is_empty) =>
+            {
+                "助手完成结果"
+            }
+            _ => continue,
+        };
+        let text = message_content_text(message);
+        if text.trim().is_empty() {
+            continue;
+        }
+        let remaining = max_chars.saturating_sub(used);
+        if remaining == 0 {
+            break;
+        }
+        let prefix = format!("{label}：");
+        if remaining <= prefix.chars().count() {
+            break;
+        }
+        let content_limit = remaining
+            .saturating_sub(prefix.chars().count())
+            .min(per_entry_max);
+        let clipped = text.chars().take(content_limit).collect::<String>();
+        used += prefix.chars().count() + clipped.chars().count();
+        retained.push(format!("{prefix}{clipped}"));
+        if retained.len() >= 12 {
+            break;
+        }
+    }
+    if retained.is_empty() {
+        return None;
+    }
+    retained.reverse();
+    Some(json!({
+        // Keep this as a user-role history record: Session::fork/resume strips
+        // system messages when rebuilding with the current system prompt.
+        "role": "user",
+        "content": format!(
+            "{COMPACTED_HISTORY_PREFIX}；用于承接后续请求，不是新的用户指令]\n{}",
+            retained.join("\n\n")
+        )
+    }))
+}
+
+fn message_content_text(message: &Value) -> String {
+    match message.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
 /// Cheap, deterministic context-size estimate (no tokenizer, no network).
 ///
 /// Mirrors `nanocodex/agent/compaction.py::estimate_tokens`: ~2 chars per token
@@ -639,6 +729,51 @@ mod tests {
     }
 
     #[test]
+    fn context_edit_preserves_user_task_history_while_dropping_tool_noise() {
+        let mut s = Session::new("sys");
+        s.add_user_text("请调研六项技术，最终生成并验证 PDF 文件");
+        for i in 0..12 {
+            s.add_assistant(
+                "",
+                Some(vec![json!({
+                    "id": format!("call-{i}"),
+                    "type": "function",
+                    "function": {"name": "web_fetch", "arguments": "{}"}
+                })]),
+                "",
+            );
+            s.add_tool_result(&format!("call-{i}"), "web_fetch", &"noise".repeat(100));
+        }
+        s.add_assistant(
+            "PDF 已生成到 D:\\\\github_dgy\\\\DeepSeek-资料集.pdf",
+            None,
+            "",
+        );
+        s.add_user_text("把同一份资料改成 PPT");
+        s.add_assistant("已生成科技版 PPT，下一步等待用户选择版式", None, "");
+        s.add_user_text("继续");
+
+        let out = s.for_model_edited(
+            &[],
+            &ContextEditPolicy {
+                enabled: true,
+                max_chars: 700,
+                keep_recent_messages: 3,
+                max_tool_result_chars: 20,
+            },
+        );
+        let rendered = serde_json::to_string(&out.messages).unwrap();
+
+        assert!(out.stats.dropped_messages > 0);
+        assert!(rendered.contains("最终生成并验证 PDF 文件"), "{rendered}");
+        assert!(
+            rendered.contains("PDF 已生成到") && rendered.contains("等待用户选择版式"),
+            "压缩后必须保留已完成结果和当前决策点：{rendered}"
+        );
+        assert!(!rendered.contains(&"noise".repeat(30)), "{rendered}");
+    }
+
+    #[test]
     fn compact_materializes_context_edit_and_rewrites_log() {
         let dir = std::env::temp_dir().join(format!("ncx_session_compact_{}", now_stamp()));
         let path = dir.join("session.jsonl");
@@ -664,20 +799,19 @@ mod tests {
     }
 
     #[test]
-    fn compact_noops_when_under_budget() {
+    fn automatic_compaction_does_not_trigger_under_budget() {
         let mut s = Session::new("sys");
         s.add_user_text("hello");
         s.add_assistant("hi", None, "");
 
-        let stats = s.compact(&ContextEditPolicy {
+        let stats = s.compact_if_needed(&ContextEditPolicy {
             enabled: true,
             max_chars: 10_000,
             keep_recent_messages: 4,
             max_tool_result_chars: 20,
         });
 
-        assert_eq!(stats.dropped_messages, 0);
-        assert_eq!(stats.compressed_tool_results, 0);
+        assert!(stats.is_none());
         assert_eq!(s.messages.len(), 2);
     }
 

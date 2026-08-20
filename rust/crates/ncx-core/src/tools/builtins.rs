@@ -31,7 +31,35 @@ impl Tool for UpdatePlanTool {
         let Some(plan) = args.get("plan").and_then(|v| v.as_array()) else {
             return "Error: 'plan' is required and must be an array.".into();
         };
+        let active_turn = ctx.active_turn_id.get();
+        if active_turn.is_some() && ctx.plan_turn_id.get() != active_turn {
+            ctx.plan.borrow_mut().clear();
+        }
+        let current = ctx.plan.borrow();
+        let missing_unfinished = current
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.get("status").and_then(Value::as_str),
+                    Some("pending" | "in_progress")
+                )
+            })
+            .filter_map(|item| item.get("step").and_then(Value::as_str))
+            .filter(|step| {
+                !plan
+                    .iter()
+                    .any(|item| item.get("step").and_then(Value::as_str) == Some(*step))
+            })
+            .collect::<Vec<_>>();
+        if !missing_unfinished.is_empty() {
+            return format!(
+                "Error: cannot remove unfinished plan steps: {}. Keep them until they are completed.",
+                missing_unfinished.join(", ")
+            );
+        }
+        drop(current);
         *ctx.plan.borrow_mut() = plan.clone();
+        ctx.plan_turn_id.set(active_turn);
         let n = plan.len();
         format!("Plan updated ({n} steps).")
     }
@@ -55,6 +83,22 @@ impl ShellTool {
         }
         // workspace-write: escalate only if the workdir itself isn't writable.
         !ctx.policy.can_write(workdir)
+    }
+
+    #[cfg(windows)]
+    fn incompatible_windows_syntax(command: &str) -> bool {
+        if command.contains("<<") {
+            return true;
+        }
+        command.split_whitespace().any(|token| {
+            matches!(
+                token
+                    .trim_matches(|c: char| "|&;()\"'".contains(c))
+                    .to_ascii_lowercase()
+                    .as_str(),
+                "tail" | "head" | "wc"
+            )
+        })
     }
 }
 
@@ -85,6 +129,10 @@ impl Tool for ShellTool {
         let Some(command) = args.get("command").and_then(|v| v.as_str()) else {
             return "Error: 'command' is required and must be a string.".into();
         };
+        #[cfg(windows)]
+        if ShellTool::incompatible_windows_syntax(command) {
+            return "Error: Windows shell is cmd.exe and does not support heredoc (<<) or Unix tail/head/wc commands. Write multiline code to a temporary script with apply_patch, use PowerShell Get-Content -Tail/Select-Object, or run a single-line command. Do not retry the same syntax.".into();
+        }
         let workdir = resolve_shell_workdir(ctx, args);
         if !workdir.exists() {
             return format!(

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1";
 pub const DEFAULT_MODEL: &str = "deepseek-chat";
 pub const DEFAULT_MODELS: &[&str] = &["deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"];
+pub const VALID_PRICE_CURRENCIES: &[&str] = &["CNY", "USD"];
 
 pub const VALID_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
 pub const VALID_APPROVAL_POLICIES: &[&str] = &["untrusted", "on-failure", "on-request", "never"];
@@ -105,6 +106,9 @@ pub struct Config {
     /// user's currency. 0 = unknown (the GUI then shows only token counts).
     pub price_in: f64,
     pub price_out: f64,
+    /// Currency used for local cost estimates. Kept in the provider's original
+    /// currency so no unstable exchange-rate conversion is needed.
+    pub price_currency: String,
     pub hooks: Vec<HookConfig>,
     /// MCP servers loaded from `~/.nanocodex/mcp.toml`.
     pub mcp_servers: Vec<McpServerConfig>,
@@ -144,6 +148,7 @@ impl Default for Config {
             available_models: DEFAULT_MODELS.iter().map(|s| s.to_string()).collect(),
             price_in: 0.0,
             price_out: 0.0,
+            price_currency: "CNY".to_string(),
             hooks: vec![],
             mcp_servers: vec![],
         }
@@ -176,6 +181,12 @@ impl Config {
             return Err(ConfigError(format!(
                 "Invalid permission_mode {:?}; expected one of {:?}.",
                 self.permission_mode, VALID_PERMISSION_MODES
+            )));
+        }
+        if !VALID_PRICE_CURRENCIES.contains(&self.price_currency.as_str()) {
+            return Err(ConfigError(format!(
+                "Invalid price_currency {:?}; expected one of {:?}.",
+                self.price_currency, VALID_PRICE_CURRENCIES
             )));
         }
         if !(1..=128).contains(&self.max_parallel_tool_calls) {

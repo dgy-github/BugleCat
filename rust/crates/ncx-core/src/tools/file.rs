@@ -7,7 +7,8 @@ impl Tool for ReadFileTool {
         "read_file"
     }
     fn description(&self) -> &str {
-        "Read a UTF-8 text file and return its contents as 'LINE| TEXT'. Use \
+        "Read a text file and return its contents as 'LINE| TEXT'. Automatically decodes UTF-8, \
+         UTF-8 BOM, UTF-16, GB18030/GBK, and Windows-1252 while rejecting binary files. Use \
          'offset' (1-indexed) and 'limit' for large files."
     }
     fn parameters(&self) -> Value {
@@ -52,9 +53,16 @@ impl Tool for ReadFileTool {
             Ok(b) => b,
             Err(e) => return format!("Error reading file: {e}"),
         };
-        match std::str::from_utf8(&raw) {
-            Ok(text) => rf::render(path, text, offset, limit),
-            Err(_) => format!("Error: cannot read non-UTF-8 file {path}."),
+        match decode_text(&raw) {
+            Ok(decoded) => {
+                let rendered = rf::render(path, &decoded.text, offset, limit);
+                if decoded.encoding.is_plain_utf8() {
+                    rendered
+                } else {
+                    format!("[decoded as {}]\n{rendered}", decoded.encoding.label())
+                }
+            }
+            Err(reason) => format!("Error: cannot read text file {path}: {reason}."),
         }
     }
 }
