@@ -1594,6 +1594,50 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_stays_collapsed_and_bounded_while_streaming() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("REASONING_DISPLAY_MAX_CHARS"));
+        assert!(app.contains("appendReasoning(m.text, p.text)"));
+        assert!(app.contains("<details class=\"reasoning-run\" class:settled={m.settled}>") );
+        assert!(!app.contains(
+            "<details class=\"reasoning-run\" class:settled={m.settled} open={!m.settled}>"
+        ));
+        assert!(app.contains("<pre class=\"reasoning-content\">{m.text}</pre>"));
+    }
+
+    #[test]
+    fn completed_turn_removes_transient_reasoning_cards() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function removeReasoningMessages()"));
+        assert!(app.contains("removeReasoningMessages();\n          messages = hideCompletedToolActivity(messages);"));
+        assert!(app.contains("case \"done\":"));
+        assert!(app.contains("case \"error\":"));
+        assert!(app.contains("sessionMessages.set(p.session_id, cloneMessages(messages));"));
+        assert!(app.contains("message.role !== \"reasoning\""));
+        assert!(app.contains("message.role !== \"tool_group\""));
+    }
+
+    #[test]
+    fn completed_turn_keeps_prior_history_and_only_its_final_conclusion() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("function keepConversationConclusions(finalText: string)"));
+        assert!(app.contains("if (pendingAnswer) compacted.push(pendingAnswer);"));
+        assert!(app.contains("compacted.push({ ...message });"));
+        assert!(app.contains("pendingAnswer = { ...message };"));
+        assert!(app.contains("keepConversationConclusions(p.final_text);"));
+    }
+
+    #[test]
+    fn stop_button_remains_retryable_until_turn_finishes() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("if (!busy) return;"));
+        assert!(app.contains(
+            "disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"
+        ));
+        assert!(!app.contains("if (!busy || stopping) return;"));
+    }
+
+    #[test]
     fn automatic_context_compaction_is_visible_and_session_scoped() {
         let app = include_str!("../../src/App.svelte");
         let css = include_str!("../../src/app.css");

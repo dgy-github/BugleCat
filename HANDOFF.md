@@ -300,7 +300,7 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 ## 2026-08-19 DeepSeek 思考过程恢复显示
 - 根因：`ncx-provider` 已解析并持有 `reasoning_content`，但 `ncx-core::Provider::chat_streaming` 只向上层暴露正文回调，DeepSeek 适配器把 reasoning 回调写成 `|_| {}`，GUI 因而永远收不到思考内容。
 - 新增独立 `StreamDelta::Reasoning` → `LoopEvent::ReasoningDelta` → `UiEvent::ReasoningDelta` 事件链，且所有事件继续绑定 `session_id`。
-- 前端运行时自动展开“思考过程”，本轮模型响应结束后折叠保留、可手动查看；它与工具日志分开，工具输入/结果和历史恢复过滤规则不变。
+- 前端“思考过程”始终默认折叠、可手动查看；仅保留最近 4000 字并使用纯文本渲染，避免长推理逐 token Markdown 重排拖卡界面。它与工具日志分开，工具输入/结果和历史恢复过滤规则不变。
 - 验证：`ncx-core` 197 项、`ncx-gui` 38 项、Vite 生产构建全部通过。
 ## 2026-08-19 自动上下文压缩持久化
 - 之前 `for_model_edited` 只构造临时发送视图，完整工具噪声仍写入日志/快照；长会话每轮都会重复裁剪，没有真正的自动压缩触发。
@@ -308,3 +308,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 压缩保留用户要求、助手完成结果、文件路径、当前计划和最近消息；清理旧工具调用噪声。内部压缩摘要不计作用户问数，历史恢复只显示淡色压缩标记。
 - 新增 session-scoped `ContextCompacted` UI 事件，显示压缩前后字符数、清理消息数和工具结果数；后台并发会话不会串事件。
 - 验证：`ncx-core` 198 项、`ncx-gui` 40 项、Vite 生产构建全部通过。
+
+## 2026-08-19 长思考卡顿与停止按钮
+- 根因一：思考流运行时强制展开，每个增量都重新做 Markdown 渲染；长链路会持续放大 DOM 和主线程开销。
+- 根因二：点击停止后按钮被 `stopping` 状态禁用；即使后端取消已按会话直接触发，界面仍让用户感觉无法再次停止。
+- 现在思考默认折叠、纯文本、最多保留最近 4000 字并限制展开高度；停止按钮在任务真正结束前保持可点击，可重复发送当前会话的直接取消请求。
+- 完成态进一步按整个会话逐轮收口：执行中可临时显示思考和中间播报；收到 `done` 后，每一轮都保留用户消息和该轮最后的正式回答，清掉各轮中间播报，而不是只整理或只保留最后一轮。

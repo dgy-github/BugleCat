@@ -361,12 +361,17 @@ header {
 .reasoning-status { color: var(--ink-4); font-size: var(--fs-xs); }
 .reasoning-content {
   max-width: 78%;
+  max-height: 18rem;
+  overflow: auto;
   margin: 0.12rem 0 0.38rem 1.14rem;
   padding: 0.5rem 0.68rem;
   border-left: 2px solid var(--line);
   color: var(--ink-3);
   font-size: var(--fs-sm);
   line-height: var(--lh-body);
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .reasoning-content > :first-child { margin-top: 0; }
 .reasoning-content > :last-child { margin-bottom: 0; }

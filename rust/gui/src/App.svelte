@@ -129,6 +129,8 @@
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
   let busy = $state(false);
   let reasoningIdx = $state<number | null>(null);
+  const REASONING_DISPLAY_MAX_CHARS = 4000;
+  const REASONING_OMITTED = "\n\n…较长思考已省略，仅保留最近内容…\n\n";
   let runningSessions = $state(new Set<string>());
   let stopping = $state(false);
   let switchingSession = $state(false);
@@ -270,6 +272,33 @@
     const message = messages[reasoningIdx];
     if (message?.role === "reasoning") message.settled = true;
     reasoningIdx = null;
+  }
+  function removeReasoningMessages() {
+    messages = messages.filter((message) => message.role !== "reasoning");
+    reasoningIdx = null;
+  }
+  function keepConversationConclusions(finalText: string) {
+    const compacted: Msg[] = [];
+    let pendingAnswer: Extract<Msg, { role: "assistant" }> | null = null;
+    for (const message of messages) {
+      if (message.role === "user") {
+        if (pendingAnswer) compacted.push(pendingAnswer);
+        compacted.push({ ...message });
+        pendingAnswer = null;
+      } else if (message.role === "assistant") {
+        // Intermediate narrations are replaced until the next user turn.
+        pendingAnswer = { ...message };
+      }
+    }
+    if (finalText.trim() !== "") pendingAnswer = { role: "assistant", text: finalText };
+    if (pendingAnswer) compacted.push(pendingAnswer);
+    messages = compacted;
+  }
+  function appendReasoning(previous: string, delta: string): string {
+    const combined = previous + delta;
+    if (combined.length <= REASONING_DISPLAY_MAX_CHARS) return combined;
+    const tailLength = REASONING_DISPLAY_MAX_CHARS - REASONING_OMITTED.length;
+    return REASONING_OMITTED + combined.slice(-tailLength);
   }
   function hideCompletedToolActivity(source: Msg[]): Msg[] {
     return source.filter((message) => message.role !== "tool_group");
@@ -589,11 +618,11 @@
           if (!acceptsSessionEvent(p.session_id) || p.text === "") break;
           if (reasoningIdx === null) {
             settleCompletedToolGroups();
-            messages.push({ role: "reasoning", text: p.text, settled: false });
+            messages.push({ role: "reasoning", text: appendReasoning("", p.text), settled: false });
             reasoningIdx = messages.length - 1;
           } else {
             const m = messages[reasoningIdx];
-            if (m?.role === "reasoning") m.text += p.text;
+            if (m?.role === "reasoning") m.text = appendReasoning(m.text, p.text);
           }
           break;
         case "context_compacted":
@@ -690,21 +719,17 @@
           }
           settleCompletedToolGroups();
           settleReasoning();
+          removeReasoningMessages();
           messages = hideCompletedToolActivity(messages);
-          // The completed reply already arrived as an `assistant` event; only a
-          // switch can happen in the tiny gap between the final text and Done;
-          // recover that final answer without duplicating the normal path.
-          if (p.stop_reason === "completed" && p.final_text.trim() !== "") {
-            const lastAssistant = [...messages].reverse().find(
-              (message): message is Extract<Msg, { role: "assistant" }> => message.role === "assistant",
-            );
-            if (!lastAssistant || lastAssistant.text !== p.final_text) {
-              messages.push({ role: "assistant", text: p.final_text });
-            }
+          if (p.stop_reason === "completed") {
+            keepConversationConclusions(p.final_text);
           } else if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
           streamingIdx = null;
+          // Keep the completed conclusion in the per-session cache; only the
+          // transient reasoning cards are removed from the visible transcript.
+          sessionMessages.set(p.session_id, cloneMessages(messages));
           busy = runningSessions.has(currentSessionId);
           stopping = false;
           refreshSessions();
@@ -753,9 +778,11 @@
           if (!acceptsSessionEvent(p.session_id)) break;
           settleCompletedToolGroups();
           settleReasoning();
+          removeReasoningMessages();
           messages = hideCompletedToolActivity(messages);
           streamingIdx = null;
           messages.push({ role: "note", text: `错误：${p.message}` });
+          sessionMessages.set(p.session_id, cloneMessages(messages));
           busy = false;
           stopping = false;
           switchingSession = false;
@@ -892,7 +919,7 @@
   }
 
   async function stopGeneration() {
-    if (!busy || stopping) return;
+    if (!busy) return;
     stopping = true;
     // A stop applies to the active turn, so do not start queued follow-ups
     // after its cancellation event arrives.
@@ -1731,13 +1758,13 @@
         {:else if m.role === "compact"}
           <div class="msg compact"><span aria-hidden="true">◇</span>{m.text}</div>
         {:else if m.role === "reasoning"}
-          <details class="reasoning-run" class:settled={m.settled} open={!m.settled}>
+          <details class="reasoning-run" class:settled={m.settled}>
             <summary>
               <span class="reasoning-caret" aria-hidden="true">›</span>
               <span class="reasoning-label">思考过程</span>
               <span class="reasoning-status">{m.settled ? "查看" : "思考中…"}</span>
             </summary>
-            <div class="reasoning-content md">{@html renderMarkdown(m.text)}</div>
+            <pre class="reasoning-content">{m.text}</pre>
           </details>
         {:else if m.role === "tool_group"}
           <details class="tool-run" class:settled={m.settled} open={!m.settled}>
@@ -1906,7 +1933,7 @@
           rows="2"
         ></textarea>
         <button class="stop-btn" class:visible={busy} onclick={stopGeneration}
-          disabled={!busy || stopping} title="停止生成" aria-label="停止生成" tabindex={busy ? 0 : -1}>■</button>
+          disabled={!busy} title={stopping ? "再次停止" : "停止生成"} aria-label="停止生成" tabindex={busy ? 0 : -1}>■</button>
         <button onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
           {busy ? "排队" : "发送"}
         </button>
