@@ -606,7 +606,7 @@ fn build_agent(
     if !restored_plan.is_empty() {
         ctx.plan.replace(restored_plan);
     }
-    let tools = ToolRegistry::new(ctx);
+    let tools = ncx_core::HarnessRuntimeBuilder::default().build(ctx);
     let (session_id, seed_messages) = match seed {
         Some((id, messages)) => (id, Some(messages)),
         None => (new_session_id(), None),
@@ -1678,7 +1678,7 @@ mod tests {
         let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &root))
             .with_memory(memory)
             .with_skills(vec![skill]);
-        let registry = ToolRegistry::new(ctx);
+        let registry = ncx_core::HarnessRuntimeBuilder::default().build(ctx);
 
         for name in [
             "read_file",

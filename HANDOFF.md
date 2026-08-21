@@ -1,5 +1,14 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 组件化工作树（2026-08-21）
+
+- 独立目录：`D:\github_dgy\nanocodex\.worktrees\deepseek-harness-components`
+- 分支：`feat/deepseek-harness-components`，基线 `b867466`；组件版后续只在此目录开发。
+- 新增 Harness 插件清单：稳定 ID、名称、版本、能力类型、依赖和默认启用状态。
+- 新增 `HarnessProfile`：`Full`、`Coding`、`ReadOnly`、`Minimal`，运行时按能力选择组件；真正的只读限制仍由 sandbox/permission policy 执行。
+- CLI、CLI orchestrator worker 和 GUI 后端已改为显式通过 `HarnessRuntimeBuilder` 装配；`ToolRegistry::new()` 仅保留兼容入口。
+- 验证：`cargo test -p ncx-core --lib` 204 项通过；`cargo check -p ncx-cli` 通过。GUI 后端首次下载 Tauri 依赖时网络长时间无进展，已主动停止，本轮尚未取得 GUI check 结果。
+
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 

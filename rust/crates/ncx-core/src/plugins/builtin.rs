@@ -1,6 +1,6 @@
 //! Built-in capability plugins composed by the default nanocodex runtime.
 
-use crate::plugins::{HarnessPlugin, PluginHost};
+use crate::plugins::{HarnessPlugin, PluginCapability, PluginHost, PluginManifest};
 use crate::tools::{
     ApplyPatchTool, RememberTool, ShellTool, SkillTool, ToolSearchTool, UpdatePlanTool,
 };
@@ -12,6 +12,10 @@ pub struct CoreToolsPlugin;
 impl HarnessPlugin for CoreToolsPlugin {
     fn id(&self) -> &str {
         "ncx.core"
+    }
+
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.core", "Core Tools", PluginCapability::Core)
     }
 
     fn install(&self, host: &mut PluginHost<'_>) {
@@ -32,6 +36,10 @@ impl HarnessPlugin for SearchToolsPlugin {
         "ncx.search"
     }
 
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.search", "Search Tools", PluginCapability::Search)
+    }
+
     fn install(&self, host: &mut PluginHost<'_>) {
         host.tool(Box::new(crate::search::GrepTool));
         host.tool(Box::new(crate::search::GrepLiteralTool));
@@ -50,6 +58,14 @@ impl HarnessPlugin for WorkspaceToolsPlugin {
         "ncx.workspace"
     }
 
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.workspace",
+            "Workspace Tools",
+            PluginCapability::Workspace,
+        )
+    }
+
     fn install(&self, host: &mut PluginHost<'_>) {
         host.tool(Box::new(crate::workspace_tools::ListDirectoryTool));
         host.tool(Box::new(crate::workspace_tools::PathInfoTool));
@@ -64,6 +80,10 @@ pub struct ProcessToolsPlugin;
 impl HarnessPlugin for ProcessToolsPlugin {
     fn id(&self) -> &str {
         "ncx.process"
+    }
+
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.process", "Process Tools", PluginCapability::Process)
     }
 
     fn install(&self, host: &mut PluginHost<'_>) {
@@ -88,6 +108,10 @@ pub struct SessionToolsPlugin;
 impl HarnessPlugin for SessionToolsPlugin {
     fn id(&self) -> &str {
         "ncx.session"
+    }
+
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.session", "Session Tools", PluginCapability::Session)
     }
 
     fn install(&self, host: &mut PluginHost<'_>) {
@@ -117,6 +141,14 @@ pub struct BuiltinToolsPlugin;
 impl HarnessPlugin for BuiltinToolsPlugin {
     fn id(&self) -> &str {
         "ncx.builtin-tools"
+    }
+
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.builtin-tools",
+            "Built-in Tools",
+            PluginCapability::Core,
+        )
     }
 
     fn install(&self, host: &mut PluginHost<'_>) {

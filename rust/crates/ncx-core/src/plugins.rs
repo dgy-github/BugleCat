@@ -5,13 +5,15 @@
 
 mod api;
 mod builtin;
+mod manifest;
 mod registry;
 mod runtime;
 
 pub use api::{HarnessPlugin, PluginHost};
 pub use builtin::{
-    BuiltinToolsPlugin, CoreToolsPlugin, ProcessToolsPlugin, SearchToolsPlugin,
-    SessionToolsPlugin, WorkspaceToolsPlugin,
+    BuiltinToolsPlugin, CoreToolsPlugin, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,
+    WorkspaceToolsPlugin,
 };
+pub use manifest::{HarnessProfile, PluginCapability, PluginManifest};
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;

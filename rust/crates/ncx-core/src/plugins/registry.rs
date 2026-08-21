@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use super::{HarnessPlugin, PluginHost};
+use super::{HarnessPlugin, PluginHost, PluginManifest};
 use crate::tools::ToolRegistry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,12 +28,22 @@ impl PluginRegistry {
         if self.plugins.iter().any(|current| current.id() == id) {
             return Err(format!("harness plugin '{id}' is already registered"));
         }
+        if plugin.manifest().id != id {
+            return Err(format!(
+                "harness plugin id '{id}' does not match manifest id '{}'",
+                plugin.manifest().id
+            ));
+        }
         self.plugins.push(plugin);
         Ok(())
     }
 
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.plugins.iter().map(|plugin| plugin.id())
+    }
+
+    pub fn manifests(&self) -> impl Iterator<Item = PluginManifest> + '_ {
+        self.plugins.iter().map(|plugin| plugin.manifest())
     }
 
     pub fn install_into(&self, registry: &mut ToolRegistry) -> PluginInstallReport {
@@ -55,6 +65,9 @@ mod tests {
     impl HarnessPlugin for EmptyPlugin {
         fn id(&self) -> &str {
             self.0
+        }
+        fn manifest(&self) -> PluginManifest {
+            PluginManifest::new(self.0, self.0, super::super::PluginCapability::Core)
         }
         fn install(&self, _host: &mut PluginHost<'_>) {}
     }

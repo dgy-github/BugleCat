@@ -18,8 +18,8 @@ use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
 use ncx_core::{
     discover_skills, load_project_instructions, model_provider_from_config, skills_index_block,
-    AgentLoop, AgentRunner, AgentRuntimeProfile, MemoryStore, Session, Summarizer, Tier,
-    ToolContext, ToolRegistry,
+    AgentLoop, AgentRunner, AgentRuntimeProfile, HarnessRuntimeBuilder, MemoryStore, Session,
+    Summarizer, Tier, ToolContext, ToolRegistry,
 };
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
@@ -87,7 +87,7 @@ impl LiveRunner {
             .with_skills(discover_skills(workspace));
         let skills_index = skills_index_block(&discover_skills(workspace));
         let tools = if with_tools {
-            ToolRegistry::new(ctx)
+            HarnessRuntimeBuilder::default().build(ctx)
         } else {
             ToolRegistry::empty(ctx)
         };

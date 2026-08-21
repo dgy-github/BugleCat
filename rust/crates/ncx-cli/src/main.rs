@@ -26,9 +26,9 @@ use ncx_core::{
     custom_command_prompt, discover_skills, expand_file_mentions, list_custom_commands,
     load_project_instructions, model_provider_from_config, new_session_id,
     prepare_mcp_server_tools, skills_index_block, vision_provider_from_config, AgentLoop,
-    AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, MemoryStore, Orchestrator,
-    OrchestratorConfig, PromptAssembler, Session, SessionIndex, SessionSummary, Tool, ToolContext,
-    ToolRegistry, TurnResult,
+    AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, HarnessRuntimeBuilder,
+    MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session, SessionIndex,
+    SessionSummary, Tool, ToolContext, TurnResult,
 };
 use serde_json::{json, Value};
 
@@ -187,7 +187,7 @@ async fn run(args: Args) -> i32 {
         .with_hooks(cfg.hooks.clone())
         .with_skills(skills)
         .with_genome(genome);
-    let mut tools = ToolRegistry::new(ctx);
+    let mut tools = HarnessRuntimeBuilder::default().build(ctx);
     // ncx-forge: emit the default harness genome (base prompt + core tool
     // descriptions) as TOML and exit. Done BEFORE MCP registration so the dump
     // contains only the evolvable core surface, not server-provided tools.

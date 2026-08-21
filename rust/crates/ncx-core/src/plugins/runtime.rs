@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use super::{
-    CoreToolsPlugin, HarnessPlugin, PluginInstallReport, PluginRegistry, ProcessToolsPlugin,
-    SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
+    CoreToolsPlugin, HarnessPlugin, HarnessProfile, PluginInstallReport, PluginRegistry,
+    ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 use crate::tools::{ToolContext, ToolRegistry};
 
@@ -14,23 +14,7 @@ pub struct HarnessRuntimeBuilder {
 
 impl Default for HarnessRuntimeBuilder {
     fn default() -> Self {
-        let mut builder = Self::empty();
-        builder
-            .register(Rc::new(CoreToolsPlugin))
-            .expect("unique built-in plugin");
-        builder
-            .register(Rc::new(SearchToolsPlugin))
-            .expect("unique built-in plugin");
-        builder
-            .register(Rc::new(WorkspaceToolsPlugin))
-            .expect("unique built-in plugin");
-        builder
-            .register(Rc::new(ProcessToolsPlugin))
-            .expect("unique built-in plugin");
-        builder
-            .register(Rc::new(SessionToolsPlugin))
-            .expect("unique built-in plugin");
-        builder
+        Self::for_profile(HarnessProfile::Full)
     }
 }
 
@@ -39,6 +23,16 @@ impl HarnessRuntimeBuilder {
         Self {
             plugins: PluginRegistry::new(),
         }
+    }
+
+    pub fn for_profile(profile: HarnessProfile) -> Self {
+        let mut builder = Self::empty();
+        for plugin in default_plugins() {
+            if profile.enables(plugin.manifest().capability) {
+                builder.register(plugin).expect("unique built-in plugin");
+            }
+        }
+        builder
     }
 
     pub fn register(&mut self, plugin: Rc<dyn HarnessPlugin>) -> Result<&mut Self, String> {
@@ -59,6 +53,16 @@ impl HarnessRuntimeBuilder {
         let report = self.plugins.install_into(&mut tools);
         (tools, report)
     }
+}
+
+fn default_plugins() -> Vec<Rc<dyn HarnessPlugin>> {
+    vec![
+        Rc::new(CoreToolsPlugin),
+        Rc::new(SearchToolsPlugin),
+        Rc::new(WorkspaceToolsPlugin),
+        Rc::new(ProcessToolsPlugin),
+        Rc::new(SessionToolsPlugin),
+    ]
 }
 
 #[cfg(test)]
@@ -94,5 +98,19 @@ mod tests {
     fn empty_runtime_has_no_model_facing_tools() {
         let tools = HarnessRuntimeBuilder::empty().build(context());
         assert!(tools.schemas().is_empty());
+    }
+
+    #[test]
+    fn profiles_select_components_without_changing_default_order() {
+        let coding = HarnessRuntimeBuilder::for_profile(HarnessProfile::Coding);
+        assert_eq!(
+            coding.plugin_ids().collect::<Vec<_>>(),
+            vec!["ncx.core", "ncx.search", "ncx.workspace", "ncx.session"]
+        );
+        let minimal = HarnessRuntimeBuilder::for_profile(HarnessProfile::Minimal);
+        assert_eq!(
+            minimal.plugin_ids().collect::<Vec<_>>(),
+            vec!["ncx.core", "ncx.workspace"]
+        );
     }
 }

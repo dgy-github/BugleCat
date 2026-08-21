@@ -2,11 +2,13 @@
 
 use std::rc::Rc;
 
+use super::PluginManifest;
 use crate::tool_middleware::ToolMiddleware;
 use crate::tools::{Tool, ToolContext, ToolRegistry};
 
 pub trait HarnessPlugin {
     fn id(&self) -> &str;
+    fn manifest(&self) -> PluginManifest;
     fn install(&self, host: &mut PluginHost<'_>);
 }
 
