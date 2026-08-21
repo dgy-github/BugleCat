@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use crate::tool_middleware::ToolMiddleware;
-use crate::tools::{Tool, ToolRegistry};
+use crate::tools::{Tool, ToolContext, ToolRegistry};
 
 /// A named capability bundle installed into a Harness runtime.
 pub trait HarnessPlugin {
@@ -32,6 +32,12 @@ impl<'a> PluginHost<'a> {
     /// Register a model-facing tool supplied by the plugin.
     pub fn tool(&mut self, tool: Box<dyn Tool>) {
         self.registry.register(tool);
+    }
+
+    /// Read the runtime context while deciding which optional capabilities to
+    /// install. Plugins cannot replace the host context or bypass its policy.
+    pub fn context(&self) -> &ToolContext {
+        &self.registry.ctx
     }
 
     /// Register an ordered middleware layer supplied by the plugin.

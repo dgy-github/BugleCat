@@ -80,8 +80,8 @@ pub use tool_middleware::{ToolMiddleware, ToolMiddlewareDecision};
 pub use tool_recovery::{ToolCapability, ToolFailureClass};
 pub use tool_scheduler::{BoundedToolScheduler, ToolScheduler};
 pub use tools::{
-    ApprovalDecision, ApprovalHandler, ApprovalRequest, SessionGrants, Tool, ToolContext,
-    ToolRegistry,
+    ApprovalDecision, ApprovalHandler, ApprovalRequest, BuiltinToolsPlugin, SessionGrants, Tool,
+    ToolContext, ToolRegistry,
 };
 pub use turn_context::{TurnContextProvider, TurnContextRegistry, TurnContextRequest};
 pub use user_question::{UserQuestionHandler, UserQuestionRequest};
