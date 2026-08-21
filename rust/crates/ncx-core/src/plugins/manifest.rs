@@ -31,36 +31,3 @@ impl PluginManifest {
         }
     }
 }
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum HarnessProfile {
-    /// All default components, including process and terminal management.
-    #[default]
-    Full,
-    /// Coding tools without managed background process and terminal components.
-    Coding,
-    /// Read-oriented component set. Mutation is still enforced by sandbox policy.
-    ReadOnly,
-    /// Smallest useful local workspace component set.
-    Minimal,
-}
-
-impl HarnessProfile {
-    pub fn enables(self, capability: PluginCapability) -> bool {
-        match self {
-            Self::Full => true,
-            Self::Coding => capability != PluginCapability::Process,
-            Self::ReadOnly => matches!(
-                capability,
-                PluginCapability::Core
-                    | PluginCapability::Search
-                    | PluginCapability::Workspace
-                    | PluginCapability::Session
-            ),
-            Self::Minimal => matches!(
-                capability,
-                PluginCapability::Core | PluginCapability::Workspace
-            ),
-        }
-    }
-}

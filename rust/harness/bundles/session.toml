@@ -1,0 +1,5 @@
+id = "session"
+
+[[plugins]]
+id = "session-tools"
+plugin = "ncx.session"

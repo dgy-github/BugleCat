@@ -187,7 +187,13 @@ async fn run(args: Args) -> i32 {
         .with_hooks(cfg.hooks.clone())
         .with_skills(skills)
         .with_genome(genome);
-    let mut tools = HarnessRuntimeBuilder::default().build(ctx);
+    let mut tools = match HarnessRuntimeBuilder::configured(&cfg.workspace) {
+        Ok(builder) => builder.build(ctx),
+        Err(error) => {
+            eprintln!("ncx: Harness 配置错误: {error}");
+            return 1;
+        }
+    };
     // ncx-forge: emit the default harness genome (base prompt + core tool
     // descriptions) as TOML and exit. Done BEFORE MCP registration so the dump
     // contains only the evolvable core surface, not server-provided tools.

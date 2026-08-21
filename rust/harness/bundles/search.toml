@@ -1,0 +1,5 @@
+id = "search"
+
+[[plugins]]
+id = "search-tools"
+plugin = "ncx.search"

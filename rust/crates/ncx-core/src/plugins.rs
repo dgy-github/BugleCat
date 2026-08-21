@@ -5,6 +5,7 @@
 
 mod api;
 mod builtin;
+mod composition;
 mod manifest;
 mod registry;
 mod runtime;
@@ -15,6 +16,9 @@ pub use builtin::{
     BuiltinToolsPlugin, CoreToolsPlugin, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,
     WorkspaceToolsPlugin,
 };
-pub use manifest::{HarnessProfile, PluginCapability, PluginManifest};
+pub use composition::{
+    BundleSpec, HarnessComposition, OverlayEntry, OverlaySpec, PluginEntry, ProfileSpec,
+};
+pub use manifest::{PluginCapability, PluginManifest};
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;

@@ -300,7 +300,10 @@ impl ToolRegistry {
     /// Install a named Harness plugin bundle into this registry.
     pub fn install_plugin(&mut self, plugin: &dyn crate::plugins::HarnessPlugin) {
         plugin
-            .install(&mut crate::plugins::PluginHost::new(self))
+            .install(
+                &mut crate::plugins::PluginHost::new(self),
+                &toml::Value::Table(Default::default()),
+            )
             .expect("plugin installation must succeed");
     }
 

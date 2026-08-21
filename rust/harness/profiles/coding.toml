@@ -1,0 +1,2 @@
+name = "coding"
+bundles = ["base", "search", "workspace", "session"]

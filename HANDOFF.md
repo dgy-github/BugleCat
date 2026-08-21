@@ -99,7 +99,7 @@ Service Definition ← Provider Plugins ← Consumer Plugins
 #### 8. 迁移顺序
 
 - M0（已完成地基）：插件 Manifest、服务发布/读取、`inject`、按依赖激活、失败返回、effect 逆序释放、CLI/GUI 显式 Runtime 装配。
-- M1：实现可加载 Profile/Bundle/Overlay、配置 schema、依赖环/缺失服务诊断；删除固定 Profile 枚举。
+- M1（已完成）：实现可加载 Profile/Bundle/Overlay、结构校验、缺失服务诊断；删除固定 Profile 枚举。插件专属配置 schema 随 M2 的 Service Definition/Provider 契约实现。
 - M2：拆 `Tools`、`LLM Provider`、`Interaction/Policy` 三条最小完整能力链，证明 Definition/Provider/Consumer 可替换。
 - M3：拆 Session 与 Agent 生命周期，完成 Workspace/Session/Turn 作用域，保证多会话并发和事件不串线。
 - M4：拆 Context、Memory、Skills、Compaction，让长会话记忆和自动压缩由插件组合完成。
@@ -121,6 +121,18 @@ Service Definition ← Provider Plugins ← Consumer Plugins
 - 会话测试：多个会话并发执行、切换 UI 不停止后台任务、事件按 `session_id + turn_id` 隔离。
 - 回归测试：每个阶段至少运行 `cargo test -p ncx-core --lib`、`cargo check -p ncx-cli`、GUI Tauri 后端检查；涉及前端时再运行 Vite 构建和关键交互测试。
 - 交付标准：相关测试有证据、`git diff --check` 通过、`rust/Cargo.lock` 无无关变化、HANDOFF 更新、工作树只包含本阶段文件。
+
+### M1 完成记录：配置驱动的 Profile / Bundle / Overlay（2026-08-21）
+
+- 新增 `rust/harness/` 配置源：内置 `full`、`coding`、`readonly`、`minimal` Profile，以及 `base`、`search`、`workspace`、`process`、`session` Bundle。
+- 新增 `plugins/composition.rs`：从 TOML 加载 Profile 和 Bundle，按 Bundle 顺序组合稳定 entry；Overlay 按 entry ID 覆盖 plugin、enabled 或完整 config。
+- Profile/Bundle 名称不一致、重复 entry、未知 Overlay entry、未知插件、无效字段和缺失服务依赖均明确失败，不静默回退。
+- 插件配置随注册记录保存并传入 `HarnessPlugin::install`，Overlay 修改后的 config 能到达实际插件安装阶段。
+- 删除 `HarnessProfile` 固定枚举和 `for_profile` 分支；默认 Runtime 也从内嵌 TOML `full` Profile 构建。
+- CLI 主运行、CLI orchestrator worker 和 GUI Agent 构建均调用 `HarnessRuntimeBuilder::configured(workspace)`。
+- 外部选择：`NANOCODEX_HARNESS_PROFILE` 选择 Profile；`NANOCODEX_HARNESS_ROOT` 指向外部根目录；工作区 `.ncx/harness/` 可提供 Profile/Bundle；`.ncx/harness.overlay.toml` 和 `NANOCODEX_HARNESS_OVERLAYS` 叠加 Overlay。
+- 动态下载或加载任意 DLL 不属于 M1；外部配置只能组合当前二进制编译进来的 Rust 插件，避免在没有隔离与签名机制前扩大信任边界。
+- 验证：`cargo test -p ncx-core --lib` **211 通过，0 失败**；`cargo check -p ncx-cli` 通过；GUI Tauri 后端 `cargo check` 通过；`rg "HarnessProfile|for_profile" rust` 无匹配。
 
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。

@@ -1,0 +1,5 @@
+id = "base"
+
+[[plugins]]
+id = "core-tools"
+plugin = "ncx.core"

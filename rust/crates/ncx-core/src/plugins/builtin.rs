@@ -18,7 +18,7 @@ impl HarnessPlugin for CoreToolsPlugin {
         PluginManifest::new("ncx.core", "Core Tools", PluginCapability::Core)
     }
 
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         host.tool(Box::new(crate::tools::ReadFileTool));
         host.tool(Box::new(ApplyPatchTool));
         host.tool(Box::new(StrReplaceEditorTool));
@@ -41,7 +41,7 @@ impl HarnessPlugin for SearchToolsPlugin {
         PluginManifest::new("ncx.search", "Search Tools", PluginCapability::Search)
     }
 
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         host.tool(Box::new(crate::search::GrepTool));
         host.tool(Box::new(crate::search::GrepLiteralTool));
         host.tool(Box::new(crate::search::GlobTool));
@@ -68,7 +68,7 @@ impl HarnessPlugin for WorkspaceToolsPlugin {
         )
     }
 
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         host.tool(Box::new(crate::workspace_tools::ListDirectoryTool));
         host.tool(Box::new(crate::workspace_tools::PathInfoTool));
         host.tool(Box::new(crate::workspace_tools::GitStatusTool));
@@ -89,7 +89,7 @@ impl HarnessPlugin for ProcessToolsPlugin {
         PluginManifest::new("ncx.process", "Process Tools", PluginCapability::Process)
     }
 
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         host.tool(Box::new(crate::lsp_tool::LspTool));
         host.tool(Box::new(crate::process_tools::BackgroundStartTool));
         host.tool(Box::new(crate::process_tools::BackgroundPollTool));
@@ -118,7 +118,7 @@ impl HarnessPlugin for SessionToolsPlugin {
         PluginManifest::new("ncx.session", "Session Tools", PluginCapability::Session)
     }
 
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         for tool in crate::session_query_tools::session_query_tools() {
             host.tool(tool);
         }
@@ -156,12 +156,12 @@ impl HarnessPlugin for BuiltinToolsPlugin {
         )
     }
 
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
-        CoreToolsPlugin.install(host)?;
-        SearchToolsPlugin.install(host)?;
-        WorkspaceToolsPlugin.install(host)?;
-        ProcessToolsPlugin.install(host)?;
-        SessionToolsPlugin.install(host)?;
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String> {
+        CoreToolsPlugin.install(host, config)?;
+        SearchToolsPlugin.install(host, config)?;
+        WorkspaceToolsPlugin.install(host, config)?;
+        ProcessToolsPlugin.install(host, config)?;
+        SessionToolsPlugin.install(host, config)?;
         Ok(())
     }
 }

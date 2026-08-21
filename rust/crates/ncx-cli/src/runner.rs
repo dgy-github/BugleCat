@@ -87,7 +87,10 @@ impl LiveRunner {
             .with_skills(discover_skills(workspace));
         let skills_index = skills_index_block(&discover_skills(workspace));
         let tools = if with_tools {
-            HarnessRuntimeBuilder::default().build(ctx)
+            match HarnessRuntimeBuilder::configured(workspace) {
+                Ok(builder) => builder.build(ctx),
+                Err(error) => return format!("Harness 配置错误：{error}"),
+            }
         } else {
             ToolRegistry::empty(ctx)
         };

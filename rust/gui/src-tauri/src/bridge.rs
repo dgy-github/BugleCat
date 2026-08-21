@@ -606,7 +606,7 @@ fn build_agent(
     if !restored_plan.is_empty() {
         ctx.plan.replace(restored_plan);
     }
-    let tools = ncx_core::HarnessRuntimeBuilder::default().build(ctx);
+    let tools = ncx_core::HarnessRuntimeBuilder::configured(&cfg.workspace)?.build(ctx);
     let (session_id, seed_messages) = match seed {
         Some((id, messages)) => (id, Some(messages)),
         None => (new_session_id(), None),

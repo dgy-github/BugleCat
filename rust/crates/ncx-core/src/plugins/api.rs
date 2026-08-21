@@ -15,7 +15,7 @@ pub trait HarnessPlugin {
     fn inject(&self) -> &[&str] {
         &[]
     }
-    fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String>;
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String>;
 }
 
 type Disposer = Box<dyn FnOnce()>;
