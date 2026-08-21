@@ -18,6 +18,110 @@
 - 纠偏后验证：`cargo test -p ncx-core --lib` 205 项通过；`cargo check -p ncx-cli` 与 GUI Tauri 后端均通过。
 - 后续必须继续拆除固定 `HarnessProfile` 枚举，改成可加载的 bundle/overlay；再把 Provider、Session、AgentLoop、Memory、Skills、MCP、Compaction 逐个拆成 Service Definition / Provider / Consumer。
 
+### 目标架构方案：对齐 DeepSeek Harness 的“一切皆插件”
+
+#### 1. 总体原则
+
+- Rust 实现不照搬 Cordis TypeScript 代码，但必须保持相同架构语义：共享 Context、服务依赖注入、按依赖激活、可逆 effect、作用域隔离、配置化组合。
+- Runtime 只负责加载配置、创建 Context、挂载插件、调度生命周期和输出诊断，不直接拥有模型、工具、会话、记忆或压缩业务。
+- 每项能力拆成三个角色：Service Definition 定义稳定接口；Provider 提供实现；Consumer 把能力接入 Agent、工具或 UI。禁止把 Provider 私有细节泄漏到公共接口。
+- 新行为优先通过插件、服务、事件或中间件扩展；只有插件扩展点本身不足时才修改 AgentLoop 核心。
+- 所有模型可见内容必须可以从会话事件重建；工具、上下文注入、压缩摘要、计划和最终结果不能只存在于临时内存。
+
+#### 2. 运行时分层
+
+```text
+CLI / GUI / Headless
+        │
+        ▼
+Profile Loader ── Bundle / Overlay / 用户配置
+        │
+        ▼
+Harness Runtime
+├── Context：作用域化服务容器
+├── Plugin Registry：发现、校验、依赖解析
+├── Lifecycle：mount / ready / reload / dispose
+├── Effects：注册、诊断、逆序释放
+└── Events：类型化事件与可拦截流水线
+        │
+        ▼
+Service Definition ← Provider Plugins ← Consumer Plugins
+```
+
+#### 3. 插件契约
+
+- 每个插件声明稳定 ID、名称、版本、配置 schema、提供的服务、注入的必需/可选服务和兼容版本。
+- `inject` 面向服务名，不面向插件 ID；运行顺序由服务依赖决定，不能靠手写注册顺序。
+- 必需服务未满足时插件保持 Pending；服务就绪后挂载。服务消失或实现被替换时，依赖插件先卸载，再按新依赖重挂。
+- 插件安装失败必须返回明确错误并回滚本次已注册 effect；不得半安装继续运行。
+- 每个工具、事件监听器、中间件、后台任务、进程、文件监听器和服务注册都必须返回 disposer，并随所属插件逆序释放。
+- Runtime dispose 必须等待后台任务和子进程真正停稳，不能只发送取消信号就返回。
+
+#### 4. Context 与作用域
+
+- Root Context 保存进程级能力和插件清单；Workspace Context 保存项目目录、沙箱和项目配置；Session Context 保存会话、费用、计划和取消状态；Turn Context 保存单轮请求与临时注入。
+- 子 Context 可继承父服务，但允许对指定服务做 isolate/intercept；新会话共享项目文件，不继承其他会话聊天内容、未完成计划或取消状态。
+- 所有 GUI 事件、工具事件和流式响应绑定 `session_id + turn_id`；前端拒绝旧会话或旧轮次事件，但后台会话继续独立运行。
+- Provider、Memory、Skills 等可按 Workspace 或 Session 覆盖，禁止使用进程级可变单例导致串会话。
+
+#### 5. Profile、Bundle 与 Overlay
+
+- 删除代码内固定的 `HarnessProfile` 枚举，改为配置文件驱动的 Profile。
+- Profile 只声明需要叠加的 Bundle；Bundle 是一组带稳定 entry ID 的插件配置，不包含运行时硬编码分支。
+- 建议内置 Profile：`full`、`coding`、`readonly`、`minimal`、`gui`、`headless`；它们与用户自定义 Profile 使用同一加载路径。
+- 配置叠加顺序：基础 Bundle → Profile Bundle → 工作区 Overlay → 用户 Overlay → CLI 临时 Overlay。
+- Overlay 按稳定 entry ID 启用、禁用、替换 Provider 或覆盖配置；未知 ID、重复服务 Provider、依赖环和无效配置必须启动失败并给出中文诊断。
+- 权限是独立 Policy 服务，不依赖“某个 Profile 名称”。`readonly` 通过替换/配置权限 Provider 实现，而不是仅隐藏写工具。
+
+#### 6. 计划拆分的能力插件
+
+1. `service.tools`：工具注册、schema、执行和展示意图；各工具包作为 Consumer 注册工具。
+2. `service.llm`：文本/视觉 Provider 接口、模型能力、流式响应、reasoning 和 usage；DeepSeek、百炼等作为 Provider 插件。
+3. `service.session`：事件日志、快照、索引、恢复、归档、标题和费用投影；持久化实现独立 Provider。
+4. `service.agent`：消息队列、并发会话、取消、steering 和状态；不能绑定某个 GUI。
+5. `service.agent-loop`：只编排模型请求、工具执行和继续/结束，不直接实现 Memory、Skills、压缩或 PDF 规则。
+6. `service.context`：项目说明、附件、文件引用、长期记忆和单轮上下文注入，以 Consumer 方式进入模型请求。
+7. `service.compaction`：触发阈值、摘要生成、工具结果裁剪、持久化和恢复；压缩策略可替换。
+8. `service.memory`：检索、写入、合并和项目隔离；本地 MemoryStore 是一个 Provider。
+9. `service.skills`：发现、目录、加载和执行；内置、用户级、工作区级技能作为不同 Provider/Overlay。
+10. `service.mcp`：连接生命周期、工具同步、失败恢复和权限；MCP 仅是外部能力 Provider，不直接修改 AgentLoop。
+11. `service.interaction`：审批、询问用户、权限策略和 session grants；CLI 与 GUI 提供不同交互 Provider。
+12. `service.media`：附件解析、视觉理解、生图和视频；阿里百炼技能/接口作为 Provider，并由独立 Cost 服务提供价格估算。
+13. `service.telemetry`：token、费用、耗时和错误事件；UI 只消费投影结果，不自行累计核心数据。
+
+#### 7. 配置与安全边界
+
+- 插件配置先反序列化和校验，验证通过后才能 mount；部署可变参数不能散落为源码常量。
+- API Key 只从凭据服务读取，插件配置保存引用或 provider ID，不保存明文；日志、诊断、session 和 handoff 一律脱敏。
+- 文件、Shell、网络和进程权限统一经过 Policy/Sandbox 服务执行，隐藏工具或 prompt 提示不能代替真正的执行拒绝。
+- 外部动态插件默认不可信：第一阶段只支持编译时内置 Rust 插件；后续动态插件需独立进程/WASM 边界、协议版本、签名/来源和资源限制，不直接加载任意 DLL。
+
+#### 8. 迁移顺序
+
+- M0（已完成地基）：插件 Manifest、服务发布/读取、`inject`、按依赖激活、失败返回、effect 逆序释放、CLI/GUI 显式 Runtime 装配。
+- M1：实现可加载 Profile/Bundle/Overlay、配置 schema、依赖环/缺失服务诊断；删除固定 Profile 枚举。
+- M2：拆 `Tools`、`LLM Provider`、`Interaction/Policy` 三条最小完整能力链，证明 Definition/Provider/Consumer 可替换。
+- M3：拆 Session 与 Agent 生命周期，完成 Workspace/Session/Turn 作用域，保证多会话并发和事件不串线。
+- M4：拆 Context、Memory、Skills、Compaction，让长会话记忆和自动压缩由插件组合完成。
+- M5：拆 MCP、附件、图片、视频与 Cost/Telemetry，并接入 GUI 插件设置和运行诊断。
+- M6：增加外部插件发现、安装、启停、升级和隔离；完成 `full`、`minimal`、`headless` 的真实组合测试。
+
+#### 9. 兼容与回滚
+
+- 迁移期间 `ToolRegistry::new()` 保留为兼容门面，但内部必须委托默认 Bundle；生产入口不得新增对该门面的依赖。
+- 每完成一条能力链后再删除旧直连路径，禁止同时维护两套状态源。
+- Session 日志和配置格式变化必须有版本号、显式迁移或清晰拒绝；不得静默按新格式误读旧数据。
+- 每个里程碑保持可独立回滚的提交；不混入 UI 美化、模型目录或其他无关改动。
+
+#### 10. 验证门禁
+
+- 单元测试：依赖等待、缺失依赖、依赖环、重复服务、安装失败回滚、effect 逆序释放、重复 dispose。
+- 组合测试：从真实 Profile 文件启动 Runtime，验证 Provider 替换、Overlay 禁用和错误配置失败。
+- 生命周期测试：服务替换触发依赖插件卸载/重挂；取消和 dispose 后无后台任务、子进程或事件泄漏。
+- 会话测试：多个会话并发执行、切换 UI 不停止后台任务、事件按 `session_id + turn_id` 隔离。
+- 回归测试：每个阶段至少运行 `cargo test -p ncx-core --lib`、`cargo check -p ncx-cli`、GUI Tauri 后端检查；涉及前端时再运行 Vite 构建和关键交互测试。
+- 交付标准：相关测试有证据、`git diff --check` 通过、`rust/Cargo.lock` 无无关变化、HANDOFF 更新、工作树只包含本阶段文件。
+
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 
