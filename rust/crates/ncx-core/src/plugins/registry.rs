@@ -8,6 +8,7 @@ use crate::tools::ToolRegistry;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginInstallReport {
     pub installed: Vec<String>,
+    pub pending: Vec<String>,
 }
 
 #[derive(Default)]
@@ -46,19 +47,43 @@ impl PluginRegistry {
         self.plugins.iter().map(|plugin| plugin.manifest())
     }
 
-    pub fn install_into(&self, registry: &mut ToolRegistry) -> PluginInstallReport {
+    pub fn install_into(&self, registry: &mut ToolRegistry) -> Result<PluginInstallReport, String> {
         let mut installed = Vec::with_capacity(self.plugins.len());
-        for plugin in &self.plugins {
-            plugin.install(&mut PluginHost::new(registry));
-            installed.push(plugin.id().to_string());
+        let mut pending = self.plugins.iter().collect::<Vec<_>>();
+        loop {
+            let before = pending.len();
+            let mut waiting = Vec::new();
+            for plugin in pending {
+                let ready = {
+                    let host = PluginHost::new(registry);
+                    plugin.inject().iter().all(|name| host.has_service(name))
+                };
+                if !ready {
+                    waiting.push(plugin);
+                    continue;
+                }
+                plugin.install(&mut PluginHost::new(registry))?;
+                installed.push(plugin.id().to_string());
+            }
+            pending = waiting;
+            if pending.is_empty() || pending.len() == before {
+                break;
+            }
         }
-        PluginInstallReport { installed }
+        Ok(PluginInstallReport {
+            installed,
+            pending: pending
+                .iter()
+                .map(|plugin| plugin.id().to_string())
+                .collect(),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     struct EmptyPlugin(&'static str);
 
@@ -69,7 +94,9 @@ mod tests {
         fn manifest(&self) -> PluginManifest {
             PluginManifest::new(self.0, self.0, super::super::PluginCapability::Core)
         }
-        fn install(&self, _host: &mut PluginHost<'_>) {}
+        fn install(&self, _host: &mut PluginHost<'_>) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -80,5 +107,71 @@ mod tests {
         assert!(registry.register(Rc::new(EmptyPlugin("first"))).is_err());
         assert!(registry.register(Rc::new(EmptyPlugin("  "))).is_err());
         assert_eq!(registry.ids().collect::<Vec<_>>(), vec!["first", "second"]);
+    }
+
+    struct ServicePlugin {
+        disposed: Rc<Cell<bool>>,
+    }
+
+    impl HarnessPlugin for ServicePlugin {
+        fn id(&self) -> &str {
+            "service"
+        }
+        fn manifest(&self) -> PluginManifest {
+            PluginManifest::new("service", "Service", super::super::PluginCapability::Core)
+        }
+        fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+            host.provide("message", Rc::new(String::from("ready")))?;
+            let disposed = self.disposed.clone();
+            host.effect(move || disposed.set(true));
+            Ok(())
+        }
+    }
+
+    struct ConsumerPlugin;
+
+    impl HarnessPlugin for ConsumerPlugin {
+        fn id(&self) -> &str {
+            "consumer"
+        }
+        fn manifest(&self) -> PluginManifest {
+            PluginManifest::new("consumer", "Consumer", super::super::PluginCapability::Core)
+        }
+        fn inject(&self) -> &[&str] {
+            &["message"]
+        }
+        fn install(&self, host: &mut PluginHost<'_>) -> Result<(), String> {
+            let message = host
+                .service::<String>("message")
+                .ok_or_else(|| "missing injected message service".to_string())?;
+            if message.as_str() != "ready" {
+                return Err("unexpected service value".to_string());
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn dependencies_activate_by_service_and_effects_dispose_with_runtime() {
+        use crate::tools::{ToolContext, ToolRegistry};
+        use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
+        use std::path::PathBuf;
+
+        let disposed = Rc::new(Cell::new(false));
+        let mut plugins = PluginRegistry::new();
+        plugins.register(Rc::new(ConsumerPlugin)).unwrap();
+        plugins
+            .register(Rc::new(ServicePlugin {
+                disposed: disposed.clone(),
+            }))
+            .unwrap();
+        let workspace = PathBuf::from("plugin-service-test");
+        let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
+        let mut tools = ToolRegistry::empty(ToolContext::new(workspace, policy));
+        let report = plugins.install_into(&mut tools).unwrap();
+        assert_eq!(report.installed, vec!["service", "consumer"]);
+        assert!(report.pending.is_empty());
+        drop(tools);
+        assert!(disposed.get());
     }
 }

@@ -7,7 +7,16 @@
 - 新增 Harness 插件清单：稳定 ID、名称、版本、能力类型、依赖和默认启用状态。
 - 新增 `HarnessProfile`：`Full`、`Coding`、`ReadOnly`、`Minimal`，运行时按能力选择组件；真正的只读限制仍由 sandbox/permission policy 执行。
 - CLI、CLI orchestrator worker 和 GUI 后端已改为显式通过 `HarnessRuntimeBuilder` 装配；`ToolRegistry::new()` 仅保留兼容入口。
-- 验证：`cargo test -p ncx-core --lib` 204 项通过；`cargo check -p ncx-cli` 通过。GUI 后端首次下载 Tauri 依赖时网络长时间无进展，已主动停止，本轮尚未取得 GUI check 结果。
+- 验证：上一阶段 `cargo test -p ncx-core --lib` 204 项通过；`cargo check -p ncx-cli` 通过。
+
+### 官方 DeepSeek Harness 对照
+
+- 官方源码：`D:\deepseek-harness-master\deepseek-harness-master`，上游 `deepseek-ai/deepseek-harness`，MIT。
+- 官方“一切皆插件”不是工具分组：Cordis Context 是共享服务容器；插件用 `inject` 声明服务依赖；服务就绪后挂载，依赖变化后卸载/重挂；所有注册是可逆 effect，并按逆序释放。
+- 官方 Profile 是 bundle + `cordis.patch.yml` 的分层组合，不是代码里的固定模式枚举。模型、工具注册表、会话日志、agent loop、压缩、Skills、MCP 均是可替换插件。
+- nanocodex 已开始纠偏：`HarnessPlugin` 增加服务依赖和失败返回；`PluginHost` 增加类型化服务发布/读取和可逆 effect；注册器按服务依赖激活插件；运行时销毁时逆序执行 disposer。工具插件现在只是插件 Consumer 的一种。
+- 纠偏后验证：`cargo test -p ncx-core --lib` 205 项通过；`cargo check -p ncx-cli` 与 GUI Tauri 后端均通过。
+- 后续必须继续拆除固定 `HarnessProfile` 枚举，改成可加载的 bundle/overlay；再把 Provider、Session、AgentLoop、Memory、Skills、MCP、Compaction 逐个拆成 Service Definition / Provider / Consumer。
 
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。

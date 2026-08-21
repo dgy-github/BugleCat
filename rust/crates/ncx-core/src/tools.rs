@@ -293,12 +293,15 @@ pub struct ToolRegistry {
     by_name: HashMap<String, usize>,
     middleware: Vec<Rc<dyn ToolMiddleware>>,
     middleware_names: HashSet<String>,
+    pub(crate) plugin_state: crate::plugins::PluginRuntimeState,
 }
 
 impl ToolRegistry {
     /// Install a named Harness plugin bundle into this registry.
     pub fn install_plugin(&mut self, plugin: &dyn crate::plugins::HarnessPlugin) {
-        plugin.install(&mut crate::plugins::PluginHost::new(self));
+        plugin
+            .install(&mut crate::plugins::PluginHost::new(self))
+            .expect("plugin installation must succeed");
     }
 
     /// Build the default in-process tool registry.
@@ -314,6 +317,7 @@ impl ToolRegistry {
             by_name: HashMap::new(),
             middleware: Vec::new(),
             middleware_names: HashSet::new(),
+            plugin_state: Default::default(),
         }
     }
 

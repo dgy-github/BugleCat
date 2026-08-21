@@ -50,7 +50,10 @@ impl HarnessRuntimeBuilder {
 
     pub fn build_with_report(self, context: ToolContext) -> (ToolRegistry, PluginInstallReport) {
         let mut tools = ToolRegistry::empty(context);
-        let report = self.plugins.install_into(&mut tools);
+        let report = self
+            .plugins
+            .install_into(&mut tools)
+            .expect("default Harness plugin composition must be valid");
         (tools, report)
     }
 }

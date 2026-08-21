@@ -9,6 +9,7 @@ mod manifest;
 mod registry;
 mod runtime;
 
+pub(crate) use api::PluginRuntimeState;
 pub use api::{HarnessPlugin, PluginHost};
 pub use builtin::{
     BuiltinToolsPlugin, CoreToolsPlugin, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,

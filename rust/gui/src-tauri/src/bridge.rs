@@ -30,7 +30,7 @@ use ncx_core::{
     new_session_id, skills_index_block, suggest_title_with_provider, vision_provider_from_config,
     AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
     CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext,
-    ToolRegistry, UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
+    UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
 use ncx_sandbox::SandboxPolicy;
 use serde::Serialize;
