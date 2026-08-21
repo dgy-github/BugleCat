@@ -303,15 +303,7 @@ impl ToolRegistry {
 
     /// Build the default in-process tool registry.
     pub fn new(ctx: ToolContext) -> Self {
-        let mut reg = ToolRegistry {
-            ctx,
-            tools: Vec::new(),
-            by_name: HashMap::new(),
-            middleware: Vec::new(),
-            middleware_names: HashSet::new(),
-        };
-        reg.install_plugin(&crate::plugins::BuiltinToolsPlugin);
-        reg
+        crate::plugins::HarnessRuntimeBuilder::default().build(ctx)
     }
 
     /// Empty registry (tests register exactly what they need).
