@@ -61,7 +61,10 @@ pub use mentions::{expand_file_mentions, find_mentions};
 pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
-pub use plugins::{HarnessPlugin, PluginHost, PluginRegistry};
+pub use plugins::{
+    BuiltinToolsPlugin, CoreToolsPlugin, HarnessPlugin, PluginHost, PluginRegistry,
+    ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
+};
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;
 pub use runtime_profile::{
@@ -80,8 +83,8 @@ pub use tool_middleware::{ToolMiddleware, ToolMiddlewareDecision};
 pub use tool_recovery::{ToolCapability, ToolFailureClass};
 pub use tool_scheduler::{BoundedToolScheduler, ToolScheduler};
 pub use tools::{
-    ApprovalDecision, ApprovalHandler, ApprovalRequest, BuiltinToolsPlugin, SessionGrants, Tool,
-    ToolContext, ToolRegistry,
+    ApprovalDecision, ApprovalHandler, ApprovalRequest, SessionGrants, Tool, ToolContext,
+    ToolRegistry,
 };
 pub use turn_context::{TurnContextProvider, TurnContextRegistry, TurnContextRequest};
 pub use user_question::{UserQuestionHandler, UserQuestionRequest};

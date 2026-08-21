@@ -295,61 +295,6 @@ pub struct ToolRegistry {
     middleware_names: HashSet<String>,
 }
 
-/// Built-in capability bundle. Keeping the default tools behind the same
-/// plugin boundary as extensions makes the runtime composition explicit:
-/// future DeepSeek Harness adapters can replace or omit whole capability
-/// groups without changing the agent loop.
-pub struct BuiltinToolsPlugin;
-
-impl crate::plugins::HarnessPlugin for BuiltinToolsPlugin {
-    fn id(&self) -> &str {
-        "ncx.builtin-tools"
-    }
-
-    fn install(&self, host: &mut crate::plugins::PluginHost<'_>) {
-        host.tool(Box::new(ReadFileTool));
-        host.tool(Box::new(ApplyPatchTool));
-        host.tool(Box::new(crate::editor_tool::StrReplaceEditorTool));
-        host.tool(Box::new(UpdatePlanTool));
-        host.tool(Box::new(ShellTool));
-        host.tool(Box::new(crate::search::GrepTool));
-        host.tool(Box::new(crate::search::GrepLiteralTool));
-        host.tool(Box::new(crate::search::GlobTool));
-        host.tool(Box::new(crate::search::FindFilesTool));
-        host.tool(Box::new(crate::search::WebSearchTool));
-        host.tool(Box::new(crate::search::WebFetchTool));
-        host.tool(Box::new(crate::workspace_tools::ListDirectoryTool));
-        host.tool(Box::new(crate::workspace_tools::PathInfoTool));
-        host.tool(Box::new(crate::workspace_tools::GitStatusTool));
-        host.tool(Box::new(crate::workspace_tools::GitDiffTool));
-        host.tool(Box::new(crate::lsp_tool::LspTool));
-        host.tool(Box::new(crate::process_tools::BackgroundStartTool));
-        host.tool(Box::new(crate::process_tools::BackgroundPollTool));
-        host.tool(Box::new(crate::process_tools::BackgroundStopTool));
-        host.tool(Box::new(crate::process_tools::BackgroundListTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalOpenTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalWriteTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalReadTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalExecTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalResizeTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalCloseTool));
-        host.tool(Box::new(crate::terminal_tools::TerminalListTool));
-        host.tool(Box::new(ToolSearchTool));
-        for tool in crate::session_query_tools::session_query_tools() {
-            host.tool(tool);
-        }
-        if let Some(handler) = host.context().user_question_handler.clone() {
-            host.tool(Box::new(crate::user_question::AskUserQuestionTool::new(handler)));
-        }
-        if host.context().memory.is_some() {
-            host.tool(Box::new(RememberTool));
-        }
-        if !host.context().skills.is_empty() {
-            host.tool(Box::new(SkillTool));
-        }
-    }
-}
-
 impl ToolRegistry {
     /// Install a named Harness plugin bundle into this registry.
     pub fn install_plugin(&mut self, plugin: &dyn crate::plugins::HarnessPlugin) {
@@ -365,7 +310,7 @@ impl ToolRegistry {
             middleware: Vec::new(),
             middleware_names: HashSet::new(),
         };
-        reg.install_plugin(&BuiltinToolsPlugin);
+        reg.install_plugin(&crate::plugins::BuiltinToolsPlugin);
         reg
     }
 

@@ -10,6 +10,13 @@ use std::rc::Rc;
 use crate::tool_middleware::ToolMiddleware;
 use crate::tools::{Tool, ToolContext, ToolRegistry};
 
+mod builtin;
+
+pub use builtin::{
+    BuiltinToolsPlugin, CoreToolsPlugin, ProcessToolsPlugin, SearchToolsPlugin,
+    SessionToolsPlugin, WorkspaceToolsPlugin,
+};
+
 /// A named capability bundle installed into a Harness runtime.
 pub trait HarnessPlugin {
     /// Stable identifier used in diagnostics and duplicate detection.
