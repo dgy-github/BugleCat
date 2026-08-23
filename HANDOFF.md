@@ -463,3 +463,4 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 当前仍需继续把 AgentLoop、Provider 实际调用、Session/Memory/Compaction 的业务逻辑迁移为服务消费者，不能把当前阶段误称为完整 M4。
 - 本轮验证：`cargo test -p ncx-core --lib plugins::` 13 项通过；`cargo check -p ncx-cli` 通过；GUI Tauri `cargo check` 通过。未生成或提交 Cargo.lock 等无关改动。
 - 后续增量 `90a16cb` 已补齐 `MemoryServiceDescriptor` 与 `CompactionServiceDescriptor`；`AgentLoop` 通过 `ToolRegistry::service` 消费 compaction 服务，没有安装该插件时不会自动压缩。全量 `cargo test -p ncx-core --lib` 211 项通过，提交已推送到 GitHub。
+- 增量 `93b4a50` 让 `AgentLoop` 消费 `ncx.llm` 发布的能力描述：无推理能力时不再发送 reasoning effort，无视觉能力时回退主 Provider；同时公开 `llm_capabilities()` 供前端/运行时诊断。全量 `cargo test -p ncx-core --lib` 211 项通过，已推送。
