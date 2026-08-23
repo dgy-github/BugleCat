@@ -13,8 +13,9 @@ mod runtime;
 pub(crate) use api::PluginRuntimeState;
 pub use api::{HarnessPlugin, PluginHost};
 pub use builtin::{
-    BuiltinToolsPlugin, CoreToolsPlugin, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,
-    WorkspaceToolsPlugin,
+    BuiltinToolsPlugin, CompactionPlugin, ContextPlugin, CoreToolsPlugin, InteractionPlugin,
+    LlmProviderPlugin, MemoryPlugin, PolicyPlugin, ProcessToolsPlugin, SearchToolsPlugin,
+    SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 pub use composition::{
     BundleSpec, HarnessComposition, OverlayEntry, OverlaySpec, PluginEntry, ProfileSpec,

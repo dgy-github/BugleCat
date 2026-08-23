@@ -7,6 +7,12 @@ pub enum PluginCapability {
     Workspace,
     Process,
     Session,
+    Llm,
+    Interaction,
+    Policy,
+    Context,
+    Memory,
+    Compaction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

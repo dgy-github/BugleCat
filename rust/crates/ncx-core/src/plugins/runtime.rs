@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::{
-    BundleSpec, CoreToolsPlugin, HarnessComposition, HarnessPlugin, PluginInstallReport,
-    PluginRegistry, ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin, SessionToolsPlugin,
-    WorkspaceToolsPlugin,
+    BundleSpec, CompactionPlugin, ContextPlugin, CoreToolsPlugin, HarnessComposition,
+    HarnessPlugin, InteractionPlugin, LlmProviderPlugin, MemoryPlugin, PluginInstallReport,
+    PluginRegistry, PolicyPlugin, ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin,
+    SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 use crate::tools::{ToolContext, ToolRegistry};
 
@@ -130,6 +131,12 @@ fn builtin_plugin(id: &str) -> Option<Rc<dyn HarnessPlugin>> {
         "ncx.workspace" => Some(Rc::new(WorkspaceToolsPlugin)),
         "ncx.process" => Some(Rc::new(ProcessToolsPlugin)),
         "ncx.session" => Some(Rc::new(SessionToolsPlugin)),
+        "ncx.llm" => Some(Rc::new(LlmProviderPlugin)),
+        "ncx.interaction" => Some(Rc::new(InteractionPlugin)),
+        "ncx.policy" => Some(Rc::new(PolicyPlugin)),
+        "ncx.context" => Some(Rc::new(ContextPlugin)),
+        "ncx.memory" => Some(Rc::new(MemoryPlugin)),
+        "ncx.compaction" => Some(Rc::new(CompactionPlugin)),
         _ => None,
     }
 }
@@ -170,6 +177,12 @@ mod tests {
             builder.plugin_ids().collect::<Vec<_>>(),
             vec![
                 "ncx.core",
+                "ncx.llm",
+                "ncx.interaction",
+                "ncx.policy",
+                "ncx.context",
+                "ncx.memory",
+                "ncx.compaction",
                 "ncx.search",
                 "ncx.workspace",
                 "ncx.process",
@@ -177,7 +190,7 @@ mod tests {
             ]
         );
         let (_, report) = builder.build_with_report(context());
-        assert_eq!(report.installed.len(), 5);
+        assert_eq!(report.installed.len(), 11);
     }
 
     #[test]
@@ -191,12 +204,32 @@ mod tests {
         let coding = HarnessRuntimeBuilder::builtin("coding").unwrap();
         assert_eq!(
             coding.plugin_ids().collect::<Vec<_>>(),
-            vec!["ncx.core", "ncx.search", "ncx.workspace", "ncx.session"]
+            vec![
+                "ncx.core",
+                "ncx.llm",
+                "ncx.interaction",
+                "ncx.policy",
+                "ncx.context",
+                "ncx.memory",
+                "ncx.compaction",
+                "ncx.search",
+                "ncx.workspace",
+                "ncx.session",
+            ]
         );
         let minimal = HarnessRuntimeBuilder::builtin("minimal").unwrap();
         assert_eq!(
             minimal.plugin_ids().collect::<Vec<_>>(),
-            vec!["ncx.core", "ncx.workspace"]
+            vec![
+                "ncx.core",
+                "ncx.llm",
+                "ncx.interaction",
+                "ncx.policy",
+                "ncx.context",
+                "ncx.memory",
+                "ncx.compaction",
+                "ncx.workspace",
+            ]
         );
     }
 

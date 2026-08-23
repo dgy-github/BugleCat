@@ -3,3 +3,27 @@ id = "base"
 [[plugins]]
 id = "core-tools"
 plugin = "ncx.core"
+
+[[plugins]]
+id = "llm-provider"
+plugin = "ncx.llm"
+
+[[plugins]]
+id = "interaction"
+plugin = "ncx.interaction"
+
+[[plugins]]
+id = "policy"
+plugin = "ncx.policy"
+
+[[plugins]]
+id = "context"
+plugin = "ncx.context"
+
+[[plugins]]
+id = "memory"
+plugin = "ncx.memory"
+
+[[plugins]]
+id = "compaction"
+plugin = "ncx.compaction"

@@ -134,6 +134,13 @@ Service Definition ← Provider Plugins ← Consumer Plugins
 - 动态下载或加载任意 DLL 不属于 M1；外部配置只能组合当前二进制编译进来的 Rust 插件，避免在没有隔离与签名机制前扩大信任边界。
 - 验证：`cargo test -p ncx-core --lib` **211 通过，0 失败**；`cargo check -p ncx-cli` 通过；GUI Tauri 后端 `cargo check` 通过；`rg "HarnessProfile|for_profile" rust` 无匹配。
 
+### M2–M4 当前推进记录（2026-08-23）
+
+- 已把 LLM、Interaction、Policy、Context、Memory、Compaction 纳入可组合的插件清单和内置 Bundle；这些能力现在有独立 Manifest、稳定 entry ID、服务名和可替换挂载点。
+- `ncx.llm`、`ncx.interaction`、`ncx.policy`、`ncx.context`、`ncx.memory`、`ncx.compaction` 已通过 `PluginHost::provide()` 发布服务，默认 `full/coding/readonly/minimal` Profile 均可按配置启停。
+- 这一步完成的是 M2–M4 的运行时装配地基，不等同于所有业务实现已经从 AgentLoop 拆出：LLM 的真实 Provider 请求、Interaction 的审批实现、Session/Context/Memory/Compaction 的核心状态仍在迁移中，后续必须把现有直连逻辑改为读取这些服务，补充真实组合测试后才能宣布 M4 完成。
+- 当前验证：核心插件相关测试 13 项通过；全 `ncx-core` 回归此前 211 项通过；CLI 和 GUI Tauri 后端检查通过。此次修改尚未提交或推送，下一步先完成服务 Consumer 接入，再提交 M2–M4 阶段提交。
+
 > 新接手的 agent：先读完再动手。与上一级 `D:\agent_prac\HANDOFF.md`（面试准备）是两条独立线。
 > Python 时代历史在 git 历史 + SESSION_MEMORY.md。
 

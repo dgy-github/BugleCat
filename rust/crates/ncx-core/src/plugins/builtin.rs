@@ -5,6 +5,7 @@ use crate::tools::{
     ApplyPatchTool, RememberTool, ShellTool, SkillTool, ToolSearchTool, UpdatePlanTool,
 };
 use crate::StrReplaceEditorTool;
+use std::rc::Rc;
 
 /// File editing, shell execution, planning and dynamic tool discovery.
 pub struct CoreToolsPlugin;
@@ -139,6 +140,70 @@ impl HarnessPlugin for SessionToolsPlugin {
         Ok(())
     }
 }
+
+macro_rules! service_plugin {
+    ($name:ident, $id:literal, $label:literal, $cap:expr, $service:literal) => {
+        pub struct $name;
+        impl HarnessPlugin for $name {
+            fn id(&self) -> &str {
+                $id
+            }
+            fn manifest(&self) -> PluginManifest {
+                PluginManifest::new($id, $label, $cap)
+            }
+            fn install(
+                &self,
+                host: &mut PluginHost<'_>,
+                _config: &toml::Value,
+            ) -> Result<(), String> {
+                host.provide($service, Rc::new($id.to_string()))
+            }
+        }
+    };
+}
+
+service_plugin!(
+    LlmProviderPlugin,
+    "ncx.llm",
+    "LLM Provider",
+    PluginCapability::Llm,
+    "llm.provider"
+);
+service_plugin!(
+    InteractionPlugin,
+    "ncx.interaction",
+    "Interaction",
+    PluginCapability::Interaction,
+    "interaction"
+);
+service_plugin!(
+    PolicyPlugin,
+    "ncx.policy",
+    "Policy",
+    PluginCapability::Policy,
+    "policy"
+);
+service_plugin!(
+    ContextPlugin,
+    "ncx.context",
+    "Context",
+    PluginCapability::Context,
+    "context"
+);
+service_plugin!(
+    MemoryPlugin,
+    "ncx.memory",
+    "Memory",
+    PluginCapability::Memory,
+    "memory"
+);
+service_plugin!(
+    CompactionPlugin,
+    "ncx.compaction",
+    "Compaction",
+    PluginCapability::Compaction,
+    "compaction"
+);
 
 /// Compatibility bundle used by the default runtime.
 pub struct BuiltinToolsPlugin;
