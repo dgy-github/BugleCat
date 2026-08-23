@@ -467,3 +467,4 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 本轮将 Provider 实例装配闭环：新增 `LlmProviderFactory`/`LlmProviderFactoryHandle` 服务，CLI、GUI 和编排 runner 均通过 `install_llm_provider_factory` 注入配置，再由 `AgentLoop::from_runtime_services` 创建主/视觉 Provider；标题生成等独立短调用仍保留显式 Provider，避免引入无意义的工具运行时。验证：`cargo test -p ncx-core --lib` 211 项、`cargo check -p ncx-cli`、GUI Tauri `cargo check` 均通过。
 - M4 增量：`MemoryPlugin` 现在发布带实际 `MemoryStore` 的服务描述，AgentLoop 的提示前记忆召回改为从 `ToolRegistry` 的 memory 服务读取，不再直接耦合 `ToolContext.memory`；记忆回归测试通过。
 - M4 增量：`AgentLoop` 现在同时消费 `policy` 与 `interaction` 服务；`runtime_profile()` 优先使用 Harness 策略服务生成有效权限快照，并公开交互服务是否存在，旧的无插件单元测试仍回退到 `ToolContext`。全量 `ncx-core` 211 项测试通过。
+- `dc7a915` 补充 AgentLoop 对 `context` 服务的持有与诊断接口；Context/Memory/Policy/Interaction/LLM/Compaction 服务均已有运行时消费者或能力查询入口，分支已推送。
