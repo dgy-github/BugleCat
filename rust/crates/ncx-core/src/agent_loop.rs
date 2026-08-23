@@ -98,10 +98,13 @@ pub struct AgentLoop {
     next_turn_id: u64,
     use_vision_this_turn: bool,
     event_sink: Option<EventSink>,
+    llm_capabilities: Option<Rc<crate::plugins::LlmServiceDescriptor>>,
 }
 
 impl AgentLoop {
     pub fn new(provider: Box<dyn Provider>, tools: ToolRegistry, session: Session) -> Self {
+        let llm_capabilities =
+            tools.service::<crate::plugins::LlmServiceDescriptor>("llm.provider");
         AgentLoop {
             provider,
             vision_provider: None,
@@ -117,6 +120,7 @@ impl AgentLoop {
             next_turn_id: 0,
             use_vision_this_turn: false,
             event_sink: None,
+            llm_capabilities,
         }
     }
 
@@ -161,6 +165,11 @@ impl AgentLoop {
     /// Return the active primary provider's model identifier.
     pub fn provider_model(&self) -> &str {
         self.provider.model()
+    }
+
+    /// Capabilities declared by the active Harness LLM plugin, if installed.
+    pub fn llm_capabilities(&self) -> Option<&crate::plugins::LlmServiceDescriptor> {
+        self.llm_capabilities.as_deref()
     }
 
     /// Snapshot the normalized controls applied by a frontend assembly path.
@@ -212,11 +221,18 @@ impl AgentLoop {
 
     fn active_provider(&self) -> &dyn Provider {
         if self.use_vision_this_turn {
-            if let Some(v) = &self.vision_provider {
-                if trace::enabled() {
-                    eprintln!("[ncx-trace] routing image turn -> vision provider");
+            let supports_vision = self
+                .llm_capabilities
+                .as_ref()
+                .map(|caps| caps.supports_vision)
+                .unwrap_or(true);
+            if supports_vision {
+                if let Some(v) = &self.vision_provider {
+                    if trace::enabled() {
+                        eprintln!("[ncx-trace] routing image turn -> vision provider");
+                    }
+                    return v.as_ref();
                 }
-                return v.as_ref();
             }
         }
         self.provider.as_ref()
@@ -264,7 +280,11 @@ impl AgentLoop {
         let edited = self
             .session
             .for_model_edited(system_notes, &self.context_edit);
-        let effort = self.reasoning_effort.as_deref();
+        let effort = self
+            .llm_capabilities
+            .as_ref()
+            .filter(|caps| caps.supports_reasoning)
+            .and(self.reasoning_effort.as_deref());
         // Stream the assistant text live: each delta becomes an AssistantDelta the
         // UI appends. `sink` is a local (threaded from run_turn), not borrowed
         // from self, so this does not conflict with the &self provider borrow.
