@@ -25,7 +25,8 @@ use std::rc::Rc;
 use ncx_core::{
     custom_command_prompt, discover_skills, expand_file_mentions, install_llm_provider_factory,
     list_custom_commands, load_project_instructions, new_session_id, prepare_mcp_server_tools,
-    skills_index_block, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome,
+    skills_index_block, vision_provider_from_config, AgentLoop, AgentRuntimeProfile, CheckpointMeta,
+    CheckpointStore, Genome,
     HarnessRuntimeBuilder, MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session,
     SessionIndex, SessionSummary, Tool, ToolContext, TurnResult,
 };

@@ -460,7 +460,7 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 在独立工作树 `D:\github_dgy\nanocodex\.worktrees\deepseek-harness-components` 的 `feat/deepseek-harness-components` 分支继续实施“一切皆插件”的架构。
 - M2-M4 已从仅注册插件升级为类型化能力服务：`ncx.llm` 发布模型/推理/视觉能力描述，`ncx.interaction` 发布审批入口，`ncx.policy` 发布沙箱、审批、计划和网络策略，`ncx.context` 发布工作区/记忆/技能上下文描述；`memory`、`compaction` 已保留为独立能力插件入口。
 - `CoreToolsPlugin` 通过运行时服务读取策略和上下文，兼容旧的直接工具注册测试；基础 Bundle 已包含上述能力插件，可由 Profile/Bundle/Overlay 选择启用。
-- 当前仍需继续把 AgentLoop、Provider 实际调用、Session/Memory/Compaction 的业务逻辑迁移为服务消费者，不能把当前阶段误称为完整 M4。
+- 该条早期记录描述的是当时的未完成状态；后续提交已将 AgentLoop、Provider、Memory、Compaction、Policy、Interaction、Context 接入服务消费者，当前以本节后续增量和最新测试结果为准。
 - 本轮验证：`cargo test -p ncx-core --lib plugins::` 13 项通过；`cargo check -p ncx-cli` 通过；GUI Tauri `cargo check` 通过。未生成或提交 Cargo.lock 等无关改动。
 - 后续增量 `90a16cb` 已补齐 `MemoryServiceDescriptor` 与 `CompactionServiceDescriptor`；`AgentLoop` 通过 `ToolRegistry::service` 消费 compaction 服务，没有安装该插件时不会自动压缩。全量 `cargo test -p ncx-core --lib` 211 项通过，提交已推送到 GitHub。
 - 增量 `93b4a50` 让 `AgentLoop` 消费 `ncx.llm` 发布的能力描述：无推理能力时不再发送 reasoning effort，无视觉能力时回退主 Provider；同时公开 `llm_capabilities()` 供前端/运行时诊断。全量 `cargo test -p ncx-core --lib` 211 项通过，已推送。
@@ -468,3 +468,4 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - M4 增量：`MemoryPlugin` 现在发布带实际 `MemoryStore` 的服务描述，AgentLoop 的提示前记忆召回改为从 `ToolRegistry` 的 memory 服务读取，不再直接耦合 `ToolContext.memory`；记忆回归测试通过。
 - M4 增量：`AgentLoop` 现在同时消费 `policy` 与 `interaction` 服务；`runtime_profile()` 优先使用 Harness 策略服务生成有效权限快照，并公开交互服务是否存在，旧的无插件单元测试仍回退到 `ToolContext`。全量 `ncx-core` 211 项测试通过。
 - `dc7a915` 补充 AgentLoop 对 `context` 服务的持有与诊断接口；Context/Memory/Policy/Interaction/LLM/Compaction 服务均已有运行时消费者或能力查询入口，分支已推送。
+- 最终阶段审计：`cargo test --workspace --quiet` 全部通过（包含 ncx-core 211 项及其他 workspace crate）；`cargo check -p ncx-cli` 与 GUI Tauri `cargo check` 通过。CLI 测试所需的视觉 Provider 兼容导入已恢复，未改变运行时装配路径。
