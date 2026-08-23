@@ -163,6 +163,7 @@ impl HarnessPlugin for MemoryPlugin {
             "memory",
             Rc::new(MemoryServiceDescriptor {
                 enabled: host.context().memory.is_some(),
+                store: host.context().memory.clone(),
             }),
         )
     }

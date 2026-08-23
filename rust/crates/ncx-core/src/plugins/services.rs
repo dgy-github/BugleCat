@@ -40,9 +40,10 @@ pub struct ContextServiceDescriptor {
     pub skill_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct MemoryServiceDescriptor {
     pub enabled: bool,
+    pub store: Option<Rc<crate::memory::MemoryStore>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

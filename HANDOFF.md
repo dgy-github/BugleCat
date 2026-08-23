@@ -465,3 +465,4 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 后续增量 `90a16cb` 已补齐 `MemoryServiceDescriptor` 与 `CompactionServiceDescriptor`；`AgentLoop` 通过 `ToolRegistry::service` 消费 compaction 服务，没有安装该插件时不会自动压缩。全量 `cargo test -p ncx-core --lib` 211 项通过，提交已推送到 GitHub。
 - 增量 `93b4a50` 让 `AgentLoop` 消费 `ncx.llm` 发布的能力描述：无推理能力时不再发送 reasoning effort，无视觉能力时回退主 Provider；同时公开 `llm_capabilities()` 供前端/运行时诊断。全量 `cargo test -p ncx-core --lib` 211 项通过，已推送。
 - 本轮将 Provider 实例装配闭环：新增 `LlmProviderFactory`/`LlmProviderFactoryHandle` 服务，CLI、GUI 和编排 runner 均通过 `install_llm_provider_factory` 注入配置，再由 `AgentLoop::from_runtime_services` 创建主/视觉 Provider；标题生成等独立短调用仍保留显式 Provider，避免引入无意义的工具运行时。验证：`cargo test -p ncx-core --lib` 211 项、`cargo check -p ncx-cli`、GUI Tauri `cargo check` 均通过。
+- M4 增量：`MemoryPlugin` 现在发布带实际 `MemoryStore` 的服务描述，AgentLoop 的提示前记忆召回改为从 `ToolRegistry` 的 memory 服务读取，不再直接耦合 `ToolContext.memory`；记忆回归测试通过。

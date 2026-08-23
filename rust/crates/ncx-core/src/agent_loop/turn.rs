@@ -171,8 +171,12 @@ async fn prepare_prompt(
         query: tool_query.clone(),
     };
     runtime_notes.extend(agent.turn_context.collect(&context_request).await);
+    let memory = agent
+        .tools
+        .service::<crate::plugins::MemoryServiceDescriptor>("memory")
+        .and_then(|service| service.store.clone());
     runtime_notes.extend(memory_recall_notes(
-        &agent.tools.ctx.memory,
+        &memory,
         &tool_query,
         MEMORY_RECALL_MAX_ENTRIES,
         MEMORY_RECALL_MAX_CHARS,
