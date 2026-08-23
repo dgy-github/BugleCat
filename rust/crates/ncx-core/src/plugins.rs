@@ -9,6 +9,7 @@ mod composition;
 mod manifest;
 mod registry;
 mod runtime;
+mod services;
 
 pub(crate) use api::PluginRuntimeState;
 pub use api::{HarnessPlugin, PluginHost};
@@ -23,3 +24,7 @@ pub use composition::{
 pub use manifest::{PluginCapability, PluginManifest};
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;
+pub use services::{
+    context_descriptor, ContextServiceDescriptor, InteractionService, LlmServiceDescriptor,
+    PolicyService,
+};

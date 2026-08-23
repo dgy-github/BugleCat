@@ -455,3 +455,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 根因二：点击停止后按钮被 `stopping` 状态禁用；即使后端取消已按会话直接触发，界面仍让用户感觉无法再次停止。
 - 现在思考默认折叠、纯文本、最多保留最近 4000 字并限制展开高度；停止按钮在任务真正结束前保持可点击，可重复发送当前会话的直接取消请求。
 - 完成态进一步按整个会话逐轮收口：执行中可临时显示思考和中间播报；收到 `done` 后，每一轮都保留用户消息和该轮最后的正式回答，清掉各轮中间播报，而不是只整理或只保留最后一轮。
+
+## 2026-08-23 DeepSeek Harness 组件化 M2-M4 进展
+- 在独立工作树 `D:\github_dgy\nanocodex\.worktrees\deepseek-harness-components` 的 `feat/deepseek-harness-components` 分支继续实施“一切皆插件”的架构。
+- M2-M4 已从仅注册插件升级为类型化能力服务：`ncx.llm` 发布模型/推理/视觉能力描述，`ncx.interaction` 发布审批入口，`ncx.policy` 发布沙箱、审批、计划和网络策略，`ncx.context` 发布工作区/记忆/技能上下文描述；`memory`、`compaction` 已保留为独立能力插件入口。
+- `CoreToolsPlugin` 通过运行时服务读取策略和上下文，兼容旧的直接工具注册测试；基础 Bundle 已包含上述能力插件，可由 Profile/Bundle/Overlay 选择启用。
+- 当前仍需继续把 AgentLoop、Provider 实际调用、Session/Memory/Compaction 的业务逻辑迁移为服务消费者，不能把当前阶段误称为完整 M4。
+- 本轮验证：`cargo test -p ncx-core --lib plugins::` 13 项通过；`cargo check -p ncx-cli` 通过；GUI Tauri `cargo check` 通过。未生成或提交 Cargo.lock 等无关改动。

@@ -1,6 +1,9 @@
 //! Built-in capability plugins composed by the default nanocodex runtime.
 
-use crate::plugins::{HarnessPlugin, PluginCapability, PluginHost, PluginManifest};
+use crate::plugins::{
+    context_descriptor, HarnessPlugin, InteractionService, LlmServiceDescriptor, PluginCapability,
+    PluginHost, PluginManifest, PolicyService,
+};
 use crate::tools::{
     ApplyPatchTool, RememberTool, ShellTool, SkillTool, ToolSearchTool, UpdatePlanTool,
 };
@@ -18,8 +21,13 @@ impl HarnessPlugin for CoreToolsPlugin {
     fn manifest(&self) -> PluginManifest {
         PluginManifest::new("ncx.core", "Core Tools", PluginCapability::Core)
     }
+    fn inject(&self) -> &[&str] {
+        &[]
+    }
 
     fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        let _policy = host.service::<PolicyService>("policy");
+        let _context = host.service::<crate::plugins::ContextServiceDescriptor>("context");
         host.tool(Box::new(crate::tools::ReadFileTool));
         host.tool(Box::new(ApplyPatchTool));
         host.tool(Box::new(StrReplaceEditorTool));
@@ -162,34 +170,83 @@ macro_rules! service_plugin {
     };
 }
 
-service_plugin!(
-    LlmProviderPlugin,
-    "ncx.llm",
-    "LLM Provider",
-    PluginCapability::Llm,
-    "llm.provider"
-);
-service_plugin!(
-    InteractionPlugin,
-    "ncx.interaction",
-    "Interaction",
-    PluginCapability::Interaction,
-    "interaction"
-);
-service_plugin!(
-    PolicyPlugin,
-    "ncx.policy",
-    "Policy",
-    PluginCapability::Policy,
-    "policy"
-);
-service_plugin!(
-    ContextPlugin,
-    "ncx.context",
-    "Context",
-    PluginCapability::Context,
-    "context"
-);
+pub struct LlmProviderPlugin;
+impl HarnessPlugin for LlmProviderPlugin {
+    fn id(&self) -> &str {
+        "ncx.llm"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.llm", "LLM Provider", PluginCapability::Llm)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String> {
+        let model = config
+            .get("model")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("configured");
+        host.provide(
+            "llm.provider",
+            Rc::new(LlmServiceDescriptor {
+                model: model.to_string(),
+                supports_reasoning: true,
+                supports_vision: true,
+            }),
+        )
+    }
+}
+pub struct InteractionPlugin;
+impl HarnessPlugin for InteractionPlugin {
+    fn id(&self) -> &str {
+        "ncx.interaction"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.interaction",
+            "Interaction",
+            PluginCapability::Interaction,
+        )
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "interaction",
+            Rc::new(InteractionService {
+                approver: host.context().approver.clone(),
+            }),
+        )
+    }
+}
+pub struct PolicyPlugin;
+impl HarnessPlugin for PolicyPlugin {
+    fn id(&self) -> &str {
+        "ncx.policy"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.policy", "Policy", PluginCapability::Policy)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        let ctx = host.context();
+        host.provide(
+            "policy",
+            Rc::new(PolicyService {
+                sandbox_mode: ctx.policy.mode.clone(),
+                approval_policy: ctx.approval_policy.clone(),
+                plan_mode: ctx.plan_mode,
+                network_access: ctx.policy.network_access,
+            }),
+        )
+    }
+}
+pub struct ContextPlugin;
+impl HarnessPlugin for ContextPlugin {
+    fn id(&self) -> &str {
+        "ncx.context"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.context", "Context", PluginCapability::Context)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide("context", Rc::new(context_descriptor(host.context())))
+    }
+}
 service_plugin!(
     MemoryPlugin,
     "ncx.memory",
