@@ -99,6 +99,8 @@ pub struct AgentLoop {
     use_vision_this_turn: bool,
     event_sink: Option<EventSink>,
     llm_capabilities: Option<Rc<crate::plugins::LlmServiceDescriptor>>,
+    policy_service: Option<Rc<crate::plugins::PolicyService>>,
+    interaction_service: Option<Rc<crate::plugins::InteractionService>>,
 }
 
 impl AgentLoop {
@@ -115,6 +117,9 @@ impl AgentLoop {
     pub fn new(provider: Box<dyn Provider>, tools: ToolRegistry, session: Session) -> Self {
         let llm_capabilities =
             tools.service::<crate::plugins::LlmServiceDescriptor>("llm.provider");
+        let policy_service = tools.service::<crate::plugins::PolicyService>("policy");
+        let interaction_service =
+            tools.service::<crate::plugins::InteractionService>("interaction");
         AgentLoop {
             provider,
             vision_provider: None,
@@ -131,6 +136,8 @@ impl AgentLoop {
             use_vision_this_turn: false,
             event_sink: None,
             llm_capabilities,
+            policy_service,
+            interaction_service,
         }
     }
 
@@ -182,16 +189,33 @@ impl AgentLoop {
         self.llm_capabilities.as_deref()
     }
 
+    pub fn policy_service(&self) -> Option<&crate::plugins::PolicyService> {
+        self.policy_service.as_deref()
+    }
+
+    pub fn has_interaction_service(&self) -> bool {
+        self.interaction_service.is_some()
+    }
+
     /// Snapshot the normalized controls applied by a frontend assembly path.
     pub fn runtime_profile(&self) -> AgentRuntimeProfile {
+        let permissions = self.policy_service.as_ref().map(|policy| {
+            crate::runtime_profile::RuntimePermissionProfile {
+                sandbox_mode: policy.sandbox_mode.clone(),
+                approval_policy: policy.approval_policy.clone(),
+                require_edit_approval: self.tools.ctx.require_edit_approval,
+                plan_mode: policy.plan_mode,
+                network_access: policy.network_access,
+            }
+        });
         AgentRuntimeProfile {
-            permissions: crate::runtime_profile::RuntimePermissionProfile {
+            permissions: permissions.unwrap_or(crate::runtime_profile::RuntimePermissionProfile {
                 sandbox_mode: self.tools.ctx.policy.mode.clone(),
                 approval_policy: self.tools.ctx.approval_policy.clone(),
                 require_edit_approval: self.tools.ctx.require_edit_approval,
                 plan_mode: self.tools.ctx.plan_mode,
                 network_access: self.tools.ctx.policy.network_access,
-            },
+            }),
             task_budget: self.task_budget.clone(),
             max_parallel_tool_calls: self.max_parallel_tool_calls,
             context_edit: self.context_edit.clone(),
