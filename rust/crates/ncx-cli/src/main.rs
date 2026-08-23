@@ -23,12 +23,11 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    custom_command_prompt, discover_skills, expand_file_mentions, list_custom_commands,
-    load_project_instructions, model_provider_from_config, new_session_id,
-    prepare_mcp_server_tools, skills_index_block, vision_provider_from_config, AgentLoop,
-    AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, HarnessRuntimeBuilder,
-    MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session, SessionIndex,
-    SessionSummary, Tool, ToolContext, TurnResult,
+    custom_command_prompt, discover_skills, expand_file_mentions, install_llm_provider_factory,
+    list_custom_commands, load_project_instructions, new_session_id, prepare_mcp_server_tools,
+    skills_index_block, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome,
+    HarnessRuntimeBuilder, MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session,
+    SessionIndex, SessionSummary, Tool, ToolContext, TurnResult,
 };
 use serde_json::{json, Value};
 
@@ -142,7 +141,6 @@ async fn run(args: Args) -> i32 {
     }
 
     let runtime_profile = runtime_profile_for_args(&cfg, &args);
-    let provider = model_provider_from_config(&cfg, cfg.model.clone());
     let policy = runtime_profile.sandbox_policy(&cfg.workspace);
     // Project memory: recalled per prompt by AgentLoop (query-scoped); the
     // `remember` tool lets the agent append verified notes (smarter on THIS repo).
@@ -194,6 +192,7 @@ async fn run(args: Args) -> i32 {
             return 1;
         }
     };
+    install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
     // ncx-forge: emit the default harness genome (base prompt + core tool
     // descriptions) as TOML and exit. Done BEFORE MCP registration so the dump
     // contains only the evolvable core surface, not server-provided tools.
@@ -236,8 +235,7 @@ async fn run(args: Args) -> i32 {
     };
     let restored_count = session.restored_count;
     let mut agent = runtime_profile
-        .apply(AgentLoop::new(Box::new(provider), tools, session))
-        .with_vision_provider(vision_provider_from_config(&cfg));
+        .apply(AgentLoop::from_runtime_services(tools, session).expect("LLM factory service"));
     let mut recorder = SessionRecorder::new(session_id, cfg.workspace.clone(), log_path);
 
     if args.resume {

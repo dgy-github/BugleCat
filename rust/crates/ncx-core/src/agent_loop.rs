@@ -102,6 +102,16 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
+    /// Assemble an agent from the frontend-owned LLM factory service.
+    pub fn from_runtime_services(tools: ToolRegistry, session: Session) -> Result<Self, String> {
+        let factory = tools
+            .service::<crate::plugins::LlmProviderFactoryHandle>("llm.factory")
+            .ok_or_else(|| "Harness LLM factory service is not installed".to_string())?;
+        let provider = factory.0.primary();
+        let vision = factory.0.vision();
+        Ok(Self::new(provider, tools, session).with_vision_provider(vision))
+    }
+
     pub fn new(provider: Box<dyn Provider>, tools: ToolRegistry, session: Session) -> Self {
         let llm_capabilities =
             tools.service::<crate::plugins::LlmServiceDescriptor>("llm.provider");

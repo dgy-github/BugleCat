@@ -64,16 +64,17 @@ pub use orchestrator::{
 pub use plugins::{
     BuiltinToolsPlugin, CompactionPlugin, CompactionServiceDescriptor, ContextPlugin,
     ContextServiceDescriptor, CoreToolsPlugin, HarnessPlugin, HarnessRuntimeBuilder,
-    InteractionPlugin, InteractionService, LlmProviderPlugin, LlmServiceDescriptor, MemoryPlugin,
-    MemoryServiceDescriptor, PluginCapability, PluginHost, PluginInstallReport, PluginManifest,
-    PluginRegistry, PolicyPlugin, PolicyService, ProcessToolsPlugin, SearchToolsPlugin,
-    SessionToolsPlugin, WorkspaceToolsPlugin,
+    InteractionPlugin, InteractionService, LlmProviderFactory, LlmProviderFactoryHandle,
+    LlmProviderPlugin, LlmServiceDescriptor, MemoryPlugin, MemoryServiceDescriptor,
+    PluginCapability, PluginHost, PluginInstallReport, PluginManifest, PluginRegistry,
+    PolicyPlugin, PolicyService, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,
+    WorkspaceToolsPlugin,
 };
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;
 pub use runtime_profile::{
-    model_provider_from_config, vision_provider_from_config, AgentRuntimeProfile,
-    RuntimePermissionProfile,
+    install_llm_provider_factory, model_provider_from_config, vision_provider_from_config,
+    AgentRuntimeProfile, ConfiguredLlmProviderFactory, RuntimePermissionProfile,
 };
 pub use rust_analyzer::RustAnalyzerProvider;
 pub use session::{

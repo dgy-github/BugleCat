@@ -26,5 +26,6 @@ pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;
 pub use services::{
     context_descriptor, CompactionServiceDescriptor, ContextServiceDescriptor, InteractionService,
-    LlmServiceDescriptor, MemoryServiceDescriptor, PolicyService,
+    LlmProviderFactory, LlmProviderFactoryHandle, LlmServiceDescriptor, MemoryServiceDescriptor,
+    PolicyService,
 };

@@ -7,6 +7,7 @@ use ncx_config::{permission_mode_to_knobs, Config};
 use ncx_provider::DeepSeekProvider;
 use ncx_sandbox::SandboxPolicy;
 
+use crate::plugins::{LlmProviderFactory, LlmProviderFactoryHandle};
 use crate::{
     AgentLoop, ContextEditPolicy, Provider, RustAnalyzerProvider, TaskBudget, ToolContext,
 };
@@ -156,6 +157,44 @@ pub fn vision_provider_from_config(cfg: &Config) -> Option<Box<dyn Provider>> {
         cfg.timeout_s as u64,
         cfg.max_retries as u32,
     )))
+}
+
+/// Frontend configuration adapter installed as the Harness LLM service.
+pub struct ConfiguredLlmProviderFactory {
+    cfg: Config,
+    model: String,
+}
+
+impl ConfiguredLlmProviderFactory {
+    pub fn new(cfg: Config, model: impl Into<String>) -> Self {
+        Self {
+            cfg,
+            model: model.into(),
+        }
+    }
+}
+
+impl LlmProviderFactory for ConfiguredLlmProviderFactory {
+    fn primary(&self) -> Box<dyn Provider> {
+        Box::new(model_provider_from_config(&self.cfg, self.model.clone()))
+    }
+
+    fn vision(&self) -> Option<Box<dyn Provider>> {
+        vision_provider_from_config(&self.cfg)
+    }
+}
+
+pub fn install_llm_provider_factory(
+    tools: &mut crate::ToolRegistry,
+    cfg: Config,
+    model: impl Into<String>,
+) {
+    tools.replace_service(
+        "llm.factory",
+        Rc::new(LlmProviderFactoryHandle(Rc::new(
+            ConfiguredLlmProviderFactory::new(cfg, model),
+        ))),
+    );
 }
 
 fn positive_usize(value: i64, fallback: usize) -> usize {

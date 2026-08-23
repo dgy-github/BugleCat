@@ -1,6 +1,7 @@
 //! Service definitions shared by capability plugins and their consumers.
 
 use crate::tools::{ApprovalHandler, ToolContext};
+use crate::Provider;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +10,15 @@ pub struct LlmServiceDescriptor {
     pub supports_reasoning: bool,
     pub supports_vision: bool,
 }
+
+/// Runtime-owned provider factory exposed through the LLM capability boundary.
+pub trait LlmProviderFactory {
+    fn primary(&self) -> Box<dyn Provider>;
+    fn vision(&self) -> Option<Box<dyn Provider>>;
+}
+
+#[derive(Clone)]
+pub struct LlmProviderFactoryHandle(pub Rc<dyn LlmProviderFactory>);
 
 #[derive(Clone)]
 pub struct InteractionService {

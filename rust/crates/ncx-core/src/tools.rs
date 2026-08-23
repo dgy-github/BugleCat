@@ -297,6 +297,13 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Replace a runtime capability service after plugin composition has run.
+    /// This is used for frontend-owned implementations such as configured LLMs.
+    pub fn replace_service<T: std::any::Any>(&mut self, name: &str, service: Rc<T>) {
+        self.plugin_state
+            .services
+            .insert(name.trim().to_string(), service);
+    }
     /// Read a typed capability service installed by the active Harness profile.
     pub fn service<T: std::any::Any>(&self, name: &str) -> Option<Rc<T>> {
         self.plugin_state

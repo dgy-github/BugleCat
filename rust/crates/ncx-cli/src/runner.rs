@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
 use ncx_core::{
-    discover_skills, load_project_instructions, model_provider_from_config, skills_index_block,
+    discover_skills, install_llm_provider_factory, load_project_instructions, skills_index_block,
     AgentLoop, AgentRunner, AgentRuntimeProfile, HarnessRuntimeBuilder, MemoryStore, Session,
     Summarizer, Tier, ToolContext, ToolRegistry,
 };
@@ -72,7 +72,7 @@ impl LiveRunner {
         task: &str,
         with_tools: bool,
     ) -> String {
-        let provider = model_provider_from_config(&self.cfg, self.model_for(tier));
+        let model = self.model_for(tier);
         let policy = SandboxPolicy::new(self.cfg.sandbox_mode.clone(), workspace)
             .with_network_access(self.cfg.network_access);
         let ctx = ToolContext::new(workspace.to_path_buf(), policy)
@@ -86,7 +86,7 @@ impl LiveRunner {
             .with_hooks(self.cfg.hooks.clone())
             .with_skills(discover_skills(workspace));
         let skills_index = skills_index_block(&discover_skills(workspace));
-        let tools = if with_tools {
+        let mut tools = if with_tools {
             match HarnessRuntimeBuilder::configured(workspace) {
                 Ok(builder) => builder.build(ctx),
                 Err(error) => return format!("Harness 配置错误：{error}"),
@@ -94,11 +94,12 @@ impl LiveRunner {
         } else {
             ToolRegistry::empty(ctx)
         };
+        install_llm_provider_factory(&mut tools, self.cfg.clone(), model);
         let instructions = load_project_instructions(workspace, 16_000);
         let system = compose_system_prompt(system, &[instructions, skills_index]);
         let session = Session::new(system);
         let mut agent = AgentRuntimeProfile::from_legacy_permissions(&self.cfg)
-            .apply(AgentLoop::new(Box::new(provider), tools, session));
+            .apply(AgentLoop::from_runtime_services(tools, session).expect("LLM factory service"));
         agent.run_turn(json!(task), None).await.final_text
     }
 

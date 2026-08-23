@@ -26,8 +26,8 @@ use ncx_config::{
     load_config, permission_mode_to_knobs, write_nanocodex_config, ConfigPaths, Overrides,
 };
 use ncx_core::{
-    discover_skills, expand_file_mentions, load_workspace_instructions, model_provider_from_config,
-    new_session_id, skills_index_block, suggest_title_with_provider, vision_provider_from_config,
+    discover_skills, expand_file_mentions, install_llm_provider_factory, load_workspace_instructions,
+    model_provider_from_config, new_session_id, skills_index_block, suggest_title_with_provider,
     AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
     CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext,
     UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
@@ -577,7 +577,6 @@ fn build_agent(
     cfg.validate().map_err(|e| e.to_string())?;
 
     let runtime_profile = AgentRuntimeProfile::from_config(&cfg);
-    let provider = model_provider_from_config(&cfg, cfg.model.clone());
     let policy = runtime_profile.sandbox_policy(&cfg.workspace);
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     // Memory is recalled per prompt by AgentLoop (query-scoped), not dumped here.
@@ -606,7 +605,8 @@ fn build_agent(
     if !restored_plan.is_empty() {
         ctx.plan.replace(restored_plan);
     }
-    let tools = ncx_core::HarnessRuntimeBuilder::configured(&cfg.workspace)?.build(ctx);
+    let mut tools = ncx_core::HarnessRuntimeBuilder::configured(&cfg.workspace)?.build(ctx);
+    install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
     let (session_id, seed_messages) = match seed {
         Some((id, messages)) => (id, Some(messages)),
         None => (new_session_id(), None),
@@ -619,8 +619,7 @@ fn build_agent(
         None => Session::with_log(system_prompt, Some(log_path.clone())),
     };
     let agent = runtime_profile
-        .apply(AgentLoop::new(Box::new(provider), tools, session))
-        .with_vision_provider(vision_provider_from_config(&cfg));
+        .apply(AgentLoop::from_runtime_services(tools, session)?);
     Ok((
         agent,
         cfg.workspace.clone(),
