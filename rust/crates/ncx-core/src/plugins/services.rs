@@ -30,6 +30,16 @@ pub struct ContextServiceDescriptor {
     pub skill_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryServiceDescriptor {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionServiceDescriptor {
+    pub enabled: bool,
+}
+
 pub fn context_descriptor(ctx: &ToolContext) -> ContextServiceDescriptor {
     ContextServiceDescriptor {
         workspace: ctx.workspace.display().to_string(),

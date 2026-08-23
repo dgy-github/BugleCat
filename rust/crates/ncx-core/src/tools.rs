@@ -297,6 +297,14 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Read a typed capability service installed by the active Harness profile.
+    pub fn service<T: std::any::Any>(&self, name: &str) -> Option<Rc<T>> {
+        self.plugin_state
+            .services
+            .get(name)
+            .cloned()
+            .and_then(|service| service.downcast::<T>().ok())
+    }
     /// Install a named Harness plugin bundle into this registry.
     pub fn install_plugin(&mut self, plugin: &dyn crate::plugins::HarnessPlugin) {
         plugin

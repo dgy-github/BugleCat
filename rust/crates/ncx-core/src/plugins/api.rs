@@ -22,7 +22,7 @@ type Disposer = Box<dyn FnOnce()>;
 
 #[derive(Default)]
 pub(crate) struct PluginRuntimeState {
-    services: HashMap<String, Rc<dyn Any>>,
+    pub(crate) services: HashMap<String, Rc<dyn Any>>,
     effects: Vec<Disposer>,
 }
 

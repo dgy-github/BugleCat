@@ -25,6 +25,6 @@ pub use manifest::{PluginCapability, PluginManifest};
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;
 pub use services::{
-    context_descriptor, ContextServiceDescriptor, InteractionService, LlmServiceDescriptor,
-    PolicyService,
+    context_descriptor, CompactionServiceDescriptor, ContextServiceDescriptor, InteractionService,
+    LlmServiceDescriptor, MemoryServiceDescriptor, PolicyService,
 };

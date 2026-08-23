@@ -1,8 +1,9 @@
 //! Built-in capability plugins composed by the default nanocodex runtime.
 
 use crate::plugins::{
-    context_descriptor, HarnessPlugin, InteractionService, LlmServiceDescriptor, PluginCapability,
-    PluginHost, PluginManifest, PolicyService,
+    context_descriptor, CompactionServiceDescriptor, HarnessPlugin, InteractionService,
+    LlmServiceDescriptor, MemoryServiceDescriptor, PluginCapability, PluginHost, PluginManifest,
+    PolicyService,
 };
 use crate::tools::{
     ApplyPatchTool, RememberTool, ShellTool, SkillTool, ToolSearchTool, UpdatePlanTool,
@@ -149,25 +150,38 @@ impl HarnessPlugin for SessionToolsPlugin {
     }
 }
 
-macro_rules! service_plugin {
-    ($name:ident, $id:literal, $label:literal, $cap:expr, $service:literal) => {
-        pub struct $name;
-        impl HarnessPlugin for $name {
-            fn id(&self) -> &str {
-                $id
-            }
-            fn manifest(&self) -> PluginManifest {
-                PluginManifest::new($id, $label, $cap)
-            }
-            fn install(
-                &self,
-                host: &mut PluginHost<'_>,
-                _config: &toml::Value,
-            ) -> Result<(), String> {
-                host.provide($service, Rc::new($id.to_string()))
-            }
-        }
-    };
+pub struct MemoryPlugin;
+impl HarnessPlugin for MemoryPlugin {
+    fn id(&self) -> &str {
+        "ncx.memory"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.memory", "Memory", PluginCapability::Memory)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "memory",
+            Rc::new(MemoryServiceDescriptor {
+                enabled: host.context().memory.is_some(),
+            }),
+        )
+    }
+}
+
+pub struct CompactionPlugin;
+impl HarnessPlugin for CompactionPlugin {
+    fn id(&self) -> &str {
+        "ncx.compaction"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.compaction", "Compaction", PluginCapability::Compaction)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "compaction",
+            Rc::new(CompactionServiceDescriptor { enabled: true }),
+        )
+    }
 }
 
 pub struct LlmProviderPlugin;
@@ -247,21 +261,6 @@ impl HarnessPlugin for ContextPlugin {
         host.provide("context", Rc::new(context_descriptor(host.context())))
     }
 }
-service_plugin!(
-    MemoryPlugin,
-    "ncx.memory",
-    "Memory",
-    PluginCapability::Memory,
-    "memory"
-);
-service_plugin!(
-    CompactionPlugin,
-    "ncx.compaction",
-    "Compaction",
-    PluginCapability::Compaction,
-    "compaction"
-);
-
 /// Compatibility bundle used by the default runtime.
 pub struct BuiltinToolsPlugin;
 
