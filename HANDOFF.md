@@ -462,3 +462,4 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `CoreToolsPlugin` 通过运行时服务读取策略和上下文，兼容旧的直接工具注册测试；基础 Bundle 已包含上述能力插件，可由 Profile/Bundle/Overlay 选择启用。
 - 当前仍需继续把 AgentLoop、Provider 实际调用、Session/Memory/Compaction 的业务逻辑迁移为服务消费者，不能把当前阶段误称为完整 M4。
 - 本轮验证：`cargo test -p ncx-core --lib plugins::` 13 项通过；`cargo check -p ncx-cli` 通过；GUI Tauri `cargo check` 通过。未生成或提交 Cargo.lock 等无关改动。
+- 后续增量 `90a16cb` 已补齐 `MemoryServiceDescriptor` 与 `CompactionServiceDescriptor`；`AgentLoop` 通过 `ToolRegistry::service` 消费 compaction 服务，没有安装该插件时不会自动压缩。全量 `cargo test -p ncx-core --lib` 211 项通过，提交已推送到 GitHub。
