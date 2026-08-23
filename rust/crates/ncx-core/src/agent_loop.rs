@@ -101,6 +101,7 @@ pub struct AgentLoop {
     llm_capabilities: Option<Rc<crate::plugins::LlmServiceDescriptor>>,
     policy_service: Option<Rc<crate::plugins::PolicyService>>,
     interaction_service: Option<Rc<crate::plugins::InteractionService>>,
+    context_service: Option<Rc<crate::plugins::ContextServiceDescriptor>>,
 }
 
 impl AgentLoop {
@@ -120,6 +121,7 @@ impl AgentLoop {
         let policy_service = tools.service::<crate::plugins::PolicyService>("policy");
         let interaction_service =
             tools.service::<crate::plugins::InteractionService>("interaction");
+        let context_service = tools.service::<crate::plugins::ContextServiceDescriptor>("context");
         AgentLoop {
             provider,
             vision_provider: None,
@@ -138,6 +140,7 @@ impl AgentLoop {
             llm_capabilities,
             policy_service,
             interaction_service,
+            context_service,
         }
     }
 
@@ -195,6 +198,10 @@ impl AgentLoop {
 
     pub fn has_interaction_service(&self) -> bool {
         self.interaction_service.is_some()
+    }
+
+    pub fn context_service(&self) -> Option<&crate::plugins::ContextServiceDescriptor> {
+        self.context_service.as_deref()
     }
 
     /// Snapshot the normalized controls applied by a frontend assembly path.
