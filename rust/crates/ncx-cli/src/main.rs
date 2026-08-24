@@ -14,7 +14,10 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use ncx_app_server::AppServer;
 use ncx_config::{
     load_config, load_mcp_servers, write_nanocodex_config, Config, ConfigPaths, McpServerConfig,
     Overrides, VALID_PERMISSION_MODES, WRITABLE_KEYS,
@@ -28,8 +31,13 @@ use ncx_core::{
     load_project_instructions, new_session_id, prepare_mcp_server_tools, skills_index_block,
     AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, HarnessRuntimeBuilder,
     McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session,
-    SessionIndex, SessionSummary, TextContextFragment, Tool, ToolContext, TurnResult,
+    TextContextFragment, Tool, ToolContext, TurnResult,
 };
+use ncx_protocol::{
+    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, TurnId,
+    TurnStatus, TurnUsage as ProtocolTurnUsage,
+};
+use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde_json::{json, Value};
 
 use args::{parse_args, Args};
@@ -109,8 +117,16 @@ async fn run(args: Args) -> i32 {
         }
     };
     if args.history {
-        println!("{}", render_history(&SessionIndex::default().entries(), 20));
-        return 0;
+        return match protocol_history(20) {
+            Ok(history) => {
+                println!("{history}");
+                0
+            }
+            Err(error) => {
+                eprintln!("ncx: history error: {error}");
+                1
+            }
+        };
     }
     if let Err(e) = cfg.validate() {
         eprintln!("ncx: {e}");
@@ -254,18 +270,22 @@ async fn run(args: Args) -> i32 {
             Err(error) => eprintln!("mcp: load failed: {error}"),
         }
     }
-    let log_path = session_log_path(&cfg.workspace);
-    let session_id = new_session_id();
-    let session = if args.resume {
-        Session::resume(system_prompt, Some(log_path.clone()))
-    } else {
-        Session::with_log(system_prompt, Some(log_path.clone()))
+    let mut recorder = match SessionRecorder::open(cfg.workspace.clone(), args.resume) {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            eprintln!("ncx: thread store error: {error}");
+            return 1;
+        }
+    };
+    let log_path = recorder.log_path();
+    let seed = recorder.model_context();
+    let session = match seed {
+        Some(messages) => Session::fork(system_prompt, messages, Some(log_path)),
+        None => Session::with_log(system_prompt, Some(log_path)),
     };
     let restored_count = session.restored_count;
     let mut agent = runtime_profile
         .apply(AgentLoop::from_runtime_services(tools, session).expect("LLM factory service"));
-    let mut recorder = SessionRecorder::new(session_id, cfg.workspace.clone(), log_path);
-
     if args.resume {
         if restored_count > 0 {
             eprintln!("resumed {restored_count} message(s) from the workspace session log.");
@@ -282,7 +302,7 @@ async fn run(args: Args) -> i32 {
             if !args.images.is_empty() {
                 eprintln!("ncx: --image is ignored with --orchestrate (text-only path).");
             }
-            return run_orchestrated(cfg, &expanded).await;
+            return run_orchestrated(cfg, &expanded, &mut recorder).await;
         }
         if let Err(error) = validate_attachments(&agent.tools, &args.images) {
             eprintln!("ncx: {error}");
@@ -295,8 +315,18 @@ async fn run(args: Args) -> i32 {
                 return 1;
             }
         };
+        let turn_id = match recorder.start_turn(&expanded) {
+            Ok(turn_id) => turn_id,
+            Err(error) => {
+                eprintln!("ncx: cannot start turn: {error}");
+                return 1;
+            }
+        };
         let result = agent.run_turn(user_input, None).await;
-        recorder.record(&agent.session);
+        if let Err(error) = recorder.finish_turn(&turn_id, &result, &agent) {
+            eprintln!("ncx: cannot persist turn: {error}");
+            return 1;
+        }
         println!("{}", result.final_text);
         // Emit a stable, parseable token-usage line on stderr so external tools
         // (e.g. the ncx-forge evaluator's Pareto cost axis) can read real token
@@ -311,13 +341,20 @@ async fn run(args: Args) -> i32 {
 
 /// Run a single prompt through the tiered flash/pro orchestrator and print the
 /// outcome (complexity, verify status, final text).
-async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
+async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecorder) -> i32 {
     let fast = if cfg.fast_model.is_empty() {
         cfg.model.clone()
     } else {
         cfg.fast_model.clone()
     };
     eprintln!("[orchestrator] main={}  fast={}", cfg.model, fast);
+    let turn_id = match recorder.start_turn(prompt) {
+        Ok(turn_id) => turn_id,
+        Err(error) => {
+            eprintln!("ncx: cannot start orchestrated turn: {error}");
+            return 1;
+        }
+    };
     let runner = LiveRunner::new(cfg);
     let orch = Orchestrator::new(&runner, OrchestratorConfig::default());
     let outcome = orch.handle(prompt).await;
@@ -332,6 +369,21 @@ async fn run_orchestrated(cfg: Config, prompt: &str) -> i32 {
         outcome.verify_rounds,
         outcome.best_worker,
     );
+    let status = if outcome.verify_passed {
+        TurnStatus::Completed
+    } else {
+        TurnStatus::Failed
+    };
+    if let Err(error) = recorder.finish_external_turn(
+        &turn_id,
+        prompt,
+        &outcome.final_text,
+        status,
+        (!outcome.verify_passed).then(|| "orchestrator verification failed".to_string()),
+    ) {
+        eprintln!("ncx: cannot persist orchestrated turn: {error}");
+        return 1;
+    }
     println!("{}", outcome.final_text);
     if outcome.verify_passed {
         0
@@ -450,8 +502,17 @@ async fn run_one_turn(
             return;
         }
     };
+    let turn_id = match recorder.start_turn(&expanded) {
+        Ok(turn_id) => turn_id,
+        Err(error) => {
+            eprintln!("ncx: cannot start turn: {error}");
+            return;
+        }
+    };
     let result = agent.run_turn(user_input, None).await;
-    recorder.record(&agent.session);
+    if let Err(error) = recorder.finish_turn(&turn_id, &result, agent) {
+        eprintln!("ncx: cannot persist turn: {error}");
+    }
     usage.record(&result);
     println!("{}", result.final_text);
 }
@@ -498,7 +559,9 @@ fn dispatch_slash(
         "/status" => SlashOutcome::Printed(render_status(cfg)),
         "/usage" | "/cost" | "/usage-credits" => SlashOutcome::Printed(usage.render()),
         "/config" | "/update-config" => SlashOutcome::Printed(config_text(cfg, arg)),
-        "/history" => SlashOutcome::Printed(render_history(&SessionIndex::default().entries(), 20)),
+        "/history" => SlashOutcome::Printed(
+            protocol_history(20).unwrap_or_else(|error| format!("history error: {error}")),
+        ),
         "/checkpoint" => SlashOutcome::Printed(create_checkpoint_text(&cfg.workspace, arg)),
         "/checkpoints" => SlashOutcome::Printed(render_checkpoints(
             &CheckpointStore::new(&cfg.workspace).list(),
@@ -1144,35 +1207,252 @@ fn usage_value(usage: &BTreeMap<String, i64>, key: &str) -> i64 {
 }
 
 struct SessionRecorder {
-    index: SessionIndex,
-    session_id: String,
+    server: AppServer<JsonThreadStore>,
+    thread_id: ThreadId,
     workspace: PathBuf,
-    log_path: PathBuf,
+    model_context: Option<Vec<Value>>,
 }
 
 impl SessionRecorder {
-    fn new(session_id: String, workspace: PathBuf, log_path: PathBuf) -> Self {
-        SessionRecorder {
-            index: SessionIndex::default(),
-            session_id,
+    fn open(workspace: PathBuf, resume: bool) -> Result<Self, String> {
+        Self::open_at(workspace, resume, default_thread_store_path())
+    }
+
+    fn open_at(workspace: PathBuf, resume: bool, store_path: PathBuf) -> Result<Self, String> {
+        let store = Arc::new(JsonThreadStore::open(store_path).map_err(|e| e.to_string())?);
+        let server = AppServer::new(store, now_epoch_millis);
+        let workspace_text = workspace.display().to_string();
+        let existing = if resume {
+            match server
+                .dispatch(ClientRequest::ThreadList {
+                    include_archived: false,
+                })
+                .map_err(|e| e.to_string())?
+                .response
+                .payload
+            {
+                ResponsePayload::Threads(threads) => threads
+                    .into_iter()
+                    .find(|metadata| metadata.workspace == workspace_text),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let thread_id = if let Some(metadata) = existing {
+            metadata.id
+        } else {
+            let thread_id = ThreadId::new(new_session_id()).map_err(|e| e.to_string())?;
+            server
+                .dispatch(ClientRequest::ThreadCreate {
+                    thread_id: Some(thread_id.clone()),
+                    workspace: workspace_text,
+                    title: "(no prompt yet)".to_string(),
+                })
+                .map_err(|e| e.to_string())?;
+            thread_id
+        };
+        let model_context = match server
+            .dispatch(ClientRequest::ThreadModelContextRead {
+                thread_id: thread_id.clone(),
+            })
+            .map_err(|e| e.to_string())?
+            .response
+            .payload
+        {
+            ResponsePayload::ModelContext(Some(context)) => Some(context.messages),
+            _ if resume => Some(read_protocol_messages(&server, &thread_id)?),
+            _ => None,
+        };
+        Ok(Self {
+            server,
+            thread_id,
             workspace,
-            log_path,
+            model_context,
+        })
+    }
+
+    fn model_context(&self) -> Option<Vec<Value>> {
+        self.model_context
+            .clone()
+            .filter(|messages| !messages.is_empty())
+    }
+
+    fn log_path(&self) -> PathBuf {
+        self.workspace
+            .join(".nanocodex")
+            .join("sessions")
+            .join(format!(
+                "{}.jsonl",
+                safe_thread_file_stem(self.thread_id.as_str())
+            ))
+    }
+
+    fn start_turn(&mut self, user_text: &str) -> Result<TurnId, String> {
+        let turn_id =
+            TurnId::new(format!("turn-{}", new_session_id())).map_err(|error| error.to_string())?;
+        self.server
+            .dispatch(ClientRequest::TurnStart {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        self.server
+            .dispatch(ClientRequest::ItemAppend {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+                item: ThreadItem::UserMessage {
+                    id: ItemId::new(format!("user-{}", new_session_id()))
+                        .map_err(|error| error.to_string())?,
+                    text: user_text.to_string(),
+                },
+            })
+            .map_err(|error| error.to_string())?;
+        let current = self
+            .server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: self.thread_id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        if matches!(current.response.payload, ResponsePayload::Thread(Thread { metadata: ThreadMetadata { ref title, .. }, .. }) if title == "(no prompt yet)")
+        {
+            self.server
+                .dispatch(ClientRequest::ThreadRename {
+                    thread_id: self.thread_id.clone(),
+                    title: clipped_label(user_text, 80),
+                })
+                .map_err(|error| error.to_string())?;
         }
+        Ok(turn_id)
     }
 
     fn session_id(&self) -> &str {
-        &self.session_id
+        self.thread_id.as_str()
     }
 
-    fn record(&mut self, session: &Session) {
-        let _ = self
-            .index
-            .record_turn(&self.session_id, &self.workspace, session, &self.log_path);
+    fn finish_turn(
+        &mut self,
+        turn_id: &TurnId,
+        result: &TurnResult,
+        agent: &AgentLoop,
+    ) -> Result<(), String> {
+        self.server
+            .dispatch(ClientRequest::ItemAppend {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+                item: ThreadItem::AssistantMessage {
+                    id: ItemId::new(format!("assistant-{}", new_session_id()))
+                        .map_err(|error| error.to_string())?,
+                    text: result.final_text.clone(),
+                },
+            })
+            .map_err(|error| error.to_string())?;
+        let messages = agent.session.full_messages();
+        self.server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: self.thread_id.clone(),
+                messages: messages.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        self.model_context = Some(messages);
+        let estimated = agent.estimated_cost(result);
+        let (currency, estimated_cost) = estimated
+            .map(|(currency, amount)| (Some(currency), Some(amount)))
+            .unwrap_or((None, None));
+        let status = if result.stop_reason == "error" {
+            TurnStatus::Failed
+        } else {
+            TurnStatus::Completed
+        };
+        self.server
+            .dispatch(ClientRequest::TurnComplete {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+                status,
+                error: (status == TurnStatus::Failed).then(|| result.final_text.clone()),
+                usage: ProtocolTurnUsage {
+                    tokens: result.usage.clone(),
+                    estimated_cost,
+                    currency,
+                },
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn replace_model_context(&mut self, session: &Session) -> Result<(), String> {
+        let messages = session.full_messages();
+        self.server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: self.thread_id.clone(),
+                messages: messages.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        self.model_context = Some(messages);
+        Ok(())
+    }
+
+    fn finish_external_turn(
+        &mut self,
+        turn_id: &TurnId,
+        user_text: &str,
+        final_text: &str,
+        status: TurnStatus,
+        error: Option<String>,
+    ) -> Result<(), String> {
+        self.server
+            .dispatch(ClientRequest::ItemAppend {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+                item: ThreadItem::AssistantMessage {
+                    id: ItemId::new(format!("assistant-{}", new_session_id()))
+                        .map_err(|failure| failure.to_string())?,
+                    text: final_text.to_string(),
+                },
+            })
+            .map_err(|failure| failure.to_string())?;
+        let mut messages = self.model_context.take().unwrap_or_default();
+        messages.push(json!({"role": "user", "content": user_text}));
+        messages.push(json!({"role": "assistant", "content": final_text}));
+        self.server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: self.thread_id.clone(),
+                messages: messages.clone(),
+            })
+            .map_err(|failure| failure.to_string())?;
+        self.model_context = Some(messages);
+        self.server
+            .dispatch(ClientRequest::TurnComplete {
+                thread_id: self.thread_id.clone(),
+                turn_id: turn_id.clone(),
+                status,
+                error,
+                usage: ProtocolTurnUsage::default(),
+            })
+            .map_err(|failure| failure.to_string())?;
+        Ok(())
     }
 }
 
-fn session_log_path(workspace: &Path) -> PathBuf {
-    workspace.join(".nanocodex").join("session.jsonl")
+fn safe_thread_file_stem(id: &str) -> String {
+    id.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn now_epoch_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(i64::MAX)
 }
 
 /// Print a stable, parseable token-usage line to stderr (one-shot mode).
@@ -1187,7 +1467,25 @@ fn emit_usage_line(usage: &std::collections::BTreeMap<String, i64>) {
     );
 }
 
-fn render_history(entries: &[SessionSummary], limit: usize) -> String {
+fn protocol_history(limit: usize) -> Result<String, String> {
+    let store =
+        Arc::new(JsonThreadStore::open(default_thread_store_path()).map_err(|e| e.to_string())?);
+    let server = AppServer::new(store, now_epoch_millis);
+    let entries = match server
+        .dispatch(ClientRequest::ThreadList {
+            include_archived: false,
+        })
+        .map_err(|e| e.to_string())?
+        .response
+        .payload
+    {
+        ResponsePayload::Threads(entries) => entries,
+        _ => return Err("threadList returned an unexpected response".to_string()),
+    };
+    Ok(render_history(&entries, limit))
+}
+
+fn render_history(entries: &[ThreadMetadata], limit: usize) -> String {
     if entries.is_empty() {
         return "No saved sessions.".into();
     }
@@ -1199,21 +1497,47 @@ fn render_history(entries: &[SessionSummary], limit: usize) -> String {
             summary.title.as_str()
         };
         out.push_str(&format!(
-            "\n  {}  {}  {}  users={} assistants={} tools={}",
-            summary.updated_at,
-            summary.session_id,
-            title,
-            summary.user_messages,
-            summary.assistant_messages,
-            summary.tool_calls
+            "\n  {}  {}  {}",
+            summary.updated_at, summary.id, title,
         ));
     }
     out
 }
 
+fn read_protocol_messages(
+    server: &AppServer<JsonThreadStore>,
+    thread_id: &ThreadId,
+) -> Result<Vec<Value>, String> {
+    let thread = match server
+        .dispatch(ClientRequest::ThreadReadVisible {
+            thread_id: thread_id.clone(),
+        })
+        .map_err(|error| error.to_string())?
+        .response
+        .payload
+    {
+        ResponsePayload::Thread(thread) => thread,
+        _ => return Err("threadReadVisible returned an unexpected response".to_string()),
+    };
+    Ok(thread
+        .turns
+        .into_iter()
+        .flat_map(|turn| turn.items)
+        .filter_map(|item| match item {
+            ThreadItem::UserMessage { text, .. } => Some(json!({"role": "user", "content": text})),
+            ThreadItem::AssistantMessage { text, .. } => {
+                Some(json!({"role": "assistant", "content": text}))
+            }
+            _ => None,
+        })
+        .collect())
+}
+
 fn compact_session_text(agent: &mut AgentLoop, recorder: &mut SessionRecorder) -> String {
     let stats = agent.session.compact(&agent.context_edit);
-    recorder.record(&agent.session);
+    if let Err(error) = recorder.replace_model_context(&agent.session) {
+        return format!("Compaction succeeded but persistence failed: {error}");
+    }
     format!(
         "Compacted session: chars {} -> {}; compressed_tool_results={} dropped_messages={}",
         stats.original_chars,
@@ -1606,25 +1930,78 @@ mod tests {
 
     #[test]
     fn history_renders_saved_sessions() {
-        let rows = vec![SessionSummary {
-            session_id: "sid".into(),
+        let rows = vec![ThreadMetadata {
+            id: ThreadId::new("sid").unwrap(),
             workspace: "/p".into(),
             title: "fix bug".into(),
-            snippet: "done".into(),
-            user_messages: 1,
-            assistant_messages: 2,
-            tool_calls: 3,
-            recent_tools: vec!["read_file".into()],
-            created_at: "2026-06-01T09:00:00".into(),
-            updated_at: "2026-06-01T10:00:00".into(),
-            log_path: "/p/.nanocodex/session.jsonl".into(),
-            has_snapshot: true,
+            created_at: 1,
+            updated_at: 2,
             archived: false,
         }];
         let out = render_history(&rows, 10);
         assert!(out.contains("sid"));
         assert!(out.contains("fix bug"));
-        assert!(out.contains("tools=3"));
+        assert!(out.contains("  2  "));
+    }
+
+    #[test]
+    fn cli_recorder_uses_protocol_store_for_turn_ownership_and_resume() {
+        let root = std::env::temp_dir().join(format!("ncx_cli_thread_{}", new_session_id()));
+        let workspace = root.join("workspace");
+        let store_path = root.join("threads-v2.json");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let mut recorder =
+            SessionRecorder::open_at(workspace.clone(), false, store_path.clone()).unwrap();
+        let original_id = recorder.thread_id.clone();
+        let turn_id = recorder.start_turn("修复历史恢复").unwrap();
+        let thread = match recorder
+            .server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: original_id.clone(),
+            })
+            .unwrap()
+            .response
+            .payload
+        {
+            ResponsePayload::Thread(thread) => thread,
+            _ => panic!("expected thread"),
+        };
+        assert_eq!(thread.metadata.title, "修复历史恢复");
+        assert_eq!(thread.turns[0].status, TurnStatus::Running);
+        assert!(matches!(
+            thread.turns[0].items.first(),
+            Some(ThreadItem::UserMessage { text, .. }) if text == "修复历史恢复"
+        ));
+
+        let messages = vec![
+            json!({"role": "user", "content": "修复历史恢复"}),
+            json!({"role": "assistant", "content": "已完成"}),
+        ];
+        recorder
+            .server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: original_id.clone(),
+                messages: messages.clone(),
+            })
+            .unwrap();
+        recorder
+            .server
+            .dispatch(ClientRequest::TurnComplete {
+                thread_id: original_id.clone(),
+                turn_id,
+                status: TurnStatus::Completed,
+                error: None,
+                usage: ProtocolTurnUsage::default(),
+            })
+            .unwrap();
+        drop(recorder);
+
+        let resumed = SessionRecorder::open_at(workspace, true, store_path).unwrap();
+        assert_eq!(resumed.thread_id, original_id);
+        assert_eq!(resumed.model_context(), Some(messages));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

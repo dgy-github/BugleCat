@@ -137,6 +137,33 @@ pub struct Thread {
     pub turns: Vec<Turn>,
 }
 
+impl Thread {
+    /// Project a durable thread to the transcript safe for history clients.
+    /// Every turn retains its user request and only its final assistant answer;
+    /// tool traffic, reasoning, compaction details, and intermediate answers are removed.
+    pub fn into_visible(mut self) -> Self {
+        for turn in &mut self.turns {
+            let mut visible = turn
+                .items
+                .iter()
+                .filter(|item| matches!(item, ThreadItem::UserMessage { .. }))
+                .cloned()
+                .collect::<Vec<_>>();
+            if let Some(answer) = turn
+                .items
+                .iter()
+                .rev()
+                .find(|item| matches!(item, ThreadItem::AssistantMessage { .. }))
+                .cloned()
+            {
+                visible.push(answer);
+            }
+            turn.items = visible;
+        }
+        self
+    }
+}
+
 /// Provider-facing conversation state kept separately from the user-visible
 /// Thread/Turn transcript. Compaction may replace this value without deleting
 /// durable user messages or final answers from the transcript.
@@ -341,5 +368,52 @@ mod tests {
         assert!(ThreadId::new("  ").is_err());
         assert!(TurnId::new("").is_err());
         assert!(ItemId::new("item").is_ok());
+    }
+
+    #[test]
+    fn visible_projection_keeps_each_request_and_only_the_final_answer() {
+        let thread = Thread {
+            metadata: ThreadMetadata {
+                id: ThreadId::new("thread-1").unwrap(),
+                workspace: "workspace".into(),
+                title: "title".into(),
+                archived: false,
+                created_at: 1,
+                updated_at: 2,
+            },
+            turns: vec![Turn {
+                id: TurnId::new("turn-1").unwrap(),
+                status: TurnStatus::Completed,
+                items: vec![
+                    ThreadItem::UserMessage {
+                        id: ItemId::new("u").unwrap(),
+                        text: "request".into(),
+                    },
+                    ThreadItem::AssistantMessage {
+                        id: ItemId::new("a1").unwrap(),
+                        text: "progress".into(),
+                    },
+                    ThreadItem::ToolResult {
+                        id: ItemId::new("r").unwrap(),
+                        call_id: ItemId::new("c").unwrap(),
+                        output: "secret".into(),
+                        success: true,
+                    },
+                    ThreadItem::AssistantMessage {
+                        id: ItemId::new("a2").unwrap(),
+                        text: "done".into(),
+                    },
+                ],
+                started_at: 1,
+                completed_at: Some(2),
+                error: None,
+                usage: TurnUsage::default(),
+            }],
+        };
+        let visible = thread.into_visible();
+        assert_eq!(visible.turns[0].items.len(), 2);
+        assert!(
+            matches!(&visible.turns[0].items[1], ThreadItem::AssistantMessage { text, .. } if text == "done")
+        );
     }
 }

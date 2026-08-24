@@ -519,3 +519,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - OpenAI Apps 资源兼容补齐：支持 manifest 内联 Apps 和 `.app.json` 的 `id`/`connector_id`，禁用插件不加载，GUI 诊断显示 Apps 数量；Apps 按 Hosted Connector 资源处理，不另建第二套执行状态机。
 - 真实桌面端验证：`npm run tauri -- dev --target x86_64-pc-windows-msvc` 成功启动当前工作树的 `rust/gui/src-tauri/target/x86_64-pc-windows-msvc/debug/ncx-gui.exe`，进程响应正常。
 - 最终回归：`cargo test --workspace --quiet` 全部通过（`ncx-core` 223 项）；GUI Rust 55 项通过；Vite production build 通过；生成的独立测试 target 目录不纳入版本控制。
+
+### 2026-08-24 CLI 与会话查询统一到 Thread Store
+- 完成收口审计后确认 CLI 与 Agent 的 `session_*` 查询工具仍直接依赖旧 `SessionIndex`，会造成 GUI、CLI 和模型查询看到不同历史；现已移除这两条运行时直连。
+- CLI 的新建、`--resume`、`--history`、普通 Turn 和 orchestrator Turn 统一写入 `ncx-app-server` + `ncx-thread-store`。每个 CLI Thread 使用独立 JSONL，恢复优先读取 `StoredModelContext`，每轮持久化用户消息、最终回答、状态、Token、估算费用和模型上下文。
+- `session_search`、`session_trace`、`session_event_read/search/trace` 改读 v2 Thread Store，并统一使用协议层的可见投影；工具调用、工具结果、推理和中间回答不会重新泄漏到模型的历史查询结果。
+- 可见历史投影已下沉到 `ncx-protocol::Thread::into_visible`，app-server 和内部查询共用同一规则，避免两套过滤口径。
+- 验证：CLI 35 项通过；新增 CLI 创建/占用/恢复测试和会话查询过滤测试；Rust workspace 全量回归在 CLI 首轮迁移后全部通过，协议投影下沉后需在最终交付门禁再次执行全量回归。

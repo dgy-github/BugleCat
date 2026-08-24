@@ -122,7 +122,7 @@ impl<S: ThreadStore> AppServer<S> {
                     .store
                     .read(&thread_id)?
                     .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
-                ResponsePayload::Thread(visible_thread(thread))
+                ResponsePayload::Thread(thread.into_visible())
             }
             ClientRequest::ThreadModelContextRead { thread_id } => {
                 if self.store.read(&thread_id)?.is_none() {
@@ -322,28 +322,6 @@ impl<S: ThreadStore> AppServer<S> {
             event,
         )
     }
-}
-
-fn visible_thread(mut thread: Thread) -> Thread {
-    for turn in &mut thread.turns {
-        let mut visible = turn
-            .items
-            .iter()
-            .filter(|item| matches!(item, ncx_protocol::ThreadItem::UserMessage { .. }))
-            .cloned()
-            .collect::<Vec<_>>();
-        if let Some(answer) = turn
-            .items
-            .iter()
-            .rev()
-            .find(|item| matches!(item, ncx_protocol::ThreadItem::AssistantMessage { .. }))
-            .cloned()
-        {
-            visible.push(answer);
-        }
-        turn.items = visible;
-    }
-    thread
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
