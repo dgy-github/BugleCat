@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:e2e:question": "node e2e/question.mjs",
+    "test:e2e:protocol": "node e2e/protocol.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "tauri build --target x86_64-pc-windows-gnu",

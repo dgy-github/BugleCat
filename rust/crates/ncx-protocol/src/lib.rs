@@ -51,7 +51,11 @@ pub struct ThreadMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ThreadItem {
     UserMessage {
         id: ItemId,
@@ -176,7 +180,12 @@ pub struct StoredModelContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "method", content = "params", rename_all = "camelCase")]
+#[serde(
+    tag = "method",
+    content = "params",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ClientRequest {
     ThreadCreate {
         thread_id: Option<ThreadId>,
@@ -262,7 +271,12 @@ pub enum ClientRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ResponsePayload {
     Ack,
     Thread(Thread),
@@ -278,7 +292,12 @@ pub struct ServerResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Event {
     ThreadCreated {
         metadata: ThreadMetadata,
@@ -414,6 +433,29 @@ mod tests {
         assert_eq!(visible.turns[0].items.len(), 2);
         assert!(
             matches!(&visible.turns[0].items[1], ThreadItem::AssistantMessage { text, .. } if text == "done")
+        );
+    }
+
+    #[test]
+    fn client_request_and_item_fields_use_frontend_camel_case() {
+        let request = ClientRequest::ItemAppend {
+            thread_id: ThreadId::new("thread-1").unwrap(),
+            turn_id: TurnId::new("turn-1").unwrap(),
+            item: ThreadItem::ToolResult {
+                id: ItemId::new("result-1").unwrap(),
+                call_id: ItemId::new("call-1").unwrap(),
+                output: "ok".into(),
+                success: true,
+            },
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"threadId\""), "{json}");
+        assert!(json.contains("\"turnId\""), "{json}");
+        assert!(json.contains("\"callId\""), "{json}");
+        assert!(!json.contains("thread_id"), "{json}");
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&json).unwrap(),
+            request
         );
     }
 }

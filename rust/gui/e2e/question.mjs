@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const cdpUrl = "http://127.0.0.1:9222";
 const executable = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npm";
 const args = process.platform === "win32"
-  ? ["/d", "/s", "/c", "npm run tauri dev"]
+  ? ["/d", "/s", "/c", "npm run tauri dev -- --target x86_64-pc-windows-msvc"]
   : ["run", "tauri", "dev"];
 const child = spawn(executable, args, {
   cwd: root,

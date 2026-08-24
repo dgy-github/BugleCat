@@ -544,3 +544,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `CodexPluginCatalog` 在发现和安装/升级前自动恢复中断的原子升级：目标目录缺失时把 `.backup` 恢复为正式插件；目标已存在时清理旧 backup；同名 `.staging` 只在 Catalog 根内清理。
 - 隐藏的 staging/backup 目录不再作为普通插件进入发现清单，避免升级中断后出现重复插件或插件消失。
 - 新增崩溃点模拟回归：手工构造“正式目录已移到 backup、staging 已生成”的状态，下一次 discover 恢复唯一正式插件并清理临时目录；OpenAI 兼容插件相关 7 项测试通过。
+
+### 2026-08-24 真实 WebView 协议修复与 E2E
+- 真实 Tauri/WebView E2E 首次调用即发现协议字段命名错误：`ClientRequest`/`ThreadItem` 的枚举 variant 已是 camelCase，但内部字段仍要求 `thread_id/turn_id/call_id`，前端实际发送 `threadId/turnId/callId` 会报 `missing field thread_id`。
+- `ncx-protocol` 现对所有枚举 variant 字段统一启用 camelCase，并新增请求/Item 序列化往返测试，确保协议 JSON 与 GUI TypeScript 契约一致。
+- 新增 `npm run test:e2e:protocol`：真实启动 MSVC Tauri 桌面端，经 WebView2 CDP 和 Tauri IPC 创建两个 Thread、同时启动两个 Turn、验证同 Thread 重入失败、写入用户/工具/中间回答/最终回答、完成并读取可见历史；结果证明跨 Thread 并发成功且工具输出/中间播报未泄漏。
+- Windows 的既有 question E2E 也固定使用 MSVC target，真实 choice/free-text/cancel 三条交互全部通过。
