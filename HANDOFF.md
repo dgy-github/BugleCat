@@ -578,3 +578,5 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `App.svelte` 从本批开始时的 2402 行降至 1943 行；纯 Markdown、工具结果状态和 Diff 行格式化移到 `src/lib/ui-format.ts`。新增生产组件均低于 300 行并通过结构门禁。
 - 验证：Vite production build 通过；真实 question E2E 的 choice/free-text/cancel 通过；真实 protocol E2E 的跨 Thread 并发、同 Thread 所有权、可见历史投影、刷新恢复、插件 Marketplace 全部通过。
 - 尚未收口：`App.svelte` 的协议事件、会话状态、工作区状态和设置编排仍集中在同一脚本中，后续必须拆成 `.svelte.ts` 控制器/store；在结构门禁通过前，不宣告 GUI 单体拆分完成。
+- 扩大回归：`cargo test --workspace --quiet` 全绿（`ncx-core` 225 项及其余 workspace crate）；GUI Rust 56 项全绿。原 GUI 模板测试只读取 `App.svelte`，组件化后已改为读取对应组件事实源。
+- 本地 `main` 已快进到组件分支 `986fd31`；HTTPS 推送功能分支和 `main` 仍均被 `Recv failure: Connection was reset` 阻断。当前桌面端已从组件工作树 MSVC debug 路径启动。
