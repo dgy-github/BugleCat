@@ -2022,7 +2022,8 @@ mod tests {
     #[test]
     fn topbar_exposes_reasoning_effort_quick_switch() {
         let app = include_str!("../../src/App.svelte");
-        assert!(app.contains("class=\"reasoning-pill\""));
+        let composer = include_str!("../../src/components/Composer.svelte");
+        assert!(composer.contains("class=\"reasoning-pill\""));
         assert!(app.contains("思考程度"));
         assert!(app.contains("selectReasoningEffort"));
         assert!(app.contains("智能体自动"));
@@ -2033,15 +2034,14 @@ mod tests {
 
     #[test]
     fn session_controls_live_in_the_composer_with_apple_visual_tokens() {
-        let app = include_str!("../../src/App.svelte");
-        let topbar = app
+        let topbar = include_str!("../../src/components/TopBar.svelte")
             .split_once("<header class=\"topbar\">")
             .unwrap()
             .1
             .split_once("</header>")
             .unwrap()
             .0;
-        let composer = app
+        let composer = include_str!("../../src/components/Composer.svelte")
             .split_once("<div class=\"composer-meta\">")
             .unwrap()
             .1
@@ -2065,6 +2065,7 @@ mod tests {
     #[test]
     fn completed_tool_activity_is_hidden_from_final_and_history_views() {
         let app = include_str!("../../src/App.svelte");
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
         let bridge = include_str!("bridge.rs");
         assert!(app.contains("role: \"tool_group\""));
         assert!(app.contains(
@@ -2084,19 +2085,19 @@ mod tests {
         assert!(bridge.contains("do not recap tool calls, logs, or intermediate process"));
 
         // Tool logs remain visible while the turn is running.
-        let group = app
-            .split_once("{:else if m.role === \"tool_group\"}")
+        let group = conversation
+            .split_once("{:else}")
             .unwrap()
             .1
             .split_once("{#if busy && streamingIdx === null && reasoningIdx === null}")
             .unwrap()
             .0;
         assert!(group.contains("<details class=\"tool-run\""));
-        assert!(group.contains("class:settled={m.settled}"));
-        assert!(group.contains("open={!m.settled}"));
-        assert!(group.contains("已执行 {m.tools.length} 个工具"));
-        assert!(group.contains("toolGroupFailureCount(m)"));
-        assert!(group.contains("{#each m.tools as tool}"));
+        assert!(group.contains("class:settled={message.settled}"));
+        assert!(group.contains("open={!message.settled}"));
+        assert!(group.contains("已执行 {message.tools.length} 个工具"));
+        assert!(group.contains("toolGroupFailureCount(message)"));
+        assert!(group.contains("{#each message.tools as tool}"));
         assert!(group.contains("tool.name"));
         assert!(group.contains("tool.args"));
         assert!(group.contains("tool.result"));
@@ -2124,6 +2125,7 @@ mod tests {
     #[test]
     fn model_reasoning_is_visible_separately_from_tool_activity() {
         let app = include_str!("../../src/App.svelte");
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
         let css = include_str!("../../src/app.css");
         let bridge = include_str!("bridge.rs");
         let core = include_str!("../../../crates/ncx-core/src/agent_loop.rs");
@@ -2134,7 +2136,7 @@ mod tests {
         assert!(bridge.contains("UiEvent::ReasoningDelta"));
         assert!(app.contains("case \"reasoning_delta\":"));
         assert!(app.contains("role: \"reasoning\""));
-        assert!(app.contains("思考过程"));
+        assert!(conversation.contains("思考过程"));
         assert!(css.contains(".reasoning-run"));
     }
 
@@ -2182,13 +2184,14 @@ mod tests {
     #[test]
     fn reasoning_stays_collapsed_and_bounded_while_streaming() {
         let app = include_str!("../../src/App.svelte");
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
         assert!(app.contains("REASONING_DISPLAY_MAX_CHARS"));
         assert!(app.contains("appendReasoning(m.text, p.text)"));
-        assert!(app.contains("<details class=\"reasoning-run\" class:settled={m.settled}>"));
-        assert!(!app.contains(
-            "<details class=\"reasoning-run\" class:settled={m.settled} open={!m.settled}>"
+        assert!(conversation.contains("<details class=\"reasoning-run\" class:settled={message.settled}>"));
+        assert!(!conversation.contains(
+            "<details class=\"reasoning-run\" class:settled={message.settled} open={!message.settled}>"
         ));
-        assert!(app.contains("<pre class=\"reasoning-content\">{m.text}</pre>"));
+        assert!(conversation.contains("<pre class=\"reasoning-content\">{message.text}</pre>"));
     }
 
     #[test]
@@ -2217,8 +2220,9 @@ mod tests {
     #[test]
     fn stop_button_remains_retryable_until_turn_finishes() {
         let app = include_str!("../../src/App.svelte");
+        let composer = include_str!("../../src/components/Composer.svelte");
         assert!(app.contains("if (!busy) return;"));
-        assert!(app.contains("disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"));
+        assert!(composer.contains("disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"));
         assert!(!app.contains("if (!busy || stopping) return;"));
     }
 
@@ -2412,7 +2416,8 @@ mod tests {
     #[test]
     fn history_session_switch_keeps_the_active_turn_running() {
         let app = include_str!("../../src/App.svelte");
-        assert!(app.contains("disabled={switchingSession || !s.has_snapshot}"));
+        let sidebar = include_str!("../../src/components/SessionSidebar.svelte");
+        assert!(sidebar.contains("disabled={switchingSession || !s.has_snapshot}"));
         let resume = app
             .split_once("async function resumeSession")
             .unwrap()
@@ -2428,10 +2433,11 @@ mod tests {
     #[test]
     fn archived_sessions_render_below_recent_sessions() {
         let app = include_str!("../../src/App.svelte");
+        let sidebar_component = include_str!("../../src/components/SessionSidebar.svelte");
         assert!(app.contains("sessions.filter((s) => !s.archived)"));
         assert!(app.contains("sessions.filter((s) => s.archived)"));
 
-        let sidebar = app
+        let sidebar = sidebar_component
             .split_once("<div class=\"side-recents\">")
             .unwrap()
             .1
@@ -2453,9 +2459,10 @@ mod tests {
     #[test]
     fn recent_sessions_are_collapsible_and_closed_by_default() {
         let app = include_str!("../../src/App.svelte");
+        let sidebar_component = include_str!("../../src/components/SessionSidebar.svelte");
         assert!(app.contains("let showRecent = $state(false)"));
 
-        let sidebar = app
+        let sidebar = sidebar_component
             .split_once("<div class=\"side-recents\">")
             .unwrap()
             .1

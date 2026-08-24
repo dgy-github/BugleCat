@@ -10,6 +10,7 @@
   import SettingsModal from "./components/SettingsModal.svelte";
   import SessionSidebar from "./components/SessionSidebar.svelte";
   import TopBar from "./components/TopBar.svelte";
+  import { diffLineClass, renderMarkdown, toolOutcome, toolStatusLabel } from "./lib/ui-format";
 
   const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
   const isImage = (p: string) => IMAGE_EXTS.includes((p.split(".").pop() || "").toLowerCase());
@@ -268,29 +269,6 @@
   // ── Quiet, grouped tool activity ─────────────────────────────────────────
   // Routine command lines stay out of the conversation. Every tool stays
   // collapsed by default, while its parameters and output remain available.
-  const lineCount = (s: string = "") => (s ? s.split("\n").length : 0);
-  // Classify a finished tool result so the outcome (报错 / 无输出 / N 行) is
-  // visible at a glance — a bare "Exit code: 0" otherwise reads as "no info".
-  const toolOutcome = (result: string = ""): "err" | "empty" | "ok" => {
-    const exit = result.match(/Exit code: (-?\d+)/);
-    const trimmed = result.trimStart();
-    const body = result
-      .replace(/\n?Exit code: -?\d+\s*$/, "")
-      .replace(/^STDERR:\s*/, "")
-      .trim();
-    if (
-      (exit && exit[1] !== "0") ||
-      trimmed.startsWith("Error:") ||
-      trimmed.startsWith("Sandbox denied:") ||
-      trimmed.startsWith("[interrupted:")
-    ) return "err";
-    if (body === "") return "empty";
-    return "ok";
-  };
-  const toolStatusLabel = (result: string = "") => {
-    const oc = toolOutcome(result);
-    return oc === "err" ? "报错" : oc === "empty" ? "无输出" : `${lineCount(result)} 行`;
-  };
   function settleCompletedToolGroups() {
     for (const message of messages) {
       if (
@@ -343,88 +321,6 @@
     return group.tools.filter(
       (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
     ).length;
-  }
-  // Per-line class for unified-diff coloring.
-  const diffLineClass = (ln: string) => {
-    if (ln.startsWith("+++") || ln.startsWith("---") || ln.startsWith("diff ") || ln.startsWith("index ")) return "dl-meta";
-    if (ln.startsWith("@@")) return "dl-hunk";
-    if (ln.startsWith("+")) return "dl-add";
-    if (ln.startsWith("-")) return "dl-del";
-    return "";
-  };
-  // ── Minimal, safe Markdown renderer (escape-first; only emits known tags) ──
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  // Inline spans on already-escaped text: code, bold, italic, http(s) links.
-  function inlineMd(s: string): string {
-    s = s.replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`);
-    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-    s = s.replace(
-      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
-    );
-    return s;
-  }
-  function renderMarkdown(src: string): string {
-    const lines = (src || "").replace(/\r\n/g, "\n").split("\n");
-    const out: string[] = [];
-    let i = 0;
-    let ul = false, ol = false;
-    const closeLists = () => {
-      if (ul) { out.push("</ul>"); ul = false; }
-      if (ol) { out.push("</ol>"); ol = false; }
-    };
-    const rowCells = (r: string) =>
-      r.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
-    while (i < lines.length) {
-      const line = lines[i];
-      const fence = line.match(/^```(\w*)\s*$/);
-      if (fence) {
-        closeLists();
-        const buf: string[] = [];
-        i++;
-        while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
-        i++;
-        out.push(`<pre class="md-code"><code>${esc(buf.join("\n"))}</code></pre>`);
-        continue;
-      }
-      if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
-        closeLists();
-        const headers = rowCells(line);
-        i += 2;
-        const rows: string[][] = [];
-        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(rowCells(lines[i])); i++; }
-        let t = '<table class="md-table"><thead><tr>';
-        t += headers.map((h) => `<th>${inlineMd(esc(h))}</th>`).join("");
-        t += "</tr></thead><tbody>";
-        for (const r of rows) t += "<tr>" + r.map((c) => `<td>${inlineMd(esc(c))}</td>`).join("") + "</tr>";
-        out.push(t + "</tbody></table>");
-        continue;
-      }
-      const h = line.match(/^(#{1,6})\s+(.*)$/);
-      if (h) { closeLists(); const l = h[1].length; out.push(`<h${l} class="md-h">${inlineMd(esc(h[2]))}</h${l}>`); i++; continue; }
-      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
-        closeLists();
-        // deepseek over-uses '---' as section separators; collapse consecutive /
-        // leading rules so they don't render as a stack of empty "striped" lines.
-        if (out.length && out[out.length - 1] !== "<hr/>") out.push("<hr/>");
-        i++; continue;
-      }
-      if (/^\s*>\s?/.test(line)) { closeLists(); out.push(`<blockquote>${inlineMd(esc(line.replace(/^\s*>\s?/, "")))}</blockquote>`); i++; continue; }
-      const um = line.match(/^\s*[-*+]\s+(.*)$/);
-      if (um) { if (ol) { out.push("</ol>"); ol = false; } if (!ul) { out.push("<ul>"); ul = true; } out.push(`<li>${inlineMd(esc(um[1]))}</li>`); i++; continue; }
-      const om = line.match(/^\s*\d+\.\s+(.*)$/);
-      if (om) { if (ul) { out.push("</ul>"); ul = false; } if (!ol) { out.push("<ol>"); ol = true; } out.push(`<li>${inlineMd(esc(om[1]))}</li>`); i++; continue; }
-      if (line.trim() === "") { closeLists(); i++; continue; }
-      closeLists();
-      out.push(`<p>${inlineMd(esc(line))}</p>`);
-      i++;
-    }
-    closeLists();
-    while (out.length && out[out.length - 1] === "<hr/>") out.pop(); // drop trailing rules
-    return out.join("\n");
   }
 
   // Branch / checkpoint expand-to-detail.

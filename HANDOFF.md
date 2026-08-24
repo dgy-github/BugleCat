@@ -571,3 +571,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 验证：`cargo test --workspace --quiet` 全绿（`ncx-core` 225 项）；受影响模块 `cargo clippy ... -D warnings` 通过；GUI Rust 56 项、Vite production build、question E2E、protocol E2E 全部通过。协议 E2E 现额外验证插件/Marketplace 经真实 WebView/Tauri IPC 返回。
 - GUI 结构拆分已启动：设置弹窗、模型目录、插件管理分别提取为 `SettingsModal.svelte`、`ModelCatalogSettings.svelte`、`PluginSettings.svelte`，三个新组件均低于 300 行并通过生产构建；协议 E2E 会实际打开设置页并检查 Codex 插件与 Marketplace 区域。首次重跑遇到一次 WebView2 CDP 页面发现超时，确认无残留进程后重跑通过，属于测试启动竞争而非页面断言失败。
 - 尚未完成的结构债务：`rust/gui/src/App.svelte` 已从 2674 行降至 2466 行，但仍是历史单体，结构门禁继续报超 300 行。下一拆分批次继续拆会话侧栏、消息流、输入区和各工作区面板；在完成前不能宣告整套架构改造全部结束。
+
+### 2026-08-24 GUI 业务组件拆分增量
+- 会话侧栏、顶部栏、消息流、输入 Composer、审批/用户问题弹窗、右侧工作区面板已从 `App.svelte` 按业务边界提取；设置、模型目录和插件管理沿用前一批独立组件。
+- 输入组件保留模型、DeepSeek 思考等级、权限模式、每会话累计 Token/费用、附件、Slash 命令、排队和可重复停止行为；消息组件保留执行中工具明细，完成后默认折叠工具、思考并保留每轮最终结论。
+- `App.svelte` 从本批开始时的 2402 行降至 1943 行；纯 Markdown、工具结果状态和 Diff 行格式化移到 `src/lib/ui-format.ts`。新增生产组件均低于 300 行并通过结构门禁。
+- 验证：Vite production build 通过；真实 question E2E 的 choice/free-text/cancel 通过；真实 protocol E2E 的跨 Thread 并发、同 Thread 所有权、可见历史投影、刷新恢复、插件 Marketplace 全部通过。
+- 尚未收口：`App.svelte` 的协议事件、会话状态、工作区状态和设置编排仍集中在同一脚本中，后续必须拆成 `.svelte.ts` 控制器/store；在结构门禁通过前，不宣告 GUI 单体拆分完成。
