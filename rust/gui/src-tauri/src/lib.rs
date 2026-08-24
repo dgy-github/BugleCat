@@ -2064,11 +2064,11 @@ mod tests {
 
     #[test]
     fn completed_tool_activity_is_hidden_from_final_and_history_views() {
-        let app = include_str!("../../src/App.svelte");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
         let model = include_str!("../../src/lib/conversation-model.ts");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let bridge = include_str!("bridge.rs");
-        assert!(app.contains("role: \"tool_group\""));
+        assert!(thread.contains("role: \"tool_group\""));
         assert!(model.contains(
             "type ToolGroup = { role: \"tool_group\"; tools: ToolEntry[]; settled: boolean }"
         ));
@@ -2081,7 +2081,7 @@ mod tests {
             .unwrap()
             .0;
         assert!(cleanup.contains("message.role !== \"tool_group\""));
-        assert!(app.matches("hideCompletedToolActivity(").count() >= 3);
+        assert!(thread.matches("hideCompletedToolActivity(").count() >= 3);
         assert!(bridge.contains("only the execution result and a brief recommended next action"));
         assert!(bridge.contains("do not recap tool calls, logs, or intermediate process"));
 
@@ -2125,7 +2125,7 @@ mod tests {
 
     #[test]
     fn model_reasoning_is_visible_separately_from_tool_activity() {
-        let app = include_str!("../../src/App.svelte");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
         let css = include_str!("../../src/app.css");
         let bridge = include_str!("bridge.rs");
@@ -2135,8 +2135,8 @@ mod tests {
         assert!(provider.contains("StreamDelta::Reasoning"));
         assert!(core.contains("ReasoningDelta(String)"));
         assert!(bridge.contains("UiEvent::ReasoningDelta"));
-        assert!(app.contains("case \"reasoning_delta\":"));
-        assert!(app.contains("role: \"reasoning\""));
+        assert!(thread.contains("case \"reasoning_delta\":"));
+        assert!(thread.contains("role: \"reasoning\""));
         assert!(conversation.contains("思考过程"));
         assert!(css.contains(".reasoning-run"));
     }
@@ -2184,11 +2184,11 @@ mod tests {
 
     #[test]
     fn reasoning_stays_collapsed_and_bounded_while_streaming() {
-        let app = include_str!("../../src/App.svelte");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
         let model = include_str!("../../src/lib/conversation-model.ts");
         assert!(model.contains("REASONING_DISPLAY_MAX_CHARS"));
-        assert!(app.contains("appendReasoning(m.text, p.text)"));
+        assert!(thread.contains("appendReasoning(message.text, event.text)"));
         assert!(conversation.contains("<details class=\"reasoning-run\" class:settled={message.settled}>"));
         assert!(!conversation.contains(
             "<details class=\"reasoning-run\" class:settled={message.settled} open={!message.settled}>"
@@ -2198,50 +2198,49 @@ mod tests {
 
     #[test]
     fn completed_turn_removes_transient_reasoning_cards() {
-        let app = include_str!("../../src/App.svelte");
-        assert!(app.contains("function removeReasoningMessages()"));
-        assert!(app.contains("removeReasoningMessages();"));
-        assert!(app.contains("messages = hideCompletedToolActivity(messages);"));
-        assert!(app.contains("case \"done\":"));
-        assert!(app.contains("case \"error\":"));
-        assert!(app.contains("sessionMessages.set(p.session_id, cloneMessages(messages));"));
-        assert!(app.contains("message.role !== \"reasoning\""));
-        assert!(app.contains("message.role !== \"tool_group\""));
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        assert!(thread.contains("private removeReasoning()"));
+        assert!(thread.contains("this.removeReasoning();"));
+        assert!(thread.contains("this.messages = hideCompletedToolActivity(this.messages);"));
+        assert!(thread.contains("case \"done\":"));
+        assert!(thread.contains("case \"error\":"));
+        assert!(thread.contains("this.messagesBySession.set(event.session_id, this.clone(this.messages));"));
+        assert!(thread.contains("message.role !== \"reasoning\""));
     }
 
     #[test]
     fn completed_turn_keeps_prior_history_and_only_its_final_conclusion() {
-        let app = include_str!("../../src/App.svelte");
         let model = include_str!("../../src/lib/conversation-model.ts");
         assert!(model.contains("function keepConversationConclusions("));
         assert!(model.contains("if (pendingAnswer) compacted.push(pendingAnswer);"));
         assert!(model.contains("compacted.push({ ...message });"));
         assert!(model.contains("pendingAnswer = { ...message };"));
-        assert!(app.contains("keepConversationConclusions(messages, p.final_text)"));
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        assert!(thread.contains("keepConversationConclusions(this.messages, event.final_text)"));
     }
 
     #[test]
     fn stop_button_remains_retryable_until_turn_finishes() {
         let app = include_str!("../../src/App.svelte");
         let composer = include_str!("../../src/components/Composer.svelte");
-        assert!(app.contains("if (!busy) return;"));
+        assert!(app.contains("if (!thread.busy) return;"));
         assert!(composer.contains("disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"));
-        assert!(!app.contains("if (!busy || stopping) return;"));
+        assert!(!app.contains("if (!thread.busy || thread.stopping) return;"));
     }
 
     #[test]
     fn automatic_context_compaction_is_visible_and_session_scoped() {
-        let app = include_str!("../../src/App.svelte");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let css = include_str!("../../src/app.css");
         let bridge = include_str!("bridge.rs");
         let core = include_str!("../../../crates/ncx-core/src/agent_loop/turn.rs");
 
         assert!(core.contains("agent.session.compact_if_needed"));
         assert!(bridge.contains("UiEvent::ContextCompacted"));
-        assert!(app.contains("case \"context_compacted\":"));
-        assert!(app.contains("acceptsSessionEvent(p.session_id)"));
-        assert!(app.contains("已自动压缩上下文"));
-        assert!(app.contains("role: \"compact\""));
+        assert!(thread.contains("case \"context_compacted\":"));
+        assert!(thread.contains("this.accepts(event.session_id)"));
+        assert!(thread.contains("已自动压缩上下文"));
+        assert!(thread.contains("role: \"compact\""));
         assert!(css.contains(".compact"));
     }
 
@@ -2249,21 +2248,22 @@ mod tests {
     fn session_usage_survives_restart_and_session_switches() {
         let app = include_str!("../../src/App.svelte");
         let usage = include_str!("../../src/lib/usage-controller.svelte.ts");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         assert!(usage.contains("restore(sessionId: string)"));
         assert!(usage.contains("persist(sessionId: string)"));
         assert!(usage.contains("ncx.sessionUsage."));
-        assert!(app.contains("usage.add(p.session_id"));
+        assert!(thread.contains("this.usage.add(event.session_id"));
         assert!(usage.contains("this.persist(sessionId)"));
-        assert!(app.matches("usage.restore(currentSessionId)").count() >= 2);
+        assert!(app.matches("usage.restore(thread.currentId)").count() >= 2);
         assert!(app.matches("usage.reset()").count() >= 2);
     }
 
     #[test]
     fn frontend_rejects_events_from_inactive_sessions() {
-        let app = include_str!("../../src/App.svelte");
-        assert!(app.contains("function acceptsSessionEvent(sessionId: string)"));
-        assert!(app.contains("if (!acceptsSessionEvent(p.session_id)) break"));
-        assert!(app.contains("session_id: string; text: string"));
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        assert!(thread.contains("accepts(sessionId: string)"));
+        assert!(thread.contains("if (!this.accepts(event.session_id)) return"));
+        assert!(thread.contains("session_id: string; text: string"));
     }
 
     #[test]
@@ -2416,8 +2416,9 @@ mod tests {
             .unwrap()
             .0;
         assert!(!resume.contains("stop_generation"));
-        assert!(app.contains("setSessionRunning(targetSessionId, true)"));
-        assert!(app.contains("setSessionRunning(p.session_id, false)"));
+        assert!(app.contains("thread.setRunning(targetSessionId, true)"));
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        assert!(thread.contains("this.setRunning(event.session_id, false)"));
     }
 
     #[test]
@@ -2433,7 +2434,7 @@ mod tests {
             .unwrap()
             .0;
         assert!(!resume.contains("stop_generation"));
-        assert!(resume.contains("busy = runningSessions.has(id)"));
+        assert!(resume.contains("thread.busy = thread.runningSessions.has(id)"));
         assert!(resume.contains("method: \"threadActivate\""));
     }
 

@@ -23,6 +23,7 @@
   import { SettingsController, type Settings } from "./lib/settings-controller.svelte";
   import { SlashController } from "./lib/slash-controller.svelte";
   import { ModelControlsController, PERMISSION_MODES, REASONING_EFFORTS } from "./lib/model-controls-controller.svelte";
+  import { ThreadController, type UiEvent } from "./lib/thread-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -32,82 +33,62 @@
   const isImage = (p: string) => IMAGE_EXTS.includes((p.split(".").pop() || "").toLowerCase());
   const baseName = (p: string) => p.split(/[\\/]/).pop() || p;
 
-  // Mirrors the Rust `UiEvent` enum (serde tag = "kind", snake_case).
-  type UiEvent =
-    | { kind: "ready"; model: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
-    | { kind: "assistant_delta"; session_id: string; text: string }
-    | { kind: "reasoning_delta"; session_id: string; text: string }
-    | { kind: "context_compacted"; session_id: string; original_chars: number; edited_chars: number; dropped_messages: number; compressed_tool_results: number }
-    | { kind: "assistant"; session_id: string; text: string }
-    | { kind: "tool_start"; session_id: string; name: string; args: string }
-    | { kind: "tool_result"; session_id: string; name: string; result: string }
-    | { kind: "approval"; session_id: string; id: number; command: string; reason: string; cwd: string; details: string }
-    | { kind: "question"; session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean }
-    | { kind: "done"; session_id: string; final_text: string; stop_reason: string; usage: Record<string, number> }
-    | { kind: "session_title"; session_id: string; title: string }
-    | { kind: "loaded"; session_id: string; messages: { role: string; text: string; tools?: ToolEntry[] }[] }
-    | { kind: "error"; session_id: string; message: string };
-
-  type Approval = { session_id: string; id: number; command: string; reason: string; cwd: string; details: string };
-  let approval = $state<Approval | null>(null);
-  const approvalsBySession = new Map<string, Approval>();
-  type UserQuestion = { session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean };
-  let userQuestion = $state<UserQuestion | null>(null);
-  const questionsBySession = new Map<string, UserQuestion>();
-  let questionAnswer = $state("");
-
-
-
-
-  let messages = $state<Msg[]>([]);
-  const sessionMessages = new Map<string, Msg[]>();
+  // UiEvent and per-Thread state are owned by ThreadController.
   let input = $state("");
+  const thread = new ThreadController(usage, {
+    refreshSessions: () => void refreshSessions(),
+    scrollDown: () => scrollDown(),
+    dequeue: () => dequeue(),
+    ready: (event) => {
+      header = `${event.model} · ${event.sandbox}`;
+      workspace = event.workspace;
+      needsWorkspace = event.needs_workspace;
+      sandboxMode = event.sandbox;
+      modelControls.currentModel = event.model;
+      if (event.models?.length) modelControls.models = event.models;
+      if (event.permission_mode) modelControls.permissionMode = event.permission_mode;
+      if (event.reasoning_effort) modelControls.reasoningEffort = event.reasoning_effort;
+    },
+  });
   const fileBrowser = new FileBrowserController(
-    (text) => messages.push({ role: "note", text }),
+    (text) => thread.messages.push({ role: "note", text }),
     () => input,
     (value) => (input = value),
   );
-  const gitWorkspace = new GitWorkspaceController((text) => messages.push({ role: "note", text }));
+  const gitWorkspace = new GitWorkspaceController((text) => thread.messages.push({ role: "note", text }));
   const checkpointController = new CheckpointController(
-    (text) => messages.push({ role: "note", text }),
-    () => busy,
+    (text) => thread.messages.push({ role: "note", text }),
+    () => thread.busy,
   );
-  const memoryController = new MemoryController((text) => messages.push({ role: "note", text }));
-  const pluginController = new PluginController((text) => messages.push({ role: "note", text }));
+  const memoryController = new MemoryController((text) => thread.messages.push({ role: "note", text }));
+  const pluginController = new PluginController((text) => thread.messages.push({ role: "note", text }));
   const modelControls = new ModelControlsController(
-    (text) => messages.push({ role: "note", text }),
+    (text) => thread.messages.push({ role: "note", text }),
     (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
   );
   const settingsController = new SettingsController(
     pluginController,
-    (text) => messages.push({ role: "note", text }),
+    (text) => thread.messages.push({ role: "note", text }),
     modelControls.applyModel,
     (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
   );
   const slashController = new SlashController(
     () => input,
     (value) => (input = value),
-    (text) => messages.push({ role: "note", text }),
+    (text) => thread.messages.push({ role: "note", text }),
     {
       newSession: () => newSession(),
-      forkCurrent: () => currentSessionId ? void forkSession(currentSessionId, sessionTitle) : messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
+      forkCurrent: () => thread.currentId ? void forkSession(thread.currentId, thread.title) : thread.messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
       openModel: () => (modelControls.modelMenuOpen = true),
       openSettings: () => void openSettings(),
       showUsage: () => showUsage(),
       openCheckpoints: () => void openCheckpoints(), openFiles: () => void openFiles(), openDiff: () => void openDiff(),
       openBranches: () => void openBranches(), openMemory: () => void openHermes(),
-      refreshSessions, currentThreadId: () => currentSessionId, currentTitle: () => sessionTitle,
-      setTitle: (title) => (sessionTitle = title),
+      refreshSessions, currentThreadId: () => thread.currentId, currentTitle: () => thread.title,
+      setTitle: (title) => (thread.title = title),
     },
   );
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
-  let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
-  const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
-  let busy = $state(false);
-  let reasoningIdx = $state<number | null>(null);
-  let runningSessions = $state(new Set<string>());
-  let stopping = $state(false);
-  let switchingSession = $state(false);
   // File explorer (workspace tree)
   let header = $state("连接中…");
   let workspace = $state("");
@@ -116,9 +97,7 @@
   const wsName = $derived(
     workspace ? workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspace : "",
   );
-  let sessionTitle = $state("新会话");
   let sandboxMode = $state("");
-  let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
   const currencySymbol = (currency: "CNY" | "USD") => currency === "USD" ? "$" : "¥";
@@ -126,35 +105,16 @@
   const priceSourceName = (source: "official_direct" | "aggregator") =>
     source === "official_direct" ? "厂商官方直连价" : "OpenRouter 聚合渠道价";
 
-  // ── Quiet, grouped tool activity ─────────────────────────────────────────
-  // Routine command lines stay out of the conversation. Every tool stays
-  // collapsed by default, while its parameters and output remain available.
-  function settleReasoning() {
-    if (reasoningIdx === null) return;
-    const message = messages[reasoningIdx];
-    if (message?.role === "reasoning") message.settled = true;
-    reasoningIdx = null;
-  }
-  function removeReasoningMessages() {
-    messages = messages.filter((message) => message.role !== "reasoning");
-    reasoningIdx = null;
-  }
-
   // Branch / checkpoint expand-to-detail.
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
   };
-  let currentSessionId = $state("");
   let scroller = $state<HTMLDivElement>();
 
 
   function scrollDown() {
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
-  }
-
-  function acceptsSessionEvent(sessionId: string) {
-    return sessionId === "" || (currentSessionId !== "" && sessionId === currentSessionId);
   }
 
   onMount(async () => {
@@ -181,221 +141,7 @@
       }
     });
 
-    await listen<UiEvent>("ncx://event", (ev) => {
-      const p = ev.payload;
-      switch (p.kind) {
-        case "ready":
-          if (currentSessionId !== "" && p.session_id !== currentSessionId) break;
-          header = `${p.model} · ${p.sandbox}`;
-          workspace = p.workspace;
-          needsWorkspace = p.needs_workspace;
-          sandboxMode = p.sandbox;
-          modelControls.currentModel = p.model;
-          if (p.models?.length) modelControls.models = p.models;
-          if (p.permission_mode) modelControls.permissionMode = p.permission_mode;
-          if (p.reasoning_effort) modelControls.reasoningEffort = p.reasoning_effort;
-          // Learn the active session's real id so 最近会话 can mark/return to it.
-          if (p.session_id) {
-            const wasUnbound = currentSessionId === "";
-            currentSessionId = p.session_id;
-            usage.restore(currentSessionId);
-            if (wasUnbound) {
-              restoreSessionQueue(currentSessionId);
-              restoreSessionPrompts(currentSessionId);
-              restoreSessionMessages(currentSessionId);
-            }
-          }
-          refreshSessions();
-          break;
-        case "assistant_delta":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          settleReasoning();
-          if (streamingIdx === null) {
-            if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
-            settleCompletedToolGroups(messages);
-            messages.push({ role: "assistant", text: p.text });
-            streamingIdx = messages.length - 1;
-          } else {
-            const m = messages[streamingIdx];
-            if (m && m.role === "assistant") m.text += p.text;
-          }
-          break;
-        case "reasoning_delta":
-          if (!acceptsSessionEvent(p.session_id) || p.text === "") break;
-          if (reasoningIdx === null) {
-            settleCompletedToolGroups(messages);
-            messages.push({ role: "reasoning", text: appendReasoning("", p.text), settled: false });
-            reasoningIdx = messages.length - 1;
-          } else {
-            const m = messages[reasoningIdx];
-            if (m?.role === "reasoning") m.text = appendReasoning(m.text, p.text);
-          }
-          break;
-        case "context_compacted":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          messages.push({
-            role: "compact",
-            text: `已自动压缩上下文：${p.original_chars.toLocaleString()} → ${p.edited_chars.toLocaleString()} 字符，清理 ${p.dropped_messages} 条旧消息和 ${p.compressed_tool_results} 条工具结果；关键要求、完成结果和当前计划已保留。`,
-          });
-          break;
-        case "assistant":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          settleReasoning();
-          if (streamingIdx !== null) {
-            const m = messages[streamingIdx];
-            if (m && m.role === "assistant") {
-              // Tool-only turn (no narration) → drop the empty bubble instead of
-              // leaving a blank box; a run of these is what made the "striped" rows.
-              if (p.text.trim() === "") messages.splice(streamingIdx, 1);
-              else m.text = p.text;
-            }
-            streamingIdx = null;
-          } else if (p.text.trim() !== "") {
-            settleCompletedToolGroups(messages);
-            messages.push({ role: "assistant", text: p.text });
-          }
-          break;
-        case "tool_start":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          settleReasoning();
-          // A streamed bubble that turned out empty (tool-only turn) leaves no box.
-          if (streamingIdx !== null) {
-            const m = messages[streamingIdx];
-            if (m && m.role === "assistant" && m.text.trim() === "") messages.splice(streamingIdx, 1);
-          }
-          streamingIdx = null;
-          {
-            const last = messages.at(-1);
-            const entry: ToolEntry = { name: p.name, args: p.args };
-            if (last?.role === "tool_group") last.tools.push(entry);
-            else messages.push({ role: "tool_group", tools: [entry], settled: false });
-          }
-          break;
-        case "approval":
-          {
-            const item: Approval = { session_id: p.session_id, id: p.id, command: p.command, reason: p.reason, cwd: p.cwd, details: p.details };
-            approvalsBySession.set(p.session_id, item);
-            if (acceptsSessionEvent(p.session_id)) approval = item;
-          }
-          break;
-        case "question":
-          {
-            const item: UserQuestion = { session_id: p.session_id, id: p.id, question: p.question, options: p.options, allow_free_text: p.allow_free_text };
-            questionsBySession.set(p.session_id, item);
-            if (acceptsSessionEvent(p.session_id)) {
-              userQuestion = item;
-              questionAnswer = "";
-            }
-          }
-          break;
-        case "tool_result": {
-          if (!acceptsSessionEvent(p.session_id)) break;
-          // Results preserve dispatch order, so pair with the earliest pending
-          // call across the compact groups. Failures stay visible and open.
-          let pendingGroup: ToolGroup | undefined;
-          let pendingTool: ToolEntry | undefined;
-          for (const message of messages) {
-            if (message.role !== "tool_group") continue;
-            const candidate = message.tools.find(
-              (tool) => tool.name === p.name && tool.result === undefined,
-            );
-            if (candidate) {
-              pendingGroup = message;
-              pendingTool = candidate;
-              break;
-            }
-          }
-          if (pendingTool && pendingGroup) pendingTool.result = p.result;
-          else {
-            pendingGroup = {
-              role: "tool_group",
-              tools: [{ name: p.name, result: p.result }],
-              settled: false,
-            };
-            messages.push(pendingGroup);
-          }
-          break;
-        }
-        case "done":
-          setSessionRunning(p.session_id, false);
-          usage.add(p.session_id, p.usage || {}, currentSessionId);
-          if (!acceptsSessionEvent(p.session_id)) {
-            refreshSessions();
-            break;
-          }
-          settleCompletedToolGroups(messages);
-          settleReasoning();
-          removeReasoningMessages();
-          messages = hideCompletedToolActivity(messages);
-          if (p.stop_reason === "completed") {
-            messages = keepConversationConclusions(messages, p.final_text);
-          } else if (p.stop_reason !== "completed") {
-            messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
-          }
-          streamingIdx = null;
-          // Keep the completed conclusion in the per-session cache; only the
-          // transient reasoning cards are removed from the visible transcript.
-          sessionMessages.set(p.session_id, cloneMessages(messages));
-          busy = runningSessions.has(currentSessionId);
-          stopping = false;
-          refreshSessions();
-          if (!switchingSession) dequeue();
-          break;
-        case "session_title":
-          refreshSessions();
-          if (!acceptsSessionEvent(p.session_id)) break;
-          sessionTitle = p.title;
-          break;
-        case "loaded":
-          if (!acceptsSessionEvent(p.session_id)) break;
-          {
-          const restored = p.messages
-            .flatMap((m): Msg[] => {
-              if ((m.role === "user" || m.role === "assistant") && m.text.trim() !== "") {
-                return [{ role: m.role, text: m.text }];
-              }
-              if (m.role === "tool_group" && m.tools?.length) {
-                return [{ role: "tool_group", tools: m.tools, settled: true }];
-              }
-              if (m.role === "note" && m.text.trim() !== "") {
-                return [{ role: "note", text: m.text }];
-              }
-              if (m.role === "compact" && m.text.trim() !== "") {
-                return [{ role: "compact", text: m.text }];
-              }
-              return [];
-            });
-          const cached = sessionMessages.get(p.session_id);
-          messages = runningSessions.has(p.session_id) && cached?.length
-            ? cloneMessages(cached)
-            : hideCompletedToolActivity(restored);
-          sessionMessages.set(p.session_id, cloneMessages(messages));
-          }
-          streamingIdx = null;
-          reasoningIdx = null;
-          busy = runningSessions.has(p.session_id);
-          stopping = false;
-          switchingSession = false;
-          refreshSessions(); // keep the session you just left visible in 最近会话
-          if (!busy) dequeue();
-          break;
-        case "error":
-          setSessionRunning(p.session_id, false);
-          if (!acceptsSessionEvent(p.session_id)) break;
-          settleCompletedToolGroups(messages);
-          settleReasoning();
-          removeReasoningMessages();
-          messages = hideCompletedToolActivity(messages);
-          streamingIdx = null;
-          messages.push({ role: "note", text: `错误：${p.message}` });
-          sessionMessages.set(p.session_id, cloneMessages(messages));
-          busy = false;
-          stopping = false;
-          switchingSession = false;
-          break;
-      }
-      scrollDown();
-    });
+    await listen<UiEvent>("ncx://event", (event) => thread.handle(event.payload));
     // The agent thread's initial `ready` can fire before this listener exists
     // (Tauri events aren't buffered), so the active session id would be missed.
     // Now that we're listening, ask the backend to re-emit it.
@@ -410,7 +156,7 @@
       const paths = Array.isArray(picked) ? picked : [picked];
       for (const p of paths) if (!attached.includes(p)) attached.push(p);
     } catch (e) {
-      messages.push({ role: "note", text: `添加失败：${e}` });
+      thread.messages.push({ role: "note", text: `添加失败：${e}` });
     }
   }
 
@@ -433,7 +179,7 @@
           const path = await invoke<string>("save_temp_image", { bytes: Array.from(buf), ext });
           if (!attached.includes(path)) attached.push(path);
         } catch (err) {
-          messages.push({ role: "note", text: `粘贴图片失败：${err}` });
+          thread.messages.push({ role: "note", text: `粘贴图片失败：${err}` });
         }
       }
     }
@@ -447,40 +193,40 @@
 
 
   async function chooseWorkspace() {
-    const previousSessionId = currentSessionId;
-    const previousTitle = sessionTitle;
-    const previousMessages = [...messages];
+    const previousSessionId = thread.currentId;
+    const previousTitle = thread.title;
+    const previousMessages = [...thread.messages];
     try {
       const dir = await open({ directory: true, multiple: false });
       if (!dir || Array.isArray(dir)) return;
       // Reject every event from the old project as soon as the switch starts.
-      currentSessionId = "";
-      messages = [];
-      sessionTitle = "新会话";
+      thread.currentId = "";
+      thread.messages = [];
+      thread.title = "新会话";
       usage.reset();
-      queued = [];
+      thread.queued = [];
       attached = [];
       const set = await invoke<string>("set_workspace", { path: dir });
       workspace = set;
       // Switching project starts a fresh conversation — the old one belongs to
       // the old workspace, and set_workspace already reloaded the agent into a
       // new session. Reset the conversation-scoped UI state to match.
-      messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
+      thread.messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
       refreshSessions();
     } catch (e) {
-      currentSessionId = previousSessionId;
-      sessionTitle = previousTitle;
-      messages = previousMessages;
-      usage.restore(currentSessionId);
-      messages.push({ role: "note", text: `切换工作区失败：${e}` });
+      thread.currentId = previousSessionId;
+      thread.title = previousTitle;
+      thread.messages = previousMessages;
+      usage.restore(thread.currentId);
+      thread.messages.push({ role: "note", text: `切换工作区失败：${e}` });
     }
   }
 
   async function dispatch(text: string, images: string[], shown: string) {
-    const targetSessionId = currentSessionId;
-    messages.push({ role: "user", text: shown });
-    setSessionRunning(targetSessionId, true);
-    busy = true;
+    const targetSessionId = thread.currentId;
+    thread.messages.push({ role: "user", text: shown });
+    thread.setRunning(targetSessionId, true);
+    thread.busy = true;
     scrollDown();
     try {
       await appServerRequest({
@@ -488,37 +234,34 @@
         params: { threadId: targetSessionId, text, images },
       });
     } catch (e) {
-      setSessionRunning(targetSessionId, false);
-      messages.push({ role: "note", text: `发送失败：${e}` });
-      busy = false;
-      stopping = false;
+      thread.setRunning(targetSessionId, false);
+      thread.messages.push({ role: "note", text: `发送失败：${e}` });
+      thread.busy = false;
+      thread.stopping = false;
       dequeue();
     }
   }
 
   async function stopGeneration() {
-    if (!busy) return;
-    stopping = true;
+    if (!thread.busy) return;
+    thread.stopping = true;
     // A stop applies to the active turn, so do not start queued follow-ups
     // after its cancellation event arrives.
-    queued = [];
-    approvalsBySession.delete(currentSessionId);
-    questionsBySession.delete(currentSessionId);
-    approval = null;
-    userQuestion = null;
+    thread.queued = [];
+    thread.clearPrompts(thread.currentId);
     try {
       await appServerRequest({
         method: "turnInterruptLatest",
-        params: { threadId: currentSessionId },
+        params: { threadId: thread.currentId },
       });
     } catch (e) {
-      stopping = false;
-      messages.push({ role: "note", text: `停止失败：${e}` });
+      thread.stopping = false;
+      thread.messages.push({ role: "note", text: `停止失败：${e}` });
     }
   }
   function dequeue() {
-    if (!busy && queued.length > 0) {
-      const next = queued.shift();
+    if (!thread.busy && thread.queued.length > 0) {
+      const next = thread.queued.shift();
       if (next) dispatch(next.text, next.images, next.shown);
     }
   }
@@ -526,7 +269,7 @@
     const text = input.trim();
     if (!text && attached.length === 0) return;
     if (needsWorkspace) {
-      messages.push({ role: "note", text: "请先选择项目目录（左下角「工作区」或下方按钮），再开始对话。" });
+      thread.messages.push({ role: "note", text: "请先选择项目目录（左下角「工作区」或下方按钮），再开始对话。" });
       return;
     }
     // Images route through the vision pipeline; other files become @mentions.
@@ -540,13 +283,13 @@
     input = "";
     const imgs = images;
     attached = [];
-    if (busy) {
+    if (thread.busy) {
       // Queue up to 2 follow-up turns while the agent works.
-      if (queued.length >= 2) {
-        messages.push({ role: "note", text: "队列已满（2 条），请先等当前任务完成。" });
+      if (thread.queued.length >= 2) {
+        thread.messages.push({ role: "note", text: "队列已满（2 条），请先等当前任务完成。" });
         return;
       }
-      queued.push({ text: fullText, images: imgs, shown });
+      thread.queued.push({ text: fullText, images: imgs, shown });
       return;
     }
     dispatch(fullText, imgs, shown);
@@ -568,58 +311,30 @@
   }
 
   async function decide(decision: "deny" | "once" | "always") {
-    if (!approval) return;
-    const id = approval.id;
-    approvalsBySession.delete(approval.session_id);
-    approval = null;
+    if (!thread.approval) return;
+    const id = thread.approval.id;
+    thread.removeApproval(thread.approval.session_id);
     try {
       await invoke("approve", { id, decision });
     } catch (e) {
-      messages.push({ role: "note", text: `审批失败：${e}` });
+      thread.messages.push({ role: "note", text: `审批失败：${e}` });
     }
   }
 
   async function answerUserQuestion(answer: string | null) {
-    if (!userQuestion) return;
-    const id = userQuestion.id;
-    questionsBySession.delete(userQuestion.session_id);
-    userQuestion = null;
-    questionAnswer = "";
+    if (!thread.question) return;
+    const id = thread.question.id;
+    thread.removeQuestion(thread.question.session_id);
     try {
       await invoke("answer_question", { id, answer });
     } catch (e) {
-      messages.push({ role: "note", text: `回答问题失败：${e}` });
+      thread.messages.push({ role: "note", text: `回答问题失败：${e}` });
     }
   }
 
   const openSettings = settingsController.open;
 
 
-  function stashSessionQueue(sessionId: string) {
-    if (sessionId) {
-      sessionQueues.set(sessionId, [...queued]);
-      sessionMessages.set(sessionId, cloneMessages(messages));
-    }
-    queued = [];
-    approval = null;
-    userQuestion = null;
-  }
-  function restoreSessionQueue(sessionId: string) {
-    queued = [...(sessionQueues.get(sessionId) || [])];
-  }
-  function restoreSessionPrompts(sessionId: string) {
-    approval = approvalsBySession.get(sessionId) || null;
-    userQuestion = questionsBySession.get(sessionId) || null;
-    questionAnswer = "";
-  }
-  function cloneMessages(items: Msg[]): Msg[] {
-    return items.map((item) => item.role === "tool_group"
-      ? { ...item, tools: item.tools.map((tool) => ({ ...tool })) }
-      : { ...item });
-  }
-  function restoreSessionMessages(sessionId: string) {
-    messages = cloneMessages(sessionMessages.get(sessionId) || []);
-  }
 
 
   async function openCheckpoints() {
@@ -639,18 +354,18 @@
   // boundary.
   const recentSessions = $derived.by(() => {
     const visible = sessions.filter((s) => !s.archived);
-    if (!currentSessionId) return visible;
+    if (!thread.currentId) return visible;
     return [
-      ...visible.filter((s) => s.session_id === currentSessionId),
-      ...visible.filter((s) => s.session_id !== currentSessionId),
+      ...visible.filter((s) => s.session_id === thread.currentId),
+      ...visible.filter((s) => s.session_id !== thread.currentId),
     ];
   });
   const archivedSessions = $derived.by(() => {
     const archived = sessions.filter((s) => s.archived);
-    if (!currentSessionId) return archived;
+    if (!thread.currentId) return archived;
     return [
-      ...archived.filter((s) => s.session_id === currentSessionId),
-      ...archived.filter((s) => s.session_id !== currentSessionId),
+      ...archived.filter((s) => s.session_id === thread.currentId),
+      ...archived.filter((s) => s.session_id !== thread.currentId),
     ];
   });
   const archivedCount = $derived(sessions.filter((s) => s.archived).length);
@@ -675,7 +390,7 @@
       if (s) s.archived = archived; // optimistic
       refreshSessions();
     } catch (e) {
-      messages.push({ role: "note", text: `归档失败：${e}` });
+      thread.messages.push({ role: "note", text: `归档失败：${e}` });
     }
   }
 
@@ -698,7 +413,7 @@
       else if (rightPanel === "memory") await memoryController.refresh();
       else if (rightPanel === "checkpoints") await checkpointController.refresh();
     } catch (e) {
-      messages.push({ role: "note", text: `刷新失败：${e}` });
+      thread.messages.push({ role: "note", text: `刷新失败：${e}` });
     }
   }
   async function refreshSessions() {
@@ -715,10 +430,10 @@
           { prompt_tokens: 0, completion_tokens: 0 },
         )]));
       sessions = threads.map(threadToSessionRow);
-      const current = sessions.find((session) => session.session_id === currentSessionId);
+      const current = sessions.find((session) => session.session_id === thread.currentId);
       if (current) {
-        sessionTitle = current.title || "会话";
-        usage.restore(currentSessionId);
+        thread.title = current.title || "会话";
+        usage.restore(thread.currentId);
       }
     } catch (e) {
       console.error("会话协议加载失败", e);
@@ -728,16 +443,16 @@
     return `thread-${crypto.randomUUID()}`;
   }
   async function newSession() {
-    if (switchingSession) return;
-    const previousSessionId = currentSessionId;
-    const previousTitle = sessionTitle;
-    const previousMessages = [...messages];
-    stashSessionQueue(previousSessionId);
-    switchingSession = true;
-    busy = false;
-    messages = [];
-    sessionTitle = "新会话";
-    currentSessionId = "";
+    if (thread.switching) return;
+    const previousSessionId = thread.currentId;
+    const previousTitle = thread.title;
+    const previousMessages = [...thread.messages];
+    thread.stash(previousSessionId);
+    thread.switching = true;
+    thread.busy = false;
+    thread.messages = [];
+    thread.title = "新会话";
+    thread.currentId = "";
     usage.reset();
     try {
       const id = newThreadId();
@@ -745,61 +460,55 @@
         method: "threadCreateActivate",
         params: { threadId: id, workspace, title: "(no prompt yet)" },
       });
-      if (currentSessionId === "") {
-        currentSessionId = id;
-        restoreSessionQueue(id);
-        restoreSessionPrompts(id);
-        restoreSessionMessages(id);
+      if (thread.currentId === "") {
+        thread.currentId = id;
+        thread.restore(id);
       }
     } catch (e) {
-      busy = false;
-      stopping = false;
-      switchingSession = false;
-      currentSessionId = previousSessionId;
-      sessionTitle = previousTitle;
-      messages = previousMessages;
-      restoreSessionQueue(previousSessionId);
-      restoreSessionPrompts(previousSessionId);
-      usage.restore(currentSessionId);
-      messages.push({ role: "note", text: `新建会话失败：${e}` });
+      thread.busy = false;
+      thread.stopping = false;
+      thread.switching = false;
+      thread.currentId = previousSessionId;
+      thread.title = previousTitle;
+      thread.restore(previousSessionId);
+      thread.messages = previousMessages;
+      usage.restore(thread.currentId);
+      thread.messages.push({ role: "note", text: `新建会话失败：${e}` });
     }
   }
   async function resumeSession(id: string, title = "") {
-    if (switchingSession || id === currentSessionId) return;
-    const previousId = currentSessionId;
-    const previousTitle = sessionTitle;
-    stashSessionQueue(previousId);
-    switchingSession = true;
-    sessionTitle = title || "会话";
-    currentSessionId = id;
-    usage.restore(currentSessionId);
-    restoreSessionQueue(id);
-    restoreSessionPrompts(id);
-    restoreSessionMessages(id);
+    if (thread.switching || id === thread.currentId) return;
+    const previousId = thread.currentId;
+    const previousTitle = thread.title;
+    thread.stash(previousId);
+    thread.switching = true;
+    thread.title = title || "会话";
+    thread.currentId = id;
+    usage.restore(thread.currentId);
+    thread.restore(id);
     try {
-      busy = runningSessions.has(id);
+      thread.busy = thread.runningSessions.has(id);
       await appServerRequest({ method: "threadActivate", params: { threadId: id } });
     } catch (e) {
-      busy = false;
-      stopping = false;
-      switchingSession = false;
-      currentSessionId = previousId;
-      sessionTitle = previousTitle;
-      usage.restore(currentSessionId);
-      restoreSessionQueue(previousId);
-      restoreSessionPrompts(previousId);
-      messages.push({ role: "note", text: `继续会话失败：${e}` });
+      thread.busy = false;
+      thread.stopping = false;
+      thread.switching = false;
+      thread.currentId = previousId;
+      thread.title = previousTitle;
+      usage.restore(thread.currentId);
+      thread.restore(previousId);
+      thread.messages.push({ role: "note", text: `继续会话失败：${e}` });
     }
   }
   async function forkSession(id: string, title = "") {
-    if (switchingSession) return;
-    const previousSessionId = currentSessionId;
-    const previousTitle = sessionTitle;
-    stashSessionQueue(previousSessionId);
-    switchingSession = true;
-    busy = false;
-    sessionTitle = title ? `${title}（分叉）` : "分叉";
-    currentSessionId = "";
+    if (thread.switching) return;
+    const previousSessionId = thread.currentId;
+    const previousTitle = thread.title;
+    thread.stash(previousSessionId);
+    thread.switching = true;
+    thread.busy = false;
+    thread.title = title ? `${title}（分叉）` : "分叉";
+    thread.currentId = "";
     usage.reset();
     try {
       await appServerRequest<ProtocolThread>({
@@ -807,29 +516,28 @@
         params: { threadId: id, newThreadId: newThreadId() },
       });
     } catch (e) {
-      busy = false;
-      stopping = false;
-      switchingSession = false;
-      currentSessionId = previousSessionId;
-      sessionTitle = previousTitle;
-      usage.restore(currentSessionId);
-      restoreSessionQueue(previousSessionId);
-      restoreSessionPrompts(previousSessionId);
-      messages.push({ role: "note", text: `分叉失败：${e}` });
+      thread.busy = false;
+      thread.stopping = false;
+      thread.switching = false;
+      thread.currentId = previousSessionId;
+      thread.title = previousTitle;
+      usage.restore(thread.currentId);
+      thread.restore(previousSessionId);
+      thread.messages.push({ role: "note", text: `分叉失败：${e}` });
     }
   }
   async function openSessionLog(id: string) {
     try {
       await invoke("open_session_log", { sessionId: id });
     } catch (e) {
-      messages.push({ role: "note", text: `打开会话日志失败：${e}` });
+      thread.messages.push({ role: "note", text: `打开会话日志失败：${e}` });
     }
   }
   async function openSessionSnapshot(id: string) {
     try {
       await invoke("open_session_snapshot", { sessionId: id });
     } catch (e) {
-      messages.push({ role: "note", text: `打开会话快照失败：${e}` });
+      thread.messages.push({ role: "note", text: `打开会话快照失败：${e}` });
     }
   }
 
@@ -844,16 +552,16 @@
     const costText = usage.priceIn || usage.priceOut
       ? ` · ≈${currencySymbol(usage.currency)}${fmtCost(usage.cost)}`
       : "";
-    messages.push({ role: "note", text: `本会话用量：输入 ${usage.promptTokens} / 输出 ${usage.completionTokens} tokens${costText}` });
+    thread.messages.push({ role: "note", text: `本会话用量：输入 ${usage.promptTokens} / 输出 ${usage.completionTokens} tokens${costText}` });
   }
 </script>
 
 <main class="app" style={`--sidebar-width: ${sidebar.width}px`}>
   <SessionSidebar
     sidebarOpen={sidebar.open}
-    {switchingSession}
-    {currentSessionId}
-    {runningSessions}
+    switchingSession={thread.switching}
+    currentSessionId={thread.currentId}
+    runningSessions={thread.runningSessions}
     {recentSessions}
     {archivedSessions}
     {archivedCount}
@@ -883,8 +591,8 @@
   <section class="main">
     <TopBar
       sidebarOpen={sidebar.open}
-      {sessionTitle}
-      {busy}
+      sessionTitle={thread.title}
+      busy={thread.busy}
       {rightPanel}
       toggleSidebar={sidebar.toggle}
       {openFiles}
@@ -896,10 +604,10 @@
 
     <ConversationView
       bind:scroller
-      {messages}
-      {busy}
-      {streamingIdx}
-      {reasoningIdx}
+      messages={thread.messages}
+      busy={thread.busy}
+      streamingIdx={thread.streamingIndex}
+      reasoningIdx={thread.reasoningIndex}
       {renderMarkdown}
       {toolGroupFailureCount}
       {toolOutcome}
@@ -922,7 +630,7 @@
       selectMode={modelControls.selectMode}
       modeIcon={modelControls.modeIcon}
       modeLabel={modelControls.modeLabel}
-      {busy}
+      busy={thread.busy}
       {workspace}
       {needsWorkspace}
       {wsName}
@@ -936,7 +644,7 @@
       {fmtTok}
       {currencySymbol}
       {fmtCost}
-      bind:queued
+      bind:queued={thread.queued}
       {attached}
       {isImage}
       {baseName}
@@ -949,16 +657,16 @@
       {onKey}
       {handlePaste}
       {attachFiles}
-      {stopping}
+      stopping={thread.stopping}
       {stopGeneration}
       {send}
     />
   </section>
 
   <InteractionDialogs
-    {approval}
-    {userQuestion}
-    bind:questionAnswer
+    approval={thread.approval}
+    userQuestion={thread.question}
+    bind:questionAnswer={thread.questionAnswer}
     {decide}
     {answerUserQuestion}
   />
@@ -975,7 +683,7 @@
     loadCheckpoints={checkpointController.refresh}
     toggleCheckpointDetail={checkpointController.toggleDetail}
     restoreCheckpoint={checkpointController.restore}
-    {busy}
+    busy={thread.busy}
     bind:newBranch={gitWorkspace.newBranch}
     branchBusy={gitWorkspace.busy}
     branches={gitWorkspace.branches}
@@ -997,7 +705,7 @@
     {diffLineClass}
     bind:historyOpen
     {sessions}
-    {switchingSession}
+    switchingSession={thread.switching}
     {resumeSession}
     {forkSession}
     {openSessionLog}
