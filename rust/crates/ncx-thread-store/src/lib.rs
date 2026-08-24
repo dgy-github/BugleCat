@@ -1,5 +1,6 @@
 //! Storage-neutral thread persistence with explicit per-thread turn ownership.
 
+use fs2::FileExt;
 use ncx_protocol::{
     StoredModelContext, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
     TurnUsage,
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -55,10 +56,15 @@ struct PersistedState {
     model_contexts: BTreeMap<String, StoredModelContext>,
 }
 
+struct ActiveTurn {
+    turn_id: TurnId,
+    _lease: File,
+}
+
 #[derive(Default)]
 struct StoreState {
     persisted: PersistedState,
-    active_turns: HashMap<String, TurnId>,
+    active_turns: HashMap<String, ActiveTurn>,
 }
 
 pub struct JsonThreadStore {
@@ -69,18 +75,9 @@ pub struct JsonThreadStore {
 impl JsonThreadStore {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, ThreadStoreError> {
         let path = path.into();
+        let _global = acquire_global_lock(&path)?;
         let mut persisted = load_state(&path)?;
-        let mut recovered = false;
-        for thread in persisted.threads.values_mut() {
-            for turn in &mut thread.turns {
-                if matches!(turn.status, TurnStatus::Queued | TurnStatus::Running) {
-                    turn.status = TurnStatus::Failed;
-                    turn.completed_at = Some(thread.metadata.updated_at);
-                    turn.error = Some("runtime restarted before turn completion".to_string());
-                    recovered = true;
-                }
-            }
-        }
+        let recovered = recover_orphaned_turns(&path, &mut persisted)?;
         if recovered {
             save_state(&path, &persisted)?;
         }
@@ -98,9 +95,27 @@ impl JsonThreadStore {
         operation: impl FnOnce(&mut StoreState) -> Result<T, ThreadStoreError>,
     ) -> Result<T, ThreadStoreError> {
         let mut state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
+        let _global = acquire_global_lock(&self.path)?;
+        state.persisted = load_state(&self.path)?;
+        if recover_orphaned_turns(&self.path, &mut state.persisted)? {
+            save_state(&self.path, &state.persisted)?;
+        }
         let result = operation(&mut state)?;
         save_state(&self.path, &state.persisted)?;
         Ok(result)
+    }
+
+    fn inspect<T>(
+        &self,
+        operation: impl FnOnce(&PersistedState) -> T,
+    ) -> Result<T, ThreadStoreError> {
+        let mut state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
+        let _global = acquire_global_lock(&self.path)?;
+        state.persisted = load_state(&self.path)?;
+        if recover_orphaned_turns(&self.path, &mut state.persisted)? {
+            save_state(&self.path, &state.persisted)?;
+        }
+        Ok(operation(&state.persisted))
     }
 }
 
@@ -144,29 +159,27 @@ impl ThreadStore for JsonThreadStore {
     }
 
     fn list(&self, include_archived: bool) -> Result<Vec<ThreadMetadata>, ThreadStoreError> {
-        let state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
-        let mut rows = state
-            .persisted
-            .threads
-            .values()
-            .map(|thread| thread.metadata.clone())
-            .filter(|metadata| include_archived || !metadata.archived)
-            .collect::<Vec<_>>();
-        rows.sort_by_key(|metadata| std::cmp::Reverse(metadata.updated_at));
-        Ok(rows)
+        self.inspect(|persisted| {
+            let mut rows = persisted
+                .threads
+                .values()
+                .map(|thread| thread.metadata.clone())
+                .filter(|metadata| include_archived || !metadata.archived)
+                .collect::<Vec<_>>();
+            rows.sort_by_key(|metadata| std::cmp::Reverse(metadata.updated_at));
+            rows
+        })
     }
 
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError> {
-        let state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
-        Ok(state.persisted.threads.get(id.as_str()).cloned())
+        self.inspect(|persisted| persisted.threads.get(id.as_str()).cloned())
     }
 
     fn read_model_context(
         &self,
         id: &ThreadId,
     ) -> Result<Option<StoredModelContext>, ThreadStoreError> {
-        let state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
-        Ok(state.persisted.model_contexts.get(id.as_str()).cloned())
+        self.inspect(|persisted| persisted.model_contexts.get(id.as_str()).cloned())
     }
 
     fn replace_model_context(
@@ -244,12 +257,13 @@ impl ThreadStore for JsonThreadStore {
     }
 
     fn claim_turn(&self, thread: &ThreadId, turn: Turn) -> Result<(), ThreadStoreError> {
+        let store_path = self.path.clone();
         self.mutate(|state| {
             let key = thread.as_str().to_string();
             if let Some(owner) = state.active_turns.get(&key) {
                 return Err(ThreadStoreError::Busy {
                     thread: key,
-                    turn: owner.clone(),
+                    turn: owner.turn_id.clone(),
                 });
             }
             let stored = state
@@ -260,7 +274,24 @@ impl ThreadStore for JsonThreadStore {
             if stored.turns.iter().any(|current| current.id == turn.id) {
                 return Err(ThreadStoreError::AlreadyExists(turn.id.to_string()));
             }
-            state.active_turns.insert(key, turn.id.clone());
+            if let Some(owner) =
+                stored.turns.iter().rev().find(|current| {
+                    matches!(current.status, TurnStatus::Queued | TurnStatus::Running)
+                })
+            {
+                return Err(ThreadStoreError::Busy {
+                    thread: key,
+                    turn: owner.id.clone(),
+                });
+            }
+            let lease = acquire_turn_lease(&store_path, &key)?;
+            state.active_turns.insert(
+                key,
+                ActiveTurn {
+                    turn_id: turn.id.clone(),
+                    _lease: lease,
+                },
+            );
             stored.metadata.updated_at = turn.started_at;
             stored.turns.push(turn);
             Ok(())
@@ -331,10 +362,10 @@ fn require_owner(
     turn: &TurnId,
 ) -> Result<(), ThreadStoreError> {
     match state.active_turns.get(thread.as_str()) {
-        Some(owner) if owner == turn => Ok(()),
+        Some(owner) if &owner.turn_id == turn => Ok(()),
         Some(owner) => Err(ThreadStoreError::Busy {
             thread: thread.to_string(),
-            turn: owner.clone(),
+            turn: owner.turn_id.clone(),
         }),
         None => Err(ThreadStoreError::TurnNotActive(turn.to_string())),
     }
@@ -354,6 +385,95 @@ fn find_turn_mut<'a>(
         .iter_mut()
         .find(|current| &current.id == turn)
         .ok_or_else(|| ThreadStoreError::NotFound(turn.to_string()))
+}
+
+fn acquire_global_lock(path: &Path) -> Result<File, ThreadStoreError> {
+    let lock_path = path.with_extension("lock");
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent).map_err(ThreadStoreError::Io)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .map_err(ThreadStoreError::Io)?;
+    file.lock_exclusive().map_err(ThreadStoreError::Io)?;
+    Ok(file)
+}
+
+fn acquire_turn_lease(path: &Path, thread: &str) -> Result<File, ThreadStoreError> {
+    let lock_path = turn_lock_path(path, thread);
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent).map_err(ThreadStoreError::Io)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .map_err(ThreadStoreError::Io)?;
+    file.try_lock_exclusive().map_err(|error| {
+        if lock_is_contended(&error) {
+            ThreadStoreError::LeaseBusy(thread.to_string())
+        } else {
+            ThreadStoreError::Io(error)
+        }
+    })?;
+    Ok(file)
+}
+
+fn lock_is_contended(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::WouldBlock || matches!(error.raw_os_error(), Some(32 | 33))
+}
+
+fn recover_orphaned_turns(
+    path: &Path,
+    persisted: &mut PersistedState,
+) -> Result<bool, ThreadStoreError> {
+    let mut recovered = false;
+    for (id, thread) in &mut persisted.threads {
+        if !thread
+            .turns
+            .iter()
+            .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
+        {
+            continue;
+        }
+        let lease = match acquire_turn_lease(path, id) {
+            Ok(lease) => lease,
+            Err(ThreadStoreError::LeaseBusy(_)) => continue,
+            Err(error) => return Err(error),
+        };
+        for turn in &mut thread.turns {
+            if matches!(turn.status, TurnStatus::Queued | TurnStatus::Running) {
+                turn.status = TurnStatus::Failed;
+                turn.completed_at = Some(thread.metadata.updated_at);
+                turn.error = Some("runtime restarted before turn completion".to_string());
+                recovered = true;
+            }
+        }
+        drop(lease);
+    }
+    Ok(recovered)
+}
+
+fn turn_lock_path(path: &Path, thread: &str) -> PathBuf {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in path
+        .as_os_str()
+        .to_string_lossy()
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(thread.bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    parent
+        .join("thread-leases-v2")
+        .join(format!("{hash:016x}.lock"))
 }
 
 fn load_state(path: &Path) -> Result<PersistedState, ThreadStoreError> {
@@ -424,6 +544,7 @@ pub enum ThreadStoreError {
     NotFound(String),
     Busy { thread: String, turn: TurnId },
     TurnNotActive(String),
+    LeaseBusy(String),
     Poisoned,
     Io(std::io::Error),
     Decode(serde_json::Error),
@@ -437,6 +558,7 @@ impl fmt::Display for ThreadStoreError {
             Self::NotFound(id) => write!(formatter, "{id} was not found"),
             Self::Busy { thread, turn } => write!(formatter, "thread {thread} is owned by {turn}"),
             Self::TurnNotActive(id) => write!(formatter, "turn {id} is not active"),
+            Self::LeaseBusy(id) => write!(formatter, "thread {id} is owned by another process"),
             Self::Poisoned => write!(formatter, "thread store lock is poisoned"),
             Self::Io(error) => error.fmt(formatter),
             Self::Decode(error) | Self::Encode(error) => error.fmt(formatter),
@@ -450,6 +572,7 @@ impl std::error::Error for ThreadStoreError {}
 mod tests {
     use super::*;
     use ncx_protocol::{ItemId, ThreadItem};
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_store(name: &str) -> JsonThreadStore {
@@ -676,6 +799,120 @@ mod tests {
             .unwrap()
             .contains("runtime restarted"));
         reopened.claim_turn(&thread_id, turn("next")).unwrap();
+    }
+
+    #[test]
+    fn second_store_does_not_recover_or_overwrite_a_live_owner() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ncx-cross-process-{unique}.json"));
+        let first = JsonThreadStore::open(&path).unwrap();
+        first.create(thread("first")).unwrap();
+        let first_id = ThreadId::new("first").unwrap();
+        first.claim_turn(&first_id, turn("turn-first")).unwrap();
+
+        let second = JsonThreadStore::open(&path).unwrap();
+        assert_eq!(
+            second.read(&first_id).unwrap().unwrap().turns[0].status,
+            TurnStatus::Running
+        );
+        assert!(matches!(
+            second.claim_turn(&first_id, turn("overlap")),
+            Err(ThreadStoreError::Busy { .. })
+        ));
+        second.create(thread("second")).unwrap();
+        assert!(first
+            .read(&ThreadId::new("second").unwrap())
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            first.read(&first_id).unwrap().unwrap().turns[0].status,
+            TurnStatus::Running
+        );
+
+        drop(first);
+        assert_eq!(
+            second.read(&first_id).unwrap().unwrap().turns[0].status,
+            TurnStatus::Failed
+        );
+        second.claim_turn(&first_id, turn("next")).unwrap();
+    }
+
+    #[test]
+    fn cross_process_lease_helper() {
+        let Ok(path) = std::env::var("NCX_THREAD_STORE_HELPER_PATH") else {
+            return;
+        };
+        let ready = PathBuf::from(format!("{path}.ready"));
+        let release = PathBuf::from(format!("{path}.release"));
+        let store = JsonThreadStore::open(&path).unwrap();
+        let id = ThreadId::new("owned").unwrap();
+        store.create(thread("owned")).unwrap();
+        store.claim_turn(&id, turn("child-turn")).unwrap();
+        fs::write(&ready, b"ready").unwrap();
+        for _ in 0..500 {
+            if release.exists() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("parent did not release helper");
+    }
+
+    #[test]
+    fn live_turn_lease_is_respected_across_processes() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ncx-process-lease-{unique}.json"));
+        let path_text = path.display().to_string();
+        let ready = PathBuf::from(format!("{path_text}.ready"));
+        let release = PathBuf::from(format!("{path_text}.release"));
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::cross_process_lease_helper",
+                "--nocapture",
+            ])
+            .env("NCX_THREAD_STORE_HELPER_PATH", &path_text)
+            .spawn()
+            .unwrap();
+        for _ in 0..500 {
+            if ready.exists() {
+                break;
+            }
+            assert!(child.try_wait().unwrap().is_none(), "helper exited early");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(ready.exists(), "helper did not acquire the turn lease");
+
+        let observer = JsonThreadStore::open(&path).unwrap();
+        let id = ThreadId::new("owned").unwrap();
+        assert_eq!(
+            observer.read(&id).unwrap().unwrap().turns[0].status,
+            TurnStatus::Running
+        );
+        assert!(matches!(
+            observer.claim_turn(&id, turn("overlap")),
+            Err(ThreadStoreError::Busy { .. })
+        ));
+        observer.create(thread("observer-write")).unwrap();
+        fs::write(&release, b"release").unwrap();
+        assert!(child.wait().unwrap().success());
+
+        assert_eq!(
+            observer.read(&id).unwrap().unwrap().turns[0].status,
+            TurnStatus::Failed
+        );
+        assert!(observer
+            .read(&ThreadId::new("observer-write").unwrap())
+            .unwrap()
+            .is_some());
+        let _ = fs::remove_file(ready);
+        let _ = fs::remove_file(release);
     }
 
     #[test]

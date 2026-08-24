@@ -550,3 +550,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `ncx-protocol` 现对所有枚举 variant 字段统一启用 camelCase，并新增请求/Item 序列化往返测试，确保协议 JSON 与 GUI TypeScript 契约一致。
 - 新增 `npm run test:e2e:protocol`：真实启动 MSVC Tauri 桌面端，经 WebView2 CDP 和 Tauri IPC 创建两个 Thread、同时启动两个 Turn、验证同 Thread 重入失败、写入用户/工具/中间回答/最终回答、完成并读取可见历史；结果证明跨 Thread 并发成功且工具输出/中间播报未泄漏。
 - Windows 的既有 question E2E 也固定使用 MSVC target，真实 choice/free-text/cancel 三条交互全部通过。
+
+### 2026-08-24 Thread Store 跨进程一致性
+- 完成审计发现原 Store 只用进程内 Mutex：GUI 与 CLI 同时打开会缓存不同副本，后写者可能覆盖另一进程；任一新进程打开还会把其他进程的 Running Turn 错误恢复成 Failed。
+- `JsonThreadStore` 现用全局文件锁串行化读取/写入，每次操作在锁内从磁盘重载后再原子保存，消除多进程陈旧快照覆盖。
+- 每个 Thread 使用独立 OS 文件租约：活跃进程持有租约期间，其他进程保留 Running 状态且拒绝同 Thread 重入；进程退出释放租约后，下一次操作才把孤儿 Turn 恢复为 Failed。不同 Thread 仍可并发。
+- 锁文件名同时哈希 Store 路径和 ThreadId，多个测试 Store/用户 Store 互不干扰；Windows 锁竞争错误码 32/33 与 WouldBlock 统一识别。
+- 新增真实子进程回归：子进程占用 Turn，父进程验证不误恢复、不重入、可写另一 Thread；子进程退出后父进程恢复孤儿 Turn且保留双方写入。`ncx-thread-store` 12 项、Rust workspace 全量、GUI Rust 55 项通过。
