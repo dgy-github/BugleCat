@@ -26,10 +26,17 @@ try {
     const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const a = `e2e-thread-a-${nonce}`;
     const b = `e2e-thread-b-${nonce}`;
+    const title = `协议恢复 ${nonce}`;
     const ta = `e2e-turn-a-${nonce}`;
     const tb = `e2e-turn-b-${nonce}`;
     const call = (method, params) => invoke("app_server_request", { request: { method, params } });
-    await call("threadCreate", { threadId: a, workspace: "e2e", title: "A" });
+    const existing = await call("threadList", { includeArchived: true });
+    for (const metadata of existing.response.payload.data || []) {
+      if (metadata.workspace === "e2e" && !metadata.archived) {
+        await call("threadArchive", { threadId: metadata.id, archived: true });
+      }
+    }
+    await call("threadCreate", { threadId: a, workspace: "e2e", title });
     await call("threadCreate", { threadId: b, workspace: "e2e", title: "B" });
     await call("turnStart", { threadId: a, turnId: ta });
     await call("turnStart", { threadId: b, turnId: tb });
@@ -47,15 +54,24 @@ try {
     await call("turnComplete", { threadId: a, turnId: ta, status: "completed", error: null, usage: { tokens: { prompt_tokens: 12, completion_tokens: 3 }, estimatedCost: 0.01, currency: "CNY" } });
     await call("turnComplete", { threadId: b, turnId: tb, status: "completed", error: null, usage: { tokens: {}, estimatedCost: null, currency: null } });
     const visible = await call("threadReadVisible", { threadId: a });
-    await call("threadArchive", { threadId: a, archived: true });
-    await call("threadArchive", { threadId: b, archived: true });
-    return { sameThreadRejected, visible };
+    return { sameThreadRejected, visible, a, b, title };
   });
   const serialized = JSON.stringify(evidence.visible);
   if (!evidence.sameThreadRejected) throw new Error("same-thread overlap was accepted");
   if (!serialized.includes("用户要求") || !serialized.includes("最终结论")) throw new Error(`visible transcript missing result: ${serialized}`);
   if (serialized.includes("SECRET_TOOL_OUTPUT") || serialized.includes("中间播报")) throw new Error(`visible transcript leaked internal output: ${serialized}`);
-  console.log("protocol e2e: ok (cross-thread concurrency, same-thread ownership, visible projection)");
+  await page.reload();
+  await page.getByRole("button", { name: /最近会话/ }).click();
+  await page.getByText(evidence.title, { exact: true }).waitFor({ timeout: 15_000 });
+  await page.getByText(evidence.title, { exact: true }).click();
+  await page.getByText("最终结论", { exact: true }).waitFor({ timeout: 15_000 });
+  await page.evaluate(async ({ a, b }) => {
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const call = (method, params) => invoke("app_server_request", { request: { method, params } });
+    await call("threadArchive", { threadId: a, archived: true });
+    await call("threadArchive", { threadId: b, archived: true });
+  }, { a: evidence.a, b: evidence.b });
+  console.log("protocol e2e: ok (concurrency, ownership, visible projection, history reload/open)");
 } finally {
   await browser?.close();
   stopTree(child.pid);

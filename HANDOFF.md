@@ -557,3 +557,8 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 每个 Thread 使用独立 OS 文件租约：活跃进程持有租约期间，其他进程保留 Running 状态且拒绝同 Thread 重入；进程退出释放租约后，下一次操作才把孤儿 Turn 恢复为 Failed。不同 Thread 仍可并发。
 - 锁文件名同时哈希 Store 路径和 ThreadId，多个测试 Store/用户 Store 互不干扰；Windows 锁竞争错误码 32/33 与 WouldBlock 统一识别。
 - 新增真实子进程回归：子进程占用 Turn，父进程验证不误恢复、不重入、可写另一 Thread；子进程退出后父进程恢复孤儿 Turn且保留双方写入。`ncx-thread-store` 12 项、Rust workspace 全量、GUI Rust 55 项通过。
+
+### 2026-08-24 历史会话恢复 E2E 收口
+- `test:e2e:protocol` 在真实 Tauri/WebView 中新增页面刷新、展开“最近会话”、点击协议创建的历史 Thread 并恢复最终结论的验证；证明 GUI 历史入口已使用 `ncx-app-server`/`ncx-thread-store` 的可见投影，而不是旧 SessionIndex 或前端缓存。
+- E2E 启动时会归档先前失败遗留的 `workspace == "e2e"` 测试 Thread，结束时归档本轮两个 Thread，避免测试数据污染真实历史列表。
+- 已验证结果：跨 Thread 并发、同 Thread 所有权拒绝、工具/中间输出过滤、刷新后历史加载和会话激活全部通过，输出为 `protocol e2e: ok (concurrency, ownership, visible projection, history reload/open)`。
