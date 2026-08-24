@@ -18,6 +18,7 @@
   import { FileBrowserController } from "./lib/file-browser-controller.svelte";
   import { GitWorkspaceController } from "./lib/git-workspace-controller.svelte";
   import { CheckpointController } from "./lib/checkpoint-controller.svelte";
+  import { MemoryController } from "./lib/memory-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -149,6 +150,7 @@
     (text) => messages.push({ role: "note", text }),
     () => busy,
   );
+  const memoryController = new MemoryController((text) => messages.push({ role: "note", text }));
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
@@ -1000,7 +1002,7 @@
       if (rightPanel === "files") await fileBrowser.load(fileBrowser.path);
       else if (rightPanel === "branches") await gitWorkspace.refreshBranches();
       else if (rightPanel === "diff") await gitWorkspace.loadDiff();
-      else if (rightPanel === "memory") await loadNotes();
+      else if (rightPanel === "memory") await memoryController.refresh();
       else if (rightPanel === "checkpoints") await checkpointController.refresh();
     } catch (e) {
       messages.push({ role: "note", text: `刷新失败：${e}` });
@@ -1138,68 +1140,12 @@
     }
   }
 
-  // ── Hermes: project-memory self-evolution ─────────────────────────────────
-  type MemoryNote = { ts: number; tags: string[]; text: string };
-  let hermesOpen = $state(false);
-  let notes = $state<MemoryNote[]>([]);
-  let hermesBusy = $state(false);
-  let newNote = $state("");
-  let newNoteTags = $state("");
-
-  async function loadNotes() {
-    notes = await invoke<MemoryNote[]>("memory_list");
-  }
   async function openHermes() {
     if (rightPanel === "memory") { rightPanel = ""; return; }
     rightPanel = "memory";
-    hermesBusy = true;
-    try {
-      await loadNotes();
-    } catch (e) {
-      messages.push({ role: "note", text: `记忆加载失败：${e}` });
-    }
-    hermesBusy = false;
+    await memoryController.refresh();
   }
-  async function consolidateMemory() {
-    hermesBusy = true;
-    try {
-      const removed = await invoke<number>("memory_consolidate");
-      messages.push({ role: "note", text: `记忆：合并了 ${removed} 条近重复经验。` });
-      await loadNotes();
-    } catch (e) {
-      messages.push({ role: "note", text: `记忆整理失败：${e}` });
-    }
-    hermesBusy = false;
-  }
-  async function addNote() {
-    if (!newNote.trim()) return;
-    hermesBusy = true;
-    try {
-      const tags = newNoteTags.split(",").map((t) => t.trim()).filter(Boolean);
-      const saved = await invoke<boolean>("memory_add", { note: newNote, tags });
-      messages.push({ role: "note", text: saved ? "记忆：已保存。" : "记忆：已存在（未重复）。" });
-      newNote = "";
-      newNoteTags = "";
-      await loadNotes();
-    } catch (e) {
-      messages.push({ role: "note", text: `记忆添加失败：${e}` });
-    }
-    hermesBusy = false;
-  }
-  async function openMemoryFile() {
-    try {
-      await invoke("open_memory_file");
-    } catch (e) {
-      messages.push({ role: "note", text: `打开记忆文件失败：${e}` });
-    }
-  }
-  function fmtTs(ts: number): string {
-    try {
-      return new Date(ts * 1000).toLocaleString();
-    } catch {
-      return String(ts);
-    }
-  }
+
 
   // ── Slash command palette (type `/` in the composer) ──────────────────────
   let slashIdx = $state(0);
@@ -1477,15 +1423,15 @@
     {openSessionLog}
     {openSessionSnapshot}
     {refreshSessions}
-    bind:newNote
-    bind:newNoteTags
-    {hermesBusy}
-    {notes}
-    {addNote}
-    {consolidateMemory}
-    {loadNotes}
-    {openMemoryFile}
-    {fmtTs}
+    bind:newNote={memoryController.newNote}
+    bind:newNoteTags={memoryController.newNoteTags}
+    hermesBusy={memoryController.busy}
+    notes={memoryController.notes}
+    addNote={memoryController.add}
+    consolidateMemory={memoryController.consolidate}
+    loadNotes={memoryController.refresh}
+    openMemoryFile={memoryController.openFile}
+    fmtTs={memoryController.formatTimestamp}
   />
 
 

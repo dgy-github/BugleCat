@@ -2328,7 +2328,7 @@ mod tests {
             .split_once("async function refreshSessions")
             .unwrap()
             .1
-            .split_once("async function loadNotes")
+            .split_once("function newThreadId")
             .unwrap()
             .0;
         assert!(!refresh.contains("method: \"threadRead\""));
