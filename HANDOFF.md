@@ -600,3 +600,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - GUI 模板回归不再错误地只读取 `App.svelte`，而是按真实所有者读取 Composer、Runtime 和 Lifecycle 控制器；继续覆盖同 Thread 防重入、跨 Thread 并发、切换不停止旧任务、停止可重试和协议序号门禁。
 - 拆分保持附件文件名展示、每会话累计 Token/费用恢复、设置/插件操作、工具活动完成态收口、历史最终结论投影和工作区面板行为不变。
 - 最终验证：Vite production build、结构门禁、GUI Rust 56 项、question E2E、protocol E2E 和 Rust workspace 全量均通过；协议 E2E 覆盖并发、所有权、可见历史刷新/恢复以及插件 Marketplace。
+
+### 2026-08-24 GUI 运行交互协议化增量
+- 完成度审计发现 GUI 的 Thread/Turn 与插件虽已使用 app-server，但运行状态、Ready 重发、工作区切换、审批和用户问答仍直接调用 Tauri 命令；这与“GUI 是协议客户端、Tauri 只做宿主适配”的目标不一致。
+- `ncx-protocol` 新增 `runtimeStatusRead`、`runtimeReadyRefresh`、`workspaceSet`、`interactionApprove`、`interactionAnswer`；`ncx-app-server` 统一拥有路由，GUI 只通过 `appServerRequest` 调用，Tauri 对应旧命令已从 invoke handler 删除。
+- 审批和问答请求携带可选 ThreadId：真实会话必须与后端 pending owner 一致，避免旧会话 ID 误操作其他 Thread；仅无会话归属的调试问答使用 `null`，且只能匹配后端同为空归属的 pending 项。
+- 验证：协议/App Server 定向测试、Rust workspace 全量、GUI Rust 57 项、Vite production build、真实 question E2E（选择、自由文本、取消）与原 protocol E2E 均通过；结构门禁和 `git diff --check` 通过。

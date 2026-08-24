@@ -98,7 +98,6 @@ pub struct RestoreView {
 }
 
 /// Load the resolved config and return a display-safe snapshot.
-#[tauri::command]
 fn get_status() -> Result<Status, String> {
     let workspace = std::env::current_dir().ok();
     let overrides = Overrides {
@@ -172,8 +171,7 @@ fn get_config_location() -> Result<ConfigLocation, String> {
 /// Switch the agent's workspace (the directory it operates on). Sets the process
 /// working directory — which every command resolves against — then reloads the
 /// agent so the new root, its project instructions, memory, and git all apply.
-#[tauri::command]
-fn set_workspace(path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+fn set_workspace_for_state(path: String, state: &AppState) -> Result<String, String> {
     let p = PathBuf::from(bridge::display_path(Path::new(path.trim())));
     if !p.is_dir() {
         return Err(format!("not a directory: {}", p.display()));
@@ -234,8 +232,7 @@ fn set_permission_mode(mode: String, state: tauri::State<'_, AppState>) -> Resul
 
 /// Ask the agent thread to re-emit its `ready` snapshot (called by the UI once
 /// its event listener is up, so the initial emit isn't missed).
-#[tauri::command]
-fn request_ready(state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn request_ready_for_state(state: &AppState) -> Result<(), String> {
     state
         .tx
         .send(Command::RequestReady)
@@ -300,6 +297,31 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
     fn interrupt_latest(&self, thread_id: &ThreadId) -> Result<(), String> {
         cancel_session(self.state, thread_id.as_str());
         Ok(())
+    }
+
+    fn runtime_status(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(get_status()?).map_err(|error| error.to_string())
+    }
+
+    fn refresh_ready(&self) -> Result<(), String> {
+        request_ready_for_state(self.state)
+    }
+
+    fn set_workspace(&self, path: String) -> Result<String, String> {
+        set_workspace_for_state(path, self.state)
+    }
+
+    fn approve(&self, thread_id: Option<&ThreadId>, id: u64, decision: String) -> Result<(), String> {
+        approve_for_thread(self.state, thread_id.map(ThreadId::as_str), id, decision)
+    }
+
+    fn answer(
+        &self,
+        thread_id: Option<&ThreadId>,
+        id: u64,
+        answer: Option<String>,
+    ) -> Result<(), String> {
+        answer_for_thread(self.state, thread_id.map(ThreadId::as_str), id, answer)
     }
 
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
@@ -696,14 +718,23 @@ fn open_with(program: &str, path: &Path, label: &str) -> Result<(), String> {
 
 /// Answer a pending approval request (raised by an `approval` event).
 /// `decision` is "deny" | "once" | "always" (always = remember this session).
-#[tauri::command]
-fn approve(id: u64, decision: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn approve_for_thread(
+    state: &AppState,
+    thread_id: Option<&str>,
+    id: u64,
+    decision: String,
+) -> Result<(), String> {
     let dec = match decision.as_str() {
         "always" => ncx_core::ApprovalDecision::Always,
         "once" | "approve" | "yes" | "true" => ncx_core::ApprovalDecision::Once,
         _ => ncx_core::ApprovalDecision::Deny,
     };
-    let sender = state.pending.lock().unwrap().remove(&id);
+    let mut pending = state.pending.lock().unwrap();
+    let expected = thread_id.unwrap_or_default();
+    if pending.get(&id).map(|(owner, _)| owner.as_str()) != Some(expected) {
+        return Err(format!("approval {id} does not belong to thread {expected}"));
+    }
+    let sender = pending.remove(&id);
     match sender {
         Some((_, tx)) => tx
             .send(dec)
@@ -713,17 +744,22 @@ fn approve(id: u64, decision: String, state: tauri::State<'_, AppState>) -> Resu
 }
 
 /// Answer or dismiss a pending `ask_user_question` request.
-#[tauri::command]
-fn answer_question(
+fn answer_for_thread(
+    state: &AppState,
+    thread_id: Option<&str>,
     id: u64,
     answer: Option<String>,
-    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let answer = answer.and_then(|value| {
         let trimmed = value.trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
     });
-    let sender = state.questions.lock().unwrap().remove(&id);
+    let mut questions = state.questions.lock().unwrap();
+    let expected = thread_id.unwrap_or_default();
+    if questions.get(&id).map(|(owner, _)| owner.as_str()) != Some(expected) {
+        return Err(format!("question {id} does not belong to thread {expected}"));
+    }
+    let sender = questions.remove(&id);
     match sender {
         Some((_, tx)) => tx
             .send(answer)
@@ -1889,10 +1925,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_status,
             app_server_request,
-            approve,
-            answer_question,
             e2e_ask_question,
             get_settings,
             save_settings,
@@ -1930,13 +1963,11 @@ pub fn run() {
             memory_consolidate,
             memory_add,
             open_memory_file,
-            set_workspace,
             get_workspace,
             set_approval,
             set_sandbox,
             set_model,
             set_permission_mode,
-            request_ready
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
@@ -2385,6 +2416,40 @@ mod tests {
         assert!(protocol_client.contains("this.sequences.get(envelope.threadId) || 0"));
         assert!(protocol_client.contains("envelope.sequence <= previous"));
         assert!(protocol_client.contains("this.sequences.set(envelope.threadId, envelope.sequence)"));
+    }
+
+    #[test]
+    fn runtime_and_interaction_controls_use_the_app_server_protocol() {
+        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
+        for method in [
+            "runtimeStatusRead",
+            "runtimeReadyRefresh",
+            "workspaceSet",
+            "interactionApprove",
+            "interactionAnswer",
+        ] {
+            assert!(
+                runtime.contains(&format!("method: \"{method}\"")),
+                "missing app-server request for {method}"
+            );
+        }
+        for legacy in [
+            "invoke(\"get_status\"",
+            "invoke(\"request_ready\"",
+            "invoke<string>(\"set_workspace\"",
+            "invoke(\"approve\"",
+            "invoke(\"answer_question\"",
+        ] {
+            assert!(!runtime.contains(legacy), "legacy runtime command remains: {legacy}");
+        }
+        assert!(
+            runtime.find("method: \"interactionApprove\"").unwrap()
+                < runtime.find("this.thread.removeApproval").unwrap()
+        );
+        assert!(
+            runtime.find("method: \"interactionAnswer\"").unwrap()
+                < runtime.find("this.thread.removeQuestion").unwrap()
+        );
     }
 
     #[test]

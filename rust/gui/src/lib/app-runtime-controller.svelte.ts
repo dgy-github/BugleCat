@@ -1,7 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { ProtocolSequenceGate, type ProtocolEventEnvelope } from "./app-server-client";
+import { appServerRequest, ProtocolSequenceGate, type ProtocolEventEnvelope } from "./app-server-client";
 import type { ComposerController } from "./composer-controller.svelte";
 import type { ModelControlsController } from "./model-controls-controller.svelte";
 import type { SidebarController } from "./sidebar-controller.svelte";
@@ -34,7 +33,7 @@ export class AppRuntimeController {
   start = async (): Promise<void> => {
     this.sidebar.restoreWidth();
     try {
-      const status = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; reasoning_effort: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
+      const status = await appServerRequest<{ model: string; sandbox: string; approval: string; permission_mode: string; reasoning_effort: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>({ method: "runtimeStatusRead" });
       this.header = `${status.model} · ${status.sandbox}`;
       this.sandboxMode = status.sandbox;
       this.models.currentModel = status.model;
@@ -49,7 +48,7 @@ export class AppRuntimeController {
       if (["threadCreated", "threadUpdated", "turnCompleted"].includes(envelope.event.type)) void this.lifecycle.refresh();
     });
     await listen<UiEvent>("ncx://event", (event) => this.thread.handle(event.payload));
-    invoke("request_ready").catch(() => {});
+    appServerRequest({ method: "runtimeReadyRefresh" }).catch(() => {});
     void this.slash.loadCustomCommands();
   };
 
@@ -77,7 +76,7 @@ export class AppRuntimeController {
       this.usage.reset();
       this.thread.queued = [];
       this.composer.attached = [];
-      const workspace = await invoke<string>("set_workspace", { path: directory });
+      const workspace = await appServerRequest<string>({ method: "workspaceSet", params: { path: directory } });
       this.workspace = workspace;
       this.thread.messages.push({ role: "note", text: `已切换工作区到 ${workspace}，已开始新会话。` });
       void this.lifecycle.refresh();
@@ -93,16 +92,20 @@ export class AppRuntimeController {
   decide = async (decision: "deny" | "once" | "always"): Promise<void> => {
     if (!this.thread.approval) return;
     const approval = this.thread.approval;
-    this.thread.removeApproval(approval.session_id);
-    try { await invoke("approve", { id: approval.id, decision }); }
+    try {
+      await appServerRequest({ method: "interactionApprove", params: { threadId: approval.session_id || null, id: approval.id, decision } });
+      this.thread.removeApproval(approval.session_id);
+    }
     catch (error) { this.thread.messages.push({ role: "note", text: `审批失败：${error}` }); }
   };
 
   answerQuestion = async (answer: string | null): Promise<void> => {
     if (!this.thread.question) return;
     const question = this.thread.question;
-    this.thread.removeQuestion(question.session_id);
-    try { await invoke("answer_question", { id: question.id, answer }); }
+    try {
+      await appServerRequest({ method: "interactionAnswer", params: { threadId: question.session_id || null, id: question.id, answer } });
+      this.thread.removeQuestion(question.session_id);
+    }
     catch (error) { this.thread.messages.push({ role: "note", text: `回答问题失败：${error}` }); }
   };
 }

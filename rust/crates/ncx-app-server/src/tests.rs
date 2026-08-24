@@ -241,6 +241,47 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(())
     }
 
+    fn runtime_status(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({"model":"test-model"}))
+    }
+
+    fn refresh_ready(&self) -> Result<(), String> {
+        self.calls.lock().unwrap().push("ready".into());
+        Ok(())
+    }
+
+    fn set_workspace(&self, path: String) -> Result<String, String> {
+        self.calls.lock().unwrap().push(format!("workspace:{path}"));
+        Ok(path)
+    }
+
+    fn approve(
+        &self,
+        thread_id: Option<&ThreadId>,
+        id: u64,
+        decision: String,
+    ) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!(
+            "approve:{}:{id}:{decision}",
+            thread_id.map(ToString::to_string).unwrap_or_default()
+        ));
+        Ok(())
+    }
+
+    fn answer(
+        &self,
+        thread_id: Option<&ThreadId>,
+        id: u64,
+        answer: Option<String>,
+    ) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!(
+            "answer:{}:{id}:{}",
+            thread_id.map(ToString::to_string).unwrap_or_default(),
+            answer.unwrap_or_default()
+        ));
+        Ok(())
+    }
+
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"name":"demo"}]))
     }
@@ -350,6 +391,64 @@ fn runtime_requests_are_routed_by_the_app_server() {
             "submit:runtime-thread:hello:1",
             "interrupt:runtime-thread",
             "fork:runtime-thread:forked-thread",
+        ]
+    );
+}
+
+#[test]
+fn interaction_and_desktop_runtime_requests_are_routed_by_the_app_server() {
+    let server = server();
+    let runtime = RecordingRuntime::default();
+    let thread_id = ThreadId::new("interaction-thread").unwrap();
+    let status = server
+        .dispatch_with_runtime(ClientRequest::RuntimeStatusRead, &runtime)
+        .unwrap();
+    assert!(matches!(
+        status.response.payload,
+        ResponsePayload::RuntimeStatus(ref value) if value["model"] == "test-model"
+    ));
+    server
+        .dispatch_with_runtime(ClientRequest::RuntimeReadyRefresh, &runtime)
+        .unwrap();
+    let workspace = server
+        .dispatch_with_runtime(
+            ClientRequest::WorkspaceSet {
+                path: "D:/workspace".into(),
+            },
+            &runtime,
+        )
+        .unwrap();
+    assert!(matches!(
+        workspace.response.payload,
+        ResponsePayload::Workspace(ref path) if path == "D:/workspace"
+    ));
+    server
+        .dispatch_with_runtime(
+            ClientRequest::InteractionApprove {
+                thread_id: Some(thread_id.clone()),
+                id: 7,
+                decision: "once".into(),
+            },
+            &runtime,
+        )
+        .unwrap();
+    server
+        .dispatch_with_runtime(
+            ClientRequest::InteractionAnswer {
+                thread_id: Some(thread_id),
+                id: 8,
+                answer: Some("yes".into()),
+            },
+            &runtime,
+        )
+        .unwrap();
+    assert_eq!(
+        *runtime.calls.lock().unwrap(),
+        vec![
+            "ready",
+            "workspace:D:/workspace",
+            "approve:interaction-thread:7:once",
+            "answer:interaction-thread:8:yes",
         ]
     );
 }

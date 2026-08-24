@@ -255,6 +255,21 @@ pub enum ClientRequest {
     TurnInterruptLatest {
         thread_id: ThreadId,
     },
+    RuntimeStatusRead,
+    RuntimeReadyRefresh,
+    WorkspaceSet {
+        path: String,
+    },
+    InteractionApprove {
+        thread_id: Option<ThreadId>,
+        id: u64,
+        decision: String,
+    },
+    InteractionAnswer {
+        thread_id: Option<ThreadId>,
+        id: u64,
+        answer: Option<String>,
+    },
     TurnComplete {
         thread_id: ThreadId,
         turn_id: TurnId,
@@ -300,6 +315,8 @@ pub enum ResponsePayload {
     Thread(Thread),
     Threads(Vec<ThreadMetadata>),
     ModelContext(Option<StoredModelContext>),
+    RuntimeStatus(Value),
+    Workspace(String),
     CodexPlugins(Value),
     CodexPlugin(Value),
     Marketplaces(Value),
@@ -494,6 +511,19 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ClientRequest>(&json).unwrap(),
             marketplace
+        );
+
+        let interaction = ClientRequest::InteractionAnswer {
+            thread_id: Some(ThreadId::new("thread-2").unwrap()),
+            id: 9,
+            answer: Some("继续".into()),
+        };
+        let json = serde_json::to_string(&interaction).unwrap();
+        assert!(json.contains("\"method\":\"interactionAnswer\""), "{json}");
+        assert!(json.contains("\"threadId\":\"thread-2\""), "{json}");
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&json).unwrap(),
+            interaction
         );
     }
 }

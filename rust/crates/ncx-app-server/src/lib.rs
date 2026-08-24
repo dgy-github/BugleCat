@@ -29,6 +29,21 @@ pub trait AppServerAdapter {
         images: Vec<String>,
     ) -> Result<(), String>;
     fn interrupt_latest(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), String>;
+    fn runtime_status(&self) -> Result<serde_json::Value, String>;
+    fn refresh_ready(&self) -> Result<(), String>;
+    fn set_workspace(&self, path: String) -> Result<String, String>;
+    fn approve(
+        &self,
+        thread_id: Option<&ncx_protocol::ThreadId>,
+        id: u64,
+        decision: String,
+    ) -> Result<(), String>;
+    fn answer(
+        &self,
+        thread_id: Option<&ncx_protocol::ThreadId>,
+        id: u64,
+        answer: Option<String>,
+    ) -> Result<(), String>;
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String>;
     fn install_codex_plugin(
         &self,
@@ -88,7 +103,12 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::ThreadForkActivate { .. }
             | ClientRequest::ThreadActivate { .. }
             | ClientRequest::TurnSubmit { .. }
-            | ClientRequest::TurnInterruptLatest { .. } => Err(AppServerError::InvalidRequest(
+            | ClientRequest::TurnInterruptLatest { .. }
+            | ClientRequest::RuntimeStatusRead
+            | ClientRequest::RuntimeReadyRefresh
+            | ClientRequest::WorkspaceSet { .. }
+            | ClientRequest::InteractionApprove { .. }
+            | ClientRequest::InteractionAnswer { .. } => Err(AppServerError::InvalidRequest(
                 "request requires a runtime adapter".to_string(),
             )),
             ClientRequest::CodexPluginList
@@ -434,6 +454,40 @@ impl<S: ThreadStore> AppServer<S> {
             ClientRequest::TurnInterruptLatest { thread_id } => {
                 runtime
                     .interrupt_latest(&thread_id)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::RuntimeStatusRead => runtime
+                .runtime_status()
+                .map(ResponsePayload::RuntimeStatus)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::RuntimeReadyRefresh => {
+                runtime.refresh_ready().map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::WorkspaceSet { path } => runtime
+                .set_workspace(path)
+                .map(ResponsePayload::Workspace)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::InteractionApprove {
+                thread_id,
+                id,
+                decision,
+            } => {
+                runtime
+                    .approve(thread_id.as_ref(), id, decision)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::InteractionAnswer {
+                thread_id,
+                id,
+                answer,
+            } => {
+                runtime
+                    .answer(thread_id.as_ref(), id, answer)
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
