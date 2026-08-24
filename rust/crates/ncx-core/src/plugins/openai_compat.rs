@@ -134,6 +134,7 @@ impl CodexPluginCatalog {
         if !self.root.is_dir() {
             return Ok(Vec::new());
         }
+        self.recover_interrupted_updates()?;
         let mut plugins = Vec::new();
         for entry in fs::read_dir(&self.root).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
@@ -145,6 +146,9 @@ impl CodexPluginCatalog {
                 continue;
             }
             let root = entry.path();
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
             if root.join(MANIFEST).is_file() {
                 plugins.push(load_record(root)?);
             }
@@ -166,6 +170,7 @@ impl CodexPluginCatalog {
         let record = load_record(source.clone())?;
         validate_segment(&record.manifest.name)?;
         fs::create_dir_all(&self.root).map_err(|error| error.to_string())?;
+        self.recover_interrupted_updates()?;
         let target = self.root.join(&record.manifest.name);
         if target.exists() {
             if !upgrade {
@@ -233,6 +238,55 @@ impl CodexPluginCatalog {
         } else {
             Ok(())
         }
+    }
+
+    fn recover_interrupted_updates(&self) -> Result<(), String> {
+        if !self.root.is_dir() {
+            return Ok(());
+        }
+        let entries = fs::read_dir(&self.root)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                entry
+                    .file_type()
+                    .ok()
+                    .filter(|kind| kind.is_dir())
+                    .map(|_| entry)
+            })
+            .collect::<Vec<_>>();
+        for entry in entries {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let Some(name) = file_name
+                .strip_prefix('.')
+                .and_then(|value| value.strip_suffix(".backup"))
+            else {
+                continue;
+            };
+            validate_segment(name)?;
+            let target = self.root.join(name);
+            let backup = entry.path();
+            let staging = self.root.join(format!(".{name}.staging"));
+            if target.exists() {
+                fs::remove_dir_all(&backup).map_err(|error| error.to_string())?;
+            } else {
+                fs::rename(&backup, &target)
+                    .map_err(|error| format!("恢复插件 '{name}' 的升级备份失败: {error}"))?;
+            }
+            if staging.exists() {
+                fs::remove_dir_all(staging).map_err(|error| error.to_string())?;
+            }
+        }
+        for entry in fs::read_dir(&self.root)
+            .map_err(|error| error.to_string())?
+            .filter_map(Result::ok)
+        {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.starts_with('.') && file_name.ends_with(".staging") {
+                fs::remove_dir_all(entry.path()).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -648,6 +702,30 @@ mod tests {
         let upgraded = catalog.install_or_upgrade(&source, true).unwrap();
         assert_eq!(upgraded.manifest.version.as_deref(), Some("2"));
         assert!(!upgraded.enabled);
+    }
+
+    #[test]
+    fn catalog_recovers_interrupted_upgrade_backup_and_hides_staging() {
+        let source = temp("recovery-source");
+        let target = temp("recovery-target");
+        fixture(&source, "demo.plugin");
+        let catalog = CodexPluginCatalog::new(&target);
+        catalog.install(&source).unwrap();
+        let installed = target.join("demo.plugin");
+        let backup = target.join(".demo.plugin.backup");
+        let staging = target.join(".demo.plugin.staging");
+        fs::rename(&installed, &backup).unwrap();
+        fixture(&staging, "demo.plugin");
+
+        let discovered = catalog.discover().unwrap();
+
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].manifest.name, "demo.plugin");
+        assert!(installed.is_dir());
+        assert!(!backup.exists());
+        assert!(!staging.exists());
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(target);
     }
 
     #[test]

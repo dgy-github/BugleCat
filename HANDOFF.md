@@ -539,3 +539,8 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - AgentLoop 在真实自动压缩前执行 PreCompact；失败可阻止本次压缩并把诊断作为运行时说明交给模型。压缩写回 Session/JSONL 后执行 PostCompact，并把压缩统计作为 Hook 结果输入。
 - `Session::needs_compaction` 公开纯判断，避免为了触发 Hook 先修改会话；实际压缩仍由原有唯一状态机完成，没有建立第二套 compaction 实现。
 - 回归覆盖插件资源解析和真实前/后 Hook 执行，`ncx-core` 222 项通过。
+
+### 2026-08-24 Marketplace 升级恢复
+- `CodexPluginCatalog` 在发现和安装/升级前自动恢复中断的原子升级：目标目录缺失时把 `.backup` 恢复为正式插件；目标已存在时清理旧 backup；同名 `.staging` 只在 Catalog 根内清理。
+- 隐藏的 staging/backup 目录不再作为普通插件进入发现清单，避免升级中断后出现重复插件或插件消失。
+- 新增崩溃点模拟回归：手工构造“正式目录已移到 backup、staging 已生成”的状态，下一次 discover 恢复唯一正式插件并清理临时目录；OpenAI 兼容插件相关 7 项测试通过。
