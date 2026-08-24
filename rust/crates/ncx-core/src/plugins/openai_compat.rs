@@ -1,7 +1,9 @@
 //! Compatibility with OpenAI/Codex resource plugins and local marketplaces.
 
+use ncx_config::{HookConfig, McpServerConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -28,7 +30,7 @@ pub struct CodexPluginManifest {
     #[serde(default)]
     pub mcp_servers: Option<Value>,
     #[serde(default)]
-    pub apps: Option<String>,
+    pub apps: Option<Value>,
     #[serde(default)]
     pub hooks: Option<Value>,
     #[serde(default)]
@@ -45,7 +47,7 @@ pub enum ResourcePaths {
 }
 
 impl ResourcePaths {
-    fn values(&self) -> Vec<&str> {
+    pub(crate) fn values(&self) -> Vec<&str> {
         match self {
             Self::One(path) => vec![path],
             Self::Many(paths) => paths.iter().map(String::as_str).collect(),
@@ -59,6 +61,56 @@ pub struct CodexPluginRecord {
     pub manifest: CodexPluginManifest,
     pub root: PathBuf,
     pub enabled: bool,
+}
+
+impl CodexPluginRecord {
+    pub fn skill_paths(&self) -> Vec<PathBuf> {
+        let explicit = self
+            .manifest
+            .skills
+            .values()
+            .into_iter()
+            .map(|path| self.root.join(path.strip_prefix("./").unwrap_or(path)))
+            .collect::<Vec<_>>();
+        if explicit.is_empty() {
+            let conventional = self.root.join("skills");
+            conventional
+                .is_dir()
+                .then_some(conventional)
+                .into_iter()
+                .collect()
+        } else {
+            explicit
+        }
+    }
+
+    pub fn mcp_path(&self) -> Option<PathBuf> {
+        self.root
+            .join(".mcp.json")
+            .is_file()
+            .then(|| self.root.join(".mcp.json"))
+    }
+
+    pub fn apps_path(&self) -> Option<PathBuf> {
+        self.manifest
+            .apps
+            .as_ref()
+            .and_then(Value::as_str)
+            .map(|path| self.root.join(path.strip_prefix("./").unwrap_or(path)))
+            .or_else(|| {
+                self.root
+                    .join(".app.json")
+                    .is_file()
+                    .then(|| self.root.join(".app.json"))
+            })
+    }
+
+    pub fn hooks_path(&self) -> Option<PathBuf> {
+        self.root
+            .join("hooks/hooks.json")
+            .is_file()
+            .then(|| self.root.join("hooks/hooks.json"))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -225,6 +277,141 @@ pub fn discover_marketplaces(root: &Path) -> Result<Vec<(PathBuf, Marketplace)>,
     Ok(found)
 }
 
+pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfig>, String> {
+    let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
+    let mut servers = Vec::new();
+    for plugin in catalog
+        .discover()?
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+    {
+        let value = if let Some(value) = plugin.manifest.mcp_servers.clone() {
+            value
+        } else if let Some(path) = plugin.mcp_path() {
+            serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("无效 MCP 资源 {}: {error}", path.display()))?
+        } else {
+            continue;
+        };
+        let Some(entries) = value.get("mcpServers").unwrap_or(&value).as_object() else {
+            continue;
+        };
+        for (name, config) in entries {
+            let command = config
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if command.is_empty() {
+                continue;
+            }
+            let args = config
+                .get("args")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let env = config
+                .get("env")
+                .and_then(Value::as_object)
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            value.as_str().map(|value| (key.clone(), value.to_string()))
+                        })
+                        .collect::<HashMap<_, _>>()
+                })
+                .unwrap_or_default();
+            servers.push(McpServerConfig {
+                name: format!("{}:{name}", plugin.manifest.name),
+                command: command.to_string(),
+                args,
+                env,
+            });
+        }
+    }
+    Ok(servers)
+}
+
+pub fn discover_codex_hooks(workspace: &Path) -> Result<Vec<HookConfig>, String> {
+    let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
+    let mut hooks = Vec::new();
+    for plugin in catalog
+        .discover()?
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+    {
+        let value = if let Some(value) = plugin.manifest.hooks.clone() {
+            value
+        } else if let Some(path) = plugin.hooks_path() {
+            serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("无效 Hooks 资源 {}: {error}", path.display()))?
+        } else {
+            continue;
+        };
+        let Some(events) = value.get("hooks").unwrap_or(&value).as_object() else {
+            continue;
+        };
+        for (event, groups) in events {
+            let Some(event) = map_hook_event(event) else {
+                continue;
+            };
+            for group in groups.as_array().into_iter().flatten() {
+                let matcher = group
+                    .get("matcher")
+                    .and_then(Value::as_str)
+                    .unwrap_or("*")
+                    .to_string();
+                for hook in group
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    if hook.get("type").and_then(Value::as_str) != Some("command") {
+                        continue;
+                    }
+                    let command = hook
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim();
+                    if command.is_empty() {
+                        continue;
+                    }
+                    hooks.push(HookConfig {
+                        event: event.to_string(),
+                        matcher: matcher.clone(),
+                        command: command.to_string(),
+                        timeout_s: hook
+                            .get("timeout")
+                            .and_then(Value::as_i64)
+                            .unwrap_or(10)
+                            .clamp(1, 300),
+                    });
+                }
+            }
+        }
+    }
+    Ok(hooks)
+}
+
+fn map_hook_event(event: &str) -> Option<&'static str> {
+    match event {
+        "PreToolUse" => Some("pre_tool"),
+        "PostToolUse" => Some("post_tool"),
+        "UserPromptSubmit" => Some("user_prompt"),
+        "Stop" => Some("stop"),
+        _ => None,
+    }
+}
+
 pub fn resolve_local_marketplace_plugin(
     marketplace_path: &Path,
     plugin: &MarketplacePlugin,
@@ -277,8 +464,13 @@ fn validate_manifest(root: &Path, manifest: &CodexPluginManifest) -> Result<(), 
         validate_resource(root, path)?;
     }
     for path in [&manifest.apps] {
-        if let Some(path) = path.as_deref() {
+        if let Some(path) = path.as_ref().and_then(Value::as_str) {
             validate_resource(root, path)?;
+        }
+    }
+    for conventional in ["skills", ".mcp.json", ".app.json", "hooks/hooks.json"] {
+        if root.join(conventional).exists() {
+            validate_resource(root, conventional)?;
         }
     }
     Ok(())
@@ -428,5 +620,60 @@ mod tests {
             );
             let _ = fs::remove_dir_all(root);
         }
+    }
+
+    #[test]
+    fn conventional_codex_mcp_and_hook_resources_feed_existing_runtime_types() {
+        let workspace = temp("runtime-resources");
+        let plugin = workspace.join(".ncx/codex-plugins/demo");
+        fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+        fs::create_dir_all(plugin.join("hooks")).unwrap();
+        fs::write(plugin.join(MANIFEST), r#"{"name":"demo"}"#).unwrap();
+        fs::write(
+            plugin.join(".mcp.json"),
+            r#"{"mcpServers":{"files":{"command":"server","args":["--stdio"],"env":{"MODE":"test"}}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            plugin.join("hooks/hooks.json"),
+            r#"{"hooks":{"PreToolUse":[{"matcher":"shell","hooks":[{"type":"command","command":"check","timeout":12}]}]}}"#,
+        )
+        .unwrap();
+
+        let servers = discover_codex_mcp_servers(&workspace).unwrap();
+        assert_eq!(servers[0].name, "demo:files");
+        assert_eq!(servers[0].args, vec!["--stdio"]);
+        assert_eq!(servers[0].env.get("MODE").map(String::as_str), Some("test"));
+        let hooks = discover_codex_hooks(&workspace).unwrap();
+        assert_eq!(hooks[0].event, "pre_tool");
+        assert_eq!(hooks[0].matcher, "shell");
+        assert_eq!(hooks[0].timeout_s, 12);
+
+        let inline = workspace.join(".ncx/codex-plugins/inline");
+        fs::create_dir_all(inline.join(".codex-plugin")).unwrap();
+        fs::write(
+            inline.join(MANIFEST),
+            r#"{"name":"inline","mcpServers":{"web":{"command":"web-server"}},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"finish"}]}]}}"#,
+        )
+        .unwrap();
+        assert!(discover_codex_mcp_servers(&workspace)
+            .unwrap()
+            .iter()
+            .any(|server| server.name == "inline:web"));
+        assert!(discover_codex_hooks(&workspace)
+            .unwrap()
+            .iter()
+            .any(|hook| hook.event == "stop" && hook.command == "finish"));
+
+        fs::write(inline.join(".disabled"), "disabled\n").unwrap();
+        assert!(!discover_codex_mcp_servers(&workspace)
+            .unwrap()
+            .iter()
+            .any(|server| server.name == "inline:web"));
+        assert!(!discover_codex_hooks(&workspace)
+            .unwrap()
+            .iter()
+            .any(|hook| hook.command == "finish"));
+        let _ = fs::remove_dir_all(workspace);
     }
 }

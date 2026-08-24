@@ -56,6 +56,57 @@ impl<S: ThreadStore> AppServer<S> {
                 events.push(self.event(id, None, Event::ThreadCreated { metadata }));
                 ResponsePayload::Thread(thread)
             }
+            ClientRequest::ThreadCreateActivate { .. }
+            | ClientRequest::ThreadForkActivate { .. }
+            | ClientRequest::ThreadActivate { .. } => {
+                return Err(AppServerError::InvalidRequest(
+                    "thread activation must be handled by the runtime adapter".to_string(),
+                ));
+            }
+            ClientRequest::ThreadImport { thread } => {
+                if thread
+                    .turns
+                    .iter()
+                    .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
+                {
+                    return Err(AppServerError::InvalidRequest(
+                        "imported threads cannot contain active turns".to_string(),
+                    ));
+                }
+                self.store.create(thread.clone())?;
+                events.push(self.event(
+                    thread.metadata.id.clone(),
+                    None,
+                    Event::ThreadCreated {
+                        metadata: thread.metadata.clone(),
+                    },
+                ));
+                ResponsePayload::Thread(thread)
+            }
+            ClientRequest::ThreadsImport { threads } => {
+                if threads
+                    .iter()
+                    .flat_map(|thread| &thread.turns)
+                    .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
+                {
+                    return Err(AppServerError::InvalidRequest(
+                        "imported threads cannot contain active turns".to_string(),
+                    ));
+                }
+                self.store.create_many(threads.clone())?;
+                for thread in &threads {
+                    events.push(self.event(
+                        thread.metadata.id.clone(),
+                        None,
+                        Event::ThreadCreated {
+                            metadata: thread.metadata.clone(),
+                        },
+                    ));
+                }
+                ResponsePayload::Threads(
+                    threads.into_iter().map(|thread| thread.metadata).collect(),
+                )
+            }
             ClientRequest::ThreadList { include_archived } => {
                 ResponsePayload::Threads(self.store.list(include_archived)?)
             }
@@ -86,10 +137,47 @@ impl<S: ThreadStore> AppServer<S> {
                 ));
                 ResponsePayload::Ack
             }
+            ClientRequest::ThreadRename { thread_id, title } => {
+                let mut thread = self
+                    .store
+                    .read(&thread_id)?
+                    .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
+                let title = title.trim();
+                if title.is_empty() {
+                    return Err(AppServerError::InvalidRequest(
+                        "thread title must not be empty".to_string(),
+                    ));
+                }
+                thread.metadata.title = title.to_string();
+                thread.metadata.updated_at = (self.clock)();
+                self.store.update_metadata(thread.metadata.clone())?;
+                events.push(self.event(
+                    thread_id,
+                    None,
+                    Event::ThreadUpdated {
+                        metadata: thread.metadata,
+                    },
+                ));
+                ResponsePayload::Ack
+            }
             ClientRequest::ThreadFork {
                 thread_id,
                 new_thread_id,
-            } => ResponsePayload::Thread(self.store.fork(&thread_id, new_thread_id)?),
+            } => {
+                let now = (self.clock)();
+                let mut thread = self.store.fork(&thread_id, new_thread_id.clone())?;
+                thread.metadata.created_at = now;
+                thread.metadata.updated_at = now;
+                self.store.update_metadata(thread.metadata.clone())?;
+                events.push(self.event(
+                    new_thread_id,
+                    None,
+                    Event::ThreadCreated {
+                        metadata: thread.metadata.clone(),
+                    },
+                ));
+                ResponsePayload::Thread(thread)
+            }
             ClientRequest::TurnStart { thread_id, turn_id } => {
                 let now = (self.clock)();
                 self.store.claim_turn(
@@ -112,6 +200,11 @@ impl<S: ThreadStore> AppServer<S> {
                 ));
                 ResponsePayload::Ack
             }
+            ClientRequest::TurnSubmit { .. } => {
+                return Err(AppServerError::InvalidRequest(
+                    "turnSubmit must be handled by the runtime adapter".to_string(),
+                ));
+            }
             ClientRequest::TurnInterrupt { thread_id, turn_id } => {
                 self.store.finish_turn(
                     &thread_id,
@@ -129,6 +222,11 @@ impl<S: ThreadStore> AppServer<S> {
                     },
                 ));
                 ResponsePayload::Ack
+            }
+            ClientRequest::TurnInterruptLatest { .. } => {
+                return Err(AppServerError::InvalidRequest(
+                    "turnInterruptLatest must be handled by the runtime adapter".to_string(),
+                ));
             }
             ClientRequest::TurnComplete {
                 thread_id,
@@ -155,7 +253,8 @@ impl<S: ThreadStore> AppServer<S> {
                 turn_id,
                 item,
             } => {
-                self.store.append_item(&thread_id, &turn_id, item.clone())?;
+                self.store
+                    .append_item(&thread_id, &turn_id, item.clone(), (self.clock)())?;
                 events.push(self.event(thread_id, Some(turn_id), Event::ItemAdded { item }));
                 ResponsePayload::Ack
             }
@@ -167,6 +266,16 @@ impl<S: ThreadStore> AppServer<S> {
             },
             events,
         })
+    }
+
+    pub fn ack(&self) -> DispatchOutcome {
+        DispatchOutcome {
+            response: ServerResponse {
+                protocol_version: PROTOCOL_VERSION,
+                payload: ResponsePayload::Ack,
+            },
+            events: Vec::new(),
+        }
     }
 
     fn event(
@@ -196,6 +305,7 @@ pub enum AppServerError {
     Protocol(ncx_protocol::ProtocolError),
     Store(ThreadStoreError),
     NotFound(String),
+    InvalidRequest(String),
 }
 
 impl fmt::Display for AppServerError {
@@ -204,6 +314,7 @@ impl fmt::Display for AppServerError {
             Self::Protocol(error) => error.fmt(formatter),
             Self::Store(error) => error.fmt(formatter),
             Self::NotFound(id) => write!(formatter, "{id} was not found"),
+            Self::InvalidRequest(message) => message.fmt(formatter),
         }
     }
 }
@@ -293,5 +404,39 @@ mod tests {
                 turn_id: TurnId::new("two").unwrap(),
             })
             .is_err());
+    }
+
+    #[test]
+    fn rename_and_fork_are_owned_by_the_app_server() {
+        let server = server();
+        let thread_id = ThreadId::new("source").unwrap();
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(thread_id.clone()),
+                workspace: "workspace".into(),
+                title: "old".into(),
+            })
+            .unwrap();
+        let renamed = server
+            .dispatch(ClientRequest::ThreadRename {
+                thread_id: thread_id.clone(),
+                title: "new title".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            renamed.events[0].event,
+            Event::ThreadUpdated { .. }
+        ));
+        let forked = server
+            .dispatch(ClientRequest::ThreadFork {
+                thread_id,
+                new_thread_id: ThreadId::new("target").unwrap(),
+            })
+            .unwrap();
+        let ResponsePayload::Thread(forked_thread) = forked.response.payload else {
+            panic!("expected forked thread");
+        };
+        assert_eq!(forked_thread.metadata.title, "new title");
+        assert_eq!(forked.events[0].thread_id.as_str(), "target");
     }
 }

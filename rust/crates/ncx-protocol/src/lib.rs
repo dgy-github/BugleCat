@@ -131,6 +131,17 @@ pub enum ClientRequest {
         workspace: String,
         title: String,
     },
+    ThreadCreateActivate {
+        thread_id: ThreadId,
+        workspace: String,
+        title: String,
+    },
+    ThreadImport {
+        thread: Thread,
+    },
+    ThreadsImport {
+        threads: Vec<Thread>,
+    },
     ThreadList {
         include_archived: bool,
     },
@@ -141,17 +152,37 @@ pub enum ClientRequest {
         thread_id: ThreadId,
         archived: bool,
     },
+    ThreadRename {
+        thread_id: ThreadId,
+        title: String,
+    },
     ThreadFork {
         thread_id: ThreadId,
         new_thread_id: ThreadId,
+    },
+    ThreadForkActivate {
+        thread_id: ThreadId,
+        new_thread_id: ThreadId,
+    },
+    ThreadActivate {
+        thread_id: ThreadId,
     },
     TurnStart {
         thread_id: ThreadId,
         turn_id: TurnId,
     },
+    TurnSubmit {
+        thread_id: ThreadId,
+        text: String,
+        #[serde(default)]
+        images: Vec<String>,
+    },
     TurnInterrupt {
         thread_id: ThreadId,
         turn_id: TurnId,
+    },
+    TurnInterruptLatest {
+        thread_id: ThreadId,
     },
     TurnComplete {
         thread_id: ThreadId,

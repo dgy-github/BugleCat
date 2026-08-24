@@ -1,12 +1,43 @@
 //! Bounded, typed fragments and compaction contracts for model context.
 
 pub trait ContextFragment {
-    fn source(&self) -> &'static str;
+    fn source(&self) -> &str;
     fn render(&self) -> String;
     fn max_chars(&self) -> usize;
 
     fn bounded_render(&self) -> String {
         self.render().chars().take(self.max_chars()).collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextContextFragment {
+    source: String,
+    content: String,
+    max_chars: usize,
+}
+
+impl TextContextFragment {
+    pub fn new(source: impl Into<String>, content: impl Into<String>, max_chars: usize) -> Self {
+        Self {
+            source: source.into(),
+            content: content.into(),
+            max_chars,
+        }
+    }
+}
+
+impl ContextFragment for TextContextFragment {
+    fn source(&self) -> &str {
+        &self.source
+    }
+
+    fn render(&self) -> String {
+        self.content.clone()
+    }
+
+    fn max_chars(&self) -> usize {
+        self.max_chars
     }
 }
 
@@ -44,7 +75,7 @@ mod tests {
     struct Fragment;
 
     impl ContextFragment for Fragment {
-        fn source(&self) -> &'static str { "test" }
+        fn source(&self) -> &str { "test" }
         fn render(&self) -> String { "abcdef".into() }
         fn max_chars(&self) -> usize { 3 }
     }

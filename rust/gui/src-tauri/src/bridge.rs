@@ -27,13 +27,17 @@ use ncx_config::{
     load_config, permission_mode_to_knobs, write_nanocodex_config, ConfigPaths, Overrides,
 };
 use ncx_core::{
-    discover_skills, expand_file_mentions, install_llm_provider_factory,
-    load_workspace_instructions, model_provider_from_config, new_session_id, skills_index_block,
-    suggest_title_with_provider, AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler,
-    ApprovalRequest, CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex,
-    ToolContext, UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
+    discover_codex_hooks, discover_codex_mcp_servers, discover_skills, expand_file_mentions,
+    install_llm_provider_factory, load_workspace_instructions, model_provider_from_config,
+    new_session_id, prepare_mcp_server_tools, skills_index_block, suggest_title_with_provider,
+    AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
+    CheckpointStore, LoopEvent, McpServiceDescriptor, MemoryStore, PromptAssembler, Session,
+    SessionGrants, SessionIndex, TextContextFragment, ToolContext, UserQuestionHandler,
+    UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
-use ncx_protocol::{ClientRequest, ItemId, ThreadId, ThreadItem, TurnId, TurnStatus};
+use ncx_protocol::{
+    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId, TurnStatus,
+};
 use ncx_sandbox::SandboxPolicy;
 use ncx_thread_store::JsonThreadStore;
 use serde::Serialize;
@@ -57,6 +61,7 @@ const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run s
 
 /// The Tauri event name every UI update is delivered on.
 pub const EVENT: &str = "ncx://event";
+pub const PROTOCOL_EVENT: &str = "ncx://protocol-event";
 
 /// Pending approval requests, keyed by id. Shared between the agent thread
 /// (inserts a one-shot sender when asking) and the `approve` command (takes it
@@ -152,7 +157,10 @@ pub enum Command {
     Resume(String),
     /// Branch a saved session: reseed a NEW session from the snapshot, leaving
     /// the source untouched (explore an alternative continuation).
-    Fork(String),
+    Fork {
+        source_id: String,
+        target_id: String,
+    },
     /// Change the approval policy live (no session reset) + persist it.
     SetApproval(String),
     /// Change the sandbox mode live (no session reset) + persist it. Used by the
@@ -259,6 +267,12 @@ pub struct UiMsg {
 
 pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
     let _ = app.emit(EVENT, ev);
+}
+
+fn emit_protocol_outcome(app: &AppHandle, outcome: &ncx_app_server::DispatchOutcome) {
+    for event in &outcome.events {
+        let _ = app.emit(PROTOCOL_EVENT, event);
+    }
 }
 
 fn should_generate_session_title(is_first_turn: bool, stop_reason: &str) -> bool {
@@ -369,11 +383,13 @@ fn make_sink(
             turn_id.clone(),
             item,
         ) {
-            let _ = server.dispatch(ClientRequest::ItemAppend {
+            if let Ok(outcome) = server.dispatch(ClientRequest::ItemAppend {
                 thread_id,
                 turn_id,
                 item,
-            });
+            }) {
+                emit_protocol_outcome(&app, &outcome);
+            }
         }
         emit(&app, ui);
     })
@@ -603,6 +619,7 @@ fn set_active_session(active: &Arc<Mutex<String>>, session_id: &str) {
 
 fn spawn_title_generation(
     app: AppHandle,
+    app_server: Arc<AppServer<JsonThreadStore>>,
     session_index: Arc<Mutex<SessionIndex>>,
     session_id: String,
     workspace: PathBuf,
@@ -632,14 +649,28 @@ fn spawn_title_generation(
                     .lock()
                     .map(|mut index| index.set_title(&session_id, &title))
                     .unwrap_or(false);
-                if persisted {
+                let protocol_outcome =
+                    ThreadId::new(session_id.clone())
+                        .ok()
+                        .and_then(|thread_id| {
+                            app_server
+                                .dispatch(ClientRequest::ThreadRename {
+                                    thread_id,
+                                    title: title.clone(),
+                                })
+                                .ok()
+                        });
+                if let Some(outcome) = &protocol_outcome {
+                    emit_protocol_outcome(&app, outcome);
+                }
+                if persisted || protocol_outcome.is_some() {
                     emit(&app, UiEvent::SessionTitle { session_id, title });
                 }
             });
         });
 }
 
-fn build_agent(
+async fn build_agent(
     approver: Rc<dyn ApprovalHandler>,
     questioner: Rc<dyn UserQuestionHandler>,
     seed: Option<(String, Vec<Value>)>,
@@ -672,15 +703,25 @@ fn build_agent(
     } else {
         String::new()
     };
-    let system_prompt =
-        compose_system_prompt(SYSTEM_PROMPT, &[instructions, skills_index, plan_note]);
+    let mut prompt = PromptAssembler::new(SYSTEM_PROMPT);
+    let instruction_fragment =
+        TextContextFragment::new("project_instructions", instructions, 16_000);
+    let skills_fragment = TextContextFragment::new("skills", skills_index, 32_000);
+    let plan_fragment = TextContextFragment::new("plan_mode", plan_note, 4_000);
+    prompt
+        .upsert_fragment(10, &instruction_fragment)
+        .upsert_fragment(20, &skills_fragment)
+        .upsert_fragment(30, &plan_fragment);
+    let system_prompt = prompt.build();
+    let mut hooks = cfg.hooks.clone();
+    hooks.extend(discover_codex_hooks(&cfg.workspace)?);
     let ctx = runtime_profile
         .apply_tool_context(ToolContext::new(cfg.workspace.clone(), policy))
         .with_session_grants(grants)
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
-        .with_hooks(cfg.hooks.clone())
+        .with_hooks(hooks)
         .with_skills(skills)
         .with_approver(approver)
         .with_user_question_handler(questioner);
@@ -688,6 +729,27 @@ fn build_agent(
         ctx.plan.replace(restored_plan);
     }
     let mut tools = ncx_core::HarnessRuntimeBuilder::configured(&cfg.workspace)?.build(ctx);
+    let mcp_servers = discover_codex_mcp_servers(&cfg.workspace)?;
+    if !mcp_servers.is_empty() {
+        let mut prepared = Vec::new();
+        for server in &mcp_servers {
+            let mut server_tools =
+                prepare_mcp_server_tools(&server.name, &server.command, &server.args, &server.env)
+                    .await
+                    .map_err(|error| format!("Codex MCP server '{}': {error}", server.name))?;
+            prepared.append(&mut server_tools);
+        }
+        let active_tools = prepared.len();
+        tools.replace_tools(&[], prepared)?;
+        tools.replace_service(
+            "mcp",
+            Rc::new(McpServiceDescriptor {
+                enabled: true,
+                configured_servers: mcp_servers.len(),
+                active_tools,
+            }),
+        );
+    }
     install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
     let (session_id, seed_messages) = match seed {
         Some((id, messages)) => (id, Some(messages)),
@@ -717,15 +779,63 @@ fn session_log_path(workspace: &Path, session_id: &str) -> PathBuf {
         .join(format!("{session_id}.jsonl"))
 }
 
-fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
-    let mut out = base.to_string();
-    for block in blocks {
-        if !block.trim().is_empty() {
-            out.push_str("\n\n");
-            out.push_str(block.trim());
-        }
-    }
-    out
+fn protocol_thread_seed(
+    app_server: &AppServer<JsonThreadStore>,
+    session_id: &str,
+) -> Option<(Vec<Value>, Option<String>)> {
+    let thread_id = ThreadId::new(session_id.to_string()).ok()?;
+    let outcome = app_server
+        .dispatch(ClientRequest::ThreadRead { thread_id })
+        .ok()?;
+    let ResponsePayload::Thread(thread) = outcome.response.payload else {
+        return None;
+    };
+    let messages = protocol_thread_messages(&thread);
+    (!messages.is_empty()).then(|| (messages, Some(thread.metadata.workspace)))
+}
+
+fn protocol_thread_messages(thread: &Thread) -> Vec<Value> {
+    thread
+        .turns
+        .iter()
+        .flat_map(|turn| &turn.items)
+        .filter_map(|item| match item {
+            ThreadItem::UserMessage { text, .. } => {
+                Some(json!({"role": "user", "content": text}))
+            }
+            ThreadItem::AssistantMessage { text, .. } => {
+                Some(json!({"role": "assistant", "content": text}))
+            }
+            ThreadItem::ToolCall {
+                id,
+                name,
+                arguments,
+            } => Some(json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": id.as_str(),
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": serde_json::to_string(arguments).unwrap_or_else(|_| "{}".into())
+                    }
+                }]
+            })),
+            ThreadItem::ToolResult {
+                call_id, output, ..
+            } => Some(json!({
+                "role": "tool",
+                "tool_call_id": call_id.as_str(),
+                "content": output
+            })),
+            ThreadItem::ContextCompaction { summary, .. } => Some(json!({
+                "role": "user",
+                "content": format!("{COMPACTED_HISTORY_PREFIX}；协议存储]\n{summary}")
+            })),
+            ThreadItem::Reasoning { .. } => None,
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -759,6 +869,7 @@ fn spawn_turn_worker(
     let turn_id =
         TurnId::new(format!("turn-{}", new_session_id())).expect("generated turn id is non-empty");
     let protocol_turn = match ProtocolTurnGuard::start(
+        Some(app.clone()),
         app_server.clone(),
         &session_id,
         &workspace,
@@ -844,7 +955,8 @@ fn spawn_turn_worker(
                     Some((session_id.clone(), messages)),
                     grants.clone(),
                     Some(workspace.clone()),
-                );
+                )
+                .await;
                 let (mut agent, _, _, log_path, _) = match built {
                     Ok(value) => value,
                     Err(message) => {
@@ -915,6 +1027,7 @@ fn spawn_turn_worker(
                 if should_generate_session_title(is_first_turn, &result.stop_reason) {
                     spawn_title_generation(
                         app.clone(),
+                        app_server.clone(),
                         session_index.clone(),
                         session_id.clone(),
                         workspace.clone(),
@@ -942,6 +1055,7 @@ fn spawn_turn_worker(
 }
 
 struct ProtocolTurnGuard {
+    app: Option<AppHandle>,
     server: Arc<AppServer<JsonThreadStore>>,
     thread_id: ThreadId,
     turn_id: TurnId,
@@ -950,6 +1064,7 @@ struct ProtocolTurnGuard {
 
 impl ProtocolTurnGuard {
     fn start(
+        app: Option<AppHandle>,
         server: Arc<AppServer<JsonThreadStore>>,
         session_id: &str,
         workspace: &Path,
@@ -963,27 +1078,34 @@ impl ProtocolTurnGuard {
             })
             .is_err()
         {
-            server
+            let outcome = server
                 .dispatch(ClientRequest::ThreadCreate {
                     thread_id: Some(thread_id.clone()),
                     workspace: workspace.display().to_string(),
                     title: "(no prompt yet)".to_string(),
                 })
                 .map_err(|error| error.to_string())?;
+            if let Some(app) = &app {
+                emit_protocol_outcome(app, &outcome);
+            }
         }
-        server
+        let outcome = server
             .dispatch(ClientRequest::TurnStart {
                 thread_id: thread_id.clone(),
                 turn_id: turn_id.clone(),
             })
             .map_err(|error| error.to_string())?;
+        if let Some(app) = &app {
+            emit_protocol_outcome(app, &outcome);
+        }
         let mut guard = Self {
+            app,
             server,
             thread_id,
             turn_id,
             finished: false,
         };
-        if let Err(error) = guard.server.dispatch(ClientRequest::ItemAppend {
+        match guard.server.dispatch(ClientRequest::ItemAppend {
             thread_id: guard.thread_id.clone(),
             turn_id: guard.turn_id.clone(),
             item: ThreadItem::UserMessage {
@@ -991,8 +1113,15 @@ impl ProtocolTurnGuard {
                 text: user_text.to_string(),
             },
         }) {
-            guard.complete("failed to persist user message");
-            return Err(error.to_string());
+            Ok(outcome) => {
+                if let Some(app) = &guard.app {
+                    emit_protocol_outcome(app, &outcome);
+                }
+            }
+            Err(error) => {
+                guard.complete("failed to persist user message");
+                return Err(error.to_string());
+            }
         }
         Ok(guard)
     }
@@ -1003,12 +1132,16 @@ impl ProtocolTurnGuard {
             "cancelled" | "canceled" => TurnStatus::Cancelled,
             _ => TurnStatus::Failed,
         };
-        let _ = self.server.dispatch(ClientRequest::TurnComplete {
+        if let Ok(outcome) = self.server.dispatch(ClientRequest::TurnComplete {
             thread_id: self.thread_id.clone(),
             turn_id: self.turn_id.clone(),
             status,
             error: (status == TurnStatus::Failed).then(|| stop_reason.to_string()),
-        });
+        }) {
+            if let Some(app) = &self.app {
+                emit_protocol_outcome(app, &outcome);
+            }
+        }
         self.finished = true;
     }
 }
@@ -1018,12 +1151,16 @@ impl Drop for ProtocolTurnGuard {
         if self.finished {
             return;
         }
-        let _ = self.server.dispatch(ClientRequest::TurnComplete {
+        if let Ok(outcome) = self.server.dispatch(ClientRequest::TurnComplete {
             thread_id: self.thread_id.clone(),
             turn_id: self.turn_id.clone(),
             status: TurnStatus::Failed,
             error: Some("turn worker exited before completion".to_string()),
-        });
+        }) {
+            if let Some(app) = &self.app {
+                emit_protocol_outcome(app, &outcome);
+            }
+        }
     }
 }
 
@@ -1090,7 +1227,9 @@ pub fn spawn_worker(
                         startup_seed,
                         grants.clone(),
                         None,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(v) => v,
                         Err(e) => {
                             emit(
@@ -1158,7 +1297,9 @@ pub fn spawn_worker(
                                 Some((id, Vec::new())),
                                 grants.clone(),
                                 None,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
@@ -1204,7 +1345,9 @@ pub fn spawn_worker(
                                 None,
                                 grants.clone(),
                                 None,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
@@ -1236,9 +1379,11 @@ pub fn spawn_worker(
                             }
                         }
                         Command::Resume(id) => {
-                            let loaded = session_index.lock().ok().and_then(|index| {
-                                index.load_snapshot(&id).map(|messages| {
-                                    (messages, index.get(&id).map(|s| s.workspace.clone()))
+                            let loaded = protocol_thread_seed(&app_server, &id).or_else(|| {
+                                session_index.lock().ok().and_then(|index| {
+                                    index.load_snapshot(&id).map(|messages| {
+                                        (messages, index.get(&id).map(|s| s.workspace.clone()))
+                                    })
                                 })
                             });
                             let Some((msgs, restored_workspace)) = loaded else {
@@ -1263,7 +1408,9 @@ pub fn spawn_worker(
                                 Some((id.clone(), msgs)),
                                 grants.clone(),
                                 None,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok((a, ws, sid, _, _)) => {
                                     agent = a;
                                     workspace = ws;
@@ -1293,18 +1440,29 @@ pub fn spawn_worker(
                                 ),
                             }
                         }
-                        Command::Fork(id) => {
-                            let loaded = session_index.lock().ok().and_then(|index| {
-                                index.load_snapshot(&id).map(|messages| {
-                                    (messages, index.get(&id).map(|s| s.workspace.clone()))
-                                })
-                            });
+                        Command::Fork {
+                            source_id,
+                            target_id,
+                        } => {
+                            let loaded =
+                                protocol_thread_seed(&app_server, &source_id).or_else(|| {
+                                    session_index.lock().ok().and_then(|index| {
+                                        index.load_snapshot(&source_id).map(|messages| {
+                                            (
+                                                messages,
+                                                index.get(&source_id).map(|s| s.workspace.clone()),
+                                            )
+                                        })
+                                    })
+                                });
                             let Some((msgs, restored_workspace)) = loaded else {
                                 emit(
                                     &app,
                                     UiEvent::Error {
-                                        session_id: id.clone(),
-                                        message: format!("no saved snapshot for session {id}"),
+                                        session_id: source_id.clone(),
+                                        message: format!(
+                                            "no saved snapshot for session {source_id}"
+                                        ),
                                     },
                                 );
                                 continue;
@@ -1315,10 +1473,12 @@ pub fn spawn_worker(
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
-                                Some((new_session_id(), msgs)),
+                                Some((target_id, msgs)),
                                 grants.clone(),
                                 None,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok((a, ws, sid, lp, _)) => {
                                     agent = a;
                                     workspace = ws;
@@ -1350,7 +1510,7 @@ pub fn spawn_worker(
                                 Err(e) => emit(
                                     &app,
                                     UiEvent::Error {
-                                        session_id: id,
+                                        session_id: source_id,
                                         message: e,
                                     },
                                 ),
@@ -1389,7 +1549,9 @@ pub fn spawn_worker(
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
                                 None,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok((a, ws, sid, _, _)) => {
                                     agent = a;
                                     workspace = ws;
@@ -1433,7 +1595,9 @@ pub fn spawn_worker(
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
                                 None,
-                            ) {
+                            )
+                            .await
+                            {
                                 Ok((a, ws, sid, _, _)) => {
                                     agent = a;
                                     workspace = ws;
@@ -1670,6 +1834,7 @@ mod tests {
         let (server, root) = protocol_server("complete");
         let turn_id = TurnId::new("turn-1").unwrap();
         let mut guard = ProtocolTurnGuard::start(
+            None,
             server.clone(),
             "thread-1",
             &root,
@@ -1694,6 +1859,7 @@ mod tests {
         );
 
         let next = ProtocolTurnGuard::start(
+            None,
             server,
             "thread-1",
             &root,
@@ -1706,9 +1872,63 @@ mod tests {
     }
 
     #[test]
+    fn protocol_thread_projects_back_to_model_and_history_messages() {
+        let thread = Thread {
+            metadata: ncx_protocol::ThreadMetadata {
+                id: ThreadId::new("thread-projection").unwrap(),
+                workspace: "workspace".into(),
+                title: "projection".into(),
+                archived: false,
+                created_at: 1,
+                updated_at: 2,
+            },
+            turns: vec![ncx_protocol::Turn {
+                id: TurnId::new("turn-projection").unwrap(),
+                status: TurnStatus::Completed,
+                items: vec![
+                    ThreadItem::UserMessage {
+                        id: ItemId::new("user").unwrap(),
+                        text: "生成 PDF".into(),
+                    },
+                    ThreadItem::ToolCall {
+                        id: ItemId::new("call").unwrap(),
+                        name: "shell".into(),
+                        arguments: json!({"command": "build"}),
+                    },
+                    ThreadItem::ToolResult {
+                        id: ItemId::new("result").unwrap(),
+                        call_id: ItemId::new("call").unwrap(),
+                        output: "ok".into(),
+                        success: true,
+                    },
+                    ThreadItem::AssistantMessage {
+                        id: ItemId::new("assistant").unwrap(),
+                        text: "PDF 已生成".into(),
+                    },
+                ],
+                started_at: 1,
+                completed_at: Some(2),
+                error: None,
+            }],
+        };
+        let messages = protocol_thread_messages(&thread);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "call");
+        assert_eq!(messages[2]["tool_call_id"], "call");
+        assert_eq!(messages[3]["content"], "PDF 已生成");
+        let visible = snapshot_to_ui(&messages);
+        assert_eq!(
+            visible.len(),
+            2,
+            "history keeps user and final conclusion only"
+        );
+    }
+
+    #[test]
     fn dropped_protocol_turn_fails_and_releases_ownership() {
         let (server, root) = protocol_server("drop");
         let guard = ProtocolTurnGuard::start(
+            None,
             server.clone(),
             "thread-drop",
             &root,
@@ -1719,6 +1939,7 @@ mod tests {
         drop(guard);
 
         let next = ProtocolTurnGuard::start(
+            None,
             server,
             "thread-drop",
             &root,

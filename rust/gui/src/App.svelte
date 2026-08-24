@@ -68,7 +68,15 @@
   let saving = $state(false);
   type HarnessDiagnostics = Record<"llm" | "interaction" | "policy" | "context" | "memory" | "compaction" | "mcp" | "attachment" | "media" | "cost_telemetry", boolean>;
   type ExternalPlugin = { manifest: { id: string; name: string; version: string; capabilities: string[] }; root: string; enabled: boolean };
-  type CodexPlugin = { manifest: { name: string; version?: string; description?: string; keywords: string[] }; root: string; enabled: boolean };
+  type CodexPlugin = {
+    manifest: { name: string; version?: string; description?: string; keywords: string[] };
+    root: string;
+    enabled: boolean;
+    skill_roots: number;
+    has_mcp: boolean;
+    has_apps: boolean;
+    has_hooks: boolean;
+  };
   type MarketplaceSource =
     | { source: "local"; path: string }
     | { source: "git"; url: string; path?: string; ref?: string }
@@ -587,6 +595,17 @@
     }
     refreshSessions();
 
+    await listen<ProtocolEventEnvelope>("ncx://protocol-event", (message) => {
+      const envelope = message.payload;
+      if (envelope.protocolVersion !== 2 || !envelope.threadId) return;
+      const previous = protocolSequences.get(envelope.threadId) || 0;
+      if (envelope.sequence <= previous) return;
+      protocolSequences.set(envelope.threadId, envelope.sequence);
+      if (["threadCreated", "threadUpdated", "turnCompleted"].includes(envelope.event.type)) {
+        refreshSessions();
+      }
+    });
+
     await listen<UiEvent>("ncx://event", (ev) => {
       const p = ev.payload;
       switch (p.kind) {
@@ -920,7 +939,10 @@
     busy = true;
     scrollDown();
     try {
-      await invoke("send_prompt", { sessionId: targetSessionId, text, images });
+      await appServerRequest({
+        method: "turnSubmit",
+        params: { threadId: targetSessionId, text, images },
+      });
     } catch (e) {
       setSessionRunning(targetSessionId, false);
       messages.push({ role: "note", text: `发送失败：${e}` });
@@ -941,7 +963,10 @@
     approval = null;
     userQuestion = null;
     try {
-      await invoke("stop_generation", { sessionId: currentSessionId });
+      await appServerRequest({
+        method: "turnInterruptLatest",
+        params: { threadId: currentSessionId },
+      });
     } catch (e) {
       stopping = false;
       messages.push({ role: "note", text: `停止失败：${e}` });
@@ -1113,11 +1138,11 @@
     } catch (e) { messages.push({ role: "note", text: `Codex 插件卸载失败：${e}` }); }
   }
 
-  async function installMarketplacePlugin(marketplacePath: string, pluginName: string) {
+  async function installMarketplacePlugin(marketplacePath: string, pluginName: string, upgrade = false) {
     try {
-      await invoke("install_marketplace_plugin", { marketplacePath, pluginName, upgrade: false });
+      await invoke("install_marketplace_plugin", { marketplacePath, pluginName, upgrade });
       codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
-    } catch (e) { messages.push({ role: "note", text: `Marketplace 插件安装失败：${e}` }); }
+    } catch (e) { messages.push({ role: "note", text: `Marketplace 插件${upgrade ? "升级" : "安装"}失败：${e}` }); }
   }
   function stashSessionQueue(sessionId: string) {
     if (sessionId) {
@@ -1298,6 +1323,55 @@
     has_snapshot: boolean;
     archived: boolean;
   };
+  type ProtocolThreadItem =
+    | { type: "userMessage"; id: string; text: string }
+    | { type: "assistantMessage"; id: string; text: string }
+    | { type: "toolCall"; id: string; name: string; arguments: unknown }
+    | { type: "toolResult"; id: string; callId: string; output: string; success: boolean }
+    | { type: "reasoning"; id: string; summary: string }
+    | { type: "contextCompaction"; id: string; summary: string; droppedItems: number };
+  type ProtocolThread = {
+    metadata: { id: string; workspace: string; title: string; archived: boolean; createdAt: number; updatedAt: number };
+    turns: { id: string; status: string; items: ProtocolThreadItem[]; startedAt: number; completedAt?: number }[];
+  };
+  type AppServerOutcome<T> = { response: { protocolVersion: number; payload: { type: string; data: T } } };
+  type ProtocolEventEnvelope = {
+    protocolVersion: number;
+    sequence: number;
+    threadId: string;
+    turnId?: string;
+    event: { type: string; data?: unknown };
+  };
+  const protocolSequences = new Map<string, number>();
+
+  async function appServerRequest<T>(request: Record<string, unknown>): Promise<T> {
+    const outcome = await invoke<AppServerOutcome<T>>("app_server_request", { request });
+    if (outcome.response.protocolVersion !== 2) throw new Error(`不支持的协议版本 ${outcome.response.protocolVersion}`);
+    return outcome.response.payload.data;
+  }
+
+  function threadToSessionRow(thread: ProtocolThread): SessionRow {
+    let userMessages = 0;
+    let assistantMessages = 0;
+    let toolCalls = 0;
+    let snippet = "";
+    for (const item of thread.turns.flatMap((turn) => turn.items)) {
+      if (item.type === "userMessage") { userMessages += 1; snippet = item.text; }
+      else if (item.type === "assistantMessage") { assistantMessages += 1; snippet = item.text; }
+      else if (item.type === "toolCall") toolCalls += 1;
+    }
+    return {
+      session_id: thread.metadata.id,
+      title: thread.metadata.title,
+      snippet: Array.from(snippet).slice(0, 200).join(""),
+      user_messages: userMessages,
+      assistant_messages: assistantMessages,
+      tool_calls: toolCalls,
+      updated_at: String(thread.metadata.updatedAt),
+      has_snapshot: thread.turns.length > 0,
+      archived: thread.metadata.archived,
+    };
+  }
   let branchOpen = $state(false);
   let branches = $state<BranchInfo[]>([]);
   let newBranch = $state("");
@@ -1346,7 +1420,11 @@
   }
   async function archiveSession(id: string, archived: boolean) {
     try {
-      await invoke("archive_session", { sessionId: id, archived });
+      try {
+        await appServerRequest({ method: "threadArchive", params: { threadId: id, archived } });
+      } catch {
+        await invoke("archive_session", { sessionId: id, archived });
+      }
       const s = sessions.find((x) => x.session_id === id);
       if (s) s.archived = archived; // optimistic
       refreshSessions();
@@ -1431,15 +1509,22 @@
   }
   async function refreshSessions() {
     try {
-      sessions = await invoke<SessionRow[]>("list_sessions");
+      const metadata = await appServerRequest<{ id: string }[]>({ method: "threadList", params: { includeArchived: true } });
+      const threads = await Promise.all(metadata.slice(0, 50).map((thread) =>
+        appServerRequest<ProtocolThread>({ method: "threadRead", params: { threadId: thread.id } })
+      ));
+      sessions = threads.map(threadToSessionRow);
       const current = sessions.find((session) => session.session_id === currentSessionId);
       if (current) sessionTitle = current.title || "会话";
     } catch {
-      /* index may not exist yet */
+      sessions = await invoke<SessionRow[]>("list_sessions");
     }
   }
   function toggleSidebar() {
     sidebarOpen = !sidebarOpen;
+  }
+  function newThreadId(): string {
+    return `thread-${crypto.randomUUID()}`;
   }
   async function newSession() {
     if (switchingSession) return;
@@ -1454,7 +1539,11 @@
     currentSessionId = "";
     resetSessionUsage();
     try {
-      const id = await invoke<string>("new_session");
+      const id = newThreadId();
+      await appServerRequest<ProtocolThread>({
+        method: "threadCreateActivate",
+        params: { threadId: id, workspace, title: "(no prompt yet)" },
+      });
       if (currentSessionId === "") {
         currentSessionId = id;
         restoreSessionQueue(id);
@@ -1488,7 +1577,7 @@
     restoreSessionMessages(id);
     try {
       busy = runningSessions.has(id);
-      await invoke("resume_session", { sessionId: id });
+      await appServerRequest({ method: "threadActivate", params: { threadId: id } });
     } catch (e) {
       busy = false;
       stopping = false;
@@ -1512,7 +1601,10 @@
     currentSessionId = "";
     resetSessionUsage();
     try {
-      await invoke("fork_session", { sessionId: id });
+      await appServerRequest<ProtocolThread>({
+        method: "threadForkActivate",
+        params: { threadId: id, newThreadId: newThreadId() },
+      });
     } catch (e) {
       busy = false;
       stopping = false;
@@ -2516,13 +2608,14 @@
               <div class="config-entry">
                 <span>{plugin.manifest.name} <code>{plugin.manifest.version || "未标版本"}</code></span>
                 <code>{plugin.manifest.description || plugin.root}</code>
+                <span>{plugin.skill_roots} Skills · MCP {plugin.has_mcp ? "有" : "无"} · Apps {plugin.has_apps ? "有" : "无"} · Hooks {plugin.has_hooks ? "有" : "无"}</span>
                 <button class="plain" onclick={() => toggleCodexPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
                 <button class="plain" onclick={() => removeCodexPlugin(plugin)}>卸载</button>
               </div>
             {/each}
           {:else}<p class="settings-note">当前工作区未安装 Codex 资源插件。</p>{/if}
           <div class="catalog-head">
-            <div><strong>插件 Marketplace</strong><p>自动发现 OpenAI、Claude 与 Cursor 兼容目录；本地来源可直接安装，Git/NPM 来源会明确提示尚未物化。</p></div>
+            <div><strong>插件 Marketplace</strong><p>自动发现 OpenAI、Claude 与 Cursor 兼容目录；本地来源直接安装，Git/NPM 来源先下载到工作区隔离暂存目录，校验后再安装。</p></div>
           </div>
           {#if pluginMarketplaces.length}
             {#each pluginMarketplaces as entry}
@@ -2532,6 +2625,7 @@
                   <span>{plugin.name}</span>
                   <code>{plugin.source.source}</code>
                   <button class="plain" onclick={() => installMarketplacePlugin(entry.path, plugin.name)}>安装</button>
+                  <button class="plain" onclick={() => installMarketplacePlugin(entry.path, plugin.name, true)}>升级</button>
                 </div>
               {/each}
             {/each}

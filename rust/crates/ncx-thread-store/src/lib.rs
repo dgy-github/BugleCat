@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 pub trait ThreadStore: Send + Sync {
     fn create(&self, thread: Thread) -> Result<(), ThreadStoreError>;
+    fn create_many(&self, threads: Vec<Thread>) -> Result<(), ThreadStoreError>;
     fn list(&self, include_archived: bool) -> Result<Vec<ThreadMetadata>, ThreadStoreError>;
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError>;
     fn update_metadata(&self, metadata: ThreadMetadata) -> Result<(), ThreadStoreError>;
@@ -20,6 +21,7 @@ pub trait ThreadStore: Send + Sync {
         thread: &ThreadId,
         turn: &TurnId,
         item: ThreadItem,
+        updated_at: i64,
     ) -> Result<(), ThreadStoreError>;
     fn finish_turn(
         &self,
@@ -50,7 +52,21 @@ pub struct JsonThreadStore {
 impl JsonThreadStore {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, ThreadStoreError> {
         let path = path.into();
-        let persisted = load_state(&path)?;
+        let mut persisted = load_state(&path)?;
+        let mut recovered = false;
+        for thread in persisted.threads.values_mut() {
+            for turn in &mut thread.turns {
+                if matches!(turn.status, TurnStatus::Queued | TurnStatus::Running) {
+                    turn.status = TurnStatus::Failed;
+                    turn.completed_at = Some(thread.metadata.updated_at);
+                    turn.error = Some("runtime restarted before turn completion".to_string());
+                    recovered = true;
+                }
+            }
+        }
+        if recovered {
+            save_state(&path, &persisted)?;
+        }
         Ok(Self {
             path,
             state: Mutex::new(StoreState {
@@ -87,6 +103,25 @@ impl ThreadStore for JsonThreadStore {
                 return Err(ThreadStoreError::AlreadyExists(id));
             }
             state.persisted.threads.insert(id, thread);
+            Ok(())
+        })
+    }
+
+    fn create_many(&self, threads: Vec<Thread>) -> Result<(), ThreadStoreError> {
+        self.mutate(|state| {
+            let mut incoming = std::collections::HashSet::new();
+            for thread in &threads {
+                let id = thread.metadata.id.as_str();
+                if state.persisted.threads.contains_key(id) || !incoming.insert(id.to_string()) {
+                    return Err(ThreadStoreError::AlreadyExists(id.to_string()));
+                }
+            }
+            for thread in threads {
+                state
+                    .persisted
+                    .threads
+                    .insert(thread.metadata.id.as_str().to_string(), thread);
+            }
             Ok(())
         })
     }
@@ -135,6 +170,12 @@ impl ThreadStore for JsonThreadStore {
                 .ok_or_else(|| ThreadStoreError::NotFound(source.to_string()))?;
             forked.metadata.id = target.clone();
             forked.metadata.archived = false;
+            for turn in &mut forked.turns {
+                if turn.status == TurnStatus::Running {
+                    turn.status = TurnStatus::Cancelled;
+                    turn.error = Some("forked while source turn was still running".to_string());
+                }
+            }
             state
                 .persisted
                 .threads
@@ -161,6 +202,7 @@ impl ThreadStore for JsonThreadStore {
                 return Err(ThreadStoreError::AlreadyExists(turn.id.to_string()));
             }
             state.active_turns.insert(key, turn.id.clone());
+            stored.metadata.updated_at = turn.started_at;
             stored.turns.push(turn);
             Ok(())
         })
@@ -171,6 +213,7 @@ impl ThreadStore for JsonThreadStore {
         thread: &ThreadId,
         turn: &TurnId,
         item: ThreadItem,
+        updated_at: i64,
     ) -> Result<(), ThreadStoreError> {
         self.mutate(|state| {
             require_owner(state, thread, turn)?;
@@ -183,6 +226,13 @@ impl ThreadStore for JsonThreadStore {
                 return Err(ThreadStoreError::AlreadyExists(item.id().to_string()));
             }
             stored_turn.items.push(item);
+            state
+                .persisted
+                .threads
+                .get_mut(thread.as_str())
+                .expect("owned turn must belong to a stored thread")
+                .metadata
+                .updated_at = updated_at;
             Ok(())
         })
     }
@@ -201,6 +251,13 @@ impl ThreadStore for JsonThreadStore {
             stored_turn.status = status;
             stored_turn.completed_at = Some(completed_at);
             stored_turn.error = error;
+            state
+                .persisted
+                .threads
+                .get_mut(thread.as_str())
+                .expect("owned turn must belong to a stored thread")
+                .metadata
+                .updated_at = completed_at;
             state.active_turns.remove(thread.as_str());
             Ok(())
         })
@@ -240,10 +297,38 @@ fn find_turn_mut<'a>(
 
 fn load_state(path: &Path) -> Result<PersistedState, ThreadStoreError> {
     match fs::read_to_string(path) {
-        Ok(text) => serde_json::from_str(&text).map_err(ThreadStoreError::Decode),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(PersistedState::default()),
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(state) => Ok(state),
+            Err(primary_error) => match recover_state(path)? {
+                Some(state) => Ok(state),
+                None => Err(ThreadStoreError::Decode(primary_error)),
+            },
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(recover_state(path)?.unwrap_or_default())
+        }
         Err(error) => Err(ThreadStoreError::Io(error)),
     }
+}
+
+fn recover_state(path: &Path) -> Result<Option<PersistedState>, ThreadStoreError> {
+    for candidate in [path.with_extension("bak"), path.with_extension("tmp")] {
+        let text = match fs::read_to_string(&candidate) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(ThreadStoreError::Io(error)),
+        };
+        let state: PersistedState = match serde_json::from_str(&text) {
+            Ok(state) => state,
+            Err(_) => continue,
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(ThreadStoreError::Io)?;
+        }
+        fs::write(path, text).map_err(ThreadStoreError::Io)?;
+        return Ok(Some(state));
+    }
+    Ok(None)
 }
 
 fn save_state(path: &Path, state: &PersistedState) -> Result<(), ThreadStoreError> {
@@ -377,6 +462,7 @@ mod tests {
                     id: ItemId::new("item").unwrap(),
                     text: "hello".into(),
                 },
+                3,
             )
             .unwrap();
         assert_eq!(
@@ -391,6 +477,9 @@ mod tests {
     fn fork_keeps_history_but_changes_durable_identity() {
         let store = temp_store("fork");
         store.create(thread("source")).unwrap();
+        store
+            .claim_turn(&ThreadId::new("source").unwrap(), turn("running"))
+            .unwrap();
         let forked = store
             .fork(
                 &ThreadId::new("source").unwrap(),
@@ -398,6 +487,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(forked.metadata.id.as_str(), "target");
+        assert_eq!(forked.turns[0].status, TurnStatus::Cancelled);
         assert!(store
             .read(&ThreadId::new("source").unwrap())
             .unwrap()
@@ -424,5 +514,48 @@ mod tests {
         let reopened = JsonThreadStore::open(&path).unwrap();
         let stored = reopened.read(&thread_id).unwrap().unwrap();
         assert_eq!(stored.turns[0].status, TurnStatus::Completed);
+    }
+
+    #[test]
+    fn running_turn_is_recovered_as_failed_after_restart() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ncx-recover-running-{unique}.json"));
+        let thread_id = ThreadId::new("thread").unwrap();
+        {
+            let store = JsonThreadStore::open(&path).unwrap();
+            store.create(thread("thread")).unwrap();
+            store.claim_turn(&thread_id, turn("turn")).unwrap();
+        }
+        let reopened = JsonThreadStore::open(&path).unwrap();
+        let stored = reopened.read(&thread_id).unwrap().unwrap();
+        assert_eq!(stored.turns[0].status, TurnStatus::Failed);
+        assert!(stored.turns[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("runtime restarted"));
+        reopened.claim_turn(&thread_id, turn("next")).unwrap();
+    }
+
+    #[test]
+    fn corrupt_primary_recovers_from_last_backup() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ncx-recover-backup-{unique}.json"));
+        let store = JsonThreadStore::open(&path).unwrap();
+        store.create(thread("thread")).unwrap();
+        fs::copy(&path, path.with_extension("bak")).unwrap();
+        fs::write(&path, "not-json").unwrap();
+
+        let reopened = JsonThreadStore::open(&path).unwrap();
+        assert!(reopened
+            .read(&ThreadId::new("thread").unwrap())
+            .unwrap()
+            .is_some());
     }
 }

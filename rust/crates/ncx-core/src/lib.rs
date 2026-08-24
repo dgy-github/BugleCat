@@ -51,6 +51,7 @@ pub use custom_commands::{
     custom_command_prompt, expand_custom_command_template, list_custom_commands,
     parse_custom_command_query, resolve_custom_command, CustomCommandQuery, CustomCommandSummary,
 };
+pub use ncx_context::{ContextFragment, TextContextFragment};
 pub use editor_tool::StrReplaceEditorTool;
 pub use genome::Genome;
 pub use hooks::{HookEvent, HookOutcome};
@@ -62,18 +63,19 @@ pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
 pub use plugins::{
-    AttachmentPlugin, AttachmentServiceDescriptor, BuiltinToolsPlugin, CompactionPlugin,
-    CompactionServiceDescriptor, ContextPlugin, ContextServiceDescriptor, CoreToolsPlugin,
-    CostTelemetryPlugin, CostTelemetryService, CostTelemetryServiceDescriptor,
+    discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
+    resolve_local_marketplace_plugin, AttachmentPlugin, AttachmentServiceDescriptor,
+    BuiltinToolsPlugin, CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord,
+    CompactionPlugin, CompactionServiceDescriptor, ContextPlugin, ContextServiceDescriptor,
+    CoreToolsPlugin, CostTelemetryPlugin, CostTelemetryService, CostTelemetryServiceDescriptor,
     CostTelemetrySnapshot, ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord,
-    CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, Marketplace, MarketplacePlugin,
-    MarketplaceSource, discover_marketplaces, resolve_local_marketplace_plugin,
     HarnessDiagnostics, HarnessPlugin, HarnessRuntimeBuilder, InteractionPlugin,
     InteractionService, LlmProviderFactory, LlmProviderFactoryHandle, LlmProviderPlugin,
-    LlmServiceDescriptor, McpPlugin, McpServiceDescriptor, MediaPlugin, MediaServiceDescriptor,
-    MemoryPlugin, MemoryServiceDescriptor, PluginCapability, PluginHost, PluginInstallReport,
-    PluginManifest, PluginRegistry, PolicyPlugin, PolicyService, ProcessToolsPlugin,
-    SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
+    LlmServiceDescriptor, Marketplace, MarketplacePlugin, MarketplaceSource, McpPlugin,
+    McpServiceDescriptor, MediaPlugin, MediaServiceDescriptor, MemoryPlugin,
+    MemoryServiceDescriptor, PluginCapability, PluginHost, PluginInstallReport, PluginManifest,
+    PluginRegistry, PolicyPlugin, PolicyService, ProcessToolsPlugin, SearchToolsPlugin,
+    SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;

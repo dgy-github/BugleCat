@@ -4,6 +4,8 @@
 //! load each section. It is intentionally pure so callers can snapshot the
 //! resulting model input without touching the filesystem or network.
 
+use ncx_context::ContextFragment;
+
 #[derive(Debug, Clone)]
 struct PromptSection {
     name: String,
@@ -50,6 +52,14 @@ impl PromptAssembler {
         self
     }
 
+    pub fn upsert_fragment(
+        &mut self,
+        order: u16,
+        fragment: &dyn ContextFragment,
+    ) -> &mut Self {
+        self.upsert(fragment.source(), order, fragment.bounded_render())
+    }
+
     /// Remove a section by name and report whether it was present.
     pub fn remove(&mut self, name: &str) -> bool {
         let before = self.sections.len();
@@ -76,6 +86,7 @@ impl PromptAssembler {
 #[cfg(test)]
 mod tests {
     use super::PromptAssembler;
+    use ncx_context::TextContextFragment;
 
     #[test]
     fn orders_named_sections_and_skips_empty_content() {
@@ -98,5 +109,14 @@ mod tests {
         assert!(prompt.remove("mode"));
         assert!(!prompt.remove("mode"));
         assert_eq!(prompt.build(), "base");
+    }
+
+
+    #[test]
+    fn typed_fragments_are_hard_bounded_before_prompt_assembly() {
+        let mut prompt = PromptAssembler::new("base");
+        let fragment = TextContextFragment::new("skills", "abcdef", 3);
+        prompt.upsert_fragment(20, &fragment);
+        assert_eq!(prompt.build(), "base\n\nabc");
     }
 }

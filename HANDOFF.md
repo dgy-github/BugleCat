@@ -500,3 +500,14 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 新增 OpenAI Codex 资源插件兼容：解析/校验 `.codex-plugin/plugin.json` 的 Skills、MCP、Apps、Hooks、Interface；支持本地安装、原子式升级、启停、卸载，拒绝路径穿越和符号链接。GUI 设置页可管理资源插件并查看 Marketplace。
 - Marketplace 对齐发现 `.agents/plugins/marketplace.json`、`api_marketplace.json`、`.claude-plugin/marketplace.json`、`.cursor-plugin/marketplace.json`；本地 source 从仓库根安全解析并可安装，Git/NPM source 明确返回“需先物化到本地缓存”，本阶段不擅自执行网络下载。
 - 验证：Rust workspace 全量通过（`ncx-core` 219 项及所有其他 crate）；GUI Rust 46 项全通过；Vite production build 通过；`git diff --check` 通过。
+
+### 2026-08-24 OpenAI Codex Harness 迁移收口
+- `ncx-protocol` 已补齐 GUI 所需的 Thread 重命名/导入/创建激活/恢复激活/分叉激活与 Turn 提交/停止请求；所有协议事件继续携带 v2、单调 sequence、threadId 和可选 turnId。
+- `ncx-thread-store` 成为会话持久化和活动 Turn 所有权的事实源：同 Thread 禁止重入、不同 Thread 并发；异常退出释放所有权；重启时残留 Running/Queued Turn 转 Failed；主文件损坏时可从 `.bak`/`.tmp` 恢复；分叉不会复制活动所有权。
+- GUI 历史、新建、恢复、分叉、归档、Prompt 和 Stop 主路径均通过 `app_server_request`；前端按 Thread 拒绝旧序号或错误协议版本事件。旧 `SessionIndex` 仅保留启动迁移、日志打开和兼容快照，不删除历史数据。
+- 旧 SessionIndex 启动时批量导入 v2 Store，只投影每轮用户要求和最终结论；工具输入、工具输出与中间日志不进入恢复历史。费用与最终回答仍随 Thread 恢复。
+- Provider 契约归 `ncx-provider`，Policy 归 `ncx-sandbox`；CLI/GUI 的项目说明、Skills 和 Plan 提示已改为类型化 `ContextFragment`，并在组装时强制字符硬上限。
+- OpenAI 资源插件已实际接入现有运行时：已启用插件的 Skills 可发现/加载，Hooks 映射到既有生命周期，MCP 会连接并注册工具且更新 GUI 诊断；禁用插件不会加载 Skills/Hooks/MCP。Apps 当前完成目录解析与诊断展示，因项目没有独立 Apps 执行子系统，不另建第二套状态机。
+- `.codex-plugin/plugin.json`、本地 Marketplace、Git source 和 NPM source 已支持发现、校验、安装与升级；Git/NPM 会先物化到工作区 `.ncx/codex-plugin-stage`，包含子路径越界、清理边界和 NPM 包名校验。当前未使用外部真实 Marketplace 做网络 live 安装，相关安全与解析路径由单测覆盖。
+- 组合验证继续覆盖 `full`、`minimal`、`headless`：Skills/Context 属基础能力；media/MCP/attachment 等仅在相应 Profile 与已启用资源存在时装配。
+- 本轮验证：`cargo check --workspace`、GUI Tauri check、`cargo test --workspace --quiet` 全通过（`ncx-core` 222 项）；GUI Rust 52 项全通过；Vite production build 与 `git diff --check` 通过。

@@ -105,6 +105,16 @@ fn discover_skills_with_home(workspace: &Path, home: Option<&Path>) -> Vec<Skill
     }
     roots.push(workspace.join(".ncx").join("skills"));
 
+    let codex_catalog =
+        crate::plugins::CodexPluginCatalog::new(workspace.join(".ncx").join("codex-plugins"));
+    let codex_skill_paths = codex_catalog
+        .discover()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+        .flat_map(|plugin| plugin.skill_paths())
+        .collect::<Vec<_>>();
+
     // Keyed by name. Builtins seed the map first; a later filesystem root with
     // the same name shadows it (home then workspace), so users can override.
     let mut by_name: std::collections::BTreeMap<String, Skill> = std::collections::BTreeMap::new();
@@ -116,7 +126,45 @@ fn discover_skills_with_home(workspace: &Path, home: Option<&Path>) -> Vec<Skill
             by_name.insert(skill.name.clone(), skill);
         }
     }
+    for path in codex_skill_paths {
+        for skill in scan_skill_path(&path) {
+            by_name.insert(skill.name.clone(), skill);
+        }
+    }
     by_name.into_values().collect()
+}
+
+fn scan_skill_path(path: &Path) -> Vec<Skill> {
+    if path.is_file() {
+        return load_skill_file(path).into_iter().collect();
+    }
+    if path.join("SKILL.md").is_file() {
+        return load_skill_file(&path.join("SKILL.md"))
+            .into_iter()
+            .collect();
+    }
+    scan_root(path)
+}
+
+fn load_skill_file(manifest: &Path) -> Option<Skill> {
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let dir = manifest.parent()?.to_path_buf();
+    let (name, description) = parse_frontmatter(&text);
+    let name = name.unwrap_or_else(|| {
+        dir.file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default()
+    });
+    if name.trim().is_empty() {
+        return None;
+    }
+    Some(Skill {
+        name: name.trim().to_string(),
+        description: description.unwrap_or_default().trim().to_string(),
+        path: manifest.to_path_buf(),
+        dir,
+        embedded: None,
+    })
 }
 
 /// Scan one `skills/` root for `*/SKILL.md` files.
@@ -130,27 +178,9 @@ fn scan_root(root: &Path) -> Vec<Skill> {
         if !dir.is_dir() {
             continue;
         }
-        let manifest = dir.join("SKILL.md");
-        let Ok(text) = std::fs::read_to_string(&manifest) else {
-            continue;
-        };
-        let (name, description) = parse_frontmatter(&text);
-        // Fall back to the directory name when frontmatter omits `name:`.
-        let name = name.unwrap_or_else(|| {
-            dir.file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default()
-        });
-        if name.trim().is_empty() {
-            continue;
+        if let Some(skill) = load_skill_file(&dir.join("SKILL.md")) {
+            out.push(skill);
         }
-        out.push(Skill {
-            name: name.trim().to_string(),
-            description: description.unwrap_or_default().trim().to_string(),
-            path: manifest,
-            dir,
-            embedded: None,
-        });
     }
     out
 }
@@ -376,5 +406,29 @@ mod tests {
             skills[0].load_body().unwrap(),
             "just a plain body, no frontmatter"
         );
+    }
+
+    #[test]
+    fn enabled_codex_plugin_skills_are_discovered_and_disabled_ones_are_not() {
+        let ws = tmp("codex_plugin");
+        let plugin = ws.join(".ncx/codex-plugins/demo");
+        std::fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+        std::fs::create_dir_all(plugin.join("skills/plugin-skill")).unwrap();
+        std::fs::write(
+            plugin.join(".codex-plugin/plugin.json"),
+            r#"{"name":"demo"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            plugin.join("skills/plugin-skill/SKILL.md"),
+            "---\nname: plugin-skill\ndescription: from Codex plugin\n---\nbody",
+        )
+        .unwrap();
+
+        let enabled = fs_only(discover_skills_with_home(&ws, None));
+        assert!(enabled.iter().any(|skill| skill.name == "plugin-skill"));
+        std::fs::write(plugin.join(".disabled"), "disabled\n").unwrap();
+        let disabled = fs_only(discover_skills_with_home(&ws, None));
+        assert!(!disabled.iter().any(|skill| skill.name == "plugin-skill"));
     }
 }

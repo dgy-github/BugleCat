@@ -23,11 +23,12 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    custom_command_prompt, discover_skills, expand_file_mentions, install_llm_provider_factory,
-    list_custom_commands, load_project_instructions, new_session_id, prepare_mcp_server_tools,
-    skills_index_block, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome,
-    HarnessRuntimeBuilder, McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig,
-    PromptAssembler, Session, SessionIndex, SessionSummary, Tool, ToolContext, TurnResult,
+    custom_command_prompt, discover_codex_hooks, discover_codex_mcp_servers, discover_skills,
+    expand_file_mentions, install_llm_provider_factory, list_custom_commands,
+    load_project_instructions, new_session_id, prepare_mcp_server_tools, skills_index_block,
+    AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, HarnessRuntimeBuilder,
+    McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session,
+    SessionIndex, SessionSummary, TextContextFragment, Tool, ToolContext, TurnResult,
 };
 use serde_json::{json, Value};
 
@@ -172,17 +173,29 @@ async fn run(args: Args) -> i32 {
         String::new()
     };
     let mut prompt = PromptAssembler::new(base_prompt.clone());
+    let instruction_fragment =
+        TextContextFragment::new("project_instructions", instructions, 16_000);
+    let skills_fragment = TextContextFragment::new("skills", skills_index, 32_000);
+    let plan_fragment = TextContextFragment::new("plan_mode", plan_note, 4_000);
     prompt
-        .upsert("project_instructions", 10, instructions)
-        .upsert("skills", 20, skills_index)
-        .upsert("plan_mode", 30, plan_note);
+        .upsert_fragment(10, &instruction_fragment)
+        .upsert_fragment(20, &skills_fragment)
+        .upsert_fragment(30, &plan_fragment);
     let system_prompt = prompt.build();
+    let mut hooks = cfg.hooks.clone();
+    match discover_codex_hooks(&cfg.workspace) {
+        Ok(plugin_hooks) => hooks.extend(plugin_hooks),
+        Err(error) => {
+            eprintln!("ncx: Codex 插件 Hooks 加载失败: {error}");
+            return 1;
+        }
+    }
     let ctx = runtime_profile
         .apply_tool_context(ToolContext::new(cfg.workspace.clone(), policy))
         .with_timeout(cfg.timeout_s as u64)
         .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
         .with_memory(memory)
-        .with_hooks(cfg.hooks.clone())
+        .with_hooks(hooks)
         .with_skills(skills)
         .with_genome(genome);
     let mut tools = match HarnessRuntimeBuilder::configured(&cfg.workspace) {
@@ -207,7 +220,14 @@ async fn run(args: Args) -> i32 {
     // the sandbox) when the user opts in with --mcp. Keeps startup fast and quiet.
     let mut mcp_tool_names = Vec::new();
     if args.mcp {
-        let servers = load_mcp_servers();
+        let mut servers = load_mcp_servers();
+        match discover_codex_mcp_servers(&cfg.workspace) {
+            Ok(plugin_servers) => servers.extend(plugin_servers),
+            Err(error) => {
+                eprintln!("mcp: Codex 插件资源加载失败: {error}");
+                return 1;
+            }
+        }
         if servers.is_empty() {
             eprintln!("mcp: --mcp set but no servers found in ~/.nanocodex/mcp.toml");
         }

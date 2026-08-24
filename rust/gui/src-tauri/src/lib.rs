@@ -11,7 +11,7 @@ pub mod model_catalog;
 use model_catalog::{catalog, find_preset, parse_openrouter_models, CatalogModel, CatalogProvider};
 
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -26,11 +26,14 @@ use ncx_config::{
 use ncx_core::{
     custom_command_prompt, discover_marketplaces, list_custom_commands,
     resolve_local_marketplace_plugin, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
-    CodexPluginCatalog, CodexPluginRecord, ExternalPluginCatalog, ExternalPluginRecord,
-    HarnessDiagnostics, HarnessRuntimeBuilder, Marketplace, MemoryStore, RestoreReport,
-    SessionIndex, ToolContext,
+    CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, ExternalPluginCatalog,
+    ExternalPluginRecord, HarnessDiagnostics, HarnessRuntimeBuilder, Marketplace,
+    MarketplacePlugin, MarketplaceSource, MemoryStore, RestoreReport, SessionIndex, ToolContext,
 };
-use ncx_protocol::{ClientRequest, ThreadId};
+use ncx_protocol::{
+    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn,
+    TurnId, TurnStatus,
+};
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -144,7 +147,15 @@ fn send_prompt(
     images: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let images = images.unwrap_or_default();
+    queue_prompt(&state, session_id, text, images.unwrap_or_default())
+}
+
+fn queue_prompt(
+    state: &AppState,
+    session_id: String,
+    text: String,
+    images: Vec<String>,
+) -> Result<(), String> {
     if !images.is_empty() {
         let cfg = load_config(Overrides {
             workspace: std::env::current_dir().ok(),
@@ -264,9 +275,10 @@ fn archive_session(
     archived: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    archive_session_in_index(&state.session_index, &session_id, archived)?;
-    let thread_id = ThreadId::new(session_id).map_err(|error| error.to_string())?;
-    if state
+    let legacy_updated =
+        archive_session_in_index(&state.session_index, &session_id, archived).is_ok();
+    let thread_id = ThreadId::new(session_id.clone()).map_err(|error| error.to_string())?;
+    let protocol_updated = if state
         .app_server
         .dispatch(ClientRequest::ThreadRead {
             thread_id: thread_id.clone(),
@@ -280,6 +292,12 @@ fn archive_session(
                 archived,
             })
             .map_err(|error| error.to_string())?;
+        true
+    } else {
+        false
+    };
+    if !legacy_updated && !protocol_updated {
+        return Err(format!("unknown session {session_id}"));
     }
     Ok(())
 }
@@ -312,10 +330,70 @@ fn app_server_request(
     request: ClientRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<DispatchOutcome, String> {
-    state
-        .app_server
-        .dispatch(request)
-        .map_err(|error| error.to_string())
+    match request {
+        ClientRequest::ThreadCreateActivate {
+            thread_id,
+            workspace,
+            title,
+        } => {
+            let outcome = state
+                .app_server
+                .dispatch(ClientRequest::ThreadCreate {
+                    thread_id: Some(thread_id.clone()),
+                    workspace,
+                    title,
+                })
+                .map_err(|error| error.to_string())?;
+            state
+                .tx
+                .send(Command::New(thread_id.to_string()))
+                .map_err(|_| "agent thread is not running".to_string())?;
+            Ok(outcome)
+        }
+        ClientRequest::ThreadActivate { thread_id } => {
+            state
+                .tx
+                .send(Command::Resume(thread_id.to_string()))
+                .map_err(|_| "agent thread is not running".to_string())?;
+            Ok(state.app_server.ack())
+        }
+        ClientRequest::ThreadForkActivate {
+            thread_id,
+            new_thread_id,
+        } => {
+            let outcome = state
+                .app_server
+                .dispatch(ClientRequest::ThreadFork {
+                    thread_id: thread_id.clone(),
+                    new_thread_id: new_thread_id.clone(),
+                })
+                .map_err(|error| error.to_string())?;
+            state
+                .tx
+                .send(Command::Fork {
+                    source_id: thread_id.to_string(),
+                    target_id: new_thread_id.to_string(),
+                })
+                .map_err(|_| "agent thread is not running".to_string())?;
+            Ok(outcome)
+        }
+        ClientRequest::TurnSubmit {
+            thread_id,
+            text,
+            images,
+        } => {
+            queue_prompt(&state, thread_id.to_string(), text, images)?;
+            Ok(state.app_server.ack())
+        }
+        ClientRequest::TurnInterruptLatest { thread_id } => {
+            cancel_session(&state, thread_id.as_str());
+            Ok(state.app_server.ack())
+        }
+        request => state
+            .app_server
+            .dispatch(request)
+            .map_err(|error| error.to_string()),
+    }
 }
 
 /// Continue a saved session (reseed the agent from its snapshot, same id).
@@ -330,9 +408,13 @@ fn resume_session(session_id: String, state: tauri::State<'_, AppState>) -> Resu
 /// Fork a saved session (reseed a NEW session from its snapshot; source kept).
 #[tauri::command]
 fn fork_session(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let target_id = ncx_core::new_session_id();
     state
         .tx
-        .send(Command::Fork(session_id))
+        .send(Command::Fork {
+            source_id: session_id,
+            target_id,
+        })
         .map_err(|_| "agent thread is not running".to_string())
 }
 
@@ -347,15 +429,19 @@ fn get_workspace() -> Result<String, String> {
 /// Stop the active turn. The completion event still owns the final UI reset.
 #[tauri::command]
 fn stop_generation(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    cancel_session(&state, &session_id);
+    Ok(())
+}
+
+fn cancel_session(state: &AppState, session_id: &str) {
     let cancel = state
         .cancels
         .lock()
         .ok()
-        .and_then(|registry| registry.get(&session_id).cloned());
+        .and_then(|registry| registry.get(session_id).cloned());
     if let Some(cancel) = cancel {
-        request_cancel(&session_id, &cancel, &state.pending, &state.questions);
+        request_cancel(session_id, &cancel, &state.pending, &state.questions);
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -1183,28 +1269,86 @@ fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
 
 #[tauri::command]
 fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<SessionRow>, String> {
-    // entries() already sorts newest-first by parsed epoch (handles mixed
-    // ms-epoch / legacy-ISO timestamps); don't re-sort by raw string here.
-    let entries = state
+    let legacy_entries = state
         .session_index
         .lock()
         .map_err(|_| "session index lock is poisoned".to_string())?
         .entries();
-    Ok(entries
-        .into_iter()
-        .take(50)
-        .map(|s| SessionRow {
-            session_id: s.session_id,
-            title: s.title,
-            snippet: s.snippet,
-            user_messages: s.user_messages,
-            assistant_messages: s.assistant_messages,
-            tool_calls: s.tool_calls,
-            updated_at: s.updated_at,
-            has_snapshot: s.has_snapshot,
-            archived: s.archived,
+    let listed = state
+        .app_server
+        .dispatch(ClientRequest::ThreadList {
+            include_archived: true,
         })
-        .collect())
+        .map_err(|error| error.to_string())?;
+    let ResponsePayload::Threads(threads) = listed.response.payload else {
+        return Err("app-server returned an invalid thread list response".to_string());
+    };
+    let mut rows = Vec::new();
+    let mut protocol_ids = HashSet::new();
+    for metadata in threads {
+        let read = state
+            .app_server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: metadata.id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        let ResponsePayload::Thread(thread) = read.response.payload else {
+            continue;
+        };
+        protocol_ids.insert(metadata.id.to_string());
+        rows.push(session_row_from_thread(&thread));
+    }
+    for summary in legacy_entries {
+        if protocol_ids.contains(&summary.session_id) {
+            continue;
+        }
+        rows.push(SessionRow {
+            session_id: summary.session_id,
+            title: summary.title,
+            snippet: summary.snippet,
+            user_messages: summary.user_messages,
+            assistant_messages: summary.assistant_messages,
+            tool_calls: summary.tool_calls,
+            updated_at: summary.updated_at,
+            has_snapshot: summary.has_snapshot,
+            archived: summary.archived,
+        });
+    }
+    rows.truncate(50);
+    Ok(rows)
+}
+
+fn session_row_from_thread(thread: &Thread) -> SessionRow {
+    let mut user_messages = 0;
+    let mut assistant_messages = 0;
+    let mut tool_calls = 0;
+    let mut snippet = String::new();
+    for item in thread.turns.iter().flat_map(|turn| &turn.items) {
+        match item {
+            ThreadItem::UserMessage { text, .. } => {
+                user_messages += 1;
+                snippet = text.clone();
+            }
+            ThreadItem::AssistantMessage { text, .. } => {
+                assistant_messages += 1;
+                snippet = text.clone();
+            }
+            ThreadItem::ToolCall { .. } => tool_calls += 1,
+            _ => {}
+        }
+    }
+    snippet = snippet.chars().take(200).collect();
+    SessionRow {
+        session_id: thread.metadata.id.to_string(),
+        title: thread.metadata.title.clone(),
+        snippet,
+        user_messages,
+        assistant_messages,
+        tool_calls,
+        updated_at: thread.metadata.updated_at.to_string(),
+        has_snapshot: !thread.turns.is_empty(),
+        archived: thread.metadata.archived,
+    }
 }
 
 // ── Hermes: project-memory self-evolution panel ───────────────────────────────
@@ -1426,8 +1570,37 @@ fn codex_plugin_catalog() -> Result<CodexPluginCatalog, String> {
 }
 
 #[tauri::command]
-fn list_codex_plugins() -> Result<Vec<CodexPluginRecord>, String> {
-    codex_plugin_catalog()?.discover()
+fn list_codex_plugins() -> Result<Vec<CodexPluginView>, String> {
+    Ok(codex_plugin_catalog()?
+        .discover()?
+        .into_iter()
+        .map(CodexPluginView::from)
+        .collect())
+}
+
+#[derive(Serialize)]
+struct CodexPluginView {
+    manifest: CodexPluginManifest,
+    root: PathBuf,
+    enabled: bool,
+    skill_roots: usize,
+    has_mcp: bool,
+    has_apps: bool,
+    has_hooks: bool,
+}
+
+impl From<CodexPluginRecord> for CodexPluginView {
+    fn from(plugin: CodexPluginRecord) -> Self {
+        Self {
+            skill_roots: plugin.skill_paths().len(),
+            has_mcp: plugin.manifest.mcp_servers.is_some() || plugin.mcp_path().is_some(),
+            has_apps: plugin.manifest.apps.is_some() || plugin.apps_path().is_some(),
+            has_hooks: plugin.manifest.hooks.is_some() || plugin.hooks_path().is_some(),
+            manifest: plugin.manifest,
+            root: plugin.root,
+            enabled: plugin.enabled,
+        }
+    }
 }
 
 #[tauri::command]
@@ -1487,8 +1660,286 @@ fn install_marketplace_plugin(
         .iter()
         .find(|candidate| candidate.name == plugin_name)
         .ok_or_else(|| format!("Marketplace 中不存在插件 '{plugin_name}'"))?;
-    let source = resolve_local_marketplace_plugin(&canonical_path, plugin)?;
-    codex_plugin_catalog()?.install_or_upgrade(&source, upgrade)
+    let (source, cleanup) = materialize_marketplace_plugin(&workspace, &canonical_path, plugin)?;
+    let result = codex_plugin_catalog()?.install_or_upgrade(&source, upgrade);
+    if let Some(cleanup) = cleanup {
+        let _ = remove_plugin_staging(&workspace, &cleanup);
+    }
+    result
+}
+
+fn materialize_marketplace_plugin(
+    workspace: &Path,
+    marketplace_path: &Path,
+    plugin: &MarketplacePlugin,
+) -> Result<(PathBuf, Option<PathBuf>), String> {
+    match &plugin.source {
+        MarketplaceSource::Local { .. } => Ok((
+            resolve_local_marketplace_plugin(marketplace_path, plugin)?,
+            None,
+        )),
+        MarketplaceSource::Git {
+            url,
+            path,
+            ref_name,
+        } => {
+            if !(url.starts_with("https://")
+                || url.starts_with("ssh://")
+                || url.starts_with("git@"))
+            {
+                return Err("Git Marketplace 只允许 HTTPS 或 SSH 地址".to_string());
+            }
+            let staging = plugin_staging_dir(workspace, &plugin.name)?;
+            let mut command = ProcessCommand::new("git");
+            command.args(["clone", "--depth", "1"]);
+            if let Some(ref_name) = ref_name.as_deref().filter(|value| !value.trim().is_empty()) {
+                command.args(["--branch", ref_name]);
+            }
+            let output = command
+                .arg(url)
+                .arg(&staging)
+                .output()
+                .map_err(|error| format!("启动 git clone 失败: {error}"))?;
+            if !output.status.success() {
+                let _ = remove_plugin_staging(workspace, &staging);
+                return Err(format!(
+                    "Git 插件下载失败: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            let source = match resolve_staged_subpath(&staging, path.as_deref()) {
+                Ok(source) => source,
+                Err(error) => {
+                    let _ = remove_plugin_staging(workspace, &staging);
+                    return Err(error);
+                }
+            };
+            Ok((source, Some(staging)))
+        }
+        MarketplaceSource::Npm { package, version } => {
+            if !valid_npm_package(package) {
+                return Err("NPM 包名格式无效".to_string());
+            }
+            let staging = plugin_staging_dir(workspace, &plugin.name)?;
+            fs::create_dir_all(&staging).map_err(|error| error.to_string())?;
+            let spec = version
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(|version| format!("{package}@{version}"))
+                .unwrap_or_else(|| package.clone());
+            let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+            let output = ProcessCommand::new(npm)
+                .args(["pack", &spec, "--pack-destination"])
+                .arg(&staging)
+                .output()
+                .map_err(|error| format!("启动 npm pack 失败: {error}"))?;
+            if !output.status.success() {
+                let _ = remove_plugin_staging(workspace, &staging);
+                return Err(format!(
+                    "NPM 插件下载失败: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            let archive = fs::read_dir(&staging)
+                .map_err(|error| error.to_string())?
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| path.extension().and_then(|value| value.to_str()) == Some("tgz"));
+            let Some(archive) = archive else {
+                let _ = remove_plugin_staging(workspace, &staging);
+                return Err("npm pack 未生成 tgz 文件".to_string());
+            };
+            let extract = ProcessCommand::new("tar")
+                .arg("-xzf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(&staging)
+                .output()
+                .map_err(|error| format!("启动 tar 解包失败: {error}"))?;
+            if !extract.status.success() {
+                let _ = remove_plugin_staging(workspace, &staging);
+                return Err(format!(
+                    "NPM 插件解包失败: {}",
+                    String::from_utf8_lossy(&extract.stderr).trim()
+                ));
+            }
+            Ok((staging.join("package"), Some(staging)))
+        }
+    }
+}
+
+fn plugin_staging_dir(workspace: &Path, name: &str) -> Result<PathBuf, String> {
+    let safe_name = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if safe_name.trim_matches('_').is_empty() {
+        return Err("Marketplace 插件名称无效".to_string());
+    }
+    let root = workspace.join(".ncx/codex-plugin-stage");
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    Ok(root.join(format!("{safe_name}-{}-{nonce}", std::process::id())))
+}
+
+fn resolve_staged_subpath(staging: &Path, subpath: Option<&str>) -> Result<PathBuf, String> {
+    let Some(subpath) = subpath.filter(|value| !value.trim().is_empty()) else {
+        return Ok(staging.to_path_buf());
+    };
+    let relative = Path::new(subpath);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("Git 插件子目录不得越界".to_string());
+    }
+    let root = staging.canonicalize().map_err(|error| error.to_string())?;
+    let resolved = staging
+        .join(relative)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !resolved.starts_with(root) {
+        return Err("Git 插件子目录不得越界".to_string());
+    }
+    Ok(resolved)
+}
+
+fn remove_plugin_staging(workspace: &Path, staging: &Path) -> Result<(), String> {
+    let canonical_root = workspace
+        .join(".ncx/codex-plugin-stage")
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let canonical_staging = staging.canonicalize().map_err(|error| error.to_string())?;
+    if canonical_staging == canonical_root || !canonical_staging.starts_with(&canonical_root) {
+        return Err("拒绝清理工作区之外的插件暂存目录".to_string());
+    }
+    fs::remove_dir_all(canonical_staging).map_err(|error| error.to_string())
+}
+
+fn valid_npm_package(package: &str) -> bool {
+    !package.is_empty()
+        && package.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'@' | b'/' | b'.' | b'-' | b'_')
+        })
+        && !package.contains("..")
+        && !package.starts_with('/')
+}
+
+fn migrate_legacy_threads(
+    index: &SessionIndex,
+    app_server: &AppServer<JsonThreadStore>,
+) -> Result<usize, String> {
+    let mut pending = Vec::new();
+    for summary in index.entries() {
+        let thread_id =
+            ThreadId::new(summary.session_id.clone()).map_err(|error| error.to_string())?;
+        if app_server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: thread_id.clone(),
+            })
+            .is_ok()
+        {
+            continue;
+        }
+        let messages = index.load_snapshot(&summary.session_id).unwrap_or_default();
+        let updated_at = summary
+            .updated_at
+            .parse::<i64>()
+            .unwrap_or_else(|_| now_epoch_millis());
+        let created_at = summary.created_at.parse::<i64>().unwrap_or(updated_at);
+        let thread = Thread {
+            metadata: ThreadMetadata {
+                id: thread_id,
+                workspace: summary.workspace,
+                title: summary.title,
+                archived: summary.archived,
+                created_at,
+                updated_at,
+            },
+            turns: legacy_conclusion_turns(&messages, created_at),
+        };
+        pending.push(thread);
+    }
+    let imported = pending.len();
+    if !pending.is_empty() {
+        app_server
+            .dispatch(ClientRequest::ThreadsImport { threads: pending })
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(imported)
+}
+
+fn legacy_conclusion_turns(messages: &[serde_json::Value], timestamp: i64) -> Vec<Turn> {
+    let mut turns = Vec::new();
+    let mut current_user: Option<String> = None;
+    let mut final_answer: Option<String> = None;
+    let flush = |user: Option<String>, answer: Option<String>, turns: &mut Vec<Turn>| {
+        let Some(user) = user else { return };
+        let index = turns.len();
+        let mut items = vec![ThreadItem::UserMessage {
+            id: ItemId::new(format!("legacy-user-{index}")).expect("non-empty legacy item id"),
+            text: user,
+        }];
+        if let Some(answer) = answer.filter(|answer| !answer.trim().is_empty()) {
+            items.push(ThreadItem::AssistantMessage {
+                id: ItemId::new(format!("legacy-assistant-{index}"))
+                    .expect("non-empty legacy item id"),
+                text: answer,
+            });
+        }
+        turns.push(Turn {
+            id: TurnId::new(format!("legacy-turn-{index}")).expect("non-empty legacy turn id"),
+            status: TurnStatus::Completed,
+            items,
+            started_at: timestamp,
+            completed_at: Some(timestamp),
+            error: None,
+        });
+    };
+    for message in messages {
+        match message.get("role").and_then(serde_json::Value::as_str) {
+            Some("user") => {
+                flush(current_user.take(), final_answer.take(), &mut turns);
+                current_user = legacy_message_text(message.get("content"));
+            }
+            Some("assistant") => {
+                if let Some(text) = legacy_message_text(message.get("content")) {
+                    if !text.trim().is_empty() {
+                        final_answer = Some(text);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    flush(current_user, final_answer, &mut turns);
+    turns
+}
+
+fn legacy_message_text(content: Option<&serde_json::Value>) -> Option<String> {
+    match content? {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Array(parts) => parts.iter().find_map(|part| {
+            (part.get("type").and_then(serde_json::Value::as_str) == Some("text"))
+                .then(|| {
+                    part.get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .flatten()
+        }),
+        _ => None,
+    }
 }
 
 pub fn run() {
@@ -1509,6 +1960,11 @@ pub fn run() {
             .expect("open the versioned nanocodex thread store"),
     );
     let app_server = Arc::new(AppServer::new(thread_store, now_epoch_millis));
+    if let Ok(index) = session_index.lock() {
+        if let Err(error) = migrate_legacy_threads(&index, &app_server) {
+            eprintln!("thread migration: {error}");
+        }
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1790,6 +2246,47 @@ mod tests {
     }
 
     #[test]
+    fn legacy_migration_keeps_each_user_request_and_final_conclusion_only() {
+        let turns = legacy_conclusion_turns(
+            &[
+                serde_json::json!({"role":"system","content":"rules"}),
+                serde_json::json!({"role":"user","content":"生成 PDF"}),
+                serde_json::json!({"role":"assistant","content":"开始检查"}),
+                serde_json::json!({"role":"tool","content":"very noisy output"}),
+                serde_json::json!({"role":"assistant","content":"PDF 已生成"}),
+                serde_json::json!({"role":"user","content":"继续优化"}),
+                serde_json::json!({"role":"assistant","content":"优化完成"}),
+            ],
+            100,
+        );
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].items.len(), 2);
+        assert!(matches!(
+            &turns[0].items[1],
+            ThreadItem::AssistantMessage { text, .. } if text == "PDF 已生成"
+        ));
+        assert!(matches!(
+            &turns[1].items[1],
+            ThreadItem::AssistantMessage { text, .. } if text == "优化完成"
+        ));
+    }
+
+    #[test]
+    fn marketplace_staging_rejects_escape_paths_and_invalid_npm_packages() {
+        let workspace =
+            std::env::temp_dir().join(format!("ncx-market-stage-{}", now_epoch_millis()));
+        let staging = plugin_staging_dir(&workspace, "demo/plugin").unwrap();
+        std::fs::create_dir_all(staging.join("safe")).unwrap();
+        assert!(resolve_staged_subpath(&staging, Some("safe")).is_ok());
+        assert!(resolve_staged_subpath(&staging, Some("../outside")).is_err());
+        assert!(valid_npm_package("@scope/plugin-name"));
+        assert!(!valid_npm_package("../plugin"));
+        assert!(!valid_npm_package("plugin name"));
+        remove_plugin_staging(&workspace, &staging).unwrap();
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[test]
     fn reasoning_stays_collapsed_and_bounded_while_streaming() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("REASONING_DISPLAY_MAX_CHARS"));
@@ -1903,7 +2400,45 @@ mod tests {
         assert!(bridge.contains("session_id: target_id"));
         assert!(bridge.contains("spawn_turn_worker("));
         assert!(backend.contains("session_id: String"));
-        assert!(app.contains("sessionId: targetSessionId"));
+        assert!(app.contains("method: \"turnSubmit\""));
+        assert!(app.contains("threadId: targetSessionId"));
+    }
+
+    #[test]
+    fn frontend_thread_lifecycle_uses_the_versioned_app_server_protocol() {
+        let app = include_str!("../../src/App.svelte");
+        for method in [
+            "threadCreateActivate",
+            "threadActivate",
+            "threadForkActivate",
+            "turnSubmit",
+            "turnInterruptLatest",
+        ] {
+            assert!(
+                app.contains(&format!("method: \"{method}\"")),
+                "missing app-server request for {method}"
+            );
+        }
+    }
+
+    #[test]
+    fn frontend_rejects_stale_or_cross_version_protocol_events() {
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains("listen<ProtocolEventEnvelope>(\"ncx://protocol-event\""));
+        assert!(app.contains("envelope.protocolVersion !== 2 || !envelope.threadId"));
+        assert!(app.contains("protocolSequences.get(envelope.threadId) || 0"));
+        assert!(app.contains("envelope.sequence <= previous"));
+        assert!(app.contains("protocolSequences.set(envelope.threadId, envelope.sequence)"));
+    }
+
+    #[test]
+    fn enabled_codex_mcp_resources_feed_the_gui_runtime_diagnostics() {
+        let bridge = include_str!("bridge.rs");
+        assert!(bridge.contains("discover_codex_mcp_servers(&cfg.workspace)?"));
+        assert!(bridge.contains("prepare_mcp_server_tools("));
+        assert!(bridge.contains("configured_servers: mcp_servers.len()"));
+        assert!(bridge.contains("active_tools"));
+        assert!(bridge.contains("tools.replace_service("));
     }
 
     #[test]
@@ -1934,7 +2469,7 @@ mod tests {
             .0;
         assert!(!resume.contains("stop_generation"));
         assert!(resume.contains("busy = runningSessions.has(id)"));
-        assert!(resume.contains("await invoke(\"resume_session\""));
+        assert!(resume.contains("method: \"threadActivate\""));
     }
 
     #[test]
