@@ -3,7 +3,13 @@
   import { listen } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
+  import ConversationView from "./components/ConversationView.svelte";
+  import Composer from "./components/Composer.svelte";
+  import InteractionDialogs from "./components/InteractionDialogs.svelte";
+  import WorkspacePanels from "./components/WorkspacePanels.svelte";
   import SettingsModal from "./components/SettingsModal.svelte";
+  import SessionSidebar from "./components/SessionSidebar.svelte";
+  import TopBar from "./components/TopBar.svelte";
 
   const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
   const isImage = (p: string) => IMAGE_EXTS.includes((p.split(".").pop() || "").toLowerCase());
@@ -521,7 +527,7 @@
       messages.push({ role: "note", text: `切换权限模式失败：${e}` });
     }
   }
-  let scroller: HTMLDivElement;
+  let scroller = $state<HTMLDivElement>();
 
   function clampSidebarWidth(width: number): number {
     const viewportMax = typeof window === "undefined"
@@ -1836,596 +1842,171 @@
 </script>
 
 <main class="app" style={`--sidebar-width: ${sidebarWidth}px`}>
-  <aside class="sidebar" class:collapsed={!sidebarOpen}>
-    <div class="side-head">
-      <span class="side-brand">nanocodex</span>
-      <button class="side-collapse" onclick={toggleSidebar} title="收起侧边栏" aria-label="收起侧边栏">‹</button>
-    </div>
-    <button class="new-session" onclick={newSession}>
-      <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-      新会话
-    </button>
-
-    <div class="side-recents">
-      {#snippet sessionItem(s: SessionRow)}
-        <div class="recent-item" class:active={s.session_id === currentSessionId} class:running={runningSessions.has(s.session_id)} class:archived={s.archived}>
-          <button class="recent-main" title={s.snippet || s.title} disabled={switchingSession || !s.has_snapshot}
-            onclick={() => resumeSession(s.session_id, s.title)}>
-            <span class="recent-dot">●</span>
-            <span class="recent-text">
-              <span class="recent-title">{s.title || "（未命名）"}</span>
-              <span class="recent-when">{runningSessions.has(s.session_id) ? "执行中" : fmtWhen(s.updated_at)}{s.archived ? " · 已归档" : ""}</span>
-            </span>
-          </button>
-          <button class="recent-act" title="从此处分叉新会话" disabled={switchingSession || !s.has_snapshot}
-            onclick={() => forkSession(s.session_id, s.title)} aria-label="分叉">⑂</button>
-          <button class="recent-act" title="打开会话日志 (JSONL)"
-            onclick={() => openSessionLog(s.session_id)} aria-label="打开日志">📄</button>
-          <button class="recent-act" title={s.archived ? "取消归档" : "归档此会话"}
-            onclick={() => archiveSession(s.session_id, !s.archived)} aria-label="归档">{s.archived ? "↩" : "🗄"}</button>
-        </div>
-      {/snippet}
-
-      <button class="side-recent-toggle" class:open={showRecent}
-        aria-expanded={showRecent} onclick={() => (showRecent = !showRecent)}>
-        <span class="side-recent-main">
-          <span class="side-recent-caret" aria-hidden="true">›</span>
-          <span>最近会话</span>
-        </span>
-        <span class="side-recent-count">{recentSessions.length}</span>
-      </button>
-      {#if showRecent}
-        <div class="side-recent-list">
-          {#if recentSessions.length === 0}
-            <div class="side-empty">{archivedCount ? "暂无最近会话" : "暂无会话"}</div>
-          {/if}
-          {#each recentSessions as s}
-            {@render sessionItem(s)}
-          {/each}
-        </div>
-      {/if}
-
-      {#if archivedCount}
-        <button class="side-archive-toggle" class:open={showArchived}
-          aria-expanded={showArchived} onclick={() => (showArchived = !showArchived)}>
-          <span class="side-archive-main">
-            <span class="side-archive-caret" aria-hidden="true">›</span>
-            <span>已归档</span>
-          </span>
-          <span class="side-archive-count">{archivedCount}</span>
-        </button>
-        {#if showArchived}
-          <div class="side-archived-list">
-            {#each archivedSessions as s}
-              {@render sessionItem(s)}
-            {/each}
-          </div>
-        {/if}
-      {/if}
-    </div>
-
-    <div class="side-foot">
-      <button class="foot-ws" title={`工作区：${workspace}（点击切换）`} onclick={chooseWorkspace}>
-        📁 {workspace ? baseName(workspace) : "选择工作区"}
-      </button>
-      <button class="foot-gear" title="设置" onclick={openSettings} aria-label="设置">⚙</button>
-    </div>
-  </aside>
-  {#if sidebarOpen}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div
-      class="sidebar-resizer"
-      class:active={sidebarResizing}
-      role="separator"
-      aria-label="调整侧边栏宽度"
-      aria-orientation="vertical"
-      aria-valuemin={SIDEBAR_MIN_WIDTH}
-      aria-valuemax={SIDEBAR_MAX_WIDTH}
-      aria-valuenow={sidebarWidth}
-      tabindex="0"
-      title="拖动调整侧边栏宽度，双击恢复默认"
-      onpointerdown={beginSidebarResize}
-      ondblclick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)}
-      onkeydown={handleSidebarResizeKey}
-    ></div>
-  {/if}
-
+  <SessionSidebar
+    {sidebarOpen}
+    {switchingSession}
+    {currentSessionId}
+    {runningSessions}
+    {recentSessions}
+    {archivedSessions}
+    {archivedCount}
+    bind:showRecent
+    bind:showArchived
+    {workspace}
+    {sidebarResizing}
+    {sidebarWidth}
+    {SIDEBAR_MIN_WIDTH}
+    {SIDEBAR_MAX_WIDTH}
+    {SIDEBAR_DEFAULT_WIDTH}
+    {toggleSidebar}
+    {newSession}
+    {resumeSession}
+    {forkSession}
+    {openSessionLog}
+    {archiveSession}
+    {chooseWorkspace}
+    {openSettings}
+    {fmtWhen}
+    {baseName}
+    {beginSidebarResize}
+    {setSidebarWidth}
+    {handleSidebarResizeKey}
+  />
   <div class="workarea">
   <section class="main">
-    <header class="topbar">
-      <button class="collapse" onclick={toggleSidebar} title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"} aria-label="Toggle sidebar">▣</button>
-      <span class="title">{sessionTitle}</span>
-      {#if busy}<span class="spinner" title="处理中…">●</span>{/if}
-      <span class="topbar-actions">
-        <button class="tbtn" class:on={rightPanel === "files"} onclick={openFiles} title="文件" aria-label="文件">
-          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        </button>
-        <button class="tbtn" class:on={rightPanel === "diff"} onclick={openDiff} title="改动" aria-label="改动">
-          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 8h7M8.5 4.5v7M5 17h7"/></svg>
-        </button>
-        <button class="tbtn" class:on={rightPanel === "branches"} onclick={openBranches} title="分支" aria-label="分支">
-          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M6 13a6 6 0 0 0 6-6h3.8"/></svg>
-        </button>
-        <button class="tbtn" class:on={rightPanel === "memory"} onclick={openHermes} title="记忆" aria-label="记忆">
-          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z"/><path d="M9 4v16"/></svg>
-        </button>
-        <button class="tbtn" class:on={rightPanel === "checkpoints"} onclick={openCheckpoints} title="检查点" aria-label="检查点">
-          <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v4.2l2.8 1.7"/></svg>
-        </button>
-      </span>
-    </header>
+    <TopBar
+      {sidebarOpen}
+      {sessionTitle}
+      {busy}
+      {rightPanel}
+      {toggleSidebar}
+      {openFiles}
+      {openDiff}
+      {openBranches}
+      {openHermes}
+      {openCheckpoints}
+    />
 
-    <div class="scroll" bind:this={scroller}>
-      {#if messages.length === 0}
-        <div class="empty-wrap">
-          <div class="empty-mark">✦</div>
-          <p class="empty">让我检查或修改你的工作区。<br />试试「列出文件」或「用 apply_patch 创建 hello.txt」。</p>
-        </div>
-      {/if}
-      {#each messages as m}
-        {#if m.role === "user"}
-          <div class="msg user"><div class="bubble">{m.text}</div></div>
-        {:else if m.role === "assistant"}
-          <div class="msg assistant"><div class="bubble md">{@html renderMarkdown(m.text)}</div></div>
-        {:else if m.role === "note"}
-          <div class="msg note">{m.text}</div>
-        {:else if m.role === "compact"}
-          <div class="msg compact"><span aria-hidden="true">◇</span>{m.text}</div>
-        {:else if m.role === "reasoning"}
-          <details class="reasoning-run" class:settled={m.settled}>
-            <summary>
-              <span class="reasoning-caret" aria-hidden="true">›</span>
-              <span class="reasoning-label">思考过程</span>
-              <span class="reasoning-status">{m.settled ? "查看" : "思考中…"}</span>
-            </summary>
-            <pre class="reasoning-content">{m.text}</pre>
-          </details>
-        {:else if m.role === "tool_group"}
-          <details class="tool-run" class:settled={m.settled} open={!m.settled}>
-            <summary>
-              <span class="tool-run-caret" aria-hidden="true">›</span>
-              <span class="tool-run-icon" aria-hidden="true">⌘</span>
-              <span class="tool-run-label">已执行 {m.tools.length} 个工具</span>
-              {#if toolGroupFailureCount(m) > 0}
-                <span class="tool-run-status error">{toolGroupFailureCount(m)} 个失败</span>
-              {:else}
-                <span class="tool-run-status">查看明细</span>
-              {/if}
-            </summary>
-            <div class="tool-timeline">
-              {#each m.tools as tool}
-                <details class="tool-event"
-                  class:running={tool.result === undefined}
-                  class:error={tool.result !== undefined && toolOutcome(tool.result) === "err"}
-                >
-                  <summary>
-                    <span class="tool-event-caret" aria-hidden="true">›</span>
-                    <span class="tool-event-icon" aria-hidden="true">⚙</span>
-                    <span class="tname">{tool.name}</span>
-                    {#if tool.result === undefined}
-                      <span class="trunning">运行中</span>
-                    {:else}
-                      <span class="tstatus {toolOutcome(tool.result)}">{toolOutcome(tool.result) === "err" ? "失败" : "完成"}</span>
-                    {/if}
-                  </summary>
-                  {#if tool.args}<pre class="tool-detail tool-args">参数：{tool.args}</pre>{/if}
-                  {#if tool.result !== undefined && toolOutcome(tool.result) !== "empty"}
-                    <pre class="tool-detail tool-result">{tool.result}</pre>
-                  {/if}
-                </details>
-              {/each}
-            </div>
-          </details>
-        {/if}
-      {/each}
-      {#if busy && streamingIdx === null && reasoningIdx === null}
-        <div class="thinking"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span> 思考中…</div>
-      {/if}
-    </div>
+    <ConversationView
+      bind:scroller
+      {messages}
+      {busy}
+      {streamingIdx}
+      {reasoningIdx}
+      {renderMarkdown}
+      {toolGroupFailureCount}
+      {toolOutcome}
+    />
 
-    <footer>
-      <div class="composer-meta">
-        <div class="model-wrap">
-          <button class="model-pill" onclick={() => { modeMenuOpen = false; reasoningMenuOpen = false; modelMenuOpen = !modelMenuOpen; }}
-            disabled={models.length === 0 || busy} title="切换模型">
-            {currentModel || header} ▾
-          </button>
-          {#if modelMenuOpen}
-            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modelMenuOpen = false)}></button>
-            <div class="model-menu" role="menu">
-              {#each models as m}
-                <button class="model-opt" role="menuitemradio" aria-checked={m === currentModel}
-                  onclick={() => selectModel(m)}>
-                  <span class="opt-check">{m === currentModel ? "✓" : ""}</span>
-                  <span class="opt-name">{m}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
-        <div class="reasoning-wrap">
-          <button class="reasoning-pill" onclick={() => { modeMenuOpen = false; modelMenuOpen = false; reasoningMenuOpen = !reasoningMenuOpen; }}
-            disabled={busy} title="切换 DeepSeek 思考模式">
-            思考：{reasoningLabel(reasoningEffort)} ▾
-          </button>
-          {#if reasoningMenuOpen}
-            <button class="menu-backdrop" aria-label="关闭" onclick={() => (reasoningMenuOpen = false)}></button>
-            <div class="model-menu reasoning-menu" role="menu">
-              {#each REASONING_EFFORTS as option}
-                <button class="model-opt" role="menuitemradio" aria-checked={option.id === reasoningEffort}
-                  onclick={() => selectReasoningEffort(option.id)}>
-                  <span class="opt-check">{option.id === reasoningEffort ? "✓" : ""}</span>
-                  <span class="opt-text">
-                    <span class="opt-name">{option.label}</span>
-                    <span class="opt-id">{option.desc}</span>
-                  </span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
-        <div class="approval-wrap">
-          <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"}
-            onclick={() => { modelMenuOpen = false; reasoningMenuOpen = false; modeMenuOpen = !modeMenuOpen; }}
-            title="权限模式（Claude Code 四态）">
-            {modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾
-          </button>
-          {#if modeMenuOpen}
-            <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
-            <div class="approval-menu" role="menu">
-              {#each PERMISSION_MODES as opt}
-                <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === opt.id}
-                  onclick={() => selectMode(opt.id)}>
-                  <span class="opt-check">{permissionMode === opt.id ? "✓" : ""}</span>
-                  <span class="opt-text">
-                    <span class="opt-name">{modeIcon(opt.id)} {opt.label}</span>
-                    <span class="opt-id">{opt.desc}</span>
-                  </span>
-                </button>
-              {/each}
-            </div>
-            {/if}
-        </div>
-        <button
-          class="ws-pill"
-          class:warn={needsWorkspace}
-          onclick={chooseWorkspace}
-          title={needsWorkspace ? "当前在主目录（非项目），点击选择项目目录" : `工作区：${workspace}（点击切换）`}
-        >
-          📁 {needsWorkspace ? "选择项目目录" : wsName || "选择项目目录"}
-        </button>
-        {#if tokIn || tokOut}
-          <span class="usage" title="本会话累计 token（输入 / 输出）{priceIn || priceOut ? ' · 费用按设置的单价估算' : ''}">用量 ↑{fmtTok(tokIn)} ↓{fmtTok(tokOut)}{#if priceIn || priceOut}{" · ≈"}{currencySymbol(priceCurrency)}{fmtCost(cost)}{/if}</span>
-        {/if}
-      </div>
-      {#if queued.length}
-        <div class="attachments">
-          {#each queued as q, i}
-            <span class="chip queued-chip" title={q.shown}>
-              ⏳ {q.shown.split("\n")[0].slice(0, 40)}
-              <button class="chipx" onclick={() => (queued = queued.filter((_, j) => j !== i))} aria-label="Remove">×</button>
-            </span>
-          {/each}
-        </div>
-      {/if}
-      {#if attached.length}
-        <div class="attachments">
-          {#each attached as p}
-            <span class="chip" title={p}>
-              {isImage(p) ? "🖼" : "📄"} {baseName(p)}
-              <button class="chipx" onclick={() => removeAttachment(p)} aria-label="Remove">×</button>
-            </span>
-          {/each}
-        </div>
-      {/if}
-      {#if showSlash && slashMatches.length}
-        <div class="slash-menu" role="listbox" aria-label="命令">
-          {#each slashMatches as c, i}
-            <button class="slash-item" class:on={i === slashIdx} role="option" aria-selected={i === slashIdx}
-              onmouseenter={() => (slashIdx = i)} onclick={() => runSlash(c)}>
-              <span class="slash-cmd">/{c.id}</span>
-              <span class="slash-label">{c.label}</span>
-              <span class="slash-desc">{c.desc}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-      {#if needsWorkspace}
-        <div class="ws-warn">
-          <span>⚠ 当前工作区是主目录（非项目），已暂停对话以免误操作。请选择项目目录。</span>
-          <button class="plain" onclick={chooseWorkspace}>选择项目目录</button>
-        </div>
-      {/if}
-      <div class="composer-row">
-        <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">📎</button>
-        <textarea
-          bind:value={input}
-          onkeydown={onKey}
-          oninput={() => { if (input.startsWith("/")) slashIdx = 0; }}
-          onpaste={handlePaste}
-          placeholder={needsWorkspace ? "请先选择项目目录…" : "给 nanocodex 发消息…（/ 唤出命令，Enter 发送，Shift+Enter 换行，Ctrl+V 粘贴图片）"}
-          rows="2"
-        ></textarea>
-        <button class="stop-btn" class:visible={busy} onclick={stopGeneration}
-          disabled={!busy} title={stopping ? "再次停止" : "停止生成"} aria-label="停止生成" tabindex={busy ? 0 : -1}>■</button>
-        <button onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0) || (busy && queued.length >= 2)}>
-          {busy ? "排队" : "发送"}
-        </button>
-      </div>
-    </footer>
+    <Composer
+      {models}
+      {currentModel}
+      {header}
+      bind:modelMenuOpen
+      {selectModel}
+      {reasoningEffort}
+      bind:reasoningMenuOpen
+      reasoningEfforts={REASONING_EFFORTS}
+      {selectReasoningEffort}
+      {reasoningLabel}
+      {permissionMode}
+      bind:modeMenuOpen
+      permissionModes={PERMISSION_MODES}
+      {selectMode}
+      {modeIcon}
+      {modeLabel}
+      {busy}
+      {workspace}
+      {needsWorkspace}
+      {wsName}
+      {chooseWorkspace}
+      {tokIn}
+      {tokOut}
+      {priceIn}
+      {priceOut}
+      {priceCurrency}
+      {cost}
+      {fmtTok}
+      {currencySymbol}
+      {fmtCost}
+      bind:queued
+      {attached}
+      {isImage}
+      {baseName}
+      {removeAttachment}
+      {showSlash}
+      {slashMatches}
+      bind:slashIdx
+      {runSlash}
+      bind:input
+      {onKey}
+      {handlePaste}
+      {attachFiles}
+      {stopping}
+      {stopGeneration}
+      {send}
+    />
   </section>
 
-  {#if approval}
-    <div class="overlay">
-      <div class="modal">
-        <h3>需要审批</h3>
-        <p class="areason">{approval.reason}</p>
-        <div class="afield"><span>操作</span><code>{approval.command}</code></div>
-        <div class="afield"><span>目录</span><code>{approval.cwd}</code></div>
-        {#if approval.details}
-          <pre class="adetails">{approval.details}</pre>
-        {/if}
-        <div class="abtns">
-          <button class="deny" onclick={() => decide("deny")}>拒绝</button>
-          <button class="plain" onclick={() => decide("always")} title="本次会话始终允许（命令 / 编辑）">始终允许</button>
-          <button class="ok" onclick={() => decide("once")}>批准</button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <InteractionDialogs
+    {approval}
+    {userQuestion}
+    bind:questionAnswer
+    {decide}
+    {answerUserQuestion}
+  />
 
-  {#if userQuestion}
-    <div class="overlay">
-      <div class="modal question-modal">
-        <h3>需要你的选择</h3>
-        <p class="areason">{userQuestion.question}</p>
-        {#if userQuestion.options.length > 0}
-          <div class="question-options">
-            {#each userQuestion.options as option}
-              <button class="plain" onclick={() => answerUserQuestion(option)}>{option}</button>
-            {/each}
-          </div>
-        {/if}
-        {#if userQuestion.allow_free_text}
-          <textarea bind:value={questionAnswer} rows="3" placeholder="输入你的回答"></textarea>
-        {/if}
-        <div class="abtns">
-          <button class="deny" onclick={() => answerUserQuestion(null)}>取消</button>
-          {#if userQuestion.allow_free_text}
-            <button class="ok" disabled={questionAnswer.trim() === ""} onclick={() => answerUserQuestion(questionAnswer)}>提交</button>
-          {/if}
-        </div>
-      </div>
-    </div>
-  {/if}
 
-  {#if rightPanel === "checkpoints"}
-    <aside class="rightpanel">
-      <div class="rp-head"><span class="rp-title">检查点</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
-      <div class="rp-body">
-        <div class="checkpoint-create">
-          <input bind:value={checkpointLabel} placeholder="标签" />
-          <button onclick={saveCheckpoint} disabled={checkpointBusy}>保存</button>
-          <button class="plain" onclick={loadCheckpoints} disabled={checkpointBusy}>刷新</button>
-        </div>
-        <div class="checkpoint-list">
-          {#if checkpoints.length === 0}
-            <p class="emptyline">暂无检查点。</p>
-          {/if}
-          {#each checkpoints as cp}
-            <div class="checkpoint-row">
-              <div class="checkpoint-main">
-                <button class="link-row" onclick={() => toggleCheckpointDetail(cp.id)} title="查看快照文件">
-                  <span class="wt-caret">{cp.id in checkpointFiles ? "▾" : "▸"}</span>
-                  <strong>{cp.label || "（无标签）"}</strong>
-                </button>
-                <code>{cp.id}</code>
-              </div>
-              <div class="checkpoint-meta">
-                <span>{cp.created_at}</span>
-                <span>{cp.files} 个文件</span>
-                <span>跳过 {cp.skipped}</span>
-              </div>
-              <button class="restore" onclick={() => restoreCheckpoint(cp.id)} disabled={busy || checkpointBusy}>
-                恢复
-              </button>
-              {#if cp.id in checkpointFiles}
-                <div class="detail-list">
-                  {#if checkpointFiles[cp.id].length === 0}
-                    <div class="detail-row">（无文件）</div>
-                  {/if}
-                  {#each checkpointFiles[cp.id] as fp}
-                    <div class="detail-row"><code class="dl-path">{fp}</code></div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      </div>
-    </aside>
-  {/if}
+  <WorkspacePanels
+    bind:rightPanel
+    {reloadPanel}
+    bind:checkpointLabel
+    {checkpointBusy}
+    {checkpoints}
+    {checkpointFiles}
+    {saveCheckpoint}
+    {loadCheckpoints}
+    {toggleCheckpointDetail}
+    {restoreCheckpoint}
+    {busy}
+    bind:newBranch
+    {branchBusy}
+    {branches}
+    {branchCommits}
+    {createBranch}
+    {loadBranches}
+    {toggleBranchDetail}
+    {switchBranch}
+    {chooseWorkspace}
+    bind:filePreview
+    {filesPath}
+    {filesEntries}
+    {insertMention}
+    {filesUp}
+    {pickFile}
+    {diffFiles}
+    {diffOpenFiles}
+    {toggleFile}
+    {diffLineClass}
+    bind:historyOpen
+    {sessions}
+    {switchingSession}
+    {resumeSession}
+    {forkSession}
+    {openSessionLog}
+    {openSessionSnapshot}
+    {refreshSessions}
+    bind:newNote
+    bind:newNoteTags
+    {hermesBusy}
+    {notes}
+    {addNote}
+    {consolidateMemory}
+    {loadNotes}
+    {openMemoryFile}
+    {fmtTs}
+  />
 
-  {#if rightPanel === "branches"}
-    <aside class="rightpanel">
-      <div class="rp-head"><span class="rp-title">Git 分支</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
-      <div class="rp-body">
-        <div class="checkpoint-create">
-          <input bind:value={newBranch} placeholder="新分支名" />
-          <button onclick={createBranch} disabled={branchBusy}>新建并切换</button>
-          <button class="plain" onclick={loadBranches} disabled={branchBusy}>刷新</button>
-        </div>
-        <div class="checkpoint-list">
-          {#if branches.length === 0}
-            <p class="emptyline">暂无分支。</p>
-          {/if}
-          {#each branches as b}
-            <div class="checkpoint-row">
-              <div class="checkpoint-main">
-                <button class="link-row" onclick={() => toggleBranchDetail(b.name)} title="查看最近提交">
-                  <span class="wt-caret">{b.name in branchCommits ? "▾" : "▸"}</span>
-                  <strong>{b.current ? "● " : ""}{b.name}</strong>
-                </button>
-              </div>
-              <button class="restore" onclick={() => switchBranch(b.name)} disabled={branchBusy || b.current}>
-                {b.current ? "当前" : "切换"}
-              </button>
-              {#if b.name in branchCommits}
-                <div class="detail-list">
-                  {#if branchCommits[b.name].length === 0}
-                    <div class="detail-row">（无提交）</div>
-                  {/if}
-                  {#each branchCommits[b.name] as c}
-                    <div class="detail-row">
-                      {#if c.hash}<code class="dl-hash">{c.hash}</code>{/if}
-                      <span class="dl-subj">{c.subject}</span>
-                      {#if c.when}<span class="dl-when">{c.when}</span>{/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      </div>
-    </aside>
-  {/if}
-
-  {#if rightPanel === "files"}
-    <aside class="rightpanel">
-      <div class="rp-head"><span class="rp-title">文件</span><span class="rp-actions"><button class="plain" onclick={chooseWorkspace} title="选择任意 C/D 盘的项目目录作为工作区（系统对话框）">打开项目</button><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
-      <div class="rp-body">
-        {#if filePreview}
-          <div class="fx-bar">
-            <button class="plain" onclick={() => (filePreview = null)}>‹ 返回</button>
-            <code class="fx-path" title={filePreview.path}>{filePreview.path}</code>
-            <button class="plain" onclick={() => { if (filePreview) insertMention(filePreview.path); }} title="把 @引用 插入输入框">＋@引用</button>
-          </div>
-          <pre class="fx-preview">{filePreview.content}</pre>
-        {:else}
-          <div class="fx-bar">
-            <button class="plain" onclick={filesUp} disabled={!filesPath}>↑ 上级</button>
-            <code class="fx-path">/{filesPath}</code>
-            <button class="plain" onclick={chooseWorkspace} title="文件面板只浏览当前工作区；点此用系统对话框切到任意 C/D 盘项目">打开其它项目…</button>
-          </div>
-          <div class="wt-list">
-            {#if filesEntries.length === 0}
-              <p class="emptyline">（空）</p>
-            {/if}
-            {#each filesEntries as e}
-              <button class="fx-row" onclick={() => pickFile(e)} title={e.is_dir ? "打开文件夹" : "预览文件"}>
-                <span class="fx-ic">{e.is_dir ? "📁" : "📄"}</span>
-                <span class="fx-name">{e.name}</span>
-                <span class="fx-go">›</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    </aside>
-  {/if}
-
-  {#if rightPanel === "diff"}
-    <aside class="rightpanel">
-      <div class="rp-head"><span class="rp-title">工作区改动</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
-      <div class="rp-body">
-        <div class="wt-list">
-          {#if diffFiles.length === 0}
-            <p class="emptyline">工作区没有改动。</p>
-          {/if}
-          {#each diffFiles as f}
-            <div class="wt-file">
-              <button class="wt-head" onclick={() => toggleFile(f.path)}>
-                <span class="wt-caret">{f.path in diffOpenFiles ? "▾" : "▸"}</span>
-                <span class="wt-kind wt-{f.kind}">{f.kind[0].toUpperCase()}</span>
-                <span class="wt-path">{f.path}</span>
-                <span class="wt-stat">
-                  {#if f.added >= 0}<span class="wt-add">+{f.added}</span>{/if}
-                  {#if f.removed >= 0}<span class="wt-del">-{f.removed}</span>{/if}
-                </span>
-              </button>
-              {#if f.path in diffOpenFiles}
-                <pre class="wt-diff">{#each diffOpenFiles[f.path].split("\n") as ln}<span class="dl {diffLineClass(ln)}">{ln === "" ? " " : ln}</span>{/each}</pre>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      </div>
-    </aside>
-  {/if}
-
-  {#if historyOpen}
-    <div class="overlay">
-      <div class="modal">
-        <h3>会话历史</h3>
-        <div class="checkpoint-list">
-          {#if sessions.length === 0}
-            <p class="emptyline">暂无保存的会话。</p>
-          {/if}
-          {#each sessions as s}
-            <div class="checkpoint-row">
-              <div class="checkpoint-main">
-                <strong>{s.title || "（未命名）"}</strong>
-                <code>{s.snippet}</code>
-              </div>
-              <div class="session-actions">
-                <button class="plain" onclick={() => resumeSession(s.session_id)} disabled={switchingSession || !s.has_snapshot} title="继续此会话">继续</button>
-                <button class="restore" onclick={() => forkSession(s.session_id)} disabled={busy || !s.has_snapshot} title="从此处分叉新会话">⑂ 分叉</button>
-                <button class="plain" onclick={() => openSessionLog(s.session_id)} title="打开会话日志 (JSONL)">日志</button>
-                <button class="plain" onclick={() => openSessionSnapshot(s.session_id)} disabled={!s.has_snapshot} title="打开会话快照">快照</button>
-              </div>
-              <div class="checkpoint-meta">
-                <span>{s.updated_at}</span>
-                <span>{s.user_messages} 问 · {s.assistant_messages} 答 · {s.tool_calls} 工具</span>
-                {#if !s.has_snapshot}<span>（无快照）</span>{/if}
-              </div>
-            </div>
-          {/each}
-        </div>
-        <div class="abtns">
-          <button class="plain" onclick={refreshSessions}>刷新</button>
-          <button class="deny" onclick={() => (historyOpen = false)}>关闭</button>
-        </div>
-      </div>
-    </div>
-  {/if}
-
-  {#if rightPanel === "memory"}
-    <aside class="rightpanel">
-      <div class="rp-head"><span class="rp-title">项目记忆</span><span class="rp-actions"><button class="plain rp-refresh" onclick={reloadPanel}>刷新</button><button class="rp-close" onclick={() => (rightPanel = "")} aria-label="关闭">×</button></span></div>
-      <div class="rp-body">
-        <p class="emptyline">已验证的经验，会作为线索在未来会话中被回忆。（骨架自进化 / Hermes 是另一个功能，见 forge。）</p>
-        <div class="checkpoint-create">
-          <input bind:value={newNote} placeholder="记录一条已验证的经验…" />
-          <input bind:value={newNoteTags} placeholder="标签（逗号分隔）" style="max-width:140px" />
-          <button onclick={addNote} disabled={hermesBusy}>添加</button>
-        </div>
-        <div class="checkpoint-create">
-          <button onclick={consolidateMemory} disabled={hermesBusy}>整理：合并重复</button>
-          <button class="plain" onclick={loadNotes} disabled={hermesBusy}>刷新</button>
-          <button class="plain" onclick={openMemoryFile} title="在编辑器中打开 .ncx/memory/LEARNINGS.md">打开文件</button>
-          <span class="emptyline">{notes.length} 条</span>
-        </div>
-        <div class="checkpoint-list">
-          {#if notes.length === 0}
-            <p class="emptyline">暂无经验。</p>
-          {/if}
-          {#each notes as n}
-            <div class="checkpoint-row">
-              <div class="checkpoint-main">
-                <strong>{n.text}</strong>
-                {#if n.tags.length}<code>{n.tags.join(", ")}</code>{/if}
-              </div>
-              <div class="checkpoint-meta">
-                <span>{fmtTs(n.ts)}</span>
-              </div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    </aside>
-  {/if}
 
   <SettingsModal
     bind:settings
