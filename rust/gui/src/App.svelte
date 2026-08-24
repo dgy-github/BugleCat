@@ -20,6 +20,7 @@
   import { CheckpointController } from "./lib/checkpoint-controller.svelte";
   import { MemoryController } from "./lib/memory-controller.svelte";
   import { PluginController } from "./lib/plugin-controller.svelte";
+  import { SettingsController, type Settings } from "./lib/settings-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -53,67 +54,6 @@
   const questionsBySession = new Map<string, UserQuestion>();
   let questionAnswer = $state("");
 
-  type Settings = {
-    model: string;
-    base_url: string;
-    vl_model: string;
-    vl_base_url: string;
-    sandbox_mode: string;
-    approval_policy: string;
-    reasoning_effort: string;
-    max_iterations: number;
-    max_tool_calls: number;
-    context_edit_enabled: boolean;
-    context_edit_max_chars: number;
-    context_edit_keep_recent_messages: number;
-    context_edit_max_tool_result_chars: number;
-    price_in: number;
-    price_out: number;
-    price_currency: "CNY" | "USD";
-    api_key_masked: string;
-    has_api_key: boolean;
-    vl_api_key_masked: string;
-    has_vl_api_key: boolean;
-    available_models: string[];
-    sandbox_modes: string[];
-    approval_policies: string[];
-  };
-  type ConfigLocation = {
-    config_path: string;
-    config_dir: string;
-  };
-  let settings = $state<Settings | null>(null);
-  let configLocation = $state<ConfigLocation | null>(null);
-  let apiKeyInput = $state("");
-  let vlApiKeyInput = $state("");
-  let saving = $state(false);
-
-  type CatalogModel = {
-    provider_id: string;
-    model_id: string;
-    display_name: string;
-    base_url: string;
-    price_in: number;
-    price_out: number;
-    price_currency: "CNY" | "USD";
-    price_source: "official_direct" | "aggregator";
-    pricing_note: string | null;
-    source_url: string;
-    updated_at: string;
-    context_length?: number | null;
-    direct_available: boolean;
-  };
-  type CatalogProvider = { id: string; name: string; models: CatalogModel[] };
-  type ModelCatalogResponse = { providers: CatalogProvider[]; stale: boolean };
-  let modelCatalog = $state<ModelCatalogResponse | null>(null);
-  let catalogRefreshing = $state(false);
-  let presetSaving = $state("");
-  const officialProviders = $derived(
-    modelCatalog?.providers.filter((provider) => provider.id !== "openrouter") ?? [],
-  );
-  const openRouterProvider = $derived(
-    modelCatalog?.providers.find((provider) => provider.id === "openrouter") ?? null,
-  );
 
 
 
@@ -132,6 +72,12 @@
   );
   const memoryController = new MemoryController((text) => messages.push({ role: "note", text }));
   const pluginController = new PluginController((text) => messages.push({ role: "note", text }));
+  const settingsController = new SettingsController(
+    pluginController,
+    (text) => messages.push({ role: "note", text }),
+    (model, availableModels) => { currentModel = model; models = availableModels; },
+    (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
+  );
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
@@ -155,17 +101,8 @@
   const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
   const currencySymbol = (currency: "CNY" | "USD") => currency === "USD" ? "$" : "¥";
   const currencyName = (currency: "CNY" | "USD") => currency === "USD" ? "美元" : "人民币";
-  const priceSourceName = (source: CatalogModel["price_source"]) =>
+  const priceSourceName = (source: "official_direct" | "aggregator") =>
     source === "official_direct" ? "厂商官方直连价" : "OpenRouter 聚合渠道价";
-  function currentPriceSourceName() {
-    if (!settings) return "";
-    const current = modelCatalog?.providers
-      .flatMap((provider) => provider.models)
-      .find((model) => model.model_id === settings?.model && model.base_url === settings?.base_url);
-    return current
-      ? priceSourceName(current.price_source)
-      : "手动设置的价格，程序无法验证其是否为厂商官方价";
-  }
 
   // ── Quiet, grouped tool activity ─────────────────────────────────────────
   // Routine command lines stay out of the conversation. Every tool stays
@@ -698,23 +635,8 @@
     }
   }
 
-  async function openSettings() {
-    try {
-      const [loadedSettings, loadedLocation, loadedCatalog] = await Promise.all([
-        invoke<Settings>("get_settings"),
-        invoke<ConfigLocation>("get_config_location"),
-        invoke<ModelCatalogResponse>("get_model_catalog"),
-        pluginController.load(),
-      ]);
-      settings = loadedSettings;
-      configLocation = loadedLocation;
-      modelCatalog = loadedCatalog;
-      apiKeyInput = "";
-      vlApiKeyInput = "";
-    } catch (e) {
-      messages.push({ role: "note", text: `设置加载失败：${e}` });
-    }
-  }
+  const openSettings = settingsController.open;
+
 
   function stashSessionQueue(sessionId: string) {
     if (sessionId) {
@@ -742,95 +664,6 @@
     messages = cloneMessages(sessionMessages.get(sessionId) || []);
   }
 
-  async function refreshOpenRouterModels() {
-    catalogRefreshing = true;
-    try {
-      modelCatalog = await invoke<ModelCatalogResponse>("refresh_openrouter_models");
-    } catch (e) {
-      messages.push({ role: "note", text: `OpenRouter 模型目录刷新失败：${e}` });
-    }
-    catalogRefreshing = false;
-  }
-
-  async function applyModelPreset(provider: CatalogProvider, model: CatalogModel) {
-    if (!settings) return;
-    presetSaving = `${provider.id}/${model.model_id}`;
-    try {
-      const selected = await invoke<CatalogModel>("apply_model_preset", {
-        providerId: provider.id,
-        modelId: model.model_id,
-      });
-      settings.model = selected.model_id;
-      settings.base_url = selected.base_url;
-      settings.price_in = selected.price_in;
-      settings.price_out = selected.price_out;
-      settings.price_currency = selected.price_currency;
-      settings.available_models = provider.models.map((item) => item.model_id);
-      currentModel = selected.model_id;
-      models = settings.available_models;
-      usage.setPrice(selected.price_in, selected.price_out, selected.price_currency);
-    } catch (e) {
-      messages.push({ role: "note", text: `应用模型预设失败：${e}` });
-    }
-    presetSaving = "";
-  }
-
-  function openPriceSource(url: string) {
-    invoke("open_url", { url }).catch((e) =>
-      messages.push({ role: "note", text: `打开价格来源失败：${e}` }),
-    );
-  }
-
-  async function openConfigFile() {
-    try {
-      await invoke("open_config_file");
-      configLocation = await invoke<ConfigLocation>("get_config_location");
-    } catch (e) {
-      messages.push({ role: "note", text: `打开配置失败：${e}` });
-    }
-  }
-
-  async function openConfigDir() {
-    try {
-      await invoke("open_config_dir");
-      configLocation = await invoke<ConfigLocation>("get_config_location");
-    } catch (e) {
-      messages.push({ role: "note", text: `打开配置文件夹失败：${e}` });
-    }
-  }
-
-  async function saveSettings() {
-    if (!settings) return;
-    saving = true;
-    const updates: Record<string, string> = {
-      model: settings.model,
-      base_url: settings.base_url,
-      vl_model: settings.vl_model,
-      vl_base_url: settings.vl_base_url,
-      reasoning_effort: settings.reasoning_effort,
-      max_iterations: String(settings.max_iterations),
-      max_tool_calls: String(settings.max_tool_calls),
-      context_edit_enabled: String(settings.context_edit_enabled),
-      context_edit_max_chars: String(settings.context_edit_max_chars),
-      context_edit_keep_recent_messages: String(settings.context_edit_keep_recent_messages),
-      context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),
-      price_in: String(settings.price_in),
-      price_out: String(settings.price_out),
-      price_currency: settings.price_currency,
-    };
-    if (apiKeyInput.trim()) updates.api_key = apiKeyInput.trim();
-    if (vlApiKeyInput.trim()) updates.vl_api_key = vlApiKeyInput.trim();
-    try {
-      await invoke("save_settings", { updates });
-      usage.setPrice(Number(settings.price_in), Number(settings.price_out), settings.price_currency);
-      settings = null;
-      apiKeyInput = "";
-      vlApiKeyInput = "";
-    } catch (e) {
-      messages.push({ role: "note", text: `保存设置失败：${e}` });
-    }
-    saving = false;
-  }
 
   async function openCheckpoints() {
     if (rightPanel === "checkpoints") { rightPanel = ""; return; }
@@ -1339,16 +1172,16 @@
 
 
   <SettingsModal
-    bind:settings
-    bind:apiKeyInput
-    bind:vlApiKeyInput
-    {configLocation}
-    {modelCatalog}
-    {officialProviders}
-    {openRouterProvider}
-    {catalogRefreshing}
-    {presetSaving}
-    {saving}
+    bind:settings={settingsController.settings}
+    bind:apiKeyInput={settingsController.apiKeyInput}
+    bind:vlApiKeyInput={settingsController.vlApiKeyInput}
+    configLocation={settingsController.configLocation}
+    modelCatalog={settingsController.catalog}
+    officialProviders={settingsController.officialProviders}
+    openRouterProvider={settingsController.openRouterProvider}
+    catalogRefreshing={settingsController.catalogRefreshing}
+    presetSaving={settingsController.presetSaving}
+    saving={settingsController.saving}
     harnessDiagnostics={pluginController.diagnostics}
     externalPlugins={pluginController.externalPlugins}
     codexPlugins={pluginController.codexPlugins}
@@ -1357,12 +1190,12 @@
     {currencySymbol}
     {currencyName}
     {priceSourceName}
-    {currentPriceSourceName}
-    {openConfigFile}
-    {openConfigDir}
-    {applyModelPreset}
-    {openPriceSource}
-    {refreshOpenRouterModels}
+    currentPriceSourceName={settingsController.currentPriceSourceName}
+    openConfigFile={settingsController.openConfigFile}
+    openConfigDir={settingsController.openConfigDir}
+    applyModelPreset={settingsController.applyPreset}
+    openPriceSource={settingsController.openPriceSource}
+    refreshOpenRouterModels={settingsController.refreshOpenRouter}
     addExternalPlugin={pluginController.addExternal}
     upgradeExternalPlugin={pluginController.upgradeExternal}
     toggleExternalPlugin={pluginController.toggleExternal}
@@ -1371,7 +1204,7 @@
     toggleCodexPlugin={pluginController.toggleCodex}
     removeCodexPlugin={pluginController.removeCodex}
     installMarketplacePlugin={pluginController.installMarketplace}
-    {saveSettings}
+    saveSettings={settingsController.save}
   />
   </div>
 </main>
