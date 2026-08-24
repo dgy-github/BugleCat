@@ -22,8 +22,9 @@ use ncx_config::{
     VALID_SANDBOX_MODES,
 };
 use ncx_core::{
-    custom_command_prompt, list_custom_commands, CheckpointMeta, CheckpointStore, MemoryStore,
-    RestoreReport, SessionIndex,
+    custom_command_prompt, list_custom_commands, AgentRuntimeProfile, CheckpointMeta,
+    CheckpointStore, ExternalPluginCatalog, ExternalPluginRecord, HarnessDiagnostics,
+    HarnessRuntimeBuilder, MemoryStore, RestoreReport, SessionIndex, ToolContext,
 };
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -1313,6 +1314,42 @@ fn expand_custom_command(slash: String, arg: String) -> Result<String, String> {
     }
 }
 
+fn configured_workspace() -> Result<(Config, PathBuf), String> {
+    let cfg = load_config(Overrides { workspace: std::env::current_dir().ok(), ..Default::default() })
+        .map_err(|e| e.to_string())?;
+    let workspace = cfg.workspace.clone();
+    Ok((cfg, workspace))
+}
+
+#[tauri::command]
+fn get_harness_diagnostics() -> Result<HarnessDiagnostics, String> {
+    let (cfg, workspace) = configured_workspace()?;
+    let profile = AgentRuntimeProfile::from_config(&cfg);
+    let context = profile.apply_tool_context(ToolContext::new(workspace.clone(), profile.sandbox_policy(&workspace)));
+    Ok(HarnessRuntimeBuilder::configured(&workspace)?.build(context).harness_diagnostics())
+}
+
+fn external_plugin_catalog() -> Result<ExternalPluginCatalog, String> {
+    let (_, workspace) = configured_workspace()?;
+    Ok(ExternalPluginCatalog::new(workspace.join(".ncx").join("plugins")))
+}
+
+#[tauri::command]
+fn list_external_plugins() -> Result<Vec<ExternalPluginRecord>, String> {
+    external_plugin_catalog()?.discover()
+}
+
+#[tauri::command]
+fn install_external_plugin(source: String, upgrade: bool) -> Result<ExternalPluginRecord, String> {
+    let catalog = external_plugin_catalog()?;
+    if upgrade { catalog.upgrade(Path::new(&source)) } else { catalog.install(Path::new(&source)) }
+}
+
+#[tauri::command]
+fn set_external_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
+    external_plugin_catalog()?.set_enabled(&id, enabled)
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -1389,6 +1426,10 @@ pub fn run() {
             open_session_snapshot,
             get_custom_commands,
             expand_custom_command,
+            get_harness_diagnostics,
+            list_external_plugins,
+            install_external_plugin,
+            set_external_plugin_enabled,
             memory_list,
             memory_consolidate,
             memory_add,

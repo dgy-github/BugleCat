@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::{
-    BundleSpec, CompactionPlugin, ContextPlugin, CoreToolsPlugin, HarnessComposition,
-    HarnessPlugin, InteractionPlugin, LlmProviderPlugin, MemoryPlugin, PluginInstallReport,
-    PluginRegistry, PolicyPlugin, ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin,
-    SessionToolsPlugin, WorkspaceToolsPlugin,
+    AttachmentPlugin, BundleSpec, CompactionPlugin, ContextPlugin, CoreToolsPlugin,
+    CostTelemetryPlugin, HarnessComposition, HarnessPlugin, InteractionPlugin, LlmProviderPlugin,
+    McpPlugin, MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
+    ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 use crate::tools::{ToolContext, ToolRegistry};
 
@@ -112,6 +112,7 @@ fn builtin_composition(profile: &str) -> Result<HarnessComposition, String> {
             "coding" => include_str!("../../../../harness/profiles/coding.toml"),
             "readonly" => include_str!("../../../../harness/profiles/readonly.toml"),
             "minimal" => include_str!("../../../../harness/profiles/minimal.toml"),
+            "headless" => include_str!("../../../../harness/profiles/headless.toml"),
             _ => return Err(format!("unknown built-in Harness profile '{profile}'")),
         },
     )?;
@@ -137,6 +138,10 @@ fn builtin_plugin(id: &str) -> Option<Rc<dyn HarnessPlugin>> {
         "ncx.context" => Some(Rc::new(ContextPlugin)),
         "ncx.memory" => Some(Rc::new(MemoryPlugin)),
         "ncx.compaction" => Some(Rc::new(CompactionPlugin)),
+        "ncx.mcp" => Some(Rc::new(McpPlugin)),
+        "ncx.attachment" => Some(Rc::new(AttachmentPlugin)),
+        "ncx.media" => Some(Rc::new(MediaPlugin)),
+        "ncx.cost-telemetry" => Some(Rc::new(CostTelemetryPlugin)),
         _ => None,
     }
 }
@@ -148,6 +153,7 @@ fn embedded_bundle(id: &str) -> Result<BundleSpec, String> {
         "workspace" => include_str!("../../../../harness/bundles/workspace.toml"),
         "process" => include_str!("../../../../harness/bundles/process.toml"),
         "session" => include_str!("../../../../harness/bundles/session.toml"),
+        "media" => include_str!("../../../../harness/bundles/media.toml"),
         _ => return Err(format!("unknown built-in Harness bundle '{id}'")),
     };
     parse_embedded(id, text)
@@ -186,11 +192,15 @@ mod tests {
                 "ncx.search",
                 "ncx.workspace",
                 "ncx.process",
-                "ncx.session"
+                "ncx.session",
+                "ncx.mcp",
+                "ncx.attachment",
+                "ncx.media",
+                "ncx.cost-telemetry"
             ]
         );
         let (_, report) = builder.build_with_report(context());
-        assert_eq!(report.installed.len(), 11);
+        assert_eq!(report.installed.len(), 15);
     }
 
     #[test]
@@ -231,6 +241,32 @@ mod tests {
                 "ncx.workspace",
             ]
         );
+        let headless = HarnessRuntimeBuilder::builtin("headless").unwrap();
+        assert!(!headless.plugin_ids().any(|id| id == "ncx.media"));
+        assert!(headless.plugin_ids().any(|id| id == "ncx.process"));
+    }
+
+    #[test]
+    fn full_minimal_and_headless_are_real_isolated_compositions() {
+        let full = HarnessRuntimeBuilder::builtin("full")
+            .unwrap()
+            .build(context());
+        let minimal = HarnessRuntimeBuilder::builtin("minimal")
+            .unwrap()
+            .build(context());
+        let headless = HarnessRuntimeBuilder::builtin("headless")
+            .unwrap()
+            .build(context());
+        let full_diag = full.harness_diagnostics();
+        let minimal_diag = minimal.harness_diagnostics();
+        let headless_diag = headless.harness_diagnostics();
+        assert!(
+            full_diag.media && full_diag.attachment && full_diag.cost_telemetry && full_diag.mcp
+        );
+        assert!(!minimal_diag.media && !minimal_diag.mcp && !minimal_diag.attachment);
+        assert!(!headless_diag.media && !headless_diag.mcp && !headless_diag.attachment);
+        assert!(full.schemas().len() > minimal.schemas().len());
+        assert!(headless.schemas().len() > minimal.schemas().len());
     }
 
     #[test]

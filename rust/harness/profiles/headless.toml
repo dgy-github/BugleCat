@@ -1,0 +1,2 @@
+name = "headless"
+bundles = ["base", "search", "workspace", "process", "session"]

@@ -469,3 +469,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - M4 增量：`AgentLoop` 现在同时消费 `policy` 与 `interaction` 服务；`runtime_profile()` 优先使用 Harness 策略服务生成有效权限快照，并公开交互服务是否存在，旧的无插件单元测试仍回退到 `ToolContext`。全量 `ncx-core` 211 项测试通过。
 - `dc7a915` 补充 AgentLoop 对 `context` 服务的持有与诊断接口；Context/Memory/Policy/Interaction/LLM/Compaction 服务均已有运行时消费者或能力查询入口，分支已推送。
 - 最终阶段审计：`cargo test --workspace --quiet` 全部通过（包含 ncx-core 211 项及其他 workspace crate）；`cargo check -p ncx-cli` 与 GUI Tauri `cargo check` 通过。CLI 测试所需的视觉 Provider 兼容导入已恢复，未改变运行时装配路径。
+
+## 2026-08-24 DeepSeek Harness M5-M6
+- M5 新增 `ncx.mcp`、`ncx.attachment`、`ncx.media`、`ncx.cost-telemetry` 四个内置插件和类型化服务。MCP 的连接/重载会同步服务器与工具数；CLI/GUI 附件读取前受插件格式/大小策略约束；AgentLoop 通过 media 服务控制视觉路由，并可通过 cost 服务估算本轮费用。
+- `full` Profile 新增 media Bundle；`minimal`、`headless` 不加载媒体/MCP/费用能力。三种 Profile 已有真实装配隔离测试。
+- GUI 设置页新增 Harness 服务诊断、工作区外部插件列表、安装、升级、启用和停用入口。
+- M6 新增工作区外部插件 Catalog：`plugin.toml` 发现、目录复制安装、版本递增升级、启停标记和进程启动。仅允许协议 v1、目录内相对命令；拒绝路径穿越、符号链接和 DLL/SO/DYLIB，外部实现使用清空环境的独立子进程和管道通信。
+- 最终验证：`cargo test --workspace --quiet` 全部通过（`ncx-core` 215 项）；CLI 34 项、插件/外部目录/组合测试均通过；CLI/GUI Tauri check 与 Vite production build 通过。MSVC 桌面发布构建产出 `ncx-gui.exe` 和 `bundle/nsis/nanocodex_0.1.0_x64-setup.exe`。仓库默认 `tauri:build` 指向未安装的 GNU target，本轮改用已安装的 `x86_64-pc-windows-msvc` 成功验证；严格 Clippy 仅被未触及的 `ncx-tools/src/text_encoding.rs` 旧 lint 阻挡。

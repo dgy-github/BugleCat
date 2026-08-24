@@ -758,6 +758,10 @@ fn spawn_turn_worker(
                     .all(|message| message.get("role").and_then(Value::as_str) != Some("user"));
                 let expanded = expand_file_mentions(&text, &workspace);
                 save_auto_checkpoint(&workspace, &expanded);
+                if let Err(message) = validate_image_attachments(&agent.tools, &images) {
+                    emit(&app, UiEvent::Error { session_id: session_id.clone(), message });
+                    return;
+                }
                 let user_input = match build_image_user_input(&expanded, &images) {
                     Ok(value) => value,
                     Err(message) => {
@@ -1324,6 +1328,25 @@ fn clipped_label(text: &str, limit: usize) -> String {
 }
 
 // ── vision attachments (ported from the CLI) ──────────────────────────────────
+
+fn validate_image_attachments(tools: &ncx_core::ToolRegistry, images: &[String]) -> Result<(), String> {
+    if images.is_empty() { return Ok(()); }
+    let service = tools
+        .service::<ncx_core::AttachmentServiceDescriptor>("attachment")
+        .ok_or_else(|| "当前 Harness Profile 未启用附件插件".to_string())?;
+    for value in images {
+        let path = std::path::Path::new(value);
+        let extension = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase();
+        if !service.extensions.iter().any(|allowed| allowed == &extension) {
+            return Err(format!("附件格式 .{extension} 未被当前插件允许"));
+        }
+        let size = std::fs::metadata(path).map_err(|e| format!("无法读取附件 {value}: {e}"))?.len();
+        if size > service.max_bytes {
+            return Err(format!("附件 {value} 超过 {} 字节限制", service.max_bytes));
+        }
+    }
+    Ok(())
+}
 
 /// Build the user turn input. No images -> plain text; with image paths ->
 /// an OpenAI multimodal `content` array (text block + one base64 `image_url`

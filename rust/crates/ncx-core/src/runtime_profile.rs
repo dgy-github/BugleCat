@@ -189,12 +189,27 @@ pub fn install_llm_provider_factory(
     cfg: Config,
     model: impl Into<String>,
 ) {
+    let pricing = crate::plugins::CostTelemetryServiceDescriptor {
+        currency: cfg.price_currency.clone(),
+        input_per_million: cfg.price_in,
+        output_per_million: cfg.price_out,
+        telemetry_enabled: true,
+    };
     tools.replace_service(
         "llm.factory",
         Rc::new(LlmProviderFactoryHandle(Rc::new(
             ConfiguredLlmProviderFactory::new(cfg, model),
         ))),
     );
+    if tools
+        .service::<crate::plugins::CostTelemetryService>("cost.telemetry")
+        .is_some()
+    {
+        tools.replace_service(
+            "cost.telemetry",
+            Rc::new(crate::plugins::CostTelemetryService::new(pricing)),
+        );
+    }
 }
 
 fn positive_usize(value: i64, fallback: usize) -> usize {

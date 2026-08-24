@@ -297,6 +297,40 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    pub fn harness_diagnostics(&self) -> crate::plugins::HarnessDiagnostics {
+        crate::plugins::HarnessDiagnostics {
+            llm: self
+                .service::<crate::plugins::LlmServiceDescriptor>("llm.provider")
+                .is_some(),
+            interaction: self
+                .service::<crate::plugins::InteractionService>("interaction")
+                .is_some(),
+            policy: self
+                .service::<crate::plugins::PolicyService>("policy")
+                .is_some(),
+            context: self
+                .service::<crate::plugins::ContextServiceDescriptor>("context")
+                .is_some(),
+            memory: self
+                .service::<crate::plugins::MemoryServiceDescriptor>("memory")
+                .is_some(),
+            compaction: self
+                .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
+                .is_some(),
+            mcp: self
+                .service::<crate::plugins::McpServiceDescriptor>("mcp")
+                .is_some(),
+            attachment: self
+                .service::<crate::plugins::AttachmentServiceDescriptor>("attachment")
+                .is_some(),
+            media: self
+                .service::<crate::plugins::MediaServiceDescriptor>("media")
+                .is_some(),
+            cost_telemetry: self
+                .service::<crate::plugins::CostTelemetryService>("cost.telemetry")
+                .is_some(),
+        }
+    }
     /// Replace a runtime capability service after plugin composition has run.
     /// This is used for frontend-owned implementations such as configured LLMs.
     pub fn replace_service<T: std::any::Any>(&mut self, name: &str, service: Rc<T>) {

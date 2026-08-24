@@ -102,6 +102,8 @@ pub struct AgentLoop {
     policy_service: Option<Rc<crate::plugins::PolicyService>>,
     interaction_service: Option<Rc<crate::plugins::InteractionService>>,
     context_service: Option<Rc<crate::plugins::ContextServiceDescriptor>>,
+    media_service: Option<Rc<crate::plugins::MediaServiceDescriptor>>,
+    cost_service: Option<Rc<crate::plugins::CostTelemetryService>>,
 }
 
 impl AgentLoop {
@@ -122,6 +124,8 @@ impl AgentLoop {
         let interaction_service =
             tools.service::<crate::plugins::InteractionService>("interaction");
         let context_service = tools.service::<crate::plugins::ContextServiceDescriptor>("context");
+        let media_service = tools.service::<crate::plugins::MediaServiceDescriptor>("media");
+        let cost_service = tools.service::<crate::plugins::CostTelemetryService>("cost.telemetry");
         AgentLoop {
             provider,
             vision_provider: None,
@@ -141,6 +145,8 @@ impl AgentLoop {
             policy_service,
             interaction_service,
             context_service,
+            media_service,
+            cost_service,
         }
     }
 
@@ -204,6 +210,16 @@ impl AgentLoop {
         self.context_service.as_deref()
     }
 
+    pub fn estimated_cost(&self, result: &TurnResult) -> Option<(String, f64)> {
+        let service = self.cost_service.as_ref()?;
+        let prompt = result.usage.get("prompt_tokens").copied().unwrap_or(0);
+        let completion = result.usage.get("completion_tokens").copied().unwrap_or(0);
+        Some((
+            service.config.currency.clone(),
+            service.config.estimate(prompt, completion),
+        ))
+    }
+
     /// Snapshot the normalized controls applied by a frontend assembly path.
     pub fn runtime_profile(&self) -> AgentRuntimeProfile {
         let permissions = self.policy_service.as_ref().map(|policy| {
@@ -263,10 +279,15 @@ impl AgentLoop {
     fn active_provider(&self) -> &dyn Provider {
         if self.use_vision_this_turn {
             let supports_vision = self
-                .llm_capabilities
+                .media_service
                 .as_ref()
-                .map(|caps| caps.supports_vision)
-                .unwrap_or(true);
+                .map(|m| m.vision)
+                .unwrap_or(true)
+                && self
+                    .llm_capabilities
+                    .as_ref()
+                    .map(|caps| caps.supports_vision)
+                    .unwrap_or(true);
             if supports_vision {
                 if let Some(v) = &self.vision_provider {
                     if trace::enabled() {
@@ -356,6 +377,9 @@ impl AgentLoop {
         let result = self.apply_stop_hook(result, &mut sink).await;
         self.tools.ctx.active_turn_id.set(None);
         self.event_sink = sink;
+        if let Some(service) = &self.cost_service {
+            service.record(&result.usage);
+        }
         result
     }
 

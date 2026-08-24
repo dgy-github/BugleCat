@@ -1,0 +1,19 @@
+id = "media"
+
+[[plugins]]
+id = "mcp"
+plugin = "ncx.mcp"
+[plugins.config]
+enabled = false
+
+[[plugins]]
+id = "attachment"
+plugin = "ncx.attachment"
+
+[[plugins]]
+id = "media"
+plugin = "ncx.media"
+
+[[plugins]]
+id = "cost-telemetry"
+plugin = "ncx.cost-telemetry"

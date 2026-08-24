@@ -1,2 +1,2 @@
 name = "full"
-bundles = ["base", "search", "workspace", "process", "session"]
+bundles = ["base", "search", "workspace", "process", "session", "media"]

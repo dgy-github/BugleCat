@@ -25,10 +25,9 @@ use std::rc::Rc;
 use ncx_core::{
     custom_command_prompt, discover_skills, expand_file_mentions, install_llm_provider_factory,
     list_custom_commands, load_project_instructions, new_session_id, prepare_mcp_server_tools,
-    skills_index_block, vision_provider_from_config, AgentLoop, AgentRuntimeProfile, CheckpointMeta,
-    CheckpointStore, Genome,
-    HarnessRuntimeBuilder, MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session,
-    SessionIndex, SessionSummary, Tool, ToolContext, TurnResult,
+    skills_index_block, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome,
+    HarnessRuntimeBuilder, McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig,
+    PromptAssembler, Session, SessionIndex, SessionSummary, Tool, ToolContext, TurnResult,
 };
 use serde_json::{json, Value};
 
@@ -216,6 +215,14 @@ async fn run(args: Args) -> i32 {
             Ok(prepared) => match tools.replace_tools(&[], prepared) {
                 Ok(names) => {
                     mcp_tool_names = names;
+                    tools.replace_service(
+                        "mcp",
+                        Rc::new(McpServiceDescriptor {
+                            enabled: true,
+                            configured_servers: servers.len(),
+                            active_tools: mcp_tool_names.len(),
+                        }),
+                    );
                     eprintln!(
                         "mcp: {} server(s), {} tool(s) registered",
                         servers.len(),
@@ -256,6 +263,10 @@ async fn run(args: Args) -> i32 {
                 eprintln!("ncx: --image is ignored with --orchestrate (text-only path).");
             }
             return run_orchestrated(cfg, &expanded).await;
+        }
+        if let Err(error) = validate_attachments(&agent.tools, &args.images) {
+            eprintln!("ncx: {error}");
+            return 1;
         }
         let user_input = match build_image_user_input(&expanded, &args.images) {
             Ok(v) => v,
@@ -408,6 +419,10 @@ async fn run_one_turn(
     let (text, images) = split_inline_images(prompt);
     let expanded = expand_file_mentions(&text, &cfg.workspace);
     checkpoint_before_turn(&cfg.workspace, &expanded);
+    if let Err(error) = validate_attachments(&agent.tools, &images) {
+        eprintln!("ncx: {error}");
+        return;
+    }
     let user_input = match build_image_user_input(&expanded, &images) {
         Ok(v) => v,
         Err(e) => {
@@ -545,6 +560,14 @@ async fn reload_mcp_tools(agent: &mut AgentLoop, current_names: &mut Vec<String>
         Ok(new_names) => {
             let new_count = new_names.len();
             *current_names = new_names;
+            agent.tools.replace_service(
+                "mcp",
+                Rc::new(McpServiceDescriptor {
+                    enabled: true,
+                    configured_servers: server_count,
+                    active_tools: new_count,
+                }),
+            );
             format!(
                 "MCP reload complete: {server_count} server(s), {new_count} tool(s) active; replaced {old_count}."
             )
@@ -1297,6 +1320,40 @@ fn build_image_user_input(text: &str, images: &[PathBuf]) -> Result<serde_json::
     Ok(serde_json::Value::Array(content))
 }
 
+fn validate_attachments(tools: &ncx_core::ToolRegistry, images: &[PathBuf]) -> Result<(), String> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    let service = tools
+        .service::<ncx_core::AttachmentServiceDescriptor>("attachment")
+        .ok_or_else(|| "当前 Harness Profile 未启用附件插件".to_string())?;
+    for path in images {
+        let extension = path
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !service
+            .extensions
+            .iter()
+            .any(|allowed| allowed == &extension)
+        {
+            return Err(format!("附件格式 .{extension} 未被当前插件允许"));
+        }
+        let size = std::fs::metadata(path)
+            .map_err(|e| format!("cannot read image {}: {e}", path.display()))?
+            .len();
+        if size > service.max_bytes {
+            return Err(format!(
+                "附件 {} 超过 {} 字节限制",
+                path.display(),
+                service.max_bytes
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Guess an image MIME type from the file extension (defaults to PNG).
 fn image_mime(path: &Path) -> &'static str {
     match path
@@ -1341,6 +1398,7 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ncx_core::vision_provider_from_config;
 
     #[test]
     fn help_lists_all_commands() {

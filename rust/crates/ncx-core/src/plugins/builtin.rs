@@ -1,9 +1,10 @@
 //! Built-in capability plugins composed by the default nanocodex runtime.
 
 use crate::plugins::{
-    context_descriptor, CompactionServiceDescriptor, HarnessPlugin, InteractionService,
-    LlmServiceDescriptor, MemoryServiceDescriptor, PluginCapability, PluginHost, PluginManifest,
-    PolicyService,
+    context_descriptor, AttachmentServiceDescriptor, CompactionServiceDescriptor,
+    CostTelemetryService, CostTelemetryServiceDescriptor, HarnessPlugin, InteractionService,
+    LlmServiceDescriptor, McpServiceDescriptor, MediaServiceDescriptor, MemoryServiceDescriptor,
+    PluginCapability, PluginHost, PluginManifest, PolicyService,
 };
 use crate::tools::{
     ApplyPatchTool, RememberTool, ShellTool, SkillTool, ToolSearchTool, UpdatePlanTool,
@@ -181,6 +182,133 @@ impl HarnessPlugin for CompactionPlugin {
         host.provide(
             "compaction",
             Rc::new(CompactionServiceDescriptor { enabled: true }),
+        )
+    }
+}
+
+pub struct McpPlugin;
+impl HarnessPlugin for McpPlugin {
+    fn id(&self) -> &str {
+        "ncx.mcp"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.mcp", "MCP", PluginCapability::Mcp)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "mcp",
+            Rc::new(McpServiceDescriptor {
+                enabled: config
+                    .get("enabled")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(false),
+                configured_servers: config
+                    .get("configured_servers")
+                    .and_then(toml::Value::as_integer)
+                    .unwrap_or(0)
+                    .max(0) as usize,
+                active_tools: 0,
+            }),
+        )
+    }
+}
+
+pub struct AttachmentPlugin;
+impl HarnessPlugin for AttachmentPlugin {
+    fn id(&self) -> &str {
+        "ncx.attachment"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.attachment",
+            "Attachments",
+            PluginCapability::Attachment,
+        )
+    }
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String> {
+        let max_bytes = config
+            .get("max_bytes")
+            .and_then(toml::Value::as_integer)
+            .unwrap_or(20 * 1024 * 1024)
+            .max(1) as u64;
+        host.provide(
+            "attachment",
+            Rc::new(AttachmentServiceDescriptor {
+                max_bytes,
+                extensions: [
+                    "png", "jpg", "jpeg", "gif", "webp", "bmp", "pdf", "txt", "md", "docx", "xlsx",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            }),
+        )
+    }
+}
+
+pub struct MediaPlugin;
+impl HarnessPlugin for MediaPlugin {
+    fn id(&self) -> &str {
+        "ncx.media"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new("ncx.media", "Media", PluginCapability::Media)
+    }
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "media",
+            Rc::new(MediaServiceDescriptor {
+                vision: config
+                    .get("vision")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(true),
+                image_generation: config
+                    .get("image_generation")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(true),
+                video_generation: config
+                    .get("video_generation")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(true),
+            }),
+        )
+    }
+}
+
+pub struct CostTelemetryPlugin;
+impl HarnessPlugin for CostTelemetryPlugin {
+    fn id(&self) -> &str {
+        "ncx.cost-telemetry"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.cost-telemetry",
+            "Cost & Telemetry",
+            PluginCapability::CostTelemetry,
+        )
+    }
+    fn install(&self, host: &mut PluginHost<'_>, config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "cost.telemetry",
+            Rc::new(CostTelemetryService::new(CostTelemetryServiceDescriptor {
+                currency: config
+                    .get("currency")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or("CNY")
+                    .to_string(),
+                input_per_million: config
+                    .get("input_per_million")
+                    .and_then(toml::Value::as_float)
+                    .unwrap_or(0.0),
+                output_per_million: config
+                    .get("output_per_million")
+                    .and_then(toml::Value::as_float)
+                    .unwrap_or(0.0),
+                telemetry_enabled: config
+                    .get("telemetry_enabled")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(true),
+            })),
         )
     }
 }

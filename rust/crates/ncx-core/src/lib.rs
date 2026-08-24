@@ -62,13 +62,16 @@ pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
 pub use plugins::{
-    BuiltinToolsPlugin, CompactionPlugin, CompactionServiceDescriptor, ContextPlugin,
-    ContextServiceDescriptor, CoreToolsPlugin, HarnessPlugin, HarnessRuntimeBuilder,
-    InteractionPlugin, InteractionService, LlmProviderFactory, LlmProviderFactoryHandle,
-    LlmProviderPlugin, LlmServiceDescriptor, MemoryPlugin, MemoryServiceDescriptor,
-    PluginCapability, PluginHost, PluginInstallReport, PluginManifest, PluginRegistry,
-    PolicyPlugin, PolicyService, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,
-    WorkspaceToolsPlugin,
+    AttachmentPlugin, AttachmentServiceDescriptor, BuiltinToolsPlugin, CompactionPlugin,
+    CompactionServiceDescriptor, ContextPlugin, ContextServiceDescriptor, CoreToolsPlugin,
+    CostTelemetryPlugin, CostTelemetryService, CostTelemetryServiceDescriptor,
+    CostTelemetrySnapshot, ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord,
+    HarnessDiagnostics, HarnessPlugin, HarnessRuntimeBuilder, InteractionPlugin,
+    InteractionService, LlmProviderFactory, LlmProviderFactoryHandle, LlmProviderPlugin,
+    LlmServiceDescriptor, McpPlugin, McpServiceDescriptor, MediaPlugin, MediaServiceDescriptor,
+    MemoryPlugin, MemoryServiceDescriptor, PluginCapability, PluginHost, PluginInstallReport,
+    PluginManifest, PluginRegistry, PolicyPlugin, PolicyService, ProcessToolsPlugin,
+    SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;

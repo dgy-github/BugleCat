@@ -66,6 +66,10 @@
   let apiKeyInput = $state("");
   let vlApiKeyInput = $state("");
   let saving = $state(false);
+  type HarnessDiagnostics = Record<"llm" | "interaction" | "policy" | "context" | "memory" | "compaction" | "mcp" | "attachment" | "media" | "cost_telemetry", boolean>;
+  type ExternalPlugin = { manifest: { id: string; name: string; version: string; capabilities: string[] }; root: string; enabled: boolean };
+  let harnessDiagnostics = $state<HarnessDiagnostics | null>(null);
+  let externalPlugins = $state<ExternalPlugin[]>([]);
 
   type CatalogModel = {
     provider_id: string;
@@ -1013,19 +1017,48 @@
 
   async function openSettings() {
     try {
-      const [loadedSettings, loadedLocation, loadedCatalog] = await Promise.all([
+      const [loadedSettings, loadedLocation, loadedCatalog, diagnostics, plugins] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ConfigLocation>("get_config_location"),
         invoke<ModelCatalogResponse>("get_model_catalog"),
+        invoke<HarnessDiagnostics>("get_harness_diagnostics"),
+        invoke<ExternalPlugin[]>("list_external_plugins"),
       ]);
       settings = loadedSettings;
       configLocation = loadedLocation;
       modelCatalog = loadedCatalog;
+      harnessDiagnostics = diagnostics;
+      externalPlugins = plugins;
       apiKeyInput = "";
       vlApiKeyInput = "";
     } catch (e) {
       messages.push({ role: "note", text: `设置加载失败：${e}` });
     }
+  }
+
+  async function addExternalPlugin() {
+    const selected = await open({ directory: true, multiple: false, title: "选择包含 plugin.toml 的插件目录" });
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      await invoke("install_external_plugin", { source: selected, upgrade: false });
+      externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
+    } catch (e) { messages.push({ role: "note", text: `插件安装失败：${e}` }); }
+  }
+
+  async function upgradeExternalPlugin() {
+    const selected = await open({ directory: true, multiple: false, title: "选择更高版本的插件目录" });
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      await invoke("install_external_plugin", { source: selected, upgrade: true });
+      externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
+    } catch (e) { messages.push({ role: "note", text: `插件升级失败：${e}` }); }
+  }
+
+  async function toggleExternalPlugin(plugin: ExternalPlugin) {
+    try {
+      await invoke("set_external_plugin_enabled", { id: plugin.manifest.id, enabled: !plugin.enabled });
+      externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
+    } catch (e) { messages.push({ role: "note", text: `插件状态修改失败：${e}` }); }
   }
   function stashSessionQueue(sessionId: string) {
     if (sessionId) {
@@ -2388,6 +2421,34 @@
             placeholder={settings.has_vl_api_key ? `保持当前（${settings.vl_api_key_masked}）` : "留空则沿用主模型密钥"}
           />
         </label>
+        <section class="plugin-settings" aria-label="Harness 插件设置">
+          <div class="catalog-head">
+            <div>
+              <strong>Harness 运行诊断</strong>
+              <p>绿色表示当前 Profile 已挂载对应能力。MCP 默认关闭，只有明确启用后才连接外部进程。</p>
+            </div>
+          </div>
+          {#if harnessDiagnostics}
+            <div class="plugin-diagnostics">
+              {#each Object.entries(harnessDiagnostics) as [name, active]}
+                <span class:active class="plugin-state">{active ? "●" : "○"} {name}</span>
+              {/each}
+            </div>
+          {/if}
+          <div class="catalog-head">
+            <div><strong>进程隔离外部插件</strong><p>只接受 plugin.toml 和目录内相对命令；DLL、SO、DYLIB 会被拒绝。启停在下次运行时装配时生效。</p></div>
+            <div><button class="plain" onclick={addExternalPlugin}>安装本地插件</button><button class="plain" onclick={upgradeExternalPlugin}>升级插件</button></div>
+          </div>
+          {#if externalPlugins.length}
+            {#each externalPlugins as plugin}
+              <div class="config-entry">
+                <span>{plugin.manifest.name} <code>{plugin.manifest.version}</code></span>
+                <code>{plugin.manifest.id}</code>
+                <button class="plain" onclick={() => toggleExternalPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
+              </div>
+            {/each}
+          {:else}<p class="settings-note">当前工作区未安装外部插件。</p>{/if}
+        </section>
         <div class="abtns">
           <button class="deny" onclick={() => (settings = null)}>取消</button>
           <button class="ok" onclick={saveSettings} disabled={saving}>

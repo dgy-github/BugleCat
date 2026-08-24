@@ -1551,6 +1551,11 @@ main.app { flex-direction: row; }
   font-size: var(--fs-xs);
   line-height: 1.5;
 }
+
+.plugin-settings { margin-top: 1rem; padding: 0.9rem; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-soft); }
+.plugin-diagnostics { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.7rem 0 1rem; }
+.plugin-state { padding: 0.28rem 0.55rem; border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 0.78rem; }
+.plugin-state.active { color: #287a4a; background: rgba(40, 122, 74, 0.1); }
 .catalog-refresh,
 .catalog-select,
 .catalog-source {

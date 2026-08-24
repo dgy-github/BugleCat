@@ -13,6 +13,11 @@ pub enum PluginCapability {
     Context,
     Memory,
     Compaction,
+    Mcp,
+    Attachment,
+    Media,
+    CostTelemetry,
+    External,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
