@@ -270,6 +270,21 @@ pub enum ClientRequest {
         id: u64,
         answer: Option<String>,
     },
+    SettingsRead,
+    SettingsUpdate {
+        updates: BTreeMap<String, String>,
+    },
+    RuntimeModelSet {
+        model: String,
+    },
+    RuntimePermissionModeSet {
+        mode: String,
+    },
+    ModelCatalogRead,
+    ModelPresetApply {
+        provider_id: String,
+        model_id: String,
+    },
     TurnComplete {
         thread_id: ThreadId,
         turn_id: TurnId,
@@ -317,6 +332,9 @@ pub enum ResponsePayload {
     ModelContext(Option<StoredModelContext>),
     RuntimeStatus(Value),
     Workspace(String),
+    Settings(Value),
+    ModelCatalog(Value),
+    ModelPreset(Value),
     CodexPlugins(Value),
     CodexPlugin(Value),
     Marketplaces(Value),
@@ -525,5 +543,13 @@ mod tests {
             serde_json::from_str::<ClientRequest>(&json).unwrap(),
             interaction
         );
+
+        let settings = ClientRequest::SettingsUpdate {
+            updates: BTreeMap::from([("reasoning_effort".into(), "high".into())]),
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"method\":\"settingsUpdate\""), "{json}");
+        assert!(json.contains("\"reasoning_effort\":\"high\""), "{json}");
+        assert_eq!(serde_json::from_str::<ClientRequest>(&json).unwrap(), settings);
     }
 }

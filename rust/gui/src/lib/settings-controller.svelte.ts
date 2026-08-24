@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { appServerRequest } from "./app-server-client";
 import type { PluginController } from "./plugin-controller.svelte";
 
 export type Settings = {
@@ -46,8 +47,8 @@ export class SettingsController {
   open = async (): Promise<void> => {
     try {
       const [settings, configLocation, catalog] = await Promise.all([
-        invoke<Settings>("get_settings"), invoke<ConfigLocation>("get_config_location"),
-        invoke<ModelCatalogResponse>("get_model_catalog"), this.plugins.load(),
+        appServerRequest<Settings>({ method: "settingsRead" }), invoke<ConfigLocation>("get_config_location"),
+        appServerRequest<ModelCatalogResponse>({ method: "modelCatalogRead" }), this.plugins.load(),
       ]);
       this.settings = settings;
       this.configLocation = configLocation;
@@ -68,7 +69,7 @@ export class SettingsController {
     if (!this.settings) return;
     this.presetSaving = `${provider.id}/${model.model_id}`;
     try {
-      const selected = await invoke<CatalogModel>("apply_model_preset", { providerId: provider.id, modelId: model.model_id });
+      const selected = await appServerRequest<CatalogModel>({ method: "modelPresetApply", params: { providerId: provider.id, modelId: model.model_id } });
       this.settings.model = selected.model_id;
       this.settings.base_url = selected.base_url;
       this.settings.price_in = selected.price_in;
@@ -101,7 +102,8 @@ export class SettingsController {
     const settings = this.settings;
     const updates: Record<string, string> = {
       model: settings.model, base_url: settings.base_url, vl_model: settings.vl_model, vl_base_url: settings.vl_base_url,
-      reasoning_effort: settings.reasoning_effort, max_iterations: String(settings.max_iterations), max_tool_calls: String(settings.max_tool_calls),
+      sandbox_mode: settings.sandbox_mode, approval_policy: settings.approval_policy, reasoning_effort: settings.reasoning_effort,
+      max_iterations: String(settings.max_iterations), max_tool_calls: String(settings.max_tool_calls),
       context_edit_enabled: String(settings.context_edit_enabled), context_edit_max_chars: String(settings.context_edit_max_chars),
       context_edit_keep_recent_messages: String(settings.context_edit_keep_recent_messages),
       context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),
@@ -110,7 +112,7 @@ export class SettingsController {
     if (this.apiKeyInput.trim()) updates.api_key = this.apiKeyInput.trim();
     if (this.vlApiKeyInput.trim()) updates.vl_api_key = this.vlApiKeyInput.trim();
     try {
-      await invoke("save_settings", { updates });
+      await appServerRequest({ method: "settingsUpdate", params: { updates } });
       this.priceApplied(Number(settings.price_in), Number(settings.price_out), settings.price_currency);
       this.settings = null;
       this.apiKeyInput = "";

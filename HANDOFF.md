@@ -606,3 +606,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `ncx-protocol` 新增 `runtimeStatusRead`、`runtimeReadyRefresh`、`workspaceSet`、`interactionApprove`、`interactionAnswer`；`ncx-app-server` 统一拥有路由，GUI 只通过 `appServerRequest` 调用，Tauri 对应旧命令已从 invoke handler 删除。
 - 审批和问答请求携带可选 ThreadId：真实会话必须与后端 pending owner 一致，避免旧会话 ID 误操作其他 Thread；仅无会话归属的调试问答使用 `null`，且只能匹配后端同为空归属的 pending 项。
 - 验证：协议/App Server 定向测试、Rust workspace 全量、GUI Rust 57 项、Vite production build、真实 question E2E（选择、自由文本、取消）与原 protocol E2E 均通过；结构门禁和 `git diff --check` 通过。
+
+### 2026-08-24 GUI 运行配置协议化增量
+- 模型切换、权限模式、设置读取/保存、模型目录读取和模型预设应用改走 `ncx-protocol` → `ncx-app-server`；GUI 不再直连对应 Tauri 命令，旧 handler 已删除。OpenRouter 实时刷新保留为异步宿主网络 I/O，打开配置文件/价格来源仍是桌面资源 I/O。
+- 设置页保存 payload 补齐此前遗漏的 `sandbox_mode` 与 `approval_policy`，与模型、思考程度、上下文限制和费用配置一并通过 `settingsUpdate` 持久化，再用既有 Agent 重建路径应用，不创建第二套配置状态源。
+- 删除已经没有客户端的 `SetApproval`/`SetSandbox` bridge 命令及处理分支，避免运行配置继续存在协议外旁路。
+- 验证：协议/App Server 路由单测、GUI Rust 58 项、Vite production build与真实 protocol E2E 均通过；E2E 实际打开设置页并继续验证 Thread 并发、所有权、历史恢复和插件 Marketplace。

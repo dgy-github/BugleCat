@@ -182,27 +182,8 @@ fn set_workspace_for_state(path: String, state: &AppState) -> Result<String, Str
     Ok(bridge::display_path(&p))
 }
 
-/// Change the approval policy live (no session reset) + persist it.
-#[tauri::command]
-fn set_approval(policy: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state
-        .tx
-        .send(Command::SetApproval(policy))
-        .map_err(|_| "agent thread is not running".to_string())
-}
-
-/// Change the sandbox mode live (auto-execute = danger-full-access) + persist.
-#[tauri::command]
-fn set_sandbox(mode: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state
-        .tx
-        .send(Command::SetSandbox(mode))
-        .map_err(|_| "agent thread is not running".to_string())
-}
-
 /// Switch the active model (persists + rebuilds keeping the current transcript).
-#[tauri::command]
-fn set_model(model: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn set_model_for_state(model: String, state: &AppState) -> Result<(), String> {
     let cached = state
         .openrouter_models
         .lock()
@@ -222,8 +203,7 @@ fn set_model(model: String, state: tauri::State<'_, AppState>) -> Result<(), Str
 }
 
 /// Switch the CC permission mode (plan / default / accept-edits / bypass).
-#[tauri::command]
-fn set_permission_mode(mode: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn set_permission_mode_for_state(mode: String, state: &AppState) -> Result<(), String> {
     state
         .tx
         .send(Command::SetPermissionMode(mode))
@@ -322,6 +302,43 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         answer: Option<String>,
     ) -> Result<(), String> {
         answer_for_thread(self.state, thread_id.map(ThreadId::as_str), id, answer)
+    }
+
+    fn read_settings(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(get_settings()?).map_err(|error| error.to_string())
+    }
+
+    fn update_settings(
+        &self,
+        updates: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        save_settings_for_state(updates.into_iter().collect(), self.state)
+    }
+
+    fn set_model(&self, model: String) -> Result<(), String> {
+        set_model_for_state(model, self.state)
+    }
+
+    fn set_permission_mode(&self, mode: String) -> Result<(), String> {
+        set_permission_mode_for_state(mode, self.state)
+    }
+
+    fn read_model_catalog(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(get_model_catalog_for_state(self.state))
+            .map_err(|error| error.to_string())
+    }
+
+    fn apply_model_preset(
+        &self,
+        provider_id: String,
+        model_id: String,
+    ) -> Result<serde_json::Value, String> {
+        serde_json::to_value(apply_model_preset_for_state(
+            provider_id,
+            model_id,
+            self.state,
+        )?)
+        .map_err(|error| error.to_string())
     }
 
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
@@ -457,7 +474,6 @@ fn settings_from_config(cfg: &Config) -> Settings {
 }
 
 /// Read the current settings for the panel (with dropdown option lists).
-#[tauri::command]
 fn get_settings() -> Result<Settings, String> {
     let workspace = std::env::current_dir().ok();
     let cfg = load_config(Overrides {
@@ -471,10 +487,9 @@ fn get_settings() -> Result<Settings, String> {
 /// Persist settings to `~/.nanocodex/config.toml`, then rebuild the agent so the
 /// change applies live. Empty values are skipped (so a blank API key keeps the
 /// existing one). Only known keys are written.
-#[tauri::command]
-fn save_settings(
+fn save_settings_for_state(
     updates: std::collections::HashMap<String, String>,
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
 ) -> Result<(), String> {
     let borrowed: HashMap<&str, &str> = updates
         .iter()
@@ -570,13 +585,12 @@ fn find_preset_by_model_id(
 }
 
 /// 返回内置目录，并在有缓存时带上 OpenRouter 的实时模型清单。
-#[tauri::command]
-fn get_model_catalog(state: tauri::State<'_, AppState>) -> Result<ModelCatalogResponse, String> {
+fn get_model_catalog_for_state(state: &AppState) -> ModelCatalogResponse {
     let cached = state
         .openrouter_models
         .lock()
-        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
-    Ok(catalog_response(&cached, false))
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    catalog_response(&cached, false)
 }
 
 /// 通过 OpenRouter 公共接口拉取模型和每 Token 费用；接口无需 API 密钥。
@@ -606,11 +620,10 @@ async fn refresh_openrouter_models(
 }
 
 /// 选择一个模型预设时，统一保存模型、接口、费用币种和当前厂商的快捷模型。
-#[tauri::command]
-fn apply_model_preset(
+fn apply_model_preset_for_state(
     provider_id: String,
     model_id: String,
-    state: tauri::State<'_, AppState>,
+    state: &AppState,
 ) -> Result<CatalogModel, String> {
     let cached = state
         .openrouter_models
@@ -1927,11 +1940,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_server_request,
             e2e_ask_question,
-            get_settings,
-            save_settings,
-            get_model_catalog,
             refresh_openrouter_models,
-            apply_model_preset,
             get_config_location,
             open_config_file,
             open_config_dir,
@@ -1964,10 +1973,6 @@ pub fn run() {
             memory_add,
             open_memory_file,
             get_workspace,
-            set_approval,
-            set_sandbox,
-            set_model,
-            set_permission_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the nanocodex GUI");
@@ -2450,6 +2455,38 @@ mod tests {
             runtime.find("method: \"interactionAnswer\"").unwrap()
                 < runtime.find("this.thread.removeQuestion").unwrap()
         );
+    }
+
+    #[test]
+    fn settings_and_model_controls_use_the_app_server_protocol() {
+        let model = include_str!("../../src/lib/model-controls-controller.svelte.ts");
+        let settings = include_str!("../../src/lib/settings-controller.svelte.ts");
+        let frontend = format!("{model}\n{settings}");
+        for method in [
+            "settingsRead",
+            "settingsUpdate",
+            "runtimeModelSet",
+            "runtimePermissionModeSet",
+            "modelCatalogRead",
+            "modelPresetApply",
+        ] {
+            assert!(
+                frontend.contains(&format!("method: \"{method}\"")),
+                "missing app-server request for {method}"
+            );
+        }
+        for legacy in [
+            "invoke(\"set_model\"",
+            "invoke<Settings>(\"get_settings\"",
+            "invoke(\"save_settings\"",
+            "invoke(\"set_permission_mode\"",
+            "invoke<ModelCatalogResponse>(\"get_model_catalog\"",
+            "invoke<CatalogModel>(\"apply_model_preset\"",
+        ] {
+            assert!(!frontend.contains(legacy), "legacy model command remains: {legacy}");
+        }
+        assert!(settings.contains("sandbox_mode: settings.sandbox_mode"));
+        assert!(settings.contains("approval_policy: settings.approval_policy"));
     }
 
     #[test]

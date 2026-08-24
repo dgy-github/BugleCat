@@ -282,6 +282,47 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(())
     }
 
+    fn read_settings(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({"model":"test-model"}))
+    }
+
+    fn update_settings(
+        &self,
+        updates: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("settings:{}", updates.len()));
+        Ok(())
+    }
+
+    fn set_model(&self, model: String) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("model:{model}"));
+        Ok(())
+    }
+
+    fn set_permission_mode(&self, mode: String) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("mode:{mode}"));
+        Ok(())
+    }
+
+    fn read_model_catalog(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({"providers":[]}))
+    }
+
+    fn apply_model_preset(
+        &self,
+        provider_id: String,
+        model_id: String,
+    ) -> Result<serde_json::Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("preset:{provider_id}:{model_id}"));
+        Ok(serde_json::json!({"model_id":model_id}))
+    }
+
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"name":"demo"}]))
     }
@@ -449,6 +490,78 @@ fn interaction_and_desktop_runtime_requests_are_routed_by_the_app_server() {
             "workspace:D:/workspace",
             "approve:interaction-thread:7:once",
             "answer:interaction-thread:8:yes",
+        ]
+    );
+}
+
+#[test]
+fn settings_and_model_requests_are_routed_by_the_app_server() {
+    let server = server();
+    let runtime = RecordingRuntime::default();
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(ClientRequest::SettingsRead, &runtime)
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::Settings(ref value) if value["model"] == "test-model"
+    ));
+    server
+        .dispatch_with_runtime(
+            ClientRequest::SettingsUpdate {
+                updates: std::collections::BTreeMap::from([(
+                    "reasoning_effort".into(),
+                    "high".into(),
+                )]),
+            },
+            &runtime,
+        )
+        .unwrap();
+    server
+        .dispatch_with_runtime(
+            ClientRequest::RuntimeModelSet {
+                model: "deepseek-v4".into(),
+            },
+            &runtime,
+        )
+        .unwrap();
+    server
+        .dispatch_with_runtime(
+            ClientRequest::RuntimePermissionModeSet {
+                mode: "plan".into(),
+            },
+            &runtime,
+        )
+        .unwrap();
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(ClientRequest::ModelCatalogRead, &runtime)
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::ModelCatalog(ref value) if value["providers"].is_array()
+    ));
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(
+                ClientRequest::ModelPresetApply {
+                    provider_id: "deepseek".into(),
+                    model_id: "deepseek-v4".into(),
+                },
+                &runtime,
+            )
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::ModelPreset(ref value) if value["model_id"] == "deepseek-v4"
+    ));
+    assert_eq!(
+        *runtime.calls.lock().unwrap(),
+        vec![
+            "settings:1",
+            "model:deepseek-v4",
+            "mode:plan",
+            "preset:deepseek:deepseek-v4",
         ]
     );
 }

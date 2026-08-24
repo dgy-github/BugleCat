@@ -39,6 +39,7 @@ use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId, TurnStatus,
     TurnUsage,
 };
+#[cfg(test)]
 use ncx_sandbox::SandboxPolicy;
 use ncx_thread_store::JsonThreadStore;
 use serde::Serialize;
@@ -163,10 +164,8 @@ pub enum Command {
         target_id: String,
     },
     /// Change the approval policy live (no session reset) + persist it.
-    SetApproval(String),
     /// Change the sandbox mode live (no session reset) + persist it. Used by the
     /// "auto-execute" mode (danger-full-access).
-    SetSandbox(String),
     /// Switch the model: persist it and rebuild the agent reseeded with the
     /// current transcript, so the conversation survives the swap.
     SetModel(String),
@@ -1562,21 +1561,6 @@ pub fn spawn_worker(
                                     },
                                 ),
                             }
-                        }
-                        Command::SetApproval(policy) => {
-                            // Live update — no session reset — and persist it.
-                            agent.tools.ctx.approval_policy = policy.clone();
-                            let mut m = std::collections::HashMap::new();
-                            m.insert("approval_policy", policy.as_str());
-                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                        }
-                        Command::SetSandbox(mode) => {
-                            // Live update the sandbox (auto-execute = danger-full-access).
-                            agent.tools.ctx.policy = SandboxPolicy::new(&mode, &workspace);
-                            let mut m = std::collections::HashMap::new();
-                            m.insert("sandbox_mode", mode.as_str());
-                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            emit_ready(&app, &workspace, &session_id);
                         }
                         Command::SetModel(model) => {
                             // Persist the model, then rebuild reseeded with the current

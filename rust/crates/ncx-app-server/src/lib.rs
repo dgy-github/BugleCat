@@ -44,6 +44,19 @@ pub trait AppServerAdapter {
         id: u64,
         answer: Option<String>,
     ) -> Result<(), String>;
+    fn read_settings(&self) -> Result<serde_json::Value, String>;
+    fn update_settings(
+        &self,
+        updates: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String>;
+    fn set_model(&self, model: String) -> Result<(), String>;
+    fn set_permission_mode(&self, mode: String) -> Result<(), String>;
+    fn read_model_catalog(&self) -> Result<serde_json::Value, String>;
+    fn apply_model_preset(
+        &self,
+        provider_id: String,
+        model_id: String,
+    ) -> Result<serde_json::Value, String>;
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String>;
     fn install_codex_plugin(
         &self,
@@ -108,7 +121,13 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::RuntimeReadyRefresh
             | ClientRequest::WorkspaceSet { .. }
             | ClientRequest::InteractionApprove { .. }
-            | ClientRequest::InteractionAnswer { .. } => Err(AppServerError::InvalidRequest(
+            | ClientRequest::InteractionAnswer { .. }
+            | ClientRequest::SettingsRead
+            | ClientRequest::SettingsUpdate { .. }
+            | ClientRequest::RuntimeModelSet { .. }
+            | ClientRequest::RuntimePermissionModeSet { .. }
+            | ClientRequest::ModelCatalogRead
+            | ClientRequest::ModelPresetApply { .. } => Err(AppServerError::InvalidRequest(
                 "request requires a runtime adapter".to_string(),
             )),
             ClientRequest::CodexPluginList
@@ -491,6 +510,40 @@ impl<S: ThreadStore> AppServer<S> {
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
+            ClientRequest::SettingsRead => runtime
+                .read_settings()
+                .map(ResponsePayload::Settings)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::SettingsUpdate { updates } => {
+                runtime
+                    .update_settings(updates)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::RuntimeModelSet { model } => {
+                runtime.set_model(model).map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::RuntimePermissionModeSet { mode } => {
+                runtime
+                    .set_permission_mode(mode)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::ModelCatalogRead => runtime
+                .read_model_catalog()
+                .map(ResponsePayload::ModelCatalog)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::ModelPresetApply {
+                provider_id,
+                model_id,
+            } => runtime
+                .apply_model_preset(provider_id, model_id)
+                .map(ResponsePayload::ModelPreset)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
             ClientRequest::CodexPluginList => runtime
                 .list_codex_plugins()
                 .map(ResponsePayload::CodexPlugins)

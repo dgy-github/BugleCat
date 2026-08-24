@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { appServerRequest } from "./app-server-client";
 import type { Settings } from "./settings-controller.svelte";
 
 export const REASONING_EFFORTS = [
@@ -39,9 +39,9 @@ export class ModelControlsController {
     const previous = this.currentModel;
     this.currentModel = model;
     try {
-      await invoke("set_model", { model });
+      await appServerRequest({ method: "runtimeModelSet", params: { model } });
       try {
-        const updated = await invoke<Settings>("get_settings");
+        const updated = await appServerRequest<Settings>({ method: "settingsRead" });
         this.models = updated.available_models;
         this.priceApplied(updated.price_in, updated.price_out, updated.price_currency);
       } catch { /* status refresh will synchronize pricing */ }
@@ -56,7 +56,7 @@ export class ModelControlsController {
     if (!id || id === this.reasoningEffort) return;
     const previous = this.reasoningEffort;
     this.reasoningEffort = id;
-    try { await invoke("save_settings", { updates: { reasoning_effort: id } }); }
+    try { await appServerRequest({ method: "settingsUpdate", params: { updates: { reasoning_effort: id } } }); }
     catch (error) { this.reasoningEffort = previous; this.notify(`切换思考程度失败：${error}`); }
   };
 
@@ -65,7 +65,7 @@ export class ModelControlsController {
     if (id === this.permissionMode) return;
     const previous = this.permissionMode;
     this.permissionMode = id;
-    try { await invoke("set_permission_mode", { mode: id }); }
+    try { await appServerRequest({ method: "runtimePermissionModeSet", params: { mode: id } }); }
     catch (error) { this.permissionMode = previous; this.notify(`切换权限模式失败：${error}`); }
   };
 
