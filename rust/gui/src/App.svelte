@@ -15,6 +15,7 @@
   import { SidebarController, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./lib/sidebar-controller.svelte";
   import { appendReasoning, hideCompletedToolActivity, keepConversationConclusions, settleCompletedToolGroups, toolGroupFailureCount, type ConversationMessage as Msg, type ToolEntry, type ToolGroup } from "./lib/conversation-model";
   import { UsageController } from "./lib/usage-controller.svelte";
+  import { FileBrowserController } from "./lib/file-browser-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -154,6 +155,11 @@
   let messages = $state<Msg[]>([]);
   const sessionMessages = new Map<string, Msg[]>();
   let input = $state("");
+  const fileBrowser = new FileBrowserController(
+    (text) => messages.push({ role: "note", text }),
+    () => input,
+    (value) => (input = value),
+  );
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
@@ -163,10 +169,6 @@
   let stopping = $state(false);
   let switchingSession = $state(false);
   // File explorer (workspace tree)
-  type DirEntry = { name: string; path: string; is_dir: boolean };
-  let filesOpen = $state(false);
-  let filesPath = $state("");
-  let filesEntries = $state<DirEntry[]>([]);
   let header = $state("连接中…");
   let workspace = $state("");
   let needsWorkspace = $state(false); // true when cwd is home/root — block prompts
@@ -598,43 +600,12 @@
     }
   }
 
-  // File explorer over the workspace (with inline content preview).
-  let filePreview = $state<{ path: string; content: string } | null>(null);
-  async function loadDir(rel: string) {
-    try {
-      filesEntries = await invoke<DirEntry[]>("list_dir", { rel });
-      filesPath = rel;
-      filePreview = null;
-    } catch (e) {
-      messages.push({ role: "note", text: `读取目录失败：${e}` });
-    }
-  }
   async function openFiles() {
     if (rightPanel === "files") { rightPanel = ""; return; }
     rightPanel = "files";
-    await loadDir("");
+    await fileBrowser.load("");
   }
-  function filesUp() {
-    if (filePreview) { filePreview = null; return; } // back from preview → listing
-    if (!filesPath) return;
-    const parent = filesPath.includes("/") ? filesPath.slice(0, filesPath.lastIndexOf("/")) : "";
-    loadDir(parent);
-  }
-  async function pickFile(entry: DirEntry) {
-    if (entry.is_dir) {
-      loadDir(entry.path);
-      return;
-    }
-    try {
-      const content = await invoke<string>("read_workspace_file", { rel: entry.path });
-      filePreview = { path: entry.path, content };
-    } catch (e) {
-      filePreview = { path: entry.path, content: `（无法预览：${e}）` };
-    }
-  }
-  function insertMention(path: string) {
-    input = input ? `${input} @${path}` : `@${path}`;
-  }
+
 
   async function chooseWorkspace() {
     const previousSessionId = currentSessionId;
@@ -1164,7 +1135,7 @@
   }
   async function reloadPanel() {
     try {
-      if (rightPanel === "files") await loadDir(filesPath);
+      if (rightPanel === "files") await fileBrowser.load(fileBrowser.path);
       else if (rightPanel === "branches") await loadBranches();
       else if (rightPanel === "diff") { diffOpenFiles = {}; diffFiles = await invoke<FileChange[]>("git_changes"); }
       else if (rightPanel === "memory") await loadNotes();
@@ -1626,12 +1597,12 @@
     {toggleBranchDetail}
     {switchBranch}
     {chooseWorkspace}
-    bind:filePreview
-    {filesPath}
-    {filesEntries}
-    {insertMention}
-    {filesUp}
-    {pickFile}
+    bind:filePreview={fileBrowser.preview}
+    filesPath={fileBrowser.path}
+    filesEntries={fileBrowser.entries}
+    insertMention={fileBrowser.insertMention}
+    filesUp={fileBrowser.up}
+    pickFile={fileBrowser.pick}
     {diffFiles}
     {diffOpenFiles}
     {toggleFile}
