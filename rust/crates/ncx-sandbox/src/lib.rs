@@ -17,10 +17,12 @@ pub use approval::{
 };
 pub use policy::{SandboxPolicy, DANGER_FULL_ACCESS, READ_ONLY, WORKSPACE_WRITE};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PolicySnapshot {
-    pub sandbox_mode: String,
+#[derive(Debug, Clone)]
+pub struct PolicyService {
+    pub sandbox: SandboxPolicy,
     pub approval_policy: String,
     pub plan_mode: bool,
-    pub network_access: bool,
 }
+
+/// Compatibility name retained for callers that only treated the policy as a snapshot.
+pub type PolicySnapshot = PolicyService;

@@ -224,11 +224,11 @@ impl AgentLoop {
     pub fn runtime_profile(&self) -> AgentRuntimeProfile {
         let permissions = self.policy_service.as_ref().map(|policy| {
             crate::runtime_profile::RuntimePermissionProfile {
-                sandbox_mode: policy.sandbox_mode.clone(),
+                sandbox_mode: policy.sandbox.mode.clone(),
                 approval_policy: policy.approval_policy.clone(),
                 require_edit_approval: self.tools.ctx.require_edit_approval,
                 plan_mode: policy.plan_mode,
-                network_access: policy.network_access,
+                network_access: policy.sandbox.network_access,
             }
         });
         AgentRuntimeProfile {

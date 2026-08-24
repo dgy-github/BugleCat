@@ -526,3 +526,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `session_search`、`session_trace`、`session_event_read/search/trace` 改读 v2 Thread Store，并统一使用协议层的可见投影；工具调用、工具结果、推理和中间回答不会重新泄漏到模型的历史查询结果。
 - 可见历史投影已下沉到 `ncx-protocol::Thread::into_visible`，app-server 和内部查询共用同一规则，避免两套过滤口径。
 - 验证：CLI 35 项通过；新增 CLI 创建/占用/恢复测试和会话查询过滤测试；Rust workspace 全量回归在 CLI 首轮迁移后全部通过，协议投影下沉后需在最终交付门禁再次执行全量回归。
+
+### 2026-08-24 Provider / Policy / ContextFragment 真实消费者收口
+- Provider 契约继续由 `ncx-provider` 持有，CLI/GUI 通过 Harness 的 `LlmProviderFactory` 创建实例；核心只保留兼容 re-export。
+- Context 的确定性组装器已从 `ncx-core` 迁移到 `ncx-context::ContextAssembler`；新增可执行 `ContextService` + `ContextEntry`。CLI/GUI 不再自行拼接系统提示，而是把项目说明、Skills、Plan 作为有序硬上限片段交给 Context 插件，再从运行时服务生成 Provider 输入。
+- Policy 服务从只读诊断快照升级为携带真实 `SandboxPolicy`、审批策略和 Plan 模式的可替换运行时服务。ToolRegistry 在每次工具执行、Middleware 和 Hooks 前读取有效 Policy/Interaction 服务，因此 Overlay/Provider 替换会真正改变执行边界，而不只是改变诊断页面。
+- 新增回归证明替换 Policy 服务后工具实际看到只读策略；Context 服务回归证明排序、替换和字符硬上限由独立 crate 统一执行。
+- 验证：`ncx-context` 3 项、`ncx-sandbox` 15 项、`ncx-core` 221 项、CLI 35 项、GUI Rust 55 项通过。

@@ -26,13 +26,20 @@ pub struct InteractionService {
     pub approver: Option<Rc<dyn ApprovalHandler>>,
 }
 
-pub use ncx_sandbox::PolicySnapshot as PolicyService;
+pub use ncx_sandbox::PolicyService;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextServiceDescriptor {
     pub workspace: String,
     pub has_memory: bool,
     pub skill_count: usize,
+    pub service: ncx_context::ContextService,
+}
+
+impl ContextServiceDescriptor {
+    pub fn assemble(&self, base: impl Into<String>) -> String {
+        self.service.assemble(base)
+    }
 }
 
 #[derive(Clone)]
@@ -151,6 +158,7 @@ pub fn context_descriptor(ctx: &ToolContext) -> ContextServiceDescriptor {
         workspace: ctx.workspace.display().to_string(),
         has_memory: ctx.memory.is_some(),
         skill_count: ctx.skills.len(),
+        service: ncx_context::ContextService::new(ctx.context_entries.as_ref().clone()),
     }
 }
 

@@ -31,9 +31,9 @@ use ncx_core::{
     install_llm_provider_factory, load_workspace_instructions, model_provider_from_config,
     new_session_id, prepare_mcp_server_tools, skills_index_block, suggest_title_with_provider,
     AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
-    CheckpointStore, LoopEvent, McpServiceDescriptor, MemoryStore, PromptAssembler, Session,
-    SessionGrants, TextContextFragment, ToolContext, UserQuestionHandler, UserQuestionRequest,
-    COMPACTED_HISTORY_PREFIX,
+    CheckpointStore, ContextEntry, ContextServiceDescriptor, LoopEvent, McpServiceDescriptor,
+    MemoryStore, Session, SessionGrants, TextContextFragment, ToolContext, UserQuestionHandler,
+    UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId, TurnStatus,
@@ -699,16 +699,24 @@ async fn build_agent(
     } else {
         String::new()
     };
-    let mut prompt = PromptAssembler::new(SYSTEM_PROMPT);
     let instruction_fragment =
         TextContextFragment::new("project_instructions", instructions, 16_000);
     let skills_fragment = TextContextFragment::new("skills", skills_index, 32_000);
     let plan_fragment = TextContextFragment::new("plan_mode", plan_note, 4_000);
-    prompt
-        .upsert_fragment(10, &instruction_fragment)
-        .upsert_fragment(20, &skills_fragment)
-        .upsert_fragment(30, &plan_fragment);
-    let system_prompt = prompt.build();
+    let context_entries = vec![
+        ContextEntry {
+            order: 10,
+            fragment: instruction_fragment,
+        },
+        ContextEntry {
+            order: 20,
+            fragment: skills_fragment,
+        },
+        ContextEntry {
+            order: 30,
+            fragment: plan_fragment,
+        },
+    ];
     let mut hooks = cfg.hooks.clone();
     hooks.extend(discover_codex_hooks(&cfg.workspace)?);
     let ctx = runtime_profile
@@ -719,6 +727,7 @@ async fn build_agent(
         .with_memory(memory)
         .with_hooks(hooks)
         .with_skills(skills)
+        .with_context_entries(context_entries)
         .with_approver(approver)
         .with_user_question_handler(questioner);
     if !restored_plan.is_empty() {
@@ -747,6 +756,10 @@ async fn build_agent(
         );
     }
     install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
+    let system_prompt = tools
+        .service::<ContextServiceDescriptor>("context")
+        .ok_or_else(|| "Harness Context 服务未启用".to_string())?
+        .assemble(SYSTEM_PROMPT);
     let (session_id, seed_messages) = match seed {
         Some((id, messages)) => (id, Some(messages)),
         None => (new_session_id(), None),

@@ -29,9 +29,9 @@ use ncx_core::{
     custom_command_prompt, discover_codex_hooks, discover_codex_mcp_servers, discover_skills,
     expand_file_mentions, install_llm_provider_factory, list_custom_commands,
     load_project_instructions, new_session_id, prepare_mcp_server_tools, skills_index_block,
-    AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, Genome, HarnessRuntimeBuilder,
-    McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig, PromptAssembler, Session,
-    TextContextFragment, Tool, ToolContext, TurnResult,
+    AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, ContextEntry,
+    ContextServiceDescriptor, Genome, HarnessRuntimeBuilder, McpServiceDescriptor, MemoryStore,
+    Orchestrator, OrchestratorConfig, Session, TextContextFragment, Tool, ToolContext, TurnResult,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, TurnId,
@@ -188,16 +188,24 @@ async fn run(args: Args) -> i32 {
     } else {
         String::new()
     };
-    let mut prompt = PromptAssembler::new(base_prompt.clone());
     let instruction_fragment =
         TextContextFragment::new("project_instructions", instructions, 16_000);
     let skills_fragment = TextContextFragment::new("skills", skills_index, 32_000);
     let plan_fragment = TextContextFragment::new("plan_mode", plan_note, 4_000);
-    prompt
-        .upsert_fragment(10, &instruction_fragment)
-        .upsert_fragment(20, &skills_fragment)
-        .upsert_fragment(30, &plan_fragment);
-    let system_prompt = prompt.build();
+    let context_entries = vec![
+        ContextEntry {
+            order: 10,
+            fragment: instruction_fragment,
+        },
+        ContextEntry {
+            order: 20,
+            fragment: skills_fragment,
+        },
+        ContextEntry {
+            order: 30,
+            fragment: plan_fragment,
+        },
+    ];
     let mut hooks = cfg.hooks.clone();
     match discover_codex_hooks(&cfg.workspace) {
         Ok(plugin_hooks) => hooks.extend(plugin_hooks),
@@ -213,6 +221,7 @@ async fn run(args: Args) -> i32 {
         .with_memory(memory)
         .with_hooks(hooks)
         .with_skills(skills)
+        .with_context_entries(context_entries)
         .with_genome(genome);
     let mut tools = match HarnessRuntimeBuilder::configured(&cfg.workspace) {
         Ok(builder) => builder.build(ctx),
@@ -222,6 +231,13 @@ async fn run(args: Args) -> i32 {
         }
     };
     install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
+    let system_prompt = match tools.service::<ContextServiceDescriptor>("context") {
+        Some(context) => context.assemble(base_prompt.clone()),
+        None => {
+            eprintln!("ncx: Harness Context 服务未启用");
+            return 1;
+        }
+    };
     // ncx-forge: emit the default harness genome (base prompt + core tool
     // descriptions) as TOML and exit. Done BEFORE MCP registration so the dump
     // contains only the evolvable core surface, not server-provided tools.

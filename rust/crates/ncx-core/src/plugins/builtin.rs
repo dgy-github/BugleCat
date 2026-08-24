@@ -370,10 +370,9 @@ impl HarnessPlugin for PolicyPlugin {
         host.provide(
             "policy",
             Rc::new(PolicyService {
-                sandbox_mode: ctx.policy.mode.clone(),
+                sandbox: ctx.policy.clone(),
                 approval_policy: ctx.approval_policy.clone(),
                 plan_mode: ctx.plan_mode,
-                network_access: ctx.policy.network_access,
             }),
         )
     }
@@ -419,8 +418,10 @@ impl HarnessPlugin for BuiltinToolsPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{ToolContext, ToolRegistry};
-    use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
+    use crate::tools::{Tool, ToolContext, ToolRegistry};
+    use async_trait::async_trait;
+    use ncx_sandbox::{PolicyService, SandboxPolicy, READ_ONLY, WORKSPACE_WRITE};
+    use serde_json::{json, Value};
     use std::path::PathBuf;
 
     fn empty_registry() -> ToolRegistry {
@@ -462,5 +463,41 @@ mod tests {
         explicit.install_plugin(&BuiltinToolsPlugin);
         let default = ToolRegistry::new(default_context);
         assert_eq!(names(&explicit), names(&default));
+    }
+
+    struct PolicyProbe;
+
+    #[async_trait(?Send)]
+    impl Tool for PolicyProbe {
+        fn name(&self) -> &str {
+            "policy_probe"
+        }
+        fn description(&self) -> &str {
+            "returns the effective policy"
+        }
+        fn parameters(&self) -> Value {
+            json!({"type":"object"})
+        }
+        async fn execute(&self, ctx: &ToolContext, _args: &Value) -> String {
+            ctx.policy.mode.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_execution_consumes_replaceable_policy_service() {
+        let mut registry = empty_registry();
+        registry.register(Box::new(PolicyProbe));
+        registry.replace_service(
+            "policy",
+            Rc::new(PolicyService {
+                sandbox: SandboxPolicy::new(READ_ONLY, "builtin-plugin-test"),
+                approval_policy: "never".into(),
+                plan_mode: true,
+            }),
+        );
+        assert_eq!(
+            registry.execute("policy_probe", &json!({})).await,
+            READ_ONLY
+        );
     }
 }

@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use ncx_config::HookConfig;
+use ncx_context::ContextEntry;
 pub use ncx_sandbox::ApprovalRequest;
 use ncx_sandbox::{Approver, Decision, SandboxPolicy, DANGER_FULL_ACCESS, ON_FAILURE};
 use ncx_tools::{
@@ -146,6 +147,8 @@ pub struct ToolContext {
     /// Training-time harness overrides (NCX_GENOME). Empty by default Ã¢â‚¬â€ a no-op.
     /// Currently overrides per-tool descriptions seen by the model.
     pub genome: Rc<Genome>,
+    /// Ordered, bounded fragments consumed by the Context provider plugin.
+    pub context_entries: Rc<Vec<ContextEntry>>,
 }
 
 impl ToolContext {
@@ -174,6 +177,7 @@ impl ToolContext {
             hooks: Rc::new(Vec::new()),
             skills: Rc::new(Vec::new()),
             genome: Rc::new(Genome::default()),
+            context_entries: Rc::new(Vec::new()),
         }
     }
 
@@ -254,6 +258,11 @@ impl ToolContext {
     /// Attach training-time harness overrides (NCX_GENOME). Empty = no-op.
     pub fn with_genome(mut self, genome: Genome) -> Self {
         self.genome = Rc::new(genome);
+        self
+    }
+
+    pub fn with_context_entries(mut self, entries: Vec<ContextEntry>) -> Self {
+        self.context_entries = Rc::new(entries);
         self
     }
 }
@@ -619,20 +628,41 @@ impl ToolRegistry {
     async fn execute_attempt(&self, name: &str, args: &Value) -> String {
         match self.get(name) {
             Some(tool) => {
-                let (entered, blocked) = self.enter_middleware(name, args).await;
+                let context = self.effective_context();
+                let (entered, blocked) = self.enter_middleware(&context, name, args).await;
                 let result = match blocked {
                     Some(result) => result,
-                    None => self.execute_with_hooks(tool, name, args).await,
+                    None => self.execute_with_hooks(&context, tool, name, args).await,
                 };
-                self.leave_middleware(entered, name, args, result).await
+                self.leave_middleware(&context, entered, name, args, result)
+                    .await
             }
             None => format!("Error: unknown tool '{name}'."),
         }
     }
 
-    async fn enter_middleware(&self, name: &str, args: &Value) -> (usize, Option<String>) {
+    fn effective_context(&self) -> ToolContext {
+        let mut context = self.ctx.clone();
+        if let Some(policy) = self.service::<crate::plugins::PolicyService>("policy") {
+            context.policy = policy.sandbox.clone();
+            context.approval_policy = policy.approval_policy.clone();
+            context.plan_mode = policy.plan_mode;
+        }
+        if let Some(interaction) = self.service::<crate::plugins::InteractionService>("interaction")
+        {
+            context.approver = interaction.approver.clone();
+        }
+        context
+    }
+
+    async fn enter_middleware(
+        &self,
+        context: &ToolContext,
+        name: &str,
+        args: &Value,
+    ) -> (usize, Option<String>) {
         for (index, middleware) in self.middleware.iter().enumerate() {
-            match middleware.before_execute(&self.ctx, name, args).await {
+            match middleware.before_execute(context, name, args).await {
                 ToolMiddlewareDecision::Continue => {}
                 ToolMiddlewareDecision::Block { reason } => {
                     return (
@@ -650,15 +680,14 @@ impl ToolRegistry {
 
     async fn leave_middleware(
         &self,
+        context: &ToolContext,
         entered: usize,
         name: &str,
         args: &Value,
         mut result: String,
     ) -> String {
         for middleware in self.middleware[..entered].iter().rev() {
-            if let Some(replacement) = middleware
-                .after_execute(&self.ctx, name, args, &result)
-                .await
+            if let Some(replacement) = middleware.after_execute(context, name, args, &result).await
             {
                 result = replacement;
             }
@@ -666,28 +695,34 @@ impl ToolRegistry {
         result
     }
 
-    async fn execute_with_hooks(&self, tool: &dyn Tool, name: &str, args: &Value) -> String {
+    async fn execute_with_hooks(
+        &self,
+        context: &ToolContext,
+        tool: &dyn Tool,
+        name: &str,
+        args: &Value,
+    ) -> String {
         let pre = run_matching_hooks(
-            &self.ctx.hooks,
+            &context.hooks,
             HookEvent::PreTool,
             name,
             args,
             None,
-            &self.ctx.workspace,
+            &context.workspace,
         )
         .await;
         if pre.blocked {
             return format!("Error: {name} blocked by pre_tool hook.\n{}", pre.notes);
         }
 
-        let mut result = tool.execute(&self.ctx, args).await;
+        let mut result = tool.execute(context, args).await;
         let post = run_matching_hooks(
-            &self.ctx.hooks,
+            &context.hooks,
             HookEvent::PostTool,
             name,
             args,
             Some(&result),
-            &self.ctx.workspace,
+            &context.workspace,
         )
         .await;
         let hook_notes = [pre.notes, post.notes]
