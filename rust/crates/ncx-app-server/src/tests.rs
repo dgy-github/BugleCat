@@ -323,6 +323,34 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(serde_json::json!({"model_id":model_id}))
     }
 
+    fn harness_diagnostics(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({"llm":true}))
+    }
+
+    fn list_external_plugins(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!([{"id":"demo.echo"}]))
+    }
+
+    fn install_external_plugin(
+        &self,
+        source: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("external-install:{source}:{upgrade}"));
+        Ok(serde_json::json!({"id":"demo.echo"}))
+    }
+
+    fn set_external_plugin_enabled(&self, id: String, enabled: bool) -> Result<(), String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("external-enabled:{id}:{enabled}"));
+        Ok(())
+    }
+
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"name":"demo"}]))
     }
@@ -627,6 +655,53 @@ fn plugin_and_marketplace_requests_are_routed_by_the_app_server() {
             "plugin-enabled:demo:false",
             "plugin-uninstall:demo",
             "marketplace-install:marketplace.json:demo:true",
+        ]
+    );
+}
+
+#[test]
+fn harness_diagnostics_and_external_plugins_use_the_same_protocol_boundary() {
+    let server = server();
+    let runtime = RecordingRuntime::default();
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(ClientRequest::HarnessDiagnosticsRead, &runtime)
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::HarnessDiagnostics(ref value) if value["llm"] == true
+    ));
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(ClientRequest::ExternalPluginList, &runtime)
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::ExternalPlugins(ref value) if value.is_array()
+    ));
+    server
+        .dispatch_with_runtime(
+            ClientRequest::ExternalPluginInstall {
+                source: "external-dir".into(),
+                upgrade: true,
+            },
+            &runtime,
+        )
+        .unwrap();
+    server
+        .dispatch_with_runtime(
+            ClientRequest::ExternalPluginSetEnabled {
+                id: "demo.echo".into(),
+                enabled: false,
+            },
+            &runtime,
+        )
+        .unwrap();
+    assert_eq!(
+        *runtime.calls.lock().unwrap(),
+        vec![
+            "external-install:external-dir:true",
+            "external-enabled:demo.echo:false",
         ]
     );
 }

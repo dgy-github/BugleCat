@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { appServerRequest } from "./app-server-client";
 
@@ -25,8 +24,8 @@ export class PluginController {
 
   load = async (): Promise<void> => {
     const [diagnostics, externalPlugins, codexPlugins, marketplaces] = await Promise.all([
-      invoke<HarnessDiagnostics>("get_harness_diagnostics"),
-      invoke<ExternalPlugin[]>("list_external_plugins"),
+      appServerRequest<HarnessDiagnostics>({ method: "harnessDiagnosticsRead" }),
+      appServerRequest<ExternalPlugin[]>({ method: "externalPluginList" }),
       appServerRequest<CodexPlugin[]>({ method: "codexPluginList" }),
       appServerRequest<PluginMarketplace[]>({ method: "marketplaceList" }),
     ]);
@@ -41,8 +40,8 @@ export class PluginController {
 
   toggleExternal = async (plugin: ExternalPlugin): Promise<void> => {
     try {
-      await invoke("set_external_plugin_enabled", { id: plugin.manifest.id, enabled: !plugin.enabled });
-      this.externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
+      await appServerRequest({ method: "externalPluginSetEnabled", params: { id: plugin.manifest.id, enabled: !plugin.enabled } });
+      this.externalPlugins = await appServerRequest<ExternalPlugin[]>({ method: "externalPluginList" });
     } catch (error) { this.notify(`插件状态修改失败：${error}`); }
   };
 
@@ -74,8 +73,8 @@ export class PluginController {
     const selected = await open({ directory: true, multiple: false, title: upgrade ? "选择更高版本的插件目录" : "选择包含 plugin.toml 的插件目录" });
     if (!selected || Array.isArray(selected)) return;
     try {
-      await invoke("install_external_plugin", { source: selected, upgrade });
-      this.externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
+      await appServerRequest({ method: "externalPluginInstall", params: { source: selected, upgrade } });
+      this.externalPlugins = await appServerRequest<ExternalPlugin[]>({ method: "externalPluginList" });
     } catch (error) { this.notify(`插件${upgrade ? "升级" : "安装"}失败：${error}`); }
   };
 

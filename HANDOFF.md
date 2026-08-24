@@ -612,3 +612,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 设置页保存 payload 补齐此前遗漏的 `sandbox_mode` 与 `approval_policy`，与模型、思考程度、上下文限制和费用配置一并通过 `settingsUpdate` 持久化，再用既有 Agent 重建路径应用，不创建第二套配置状态源。
 - 删除已经没有客户端的 `SetApproval`/`SetSandbox` bridge 命令及处理分支，避免运行配置继续存在协议外旁路。
 - 验证：协议/App Server 路由单测、GUI Rust 58 项、Vite production build与真实 protocol E2E 均通过；E2E 实际打开设置页并继续验证 Thread 并发、所有权、历史恢复和插件 Marketplace。
+
+### 2026-08-24 M6 插件控制面协议统一
+- Harness 运行诊断和进程隔离外部插件的发现、安装/升级、启停已加入 `ncx-protocol` 与 `ncx-app-server`；GUI 插件页不再通过 Tauri 直连这组命令。
+- 外部 `plugin.toml` 插件与 OpenAI `.codex-plugin/plugin.json`、Marketplace 现在共用一个 app-server 客户端边界；Tauri 只负责工作区目录、进程和网络等宿主实现，不再拥有 GUI 路由选择。
+- 对应旧 Tauri handler 已删除，新增 App Server 路由单测与前端事实源回归，防止后续重新形成两套插件控制面。
+- 验证：协议/App Server 10 项、GUI Rust 59 项、Vite production build、结构门禁和 `git diff --check` 通过；最终交付前仍需重跑真实 protocol E2E 与 workspace 全量。

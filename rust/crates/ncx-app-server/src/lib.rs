@@ -57,6 +57,14 @@ pub trait AppServerAdapter {
         provider_id: String,
         model_id: String,
     ) -> Result<serde_json::Value, String>;
+    fn harness_diagnostics(&self) -> Result<serde_json::Value, String>;
+    fn list_external_plugins(&self) -> Result<serde_json::Value, String>;
+    fn install_external_plugin(
+        &self,
+        source: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String>;
+    fn set_external_plugin_enabled(&self, id: String, enabled: bool) -> Result<(), String>;
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String>;
     fn install_codex_plugin(
         &self,
@@ -127,7 +135,11 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::RuntimeModelSet { .. }
             | ClientRequest::RuntimePermissionModeSet { .. }
             | ClientRequest::ModelCatalogRead
-            | ClientRequest::ModelPresetApply { .. } => Err(AppServerError::InvalidRequest(
+            | ClientRequest::ModelPresetApply { .. }
+            | ClientRequest::HarnessDiagnosticsRead
+            | ClientRequest::ExternalPluginList
+            | ClientRequest::ExternalPluginInstall { .. }
+            | ClientRequest::ExternalPluginSetEnabled { .. } => Err(AppServerError::InvalidRequest(
                 "request requires a runtime adapter".to_string(),
             )),
             ClientRequest::CodexPluginList
@@ -544,6 +556,27 @@ impl<S: ThreadStore> AppServer<S> {
                 .map(ResponsePayload::ModelPreset)
                 .map(|payload| self.response(payload))
                 .map_err(AppServerError::Runtime),
+            ClientRequest::HarnessDiagnosticsRead => runtime
+                .harness_diagnostics()
+                .map(ResponsePayload::HarnessDiagnostics)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::ExternalPluginList => runtime
+                .list_external_plugins()
+                .map(ResponsePayload::ExternalPlugins)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::ExternalPluginInstall { source, upgrade } => runtime
+                .install_external_plugin(source, upgrade)
+                .map(ResponsePayload::ExternalPlugin)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::ExternalPluginSetEnabled { id, enabled } => {
+                runtime
+                    .set_external_plugin_enabled(id, enabled)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
             ClientRequest::CodexPluginList => runtime
                 .list_codex_plugins()
                 .map(ResponsePayload::CodexPlugins)

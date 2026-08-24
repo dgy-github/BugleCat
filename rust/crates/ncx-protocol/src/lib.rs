@@ -285,6 +285,16 @@ pub enum ClientRequest {
         provider_id: String,
         model_id: String,
     },
+    HarnessDiagnosticsRead,
+    ExternalPluginList,
+    ExternalPluginInstall {
+        source: String,
+        upgrade: bool,
+    },
+    ExternalPluginSetEnabled {
+        id: String,
+        enabled: bool,
+    },
     TurnComplete {
         thread_id: ThreadId,
         turn_id: TurnId,
@@ -335,6 +345,9 @@ pub enum ResponsePayload {
     Settings(Value),
     ModelCatalog(Value),
     ModelPreset(Value),
+    HarnessDiagnostics(Value),
+    ExternalPlugins(Value),
+    ExternalPlugin(Value),
     CodexPlugins(Value),
     CodexPlugin(Value),
     Marketplaces(Value),

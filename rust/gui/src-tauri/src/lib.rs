@@ -341,6 +341,27 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         .map_err(|error| error.to_string())
     }
 
+    fn harness_diagnostics(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(get_harness_diagnostics()?).map_err(|error| error.to_string())
+    }
+
+    fn list_external_plugins(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(list_external_plugins()?).map_err(|error| error.to_string())
+    }
+
+    fn install_external_plugin(
+        &self,
+        source: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String> {
+        serde_json::to_value(install_external_plugin(source, upgrade)?)
+            .map_err(|error| error.to_string())
+    }
+
+    fn set_external_plugin_enabled(&self, id: String, enabled: bool) -> Result<(), String> {
+        set_external_plugin_enabled(id, enabled)
+    }
+
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
         serde_json::to_value(list_codex_plugins()?).map_err(|error| error.to_string())
     }
@@ -1438,7 +1459,6 @@ fn now_epoch_millis() -> i64 {
         .unwrap_or(0)
 }
 
-#[tauri::command]
 fn get_harness_diagnostics() -> Result<HarnessDiagnostics, String> {
     let (cfg, workspace) = configured_workspace()?;
     let profile = AgentRuntimeProfile::from_config(&cfg);
@@ -1458,12 +1478,10 @@ fn external_plugin_catalog() -> Result<ExternalPluginCatalog, String> {
     ))
 }
 
-#[tauri::command]
 fn list_external_plugins() -> Result<Vec<ExternalPluginRecord>, String> {
     external_plugin_catalog()?.discover()
 }
 
-#[tauri::command]
 fn install_external_plugin(source: String, upgrade: bool) -> Result<ExternalPluginRecord, String> {
     let catalog = external_plugin_catalog()?;
     if upgrade {
@@ -1473,7 +1491,6 @@ fn install_external_plugin(source: String, upgrade: bool) -> Result<ExternalPlug
     }
 }
 
-#[tauri::command]
 fn set_external_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
     external_plugin_catalog()?.set_enabled(&id, enabled)
 }
@@ -1964,10 +1981,6 @@ pub fn run() {
             open_session_snapshot,
             get_custom_commands,
             expand_custom_command,
-            get_harness_diagnostics,
-            list_external_plugins,
-            install_external_plugin,
-            set_external_plugin_enabled,
             memory_list,
             memory_consolidate,
             memory_add,
@@ -2487,6 +2500,36 @@ mod tests {
         }
         assert!(settings.contains("sandbox_mode: settings.sandbox_mode"));
         assert!(settings.contains("approval_policy: settings.approval_policy"));
+    }
+
+    #[test]
+    fn all_plugin_settings_share_the_app_server_protocol_boundary() {
+        let plugins = include_str!("../../src/lib/plugin-controller.svelte.ts");
+        for method in [
+            "harnessDiagnosticsRead",
+            "externalPluginList",
+            "externalPluginInstall",
+            "externalPluginSetEnabled",
+            "codexPluginList",
+            "codexPluginInstall",
+            "codexPluginSetEnabled",
+            "codexPluginUninstall",
+            "marketplaceList",
+            "marketplacePluginInstall",
+        ] {
+            assert!(
+                plugins.contains(&format!("method: \"{method}\"")),
+                "missing app-server plugin request for {method}"
+            );
+        }
+        for legacy in [
+            "invoke<HarnessDiagnostics>(\"get_harness_diagnostics\"",
+            "invoke<ExternalPlugin[]>(\"list_external_plugins\"",
+            "invoke(\"install_external_plugin\"",
+            "invoke(\"set_external_plugin_enabled\"",
+        ] {
+            assert!(!plugins.contains(legacy), "legacy plugin command remains: {legacy}");
+        }
     }
 
     #[test]
