@@ -21,6 +21,11 @@ try {
   await waitForCdp();
   browser = await chromium.connectOverCDP(cdpUrl);
   const page = await waitForPage(browser);
+  await page.getByRole("button", { name: "设置" }).click();
+  await page.getByRole("heading", { name: "设置", exact: true }).waitFor();
+  await page.getByText("OpenAI Codex 资源插件", { exact: true }).waitFor();
+  await page.getByText("插件 Marketplace", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   const evidence = await page.evaluate(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

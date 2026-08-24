@@ -3,6 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { open } from "@tauri-apps/plugin-dialog";
   import { onMount } from "svelte";
+  import SettingsModal from "./components/SettingsModal.svelte";
 
   const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
   const isImage = (p: string) => IMAGE_EXTS.includes((p.split(".").pop() || "").toLowerCase());
@@ -2426,249 +2427,40 @@
     </aside>
   {/if}
 
-  {#if settings}
-    <div class="overlay">
-      <div class="modal">
-        <h3>设置</h3>
-        {#if configLocation}
-          <div class="config-entry">
-            <span>配置</span>
-            <code title={configLocation.config_path}>{configLocation.config_path}</code>
-            <button class="plain" onclick={openConfigFile}>打开文件</button>
-            <button class="plain" onclick={openConfigDir}>打开文件夹</button>
-          </div>
-        {/if}
-        <label>
-          <span>模型</span>
-          <select bind:value={settings.model}>
-            {#each settings.available_models as m}<option value={m}>{m}</option>{/each}
-          </select>
-        </label>
-        <section class="model-catalog" aria-label="模型厂商目录">
-          <div class="catalog-head">
-            <div>
-              <strong>厂商官方直连目录</strong>
-              <p>这里的单价来自各厂商官网，选择后会填写该厂商接口、模型、费用和币种；显示的是当前公开输入/输出价，缓存、长上下文阶梯和限时价格会单独说明；API 密钥仍需自行配置。</p>
-            </div>
-          </div>
-          {#if modelCatalog}
-            {#each officialProviders as provider}
-              <div class="catalog-provider">
-                <h4>{provider.name}</h4>
-                <div class="catalog-models">
-                  {#each provider.models as model}
-                    <article class:active={settings.model === model.model_id} class="catalog-model">
-                      <div class="catalog-model-name">
-                        <strong>{model.display_name}</strong>
-                        <code>{model.model_id}</code>
-                      </div>
-                      <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
-                      <span class="catalog-price-source">{priceSourceName(model.price_source)}</span>
-                      <small class="catalog-audit-note">已按官网核验：{model.updated_at}</small>
-                      {#if model.pricing_note}
-                        <small class="catalog-pricing-note">{model.pricing_note}</small>
-                      {/if}
-                      <div class="catalog-model-actions">
-                        <button
-                          class="catalog-select"
-                          onclick={() => applyModelPreset(provider, model)}
-                          disabled={presetSaving === `${provider.id}/${model.model_id}`}
-                        >
-                          {presetSaving === `${provider.id}/${model.model_id}` ? "应用中…" : "使用官方直连"}
-                        </button>
-                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>官方价格来源</button>
-                      </div>
-                    </article>
-                  {/each}
-                </div>
-              </div>
-            {/each}
-            <div class="catalog-aggregator">
-              <div class="catalog-head">
-                <div>
-                  <strong>OpenRouter 聚合平台（可选）</strong>
-                  <p>按需加载全量模型。这里显示的是经 OpenRouter 调用时的渠道价格，不是原厂官方直连价。</p>
-                </div>
-                <button class="catalog-refresh" onclick={refreshOpenRouterModels} disabled={catalogRefreshing}>
-                  {catalogRefreshing ? "加载中…" : "加载 OpenRouter 聚合模型"}
-                </button>
-              </div>
-              {#if openRouterProvider}
-                <div class="catalog-models">
-                  {#each openRouterProvider.models as model}
-                    <article class:active={settings.model === model.model_id} class:aggregator={true} class="catalog-model">
-                      <div class="catalog-model-name">
-                        <strong>{model.display_name}</strong>
-                        <code>{model.model_id}</code>
-                      </div>
-                      <p>{currencySymbol(model.price_currency)}{model.price_in} 输入 / {currencySymbol(model.price_currency)}{model.price_out} 输出（每百万 Token，{currencyName(model.price_currency)}）</p>
-                      <span class="catalog-price-source aggregator">{priceSourceName(model.price_source)}，非厂商官方报价</span>
-                      <div class="catalog-model-actions">
-                        <button
-                          class="catalog-select"
-                          onclick={() => applyModelPreset(openRouterProvider, model)}
-                          disabled={presetSaving === `${openRouterProvider.id}/${model.model_id}`}
-                        >
-                          {presetSaving === `${openRouterProvider.id}/${model.model_id}` ? "应用中…" : "使用 OpenRouter 渠道"}
-                        </button>
-                        <button class="catalog-source" onclick={() => openPriceSource(model.source_url)}>渠道价格来源</button>
-                      </div>
-                    </article>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {:else}
-            <p class="catalog-empty">正在读取模型厂商目录…</p>
-          {/if}
-        </section>
-        <p class="settings-note">权限（沙箱 / 审批）由顶部输入框旁的「权限模式」控制：规划 / 默认 / 自动接受编辑 / 全权放行。</p>
-        <label>
-          <span>思考程度</span>
-          <select bind:value={settings.reasoning_effort}>
-            {#each REASONING_EFFORTS as option}
-              <option value={option.id}>{option.label}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          <span>模型调用上限</span>
-          <input type="number" min="1" bind:value={settings.max_iterations} />
-        </label>
-        <label>
-          <span>工具调用上限</span>
-          <input type="number" min="0" bind:value={settings.max_tool_calls} />
-        </label>
-        <label class="check">
-          <span>上下文裁剪</span>
-          <input type="checkbox" bind:checked={settings.context_edit_enabled} />
-        </label>
-        <label>
-          <span>上下文字符上限</span>
-          <input type="number" min="1" bind:value={settings.context_edit_max_chars} />
-        </label>
-        <label>
-          <span>保留最近消息数</span>
-          <input type="number" min="1" bind:value={settings.context_edit_keep_recent_messages} />
-        </label>
-        <label>
-          <span>工具结果字符上限</span>
-          <input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} />
-        </label>
-        <label>
-          <span>输入单价 {currencySymbol(settings.price_currency)}/百万</span>
-          <input type="number" min="0" step="0.01" bind:value={settings.price_in} placeholder="0 = 不计费" />
-        </label>
-        <label>
-          <span>输出单价 {currencySymbol(settings.price_currency)}/百万</span>
-          <input type="number" min="0" step="0.01" bind:value={settings.price_out} placeholder="0 = 不计费" />
-        </label>
-        <label>
-          <span>价格币种</span>
-          <select bind:value={settings.price_currency}>
-            <option value="CNY">人民币（CNY）</option>
-            <option value="USD">美元（USD）</option>
-          </select>
-        </label>
-        <p class="settings-note price-note">当前费用来源：{currentPriceSourceName()}</p>
-        <label>
-          <span>Base URL</span>
-          <input bind:value={settings.base_url} />
-        </label>
-        <label>
-          <span>API 密钥</span>
-          <input
-            type="password"
-            bind:value={apiKeyInput}
-            placeholder={settings.has_api_key ? `保持当前（${settings.api_key_masked}）` : "设置 API 密钥"}
-          />
-        </label>
-        <p class="settings-note">
-          图片附件会发送到下面的视觉解析模型。接口地址或密钥留空时，会沿用上面的主模型配置。
-        </p>
-        <label>
-          <span>图片/文件解析模型</span>
-          <input bind:value={settings.vl_model} placeholder="例如：qwen3.7-plus" />
-        </label>
-        <label>
-          <span>图片/文件解析接口</span>
-          <input bind:value={settings.vl_base_url} placeholder="留空则沿用主模型接口" />
-        </label>
-        <label>
-          <span>解析接口密钥</span>
-          <input
-            type="password"
-            bind:value={vlApiKeyInput}
-            placeholder={settings.has_vl_api_key ? `保持当前（${settings.vl_api_key_masked}）` : "留空则沿用主模型密钥"}
-          />
-        </label>
-        <section class="plugin-settings" aria-label="Harness 插件设置">
-          <div class="catalog-head">
-            <div>
-              <strong>Harness 运行诊断</strong>
-              <p>绿色表示当前 Profile 已挂载对应能力。MCP 默认关闭，只有明确启用后才连接外部进程。</p>
-            </div>
-          </div>
-          {#if harnessDiagnostics}
-            <div class="plugin-diagnostics">
-              {#each Object.entries(harnessDiagnostics) as [name, active]}
-                <span class:active class="plugin-state">{active ? "●" : "○"} {name}</span>
-              {/each}
-            </div>
-          {/if}
-          <div class="catalog-head">
-            <div><strong>进程隔离外部插件</strong><p>只接受 plugin.toml 和目录内相对命令；DLL、SO、DYLIB 会被拒绝。启停在下次运行时装配时生效。</p></div>
-            <div><button class="plain" onclick={addExternalPlugin}>安装本地插件</button><button class="plain" onclick={upgradeExternalPlugin}>升级插件</button></div>
-          </div>
-          {#if externalPlugins.length}
-            {#each externalPlugins as plugin}
-              <div class="config-entry">
-                <span>{plugin.manifest.name} <code>{plugin.manifest.version}</code></span>
-                <code>{plugin.manifest.id}</code>
-                <button class="plain" onclick={() => toggleExternalPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
-              </div>
-            {/each}
-          {:else}<p class="settings-note">当前工作区未安装外部插件。</p>{/if}
-          <div class="catalog-head">
-            <div><strong>OpenAI Codex 资源插件</strong><p>兼容 .codex-plugin/plugin.json，仅装载 Skills、MCP、Apps 和 Hooks 等资源，不直接执行 DLL。</p></div>
-            <div><button class="plain" onclick={addCodexPlugin}>安装本地资源包</button><button class="plain" onclick={upgradeCodexPlugin}>升级资源包</button></div>
-          </div>
-          {#if codexPlugins.length}
-            {#each codexPlugins as plugin}
-              <div class="config-entry">
-                <span>{plugin.manifest.name} <code>{plugin.manifest.version || "未标版本"}</code></span>
-                <code>{plugin.manifest.description || plugin.root}</code>
-                <span>{plugin.skill_roots} Skills · MCP {plugin.has_mcp ? "有" : "无"} · Apps {plugin.has_apps ? `${plugin.app_count} 个` : "无"} · Hooks {plugin.has_hooks ? "有" : "无"}</span>
-                <button class="plain" onclick={() => toggleCodexPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
-                <button class="plain" onclick={() => removeCodexPlugin(plugin)}>卸载</button>
-              </div>
-            {/each}
-          {:else}<p class="settings-note">当前工作区未安装 Codex 资源插件。</p>{/if}
-          <div class="catalog-head">
-            <div><strong>插件 Marketplace</strong><p>自动发现 OpenAI、Claude 与 Cursor 兼容目录；本地来源直接安装，Git/NPM 来源先下载到工作区隔离暂存目录，校验后再安装。</p></div>
-          </div>
-          {#if pluginMarketplaces.length}
-            {#each pluginMarketplaces as entry}
-              <p class="settings-note">{entry.marketplace.name} · {entry.path}</p>
-              {#each entry.marketplace.plugins as plugin}
-                <div class="config-entry">
-                  <span>{plugin.name}</span>
-                  <code>{plugin.source.source}</code>
-                  <button class="plain" onclick={() => installMarketplacePlugin(entry.path, plugin.name)}>安装</button>
-                  <button class="plain" onclick={() => installMarketplacePlugin(entry.path, plugin.name, true)}>升级</button>
-                </div>
-              {/each}
-            {/each}
-          {:else}<p class="settings-note">当前工作区未发现 Marketplace 清单。</p>{/if}
-        </section>
-        <div class="abtns">
-          <button class="deny" onclick={() => (settings = null)}>取消</button>
-          <button class="ok" onclick={saveSettings} disabled={saving}>
-            {saving ? "保存中…" : "保存"}
-          </button>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <SettingsModal
+    bind:settings
+    bind:apiKeyInput
+    bind:vlApiKeyInput
+    {configLocation}
+    {modelCatalog}
+    {officialProviders}
+    {openRouterProvider}
+    {catalogRefreshing}
+    {presetSaving}
+    {saving}
+    {harnessDiagnostics}
+    {externalPlugins}
+    {codexPlugins}
+    {pluginMarketplaces}
+    {REASONING_EFFORTS}
+    {currencySymbol}
+    {currencyName}
+    {priceSourceName}
+    {currentPriceSourceName}
+    {openConfigFile}
+    {openConfigDir}
+    {applyModelPreset}
+    {openPriceSource}
+    {refreshOpenRouterModels}
+    {addExternalPlugin}
+    {upgradeExternalPlugin}
+    {toggleExternalPlugin}
+    {addCodexPlugin}
+    {upgradeCodexPlugin}
+    {toggleCodexPlugin}
+    {removeCodexPlugin}
+    {installMarketplacePlugin}
+    {saveSettings}
+  />
   </div>
 </main>

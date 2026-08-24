@@ -569,4 +569,5 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 对照 OpenAI Codex `068c49f` 源码补齐真实清单兼容：`mcpServers` 支持文件路径，Hooks 支持单路径/多路径/内联文档，Interface 图标和截图受插件根目录边界校验；Marketplace 支持字符串本地路径、`local`、官方 `url`、`git-subdir`、`npm` 以及旧 nanocodex `git` source，保留 ref/SHA/NPM registry。
 - 结构拆分：app-server 单测移到 `src/tests.rs`，OpenAI Marketplace 解析移到 `openai_compat/marketplace.rs`，兼容测试移到 `openai_compat/tests.rs`；这些后端文件已通过代码结构门禁。工具分发参数收敛为 `DispatchOutput`，严格 Clippy 阻挡项同步修复。
 - 验证：`cargo test --workspace --quiet` 全绿（`ncx-core` 225 项）；受影响模块 `cargo clippy ... -D warnings` 通过；GUI Rust 56 项、Vite production build、question E2E、protocol E2E 全部通过。协议 E2E 现额外验证插件/Marketplace 经真实 WebView/Tauri IPC 返回。
-- 尚未完成的结构债务：`rust/gui/src/App.svelte` 仍为 2674 行历史单体，虽然本轮只改协议调用，但结构门禁会继续报超 300 行。下一拆分批次应先提取设置/插件管理，再拆会话侧栏、消息流和输入区；在完成前不能宣告整套架构改造全部结束。
+- GUI 结构拆分已启动：设置弹窗、模型目录、插件管理分别提取为 `SettingsModal.svelte`、`ModelCatalogSettings.svelte`、`PluginSettings.svelte`，三个新组件均低于 300 行并通过生产构建；协议 E2E 会实际打开设置页并检查 Codex 插件与 Marketplace 区域。首次重跑遇到一次 WebView2 CDP 页面发现超时，确认无残留进程后重跑通过，属于测试启动竞争而非页面断言失败。
+- 尚未完成的结构债务：`rust/gui/src/App.svelte` 已从 2674 行降至 2466 行，但仍是历史单体，结构门禁继续报超 300 行。下一拆分批次继续拆会话侧栏、消息流、输入区和各工作区面板；在完成前不能宣告整套架构改造全部结束。
