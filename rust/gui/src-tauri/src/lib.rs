@@ -2066,13 +2066,14 @@ mod tests {
     fn completed_tool_activity_is_hidden_from_final_and_history_views() {
         let app = include_str!("../../src/App.svelte");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
+        let model = include_str!("../../src/lib/conversation-model.ts");
         let bridge = include_str!("bridge.rs");
         assert!(app.contains("role: \"tool_group\""));
-        assert!(app.contains(
+        assert!(model.contains(
             "type ToolGroup = { role: \"tool_group\"; tools: ToolEntry[]; settled: boolean }"
         ));
 
-        let cleanup = app
+        let cleanup = model
             .split_once("function hideCompletedToolActivity")
             .unwrap()
             .1
@@ -2185,7 +2186,8 @@ mod tests {
     fn reasoning_stays_collapsed_and_bounded_while_streaming() {
         let app = include_str!("../../src/App.svelte");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
-        assert!(app.contains("REASONING_DISPLAY_MAX_CHARS"));
+        let model = include_str!("../../src/lib/conversation-model.ts");
+        assert!(model.contains("REASONING_DISPLAY_MAX_CHARS"));
         assert!(app.contains("appendReasoning(m.text, p.text)"));
         assert!(conversation.contains("<details class=\"reasoning-run\" class:settled={message.settled}>"));
         assert!(!conversation.contains(
@@ -2210,11 +2212,12 @@ mod tests {
     #[test]
     fn completed_turn_keeps_prior_history_and_only_its_final_conclusion() {
         let app = include_str!("../../src/App.svelte");
-        assert!(app.contains("function keepConversationConclusions(finalText: string)"));
-        assert!(app.contains("if (pendingAnswer) compacted.push(pendingAnswer);"));
-        assert!(app.contains("compacted.push({ ...message });"));
-        assert!(app.contains("pendingAnswer = { ...message };"));
-        assert!(app.contains("keepConversationConclusions(p.final_text);"));
+        let model = include_str!("../../src/lib/conversation-model.ts");
+        assert!(model.contains("function keepConversationConclusions("));
+        assert!(model.contains("if (pendingAnswer) compacted.push(pendingAnswer);"));
+        assert!(model.contains("compacted.push({ ...message });"));
+        assert!(model.contains("pendingAnswer = { ...message };"));
+        assert!(app.contains("keepConversationConclusions(messages, p.final_text)"));
     }
 
     #[test]
@@ -2245,13 +2248,14 @@ mod tests {
     #[test]
     fn session_usage_survives_restart_and_session_switches() {
         let app = include_str!("../../src/App.svelte");
-        assert!(app.contains("function restoreSessionUsage(sessionId: string)"));
-        assert!(app.contains("function persistSessionUsage(sessionId: string)"));
-        assert!(app.contains("ncx.sessionUsage."));
-        assert!(app.contains("addSessionUsage(p.session_id"));
-        assert!(app.contains("persistSessionUsage(sessionId)"));
-        assert!(app.matches("restoreSessionUsage(currentSessionId)").count() >= 2);
-        assert!(app.matches("resetSessionUsage()").count() >= 2);
+        let usage = include_str!("../../src/lib/usage-controller.svelte.ts");
+        assert!(usage.contains("restore(sessionId: string)"));
+        assert!(usage.contains("persist(sessionId: string)"));
+        assert!(usage.contains("ncx.sessionUsage."));
+        assert!(app.contains("usage.add(p.session_id"));
+        assert!(usage.contains("this.persist(sessionId)"));
+        assert!(app.matches("usage.restore(currentSessionId)").count() >= 2);
+        assert!(app.matches("usage.reset()").count() >= 2);
     }
 
     #[test]
@@ -2367,11 +2371,13 @@ mod tests {
     #[test]
     fn frontend_rejects_stale_or_cross_version_protocol_events() {
         let app = include_str!("../../src/App.svelte");
+        let protocol_client = include_str!("../../src/lib/app-server-client.ts");
         assert!(app.contains("listen<ProtocolEventEnvelope>(\"ncx://protocol-event\""));
-        assert!(app.contains("envelope.protocolVersion !== 2 || !envelope.threadId"));
-        assert!(app.contains("protocolSequences.get(envelope.threadId) || 0"));
-        assert!(app.contains("envelope.sequence <= previous"));
-        assert!(app.contains("protocolSequences.set(envelope.threadId, envelope.sequence)"));
+        assert!(app.contains("protocolSequenceGate.accept(envelope)"));
+        assert!(protocol_client.contains("envelope.protocolVersion !== 2 || !envelope.threadId"));
+        assert!(protocol_client.contains("this.sequences.get(envelope.threadId) || 0"));
+        assert!(protocol_client.contains("envelope.sequence <= previous"));
+        assert!(protocol_client.contains("this.sequences.set(envelope.threadId, envelope.sequence)"));
     }
 
     #[test]

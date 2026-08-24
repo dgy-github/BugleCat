@@ -10,7 +10,15 @@
   import SettingsModal from "./components/SettingsModal.svelte";
   import SessionSidebar from "./components/SessionSidebar.svelte";
   import TopBar from "./components/TopBar.svelte";
+  import { appServerRequest, ProtocolSequenceGate, threadToSessionRow, type ProtocolEventEnvelope, type ProtocolThread, type SessionRow } from "./lib/app-server-client";
   import { diffLineClass, renderMarkdown, toolOutcome, toolStatusLabel } from "./lib/ui-format";
+  import { SidebarController, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./lib/sidebar-controller.svelte";
+  import { appendReasoning, hideCompletedToolActivity, keepConversationConclusions, settleCompletedToolGroups, toolGroupFailureCount, type ConversationMessage as Msg, type ToolEntry, type ToolGroup } from "./lib/conversation-model";
+  import { UsageController } from "./lib/usage-controller.svelte";
+
+  const protocolSequenceGate = new ProtocolSequenceGate();
+  const sidebar = new SidebarController();
+  const usage = new UsageController();
 
   const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
   const isImage = (p: string) => IMAGE_EXTS.includes((p.split(".").pop() || "").toLowerCase());
@@ -142,13 +150,6 @@
   let checkpointLabel = $state("");
   let checkpointBusy = $state(false);
 
-  type ToolEntry = { name: string; args?: string; result?: string };
-  type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boolean };
-  type ReasoningMsg = { role: "reasoning"; text: string; settled: boolean };
-  type Msg =
-    | { role: "user" | "assistant" | "note" | "compact"; text: string }
-    | ReasoningMsg
-    | ToolGroup;
 
   let messages = $state<Msg[]>([]);
   const sessionMessages = new Map<string, Msg[]>();
@@ -158,8 +159,6 @@
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
   let busy = $state(false);
   let reasoningIdx = $state<number | null>(null);
-  const REASONING_DISPLAY_MAX_CHARS = 4000;
-  const REASONING_OMITTED = "\n\n…较长思考已省略，仅保留最近内容…\n\n";
   let runningSessions = $state(new Set<string>());
   let stopping = $state(false);
   let switchingSession = $state(false);
@@ -176,79 +175,7 @@
     workspace ? workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || workspace : "",
   );
   let sessionTitle = $state("新会话");
-  let sidebarOpen = $state(true);
-  const SIDEBAR_DEFAULT_WIDTH = 250;
-  const SIDEBAR_MIN_WIDTH = 190;
-  const SIDEBAR_MAX_WIDTH = 440;
-  let sidebarWidth = $state(SIDEBAR_DEFAULT_WIDTH);
-  let sidebarResizing = $state(false);
   let sandboxMode = $state("");
-  let tokIn = $state(0);
-  let tokOut = $state(0);
-  const protocolUsageBySession = new Map<string, { prompt_tokens: number; completion_tokens: number }>();
-  const sessionUsageKey = (sessionId: string) => `ncx.sessionUsage.${sessionId}`;
-  function resetSessionUsage() {
-    tokIn = 0;
-    tokOut = 0;
-  }
-  function restoreSessionUsage(sessionId: string) {
-    resetSessionUsage();
-    if (!sessionId) return;
-    const protocolUsage = protocolUsageBySession.get(sessionId);
-    if (protocolUsage) {
-      tokIn = protocolUsage.prompt_tokens;
-      tokOut = protocolUsage.completion_tokens;
-      persistSessionUsage(sessionId);
-      return;
-    }
-    try {
-      const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
-      if (Number.isFinite(stored?.prompt_tokens) && stored.prompt_tokens >= 0) {
-        tokIn = stored.prompt_tokens;
-      }
-      if (Number.isFinite(stored?.completion_tokens) && stored.completion_tokens >= 0) {
-        tokOut = stored.completion_tokens;
-      }
-    } catch { /* missing or invalid local usage is treated as zero */ }
-  }
-  function persistSessionUsage(sessionId: string) {
-    if (!sessionId) return;
-    try {
-      localStorage.setItem(sessionUsageKey(sessionId), JSON.stringify({
-        prompt_tokens: tokIn,
-        completion_tokens: tokOut,
-      }));
-    } catch { /* storage is optional */ }
-  }
-  function addSessionUsage(sessionId: string, usage: Record<string, number>) {
-    if (!sessionId) return;
-    const prompt = usage.prompt_tokens || 0;
-    const completion = usage.completion_tokens || 0;
-    if (sessionId === currentSessionId) {
-      tokIn += prompt;
-      tokOut += completion;
-      persistSessionUsage(sessionId);
-      return;
-    }
-    try {
-      const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
-      localStorage.setItem(sessionUsageKey(sessionId), JSON.stringify({
-        prompt_tokens: (Number(stored?.prompt_tokens) || 0) + prompt,
-        completion_tokens: (Number(stored?.completion_tokens) || 0) + completion,
-      }));
-    } catch { /* storage is optional */ }
-  }
-  function setSessionRunning(sessionId: string, running: boolean) {
-    const next = new Set(runningSessions);
-    if (running) next.add(sessionId);
-    else next.delete(sessionId);
-    runningSessions = next;
-  }
-  // Per-1M-token prices (from config); 0 = unknown → cost is hidden.
-  let priceIn = $state(0);
-  let priceOut = $state(0);
-  let priceCurrency = $state<"CNY" | "USD">("CNY");
-  const cost = $derived((tokIn / 1e6) * priceIn + (tokOut / 1e6) * priceOut);
   let streamingIdx = $state<number | null>(null); // index of the bubble being streamed
   const fmtTok = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
   const fmtCost = (n: number) => (n >= 1 ? n.toFixed(2) : n.toFixed(4));
@@ -269,18 +196,6 @@
   // ── Quiet, grouped tool activity ─────────────────────────────────────────
   // Routine command lines stay out of the conversation. Every tool stays
   // collapsed by default, while its parameters and output remain available.
-  function settleCompletedToolGroups() {
-    for (const message of messages) {
-      if (
-        message.role === "tool_group" &&
-        !message.settled &&
-        message.tools.length > 0 &&
-        message.tools.every((tool) => tool.result !== undefined)
-      ) {
-        message.settled = true;
-      }
-    }
-  }
   function settleReasoning() {
     if (reasoningIdx === null) return;
     const message = messages[reasoningIdx];
@@ -290,37 +205,6 @@
   function removeReasoningMessages() {
     messages = messages.filter((message) => message.role !== "reasoning");
     reasoningIdx = null;
-  }
-  function keepConversationConclusions(finalText: string) {
-    const compacted: Msg[] = [];
-    let pendingAnswer: Extract<Msg, { role: "assistant" }> | null = null;
-    for (const message of messages) {
-      if (message.role === "user") {
-        if (pendingAnswer) compacted.push(pendingAnswer);
-        compacted.push({ ...message });
-        pendingAnswer = null;
-      } else if (message.role === "assistant") {
-        // Intermediate narrations are replaced until the next user turn.
-        pendingAnswer = { ...message };
-      }
-    }
-    if (finalText.trim() !== "") pendingAnswer = { role: "assistant", text: finalText };
-    if (pendingAnswer) compacted.push(pendingAnswer);
-    messages = compacted;
-  }
-  function appendReasoning(previous: string, delta: string): string {
-    const combined = previous + delta;
-    if (combined.length <= REASONING_DISPLAY_MAX_CHARS) return combined;
-    const tailLength = REASONING_DISPLAY_MAX_CHARS - REASONING_OMITTED.length;
-    return REASONING_OMITTED + combined.slice(-tailLength);
-  }
-  function hideCompletedToolActivity(source: Msg[]): Msg[] {
-    return source.filter((message) => message.role !== "tool_group");
-  }
-  function toolGroupFailureCount(group: ToolGroup) {
-    return group.tools.filter(
-      (tool) => tool.result !== undefined && toolOutcome(tool.result) === "err",
-    ).length;
   }
 
   // Branch / checkpoint expand-to-detail.
@@ -370,9 +254,7 @@
       try {
         const updated = await invoke<Settings>("get_settings");
         models = updated.available_models;
-        priceIn = updated.price_in || 0;
-        priceOut = updated.price_out || 0;
-        priceCurrency = updated.price_currency || "CNY";
+        usage.setPrice(updated.price_in, updated.price_out, updated.price_currency);
       } catch { /* 模型已切换，费用显示将在下一次状态刷新时同步 */ }
     } catch (e) {
       currentModel = prev;
@@ -425,58 +307,6 @@
   }
   let scroller = $state<HTMLDivElement>();
 
-  function clampSidebarWidth(width: number): number {
-    const viewportMax = typeof window === "undefined"
-      ? SIDEBAR_MAX_WIDTH
-      : Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.floor(window.innerWidth * 0.45)));
-    return Math.min(viewportMax, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
-  }
-
-  function setSidebarWidth(width: number, persist = true) {
-    sidebarWidth = clampSidebarWidth(width);
-    if (persist) {
-      try { localStorage.setItem("ncx.sidebarWidth", String(sidebarWidth)); } catch { /* storage is optional */ }
-    }
-  }
-
-  function stopSidebarResize() {
-    if (!sidebarResizing) return;
-    sidebarResizing = false;
-    window.removeEventListener("pointermove", resizeSidebar);
-    window.removeEventListener("pointerup", stopSidebarResize);
-    document.body.classList.remove("sidebar-resizing");
-  }
-
-  function resizeSidebar(event: PointerEvent) {
-    if (!sidebarResizing) return;
-    setSidebarWidth(event.clientX - sidebarResizeStartX + sidebarResizeStartWidth);
-  }
-
-  let sidebarResizeStartX = 0;
-  let sidebarResizeStartWidth = SIDEBAR_DEFAULT_WIDTH;
-  function beginSidebarResize(event: PointerEvent) {
-    if (!sidebarOpen) return;
-    event.preventDefault();
-    sidebarResizing = true;
-    sidebarResizeStartX = event.clientX;
-    sidebarResizeStartWidth = sidebarWidth;
-    document.body.classList.add("sidebar-resizing");
-    window.addEventListener("pointermove", resizeSidebar);
-    window.addEventListener("pointerup", stopSidebarResize, { once: true });
-  }
-
-  function handleSidebarResizeKey(event: KeyboardEvent) {
-    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      event.preventDefault();
-      setSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 16 : -16));
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      setSidebarWidth(SIDEBAR_MIN_WIDTH);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      setSidebarWidth(SIDEBAR_MAX_WIDTH);
-    }
-  }
 
   function scrollDown() {
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
@@ -487,10 +317,7 @@
   }
 
   onMount(async () => {
-    try {
-      const savedWidth = Number(localStorage.getItem("ncx.sidebarWidth"));
-      if (Number.isFinite(savedWidth)) setSidebarWidth(savedWidth, false);
-    } catch { /* storage is optional */ }
+    sidebar.restoreWidth();
     // Header falls back to a direct status call until the agent thread is Ready.
     try {
       const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; reasoning_effort: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
@@ -499,9 +326,7 @@
       currentModel = s.model;
       if (s.permission_mode) permissionMode = s.permission_mode;
       if (s.reasoning_effort) reasoningEffort = s.reasoning_effort;
-      priceIn = s.price_in || 0;
-      priceOut = s.price_out || 0;
-      priceCurrency = s.price_currency || "CNY";
+      usage.setPrice(s.price_in, s.price_out, s.price_currency);
     } catch (e) {
       header = "配置错误";
     }
@@ -509,10 +334,7 @@
 
     await listen<ProtocolEventEnvelope>("ncx://protocol-event", (message) => {
       const envelope = message.payload;
-      if (envelope.protocolVersion !== 2 || !envelope.threadId) return;
-      const previous = protocolSequences.get(envelope.threadId) || 0;
-      if (envelope.sequence <= previous) return;
-      protocolSequences.set(envelope.threadId, envelope.sequence);
+      if (!protocolSequenceGate.accept(envelope)) return;
       if (["threadCreated", "threadUpdated", "turnCompleted"].includes(envelope.event.type)) {
         refreshSessions();
       }
@@ -535,7 +357,7 @@
           if (p.session_id) {
             const wasUnbound = currentSessionId === "";
             currentSessionId = p.session_id;
-            restoreSessionUsage(currentSessionId);
+            usage.restore(currentSessionId);
             if (wasUnbound) {
               restoreSessionQueue(currentSessionId);
               restoreSessionPrompts(currentSessionId);
@@ -549,7 +371,7 @@
           settleReasoning();
           if (streamingIdx === null) {
             if (p.text === "") break; // ignore an empty leading delta (no bubble yet)
-            settleCompletedToolGroups();
+            settleCompletedToolGroups(messages);
             messages.push({ role: "assistant", text: p.text });
             streamingIdx = messages.length - 1;
           } else {
@@ -560,7 +382,7 @@
         case "reasoning_delta":
           if (!acceptsSessionEvent(p.session_id) || p.text === "") break;
           if (reasoningIdx === null) {
-            settleCompletedToolGroups();
+            settleCompletedToolGroups(messages);
             messages.push({ role: "reasoning", text: appendReasoning("", p.text), settled: false });
             reasoningIdx = messages.length - 1;
           } else {
@@ -588,7 +410,7 @@
             }
             streamingIdx = null;
           } else if (p.text.trim() !== "") {
-            settleCompletedToolGroups();
+            settleCompletedToolGroups(messages);
             messages.push({ role: "assistant", text: p.text });
           }
           break;
@@ -655,17 +477,17 @@
         }
         case "done":
           setSessionRunning(p.session_id, false);
-          addSessionUsage(p.session_id, p.usage || {});
+          usage.add(p.session_id, p.usage || {}, currentSessionId);
           if (!acceptsSessionEvent(p.session_id)) {
             refreshSessions();
             break;
           }
-          settleCompletedToolGroups();
+          settleCompletedToolGroups(messages);
           settleReasoning();
           removeReasoningMessages();
           messages = hideCompletedToolActivity(messages);
           if (p.stop_reason === "completed") {
-            keepConversationConclusions(p.final_text);
+            messages = keepConversationConclusions(messages, p.final_text);
           } else if (p.stop_reason !== "completed") {
             messages.push({ role: "note", text: `[${p.stop_reason}] ${p.final_text}` });
           }
@@ -719,7 +541,7 @@
         case "error":
           setSessionRunning(p.session_id, false);
           if (!acceptsSessionEvent(p.session_id)) break;
-          settleCompletedToolGroups();
+          settleCompletedToolGroups(messages);
           settleReasoning();
           removeReasoningMessages();
           messages = hideCompletedToolActivity(messages);
@@ -825,7 +647,7 @@
       currentSessionId = "";
       messages = [];
       sessionTitle = "新会话";
-      resetSessionUsage();
+      usage.reset();
       queued = [];
       attached = [];
       const set = await invoke<string>("set_workspace", { path: dir });
@@ -839,7 +661,7 @@
       currentSessionId = previousSessionId;
       sessionTitle = previousTitle;
       messages = previousMessages;
-      restoreSessionUsage(currentSessionId);
+      usage.restore(currentSessionId);
       messages.push({ role: "note", text: `切换工作区失败：${e}` });
     }
   }
@@ -1108,9 +930,7 @@
       settings.available_models = provider.models.map((item) => item.model_id);
       currentModel = selected.model_id;
       models = settings.available_models;
-      priceIn = selected.price_in;
-      priceOut = selected.price_out;
-      priceCurrency = selected.price_currency;
+      usage.setPrice(selected.price_in, selected.price_out, selected.price_currency);
     } catch (e) {
       messages.push({ role: "note", text: `应用模型预设失败：${e}` });
     }
@@ -1164,9 +984,7 @@
     if (vlApiKeyInput.trim()) updates.vl_api_key = vlApiKeyInput.trim();
     try {
       await invoke("save_settings", { updates });
-      priceIn = Number(settings.price_in) || 0; // reflect new rate immediately
-      priceOut = Number(settings.price_out) || 0;
-      priceCurrency = settings.price_currency;
+      usage.setPrice(Number(settings.price_in), Number(settings.price_out), settings.price_currency);
       settings = null;
       apiKeyInput = "";
       vlApiKeyInput = "";
@@ -1224,66 +1042,6 @@
 
   // ── Phase 1: git branches, diff, session history ──────────────────────────
   type BranchInfo = { name: string; current: boolean };
-  type SessionRow = {
-    session_id: string;
-    title: string;
-    snippet: string;
-    user_messages: number;
-    assistant_messages: number;
-    tool_calls: number;
-    updated_at: string;
-    has_snapshot: boolean;
-    archived: boolean;
-  };
-  type ProtocolThreadItem =
-    | { type: "userMessage"; id: string; text: string }
-    | { type: "assistantMessage"; id: string; text: string }
-    | { type: "toolCall"; id: string; name: string; arguments: unknown }
-    | { type: "toolResult"; id: string; callId: string; output: string; success: boolean }
-    | { type: "reasoning"; id: string; summary: string }
-    | { type: "contextCompaction"; id: string; summary: string; droppedItems: number };
-  type ProtocolThread = {
-    metadata: { id: string; workspace: string; title: string; archived: boolean; createdAt: number; updatedAt: number };
-    turns: { id: string; status: string; items: ProtocolThreadItem[]; startedAt: number; completedAt?: number; usage?: { tokens?: Record<string, number>; estimatedCost?: number; currency?: string } }[];
-  };
-  type AppServerOutcome<T> = { response: { protocolVersion: number; payload: { type: string; data: T } } };
-  type ProtocolEventEnvelope = {
-    protocolVersion: number;
-    sequence: number;
-    threadId: string;
-    turnId?: string;
-    event: { type: string; data?: unknown };
-  };
-  const protocolSequences = new Map<string, number>();
-
-  async function appServerRequest<T>(request: Record<string, unknown>): Promise<T> {
-    const outcome = await invoke<AppServerOutcome<T>>("app_server_request", { request });
-    if (outcome.response.protocolVersion !== 2) throw new Error(`不支持的协议版本 ${outcome.response.protocolVersion}`);
-    return outcome.response.payload.data;
-  }
-
-  function threadToSessionRow(thread: ProtocolThread): SessionRow {
-    let userMessages = 0;
-    let assistantMessages = 0;
-    let toolCalls = 0;
-    let snippet = "";
-    for (const item of thread.turns.flatMap((turn) => turn.items)) {
-      if (item.type === "userMessage") { userMessages += 1; snippet = item.text; }
-      else if (item.type === "assistantMessage") { assistantMessages += 1; snippet = item.text; }
-      else if (item.type === "toolCall") toolCalls += 1;
-    }
-    return {
-      session_id: thread.metadata.id,
-      title: thread.metadata.title,
-      snippet: Array.from(snippet).slice(0, 200).join(""),
-      user_messages: userMessages,
-      assistant_messages: assistantMessages,
-      tool_calls: toolCalls,
-      updated_at: String(thread.metadata.updatedAt),
-      has_snapshot: thread.turns.length > 0,
-      archived: thread.metadata.archived,
-    };
-  }
   let branchOpen = $state(false);
   let branches = $state<BranchInfo[]>([]);
   let newBranch = $state("");
@@ -1421,28 +1179,22 @@
       const threads = await Promise.all(metadata.slice(0, 50).map((thread) =>
         appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: thread.id } })
       ));
-      protocolUsageBySession.clear();
-      for (const thread of threads) {
-        protocolUsageBySession.set(thread.metadata.id, thread.turns.reduce(
+      usage.replaceProtocolUsage(threads.map((thread) => [thread.metadata.id, thread.turns.reduce(
           (sum, turn) => ({
             prompt_tokens: sum.prompt_tokens + (turn.usage?.tokens?.prompt_tokens || 0),
             completion_tokens: sum.completion_tokens + (turn.usage?.tokens?.completion_tokens || 0),
           }),
           { prompt_tokens: 0, completion_tokens: 0 },
-        ));
-      }
+        )]));
       sessions = threads.map(threadToSessionRow);
       const current = sessions.find((session) => session.session_id === currentSessionId);
       if (current) {
         sessionTitle = current.title || "会话";
-        restoreSessionUsage(currentSessionId);
+        usage.restore(currentSessionId);
       }
     } catch (e) {
       console.error("会话协议加载失败", e);
     }
-  }
-  function toggleSidebar() {
-    sidebarOpen = !sidebarOpen;
   }
   function newThreadId(): string {
     return `thread-${crypto.randomUUID()}`;
@@ -1458,7 +1210,7 @@
     messages = [];
     sessionTitle = "新会话";
     currentSessionId = "";
-    resetSessionUsage();
+    usage.reset();
     try {
       const id = newThreadId();
       await appServerRequest<ProtocolThread>({
@@ -1480,7 +1232,7 @@
       messages = previousMessages;
       restoreSessionQueue(previousSessionId);
       restoreSessionPrompts(previousSessionId);
-      restoreSessionUsage(currentSessionId);
+      usage.restore(currentSessionId);
       messages.push({ role: "note", text: `新建会话失败：${e}` });
     }
   }
@@ -1492,7 +1244,7 @@
     switchingSession = true;
     sessionTitle = title || "会话";
     currentSessionId = id;
-    restoreSessionUsage(currentSessionId);
+    usage.restore(currentSessionId);
     restoreSessionQueue(id);
     restoreSessionPrompts(id);
     restoreSessionMessages(id);
@@ -1505,7 +1257,7 @@
       switchingSession = false;
       currentSessionId = previousId;
       sessionTitle = previousTitle;
-      restoreSessionUsage(currentSessionId);
+      usage.restore(currentSessionId);
       restoreSessionQueue(previousId);
       restoreSessionPrompts(previousId);
       messages.push({ role: "note", text: `继续会话失败：${e}` });
@@ -1520,7 +1272,7 @@
     busy = false;
     sessionTitle = title ? `${title}（分叉）` : "分叉";
     currentSessionId = "";
-    resetSessionUsage();
+    usage.reset();
     try {
       await appServerRequest<ProtocolThread>({
         method: "threadForkActivate",
@@ -1532,7 +1284,7 @@
       switchingSession = false;
       currentSessionId = previousSessionId;
       sessionTitle = previousTitle;
-      restoreSessionUsage(currentSessionId);
+      usage.restore(currentSessionId);
       restoreSessionQueue(previousSessionId);
       restoreSessionPrompts(previousSessionId);
       messages.push({ role: "note", text: `分叉失败：${e}` });
@@ -1625,8 +1377,8 @@
     else messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" });
   }
   function cmdUsage() {
-    const c = priceIn || priceOut ? ` · ≈${currencySymbol(priceCurrency)}${fmtCost(cost)}` : "";
-    messages.push({ role: "note", text: `本会话用量：输入 ${tokIn} / 输出 ${tokOut} tokens${c}` });
+    const c = usage.priceIn || usage.priceOut ? ` · ≈${currencySymbol(usage.currency)}${fmtCost(usage.cost)}` : "";
+    messages.push({ role: "note", text: `本会话用量：输入 ${usage.promptTokens} / 输出 ${usage.completionTokens} tokens${c}` });
   }
   async function cmdMcp() {
     try {
@@ -1737,9 +1489,9 @@
   }
 </script>
 
-<main class="app" style={`--sidebar-width: ${sidebarWidth}px`}>
+<main class="app" style={`--sidebar-width: ${sidebar.width}px`}>
   <SessionSidebar
-    {sidebarOpen}
+    sidebarOpen={sidebar.open}
     {switchingSession}
     {currentSessionId}
     {runningSessions}
@@ -1749,12 +1501,12 @@
     bind:showRecent
     bind:showArchived
     {workspace}
-    {sidebarResizing}
-    {sidebarWidth}
+    sidebarResizing={sidebar.resizing}
+    sidebarWidth={sidebar.width}
     {SIDEBAR_MIN_WIDTH}
     {SIDEBAR_MAX_WIDTH}
     {SIDEBAR_DEFAULT_WIDTH}
-    {toggleSidebar}
+    toggleSidebar={sidebar.toggle}
     {newSession}
     {resumeSession}
     {forkSession}
@@ -1764,18 +1516,18 @@
     {openSettings}
     {fmtWhen}
     {baseName}
-    {beginSidebarResize}
-    {setSidebarWidth}
-    {handleSidebarResizeKey}
+    beginSidebarResize={sidebar.beginResize}
+    setSidebarWidth={sidebar.setWidth}
+    handleSidebarResizeKey={sidebar.handleResizeKey}
   />
   <div class="workarea">
   <section class="main">
     <TopBar
-      {sidebarOpen}
+      sidebarOpen={sidebar.open}
       {sessionTitle}
       {busy}
       {rightPanel}
-      {toggleSidebar}
+      toggleSidebar={sidebar.toggle}
       {openFiles}
       {openDiff}
       {openBranches}
@@ -1816,12 +1568,12 @@
       {needsWorkspace}
       {wsName}
       {chooseWorkspace}
-      {tokIn}
-      {tokOut}
-      {priceIn}
-      {priceOut}
-      {priceCurrency}
-      {cost}
+      tokIn={usage.promptTokens}
+      tokOut={usage.completionTokens}
+      priceIn={usage.priceIn}
+      priceOut={usage.priceOut}
+      priceCurrency={usage.currency}
+      cost={usage.cost}
       {fmtTok}
       {currencySymbol}
       {fmtCost}
