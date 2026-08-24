@@ -21,6 +21,7 @@
   import { MemoryController } from "./lib/memory-controller.svelte";
   import { PluginController } from "./lib/plugin-controller.svelte";
   import { SettingsController, type Settings } from "./lib/settings-controller.svelte";
+  import { SlashController } from "./lib/slash-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -77,6 +78,22 @@
     (text) => messages.push({ role: "note", text }),
     (model, availableModels) => { currentModel = model; models = availableModels; },
     (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
+  );
+  const slashController = new SlashController(
+    () => input,
+    (value) => (input = value),
+    (text) => messages.push({ role: "note", text }),
+    {
+      newSession: () => newSession(),
+      forkCurrent: () => currentSessionId ? void forkSession(currentSessionId, sessionTitle) : messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
+      openModel: () => (modelMenuOpen = true),
+      openSettings: () => void openSettings(),
+      showUsage: () => showUsage(),
+      openCheckpoints: () => void openCheckpoints(), openFiles: () => void openFiles(), openDiff: () => void openDiff(),
+      openBranches: () => void openBranches(), openMemory: () => void openHermes(),
+      refreshSessions, currentThreadId: () => currentSessionId, currentTitle: () => sessionTitle,
+      setTitle: (title) => (sessionTitle = title),
+    },
   );
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
@@ -443,7 +460,7 @@
     // (Tauri events aren't buffered), so the active session id would be missed.
     // Now that we're listening, ask the backend to re-emit it.
     invoke("request_ready").catch(() => {});
-    loadCustomCommands();
+    slashController.loadCustomCommands();
   });
 
   async function attachFiles() {
@@ -597,10 +614,10 @@
 
   function onKey(e: KeyboardEvent) {
     // Slash-command palette navigation takes precedence while it's open.
-    if (showSlash && slashMatches.length) {
-      if (e.key === "ArrowDown") { e.preventDefault(); slashIdx = (slashIdx + 1) % slashMatches.length; return; }
-      if (e.key === "ArrowUp") { e.preventDefault(); slashIdx = (slashIdx - 1 + slashMatches.length) % slashMatches.length; return; }
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runSlash(slashMatches[Math.min(slashIdx, slashMatches.length - 1)]); return; }
+    if (slashController.visible && slashController.matches.length) {
+      if (e.key === "ArrowDown") { e.preventDefault(); slashController.index = (slashController.index + 1) % slashController.matches.length; return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); slashController.index = (slashController.index - 1 + slashController.matches.length) % slashController.matches.length; return; }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); slashController.run(slashController.matches[Math.min(slashController.index, slashController.matches.length - 1)]); return; }
       if (e.key === "Escape") { e.preventDefault(); input = ""; return; }
     }
     // Enter sends; Shift+Enter inserts a newline.
@@ -883,124 +900,11 @@
   }
 
 
-  // ── Slash command palette (type `/` in the composer) ──────────────────────
-  let slashIdx = $state(0);
-  const showSlash = $derived(input.startsWith("/") && !input.includes("\n"));
-  const slashFilter = $derived(showSlash ? input.slice(1).trim().toLowerCase() : "");
-  function forkCurrent() {
-    if (currentSessionId) forkSession(currentSessionId, sessionTitle);
-    else messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" });
-  }
-  function cmdUsage() {
-    const c = usage.priceIn || usage.priceOut ? ` · ≈${currencySymbol(usage.currency)}${fmtCost(usage.cost)}` : "";
-    messages.push({ role: "note", text: `本会话用量：输入 ${usage.promptTokens} / 输出 ${usage.completionTokens} tokens${c}` });
-  }
-  async function cmdMcp() {
-    try {
-      const rows = await invoke<{ name: string; command: string }[]>("list_mcp");
-      messages.push({
-        role: "note",
-        text: rows.length
-          ? `MCP 服务器（${rows.length}）：\n` + rows.map((r) => `· ${r.name} — ${r.command}`).join("\n")
-          : "未配置 MCP 服务器（~/.nanocodex/mcp.toml）。",
-      });
-    } catch (e) {
-      messages.push({ role: "note", text: `读取 MCP 失败：${e}` });
-    }
-  }
-  function cmdFeedback() {
-    invoke("open_url", { url: "https://github.com/dgy-github/nanocodex/issues" }).catch((e) =>
-      messages.push({ role: "note", text: `打开反馈页失败：${e}` }),
-    );
-  }
-  function cmdUltrareview() {
-    input = "请用最严格的标准复查刚才的改动 / 结论：逐条列出潜在 bug、边界情况、错误假设与遗漏，并给出具体修正。";
-  }
-  function cmdBtw() {
-    input = "补充说明：";
-  }
-  function cmdSoon(name: string) {
-    messages.push({ role: "note", text: `「${name}」规划中（需要专门的后台支持），下一步实现。` });
-  }
-  async function cmdRename() {
-    if (!currentSessionId) return;
-    const title = window.prompt("输入新的会话名称", sessionTitle)?.trim();
-    if (!title || title === sessionTitle) return;
-    try {
-      await appServerRequest({
-        method: "threadRename",
-        params: { threadId: currentSessionId, title },
-      });
-      sessionTitle = title;
-      await refreshSessions();
-    } catch (e) {
-      messages.push({ role: "note", text: `重命名失败：${e}` });
-    }
-  }
-  // User-authored custom commands (.nanocodex|.claude/commands/*.md), surfaced
-  // in the palette alongside built-in actions.
-  let customCommands = $state<{ scope: string; name: string; slash: string; path: string }[]>([]);
-  let slashArg = ""; // trailing args captured when a palette item is chosen
-  async function loadCustomCommands() {
-    try {
-      customCommands = await invoke("get_custom_commands");
-    } catch (e) {
-      /* custom commands are optional */
-    }
-  }
-  async function runCustom(slash: string) {
-    try {
-      const expanded = await invoke<string>("expand_custom_command", { slash, arg: slashArg });
-      input = expanded; // fill the composer; user reviews, then Enter to send
-    } catch (e) {
-      messages.push({ role: "note", text: `自定义命令展开失败：${e}` });
-    }
-  }
-  type SlashCmd = { id: string; label: string; desc: string; run: () => void };
-  const SLASH_COMMANDS: SlashCmd[] = [
-    { id: "new", label: "新建会话", desc: "开始一个空会话", run: () => newSession() },
-    { id: "fork", label: "分叉会话", desc: "从当前会话分叉一个新会话", run: () => forkCurrent() },
-    { id: "rename", label: "重命名会话", desc: "给当前会话改名", run: () => cmdRename() },
-    { id: "model", label: "切换模型", desc: "打开模型选择", run: () => (modelMenuOpen = true) },
-    { id: "config", label: "设置", desc: "打开设置面板", run: () => openSettings() },
-    { id: "usage", label: "用量", desc: "显示本会话 token / 费用", run: () => cmdUsage() },
-    { id: "rewind", label: "检查点", desc: "查看 / 恢复检查点", run: () => openCheckpoints() },
-    { id: "files", label: "文件", desc: "浏览 / 预览工作区文件", run: () => openFiles() },
-    { id: "diff", label: "改动", desc: "查看工作区 diff", run: () => openDiff() },
-    { id: "branches", label: "分支", desc: "Git 分支", run: () => openBranches() },
-    { id: "memory", label: "记忆", desc: "项目记忆", run: () => openHermes() },
-    { id: "mcp", label: "MCP", desc: "列出已配置的 MCP 服务器", run: () => cmdMcp() },
-    { id: "feedback", label: "反馈", desc: "打开 GitHub Issues", run: () => cmdFeedback() },
-    { id: "ultrareview", label: "严格复查", desc: "用更严格标准复查（填入模板）", run: () => cmdUltrareview() },
-    { id: "btw", label: "补充说明", desc: "插入一条旁注（填入模板）", run: () => cmdBtw() },
-    { id: "schedule", label: "定时任务", desc: "定时运行（规划中）", run: () => cmdSoon("定时任务") },
-    { id: "workflows", label: "多-agent 编排", desc: "orchestrator 编排（规划中）", run: () => cmdSoon("多-agent 编排") },
-  ];
-  const slashHead = $derived(slashFilter.split(/\s+/)[0] ?? "");
-  const customSlash = $derived(
-    customCommands.map((c) => ({
-      id: c.slash.slice(1),
-      label: c.name,
-      desc: `自定义命令 · ${c.scope}`,
-      run: () => runCustom(c.slash),
-    })),
-  );
-  const slashMatches = $derived(
-    showSlash
-      ? [
-          ...SLASH_COMMANDS.filter(
-            (c) => c.id.includes(slashFilter) || c.label.toLowerCase().includes(slashFilter),
-          ),
-          ...customSlash.filter(
-            (c) => c.id.includes(slashHead) || c.label.toLowerCase().includes(slashHead),
-          ),
-        ]
-      : [],
-  );
-  function runSlash(c: SlashCmd) {
-    slashArg = input.replace(/^\/\S+\s*/, "");
-    input = "";
-    c.run();
+  function showUsage() {
+    const costText = usage.priceIn || usage.priceOut
+      ? ` · ≈${currencySymbol(usage.currency)}${fmtCost(usage.cost)}`
+      : "";
+    messages.push({ role: "note", text: `本会话用量：输入 ${usage.promptTokens} / 输出 ${usage.completionTokens} tokens${costText}` });
   }
 </script>
 
@@ -1097,10 +1001,10 @@
       {isImage}
       {baseName}
       {removeAttachment}
-      {showSlash}
-      {slashMatches}
-      bind:slashIdx
-      {runSlash}
+      showSlash={slashController.visible}
+      slashMatches={slashController.matches}
+      bind:slashIdx={slashController.index}
+      runSlash={slashController.run}
       bind:input
       {onKey}
       {handlePaste}

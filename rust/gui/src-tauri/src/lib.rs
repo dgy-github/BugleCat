@@ -2307,6 +2307,7 @@ mod tests {
     #[test]
     fn frontend_thread_lifecycle_uses_the_versioned_app_server_protocol() {
         let app = include_str!("../../src/App.svelte");
+        let frontend = format!("{app}\n{}", include_str!("../../src/lib/slash-controller.svelte.ts"));
         for method in [
             "threadCreateActivate",
             "threadActivate",
@@ -2318,7 +2319,7 @@ mod tests {
             "threadReadVisible",
         ] {
             assert!(
-                app.contains(&format!("method: \"{method}\"")),
+                frontend.contains(&format!("method: \"{method}\"")),
                 "missing app-server request for {method}"
             );
         }
