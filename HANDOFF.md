@@ -562,3 +562,11 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `test:e2e:protocol` 在真实 Tauri/WebView 中新增页面刷新、展开“最近会话”、点击协议创建的历史 Thread 并恢复最终结论的验证；证明 GUI 历史入口已使用 `ncx-app-server`/`ncx-thread-store` 的可见投影，而不是旧 SessionIndex 或前端缓存。
 - E2E 启动时会归档先前失败遗留的 `workspace == "e2e"` 测试 Thread，结束时归档本轮两个 Thread，避免测试数据污染真实历史列表。
 - 已验证结果：跨 Thread 并发、同 Thread 所有权拒绝、工具/中间输出过滤、刷新后历史加载和会话激活全部通过，输出为 `protocol e2e: ok (concurrency, ownership, visible projection, history reload/open)`。
+
+### 2026-08-24 App Server 与 OpenAI 插件协议收口
+- `ncx-app-server` 新增宿主适配边界并拥有完整协议路由；Tauri 的 `app_server_request` 不再匹配 Thread/Turn 方法，只实现 Agent 队列、取消和桌面资源 I/O。Thread 创建/激活/分叉、Turn 提交/停止因此不再由 Tauri bridge 决定路由。
+- Codex 插件列表、安装/升级、启停、卸载、Marketplace 列表及 Marketplace 插件安装均新增 `ncx-protocol` 请求，并由 GUI 统一通过 `app_server_request` 调用；对应旧 Tauri 命令已从 handler 移除。
+- 对照 OpenAI Codex `068c49f` 源码补齐真实清单兼容：`mcpServers` 支持文件路径，Hooks 支持单路径/多路径/内联文档，Interface 图标和截图受插件根目录边界校验；Marketplace 支持字符串本地路径、`local`、官方 `url`、`git-subdir`、`npm` 以及旧 nanocodex `git` source，保留 ref/SHA/NPM registry。
+- 结构拆分：app-server 单测移到 `src/tests.rs`，OpenAI Marketplace 解析移到 `openai_compat/marketplace.rs`，兼容测试移到 `openai_compat/tests.rs`；这些后端文件已通过代码结构门禁。工具分发参数收敛为 `DispatchOutput`，严格 Clippy 阻挡项同步修复。
+- 验证：`cargo test --workspace --quiet` 全绿（`ncx-core` 225 项）；受影响模块 `cargo clippy ... -D warnings` 通过；GUI Rust 56 项、Vite production build、question E2E、protocol E2E 全部通过。协议 E2E 现额外验证插件/Marketplace 经真实 WebView/Tauri IPC 返回。
+- 尚未完成的结构债务：`rust/gui/src/App.svelte` 仍为 2674 行历史单体，虽然本轮只改协议调用，但结构门禁会继续报超 300 行。下一拆分批次应先提取设置/插件管理，再拆会话侧栏、消息流和输入区；在完成前不能宣告整套架构改造全部结束。

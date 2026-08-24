@@ -9,6 +9,43 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// Runtime side effects that are deliberately outside durable thread storage.
+///
+/// Desktop, CLI, and future transports implement this boundary instead of
+/// matching protocol requests themselves. This keeps request routing owned by
+/// the app-server while allowing each host to choose its agent scheduler.
+pub trait AppServerAdapter {
+    fn create_thread(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), String>;
+    fn activate_thread(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), String>;
+    fn fork_thread(
+        &self,
+        source_id: &ncx_protocol::ThreadId,
+        target_id: &ncx_protocol::ThreadId,
+    ) -> Result<(), String>;
+    fn submit_turn(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+        text: String,
+        images: Vec<String>,
+    ) -> Result<(), String>;
+    fn interrupt_latest(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), String>;
+    fn list_codex_plugins(&self) -> Result<serde_json::Value, String>;
+    fn install_codex_plugin(
+        &self,
+        source: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String>;
+    fn set_codex_plugin_enabled(&self, name: String, enabled: bool) -> Result<(), String>;
+    fn uninstall_codex_plugin(&self, name: String) -> Result<(), String>;
+    fn list_marketplaces(&self) -> Result<serde_json::Value, String>;
+    fn install_marketplace_plugin(
+        &self,
+        marketplace_path: String,
+        plugin_name: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String>;
+}
+
 pub struct AppServer<S: ThreadStore> {
     store: Arc<S>,
     sequence: AtomicU64,
@@ -25,6 +62,52 @@ impl<S: ThreadStore> AppServer<S> {
     }
 
     pub fn dispatch(&self, request: ClientRequest) -> Result<DispatchOutcome, AppServerError> {
+        match request {
+            request @ (ClientRequest::ThreadCreate { .. }
+            | ClientRequest::ThreadImport { .. }
+            | ClientRequest::ThreadsImport { .. }) => self.dispatch_thread_creation(request),
+            request @ (ClientRequest::ThreadList { .. }
+            | ClientRequest::ThreadRead { .. }
+            | ClientRequest::ThreadReadVisible { .. }
+            | ClientRequest::ThreadArchive { .. }
+            | ClientRequest::ThreadRename { .. }
+            | ClientRequest::ThreadFork { .. }) => self.dispatch_thread_metadata(request),
+            request @ (ClientRequest::ThreadModelContextRead { .. }
+            | ClientRequest::ThreadModelContextReplace { .. }) => {
+                self.dispatch_model_context(request)
+            }
+            request @ (ClientRequest::TurnStart { .. }
+            | ClientRequest::TurnInterrupt { .. }
+            | ClientRequest::TurnComplete { .. }) => self.dispatch_turn(request),
+            ClientRequest::ItemAppend {
+                thread_id,
+                turn_id,
+                item,
+            } => self.dispatch_item(thread_id, turn_id, item),
+            ClientRequest::ThreadCreateActivate { .. }
+            | ClientRequest::ThreadForkActivate { .. }
+            | ClientRequest::ThreadActivate { .. }
+            | ClientRequest::TurnSubmit { .. }
+            | ClientRequest::TurnInterruptLatest { .. } => Err(AppServerError::InvalidRequest(
+                "request requires a runtime adapter".to_string(),
+            )),
+            ClientRequest::CodexPluginList
+            | ClientRequest::CodexPluginInstall { .. }
+            | ClientRequest::CodexPluginSetEnabled { .. }
+            | ClientRequest::CodexPluginUninstall { .. }
+            | ClientRequest::MarketplaceList
+            | ClientRequest::MarketplacePluginInstall { .. } => {
+                Err(AppServerError::InvalidRequest(
+                    "plugin requests require a host adapter".to_string(),
+                ))
+            }
+        }
+    }
+
+    fn dispatch_thread_creation(
+        &self,
+        request: ClientRequest,
+    ) -> Result<DispatchOutcome, AppServerError> {
         let mut events = Vec::new();
         let payload = match request {
             ClientRequest::ThreadCreate {
@@ -33,13 +116,10 @@ impl<S: ThreadStore> AppServer<S> {
                 title,
             } => {
                 let now = (self.clock)();
-                let id = match thread_id {
-                    Some(id) => id,
-                    None => ncx_protocol::ThreadId::new(format!(
-                        "thread-{now}-{}",
-                        self.sequence.fetch_add(1, Ordering::Relaxed)
-                    ))?,
-                };
+                let id = thread_id.unwrap_or(ncx_protocol::ThreadId::new(format!(
+                    "thread-{now}-{}",
+                    self.sequence.fetch_add(1, Ordering::Relaxed)
+                ))?);
                 let metadata = ThreadMetadata {
                     id: id.clone(),
                     workspace,
@@ -56,23 +136,8 @@ impl<S: ThreadStore> AppServer<S> {
                 events.push(self.event(id, None, Event::ThreadCreated { metadata }));
                 ResponsePayload::Thread(thread)
             }
-            ClientRequest::ThreadCreateActivate { .. }
-            | ClientRequest::ThreadForkActivate { .. }
-            | ClientRequest::ThreadActivate { .. } => {
-                return Err(AppServerError::InvalidRequest(
-                    "thread activation must be handled by the runtime adapter".to_string(),
-                ));
-            }
             ClientRequest::ThreadImport { thread } => {
-                if thread
-                    .turns
-                    .iter()
-                    .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
-                {
-                    return Err(AppServerError::InvalidRequest(
-                        "imported threads cannot contain active turns".to_string(),
-                    ));
-                }
+                ensure_import_is_idle(std::slice::from_ref(&thread))?;
                 self.store.create(thread.clone())?;
                 events.push(self.event(
                     thread.metadata.id.clone(),
@@ -84,15 +149,7 @@ impl<S: ThreadStore> AppServer<S> {
                 ResponsePayload::Thread(thread)
             }
             ClientRequest::ThreadsImport { threads } => {
-                if threads
-                    .iter()
-                    .flat_map(|thread| &thread.turns)
-                    .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
-                {
-                    return Err(AppServerError::InvalidRequest(
-                        "imported threads cannot contain active turns".to_string(),
-                    ));
-                }
+                ensure_import_is_idle(&threads)?;
                 self.store.create_many(threads.clone())?;
                 for thread in &threads {
                     events.push(self.event(
@@ -107,85 +164,42 @@ impl<S: ThreadStore> AppServer<S> {
                     threads.into_iter().map(|thread| thread.metadata).collect(),
                 )
             }
-            ClientRequest::ThreadList { include_archived } => {
-                ResponsePayload::Threads(self.store.list(include_archived)?)
-            }
+            _ => unreachable!("thread creation dispatcher received another request"),
+        };
+        Ok(self.outcome(payload, events))
+    }
+
+    fn dispatch_thread_metadata(
+        &self,
+        request: ClientRequest,
+    ) -> Result<DispatchOutcome, AppServerError> {
+        match request {
+            ClientRequest::ThreadList { include_archived } => Ok(self.outcome(
+                ResponsePayload::Threads(self.store.list(include_archived)?),
+                Vec::new(),
+            )),
             ClientRequest::ThreadRead { thread_id } => {
-                let thread = self
-                    .store
-                    .read(&thread_id)?
-                    .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
-                ResponsePayload::Thread(thread)
+                let thread = self.read_thread(&thread_id)?;
+                Ok(self.outcome(ResponsePayload::Thread(thread), Vec::new()))
             }
             ClientRequest::ThreadReadVisible { thread_id } => {
-                let thread = self
-                    .store
-                    .read(&thread_id)?
-                    .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
-                ResponsePayload::Thread(thread.into_visible())
-            }
-            ClientRequest::ThreadModelContextRead { thread_id } => {
-                if self.store.read(&thread_id)?.is_none() {
-                    return Err(AppServerError::NotFound(thread_id.to_string()));
-                }
-                ResponsePayload::ModelContext(self.store.read_model_context(&thread_id)?)
-            }
-            ClientRequest::ThreadModelContextReplace {
-                thread_id,
-                messages,
-            } => {
-                let message_count = messages.len();
-                self.store
-                    .replace_model_context(&thread_id, messages, (self.clock)())?;
-                events.push(self.event(
-                    thread_id,
-                    None,
-                    Event::ModelContextUpdated { message_count },
-                ));
-                ResponsePayload::Ack
+                let thread = self.read_thread(&thread_id)?;
+                Ok(self.outcome(ResponsePayload::Thread(thread.into_visible()), Vec::new()))
             }
             ClientRequest::ThreadArchive {
                 thread_id,
                 archived,
-            } => {
-                let mut thread = self
-                    .store
-                    .read(&thread_id)?
-                    .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
-                thread.metadata.archived = archived;
-                thread.metadata.updated_at = (self.clock)();
-                self.store.update_metadata(thread.metadata.clone())?;
-                events.push(self.event(
-                    thread_id,
-                    None,
-                    Event::ThreadUpdated {
-                        metadata: thread.metadata,
-                    },
-                ));
-                ResponsePayload::Ack
-            }
+            } => self.update_thread_metadata(thread_id, |metadata| metadata.archived = archived),
             ClientRequest::ThreadRename { thread_id, title } => {
-                let mut thread = self
-                    .store
-                    .read(&thread_id)?
-                    .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
                 let title = title.trim();
                 if title.is_empty() {
                     return Err(AppServerError::InvalidRequest(
                         "thread title must not be empty".to_string(),
                     ));
                 }
-                thread.metadata.title = title.to_string();
-                thread.metadata.updated_at = (self.clock)();
-                self.store.update_metadata(thread.metadata.clone())?;
-                events.push(self.event(
-                    thread_id,
-                    None,
-                    Event::ThreadUpdated {
-                        metadata: thread.metadata,
-                    },
-                ));
-                ResponsePayload::Ack
+                self.update_thread_metadata(thread_id, |metadata| {
+                    metadata.title = title.to_string()
+                })
             }
             ClientRequest::ThreadFork {
                 thread_id,
@@ -196,42 +210,74 @@ impl<S: ThreadStore> AppServer<S> {
                 thread.metadata.created_at = now;
                 thread.metadata.updated_at = now;
                 self.store.update_metadata(thread.metadata.clone())?;
-                events.push(self.event(
+                let event = self.event(
                     new_thread_id,
                     None,
                     Event::ThreadCreated {
                         metadata: thread.metadata.clone(),
                     },
-                ));
-                ResponsePayload::Thread(thread)
+                );
+                Ok(self.outcome(ResponsePayload::Thread(thread), vec![event]))
             }
+            _ => unreachable!("thread metadata dispatcher received another request"),
+        }
+    }
+
+    fn dispatch_model_context(
+        &self,
+        request: ClientRequest,
+    ) -> Result<DispatchOutcome, AppServerError> {
+        match request {
+            ClientRequest::ThreadModelContextRead { thread_id } => {
+                self.read_thread(&thread_id)?;
+                Ok(self.outcome(
+                    ResponsePayload::ModelContext(self.store.read_model_context(&thread_id)?),
+                    Vec::new(),
+                ))
+            }
+            ClientRequest::ThreadModelContextReplace {
+                thread_id,
+                messages,
+            } => {
+                let message_count = messages.len();
+                self.store
+                    .replace_model_context(&thread_id, messages, (self.clock)())?;
+                let event = self.event(
+                    thread_id,
+                    None,
+                    Event::ModelContextUpdated { message_count },
+                );
+                Ok(self.outcome(ResponsePayload::Ack, vec![event]))
+            }
+            _ => unreachable!("model context dispatcher received another request"),
+        }
+    }
+
+    fn dispatch_turn(&self, request: ClientRequest) -> Result<DispatchOutcome, AppServerError> {
+        let (payload, event) = match request {
             ClientRequest::TurnStart { thread_id, turn_id } => {
-                let now = (self.clock)();
                 self.store.claim_turn(
                     &thread_id,
                     Turn {
                         id: turn_id.clone(),
                         status: TurnStatus::Running,
                         items: Vec::new(),
-                        started_at: now,
+                        started_at: (self.clock)(),
                         completed_at: None,
                         error: None,
                         usage: Default::default(),
                     },
                 )?;
-                events.push(self.event(
-                    thread_id,
-                    Some(turn_id),
-                    Event::TurnStarted {
-                        status: TurnStatus::Running,
-                    },
-                ));
-                ResponsePayload::Ack
-            }
-            ClientRequest::TurnSubmit { .. } => {
-                return Err(AppServerError::InvalidRequest(
-                    "turnSubmit must be handled by the runtime adapter".to_string(),
-                ));
+                (
+                    ResponsePayload::Ack,
+                    self.event(
+                        thread_id,
+                        Some(turn_id),
+                        Event::TurnStarted {
+                            status: TurnStatus::Running,
+                        },
+                    ),
+                )
             }
             ClientRequest::TurnInterrupt { thread_id, turn_id } => {
                 self.store.finish_turn(
@@ -242,20 +288,17 @@ impl<S: ThreadStore> AppServer<S> {
                     None,
                     Default::default(),
                 )?;
-                events.push(self.event(
-                    thread_id,
-                    Some(turn_id),
-                    Event::TurnCompleted {
-                        status: TurnStatus::Cancelled,
-                        error: None,
-                    },
-                ));
-                ResponsePayload::Ack
-            }
-            ClientRequest::TurnInterruptLatest { .. } => {
-                return Err(AppServerError::InvalidRequest(
-                    "turnInterruptLatest must be handled by the runtime adapter".to_string(),
-                ));
+                (
+                    ResponsePayload::Ack,
+                    self.event(
+                        thread_id,
+                        Some(turn_id),
+                        Event::TurnCompleted {
+                            status: TurnStatus::Cancelled,
+                            error: None,
+                        },
+                    ),
+                )
             }
             ClientRequest::TurnComplete {
                 thread_id,
@@ -272,41 +315,174 @@ impl<S: ThreadStore> AppServer<S> {
                     error.clone(),
                     usage,
                 )?;
-                events.push(self.event(
-                    thread_id,
-                    Some(turn_id),
-                    Event::TurnCompleted { status, error },
-                ));
-                ResponsePayload::Ack
+                (
+                    ResponsePayload::Ack,
+                    self.event(
+                        thread_id,
+                        Some(turn_id),
+                        Event::TurnCompleted { status, error },
+                    ),
+                )
             }
-            ClientRequest::ItemAppend {
-                thread_id,
-                turn_id,
-                item,
-            } => {
-                self.store
-                    .append_item(&thread_id, &turn_id, item.clone(), (self.clock)())?;
-                events.push(self.event(thread_id, Some(turn_id), Event::ItemAdded { item }));
-                ResponsePayload::Ack
-            }
+            _ => unreachable!("turn dispatcher received another request"),
         };
-        Ok(DispatchOutcome {
+        Ok(self.outcome(payload, vec![event]))
+    }
+
+    fn dispatch_item(
+        &self,
+        thread_id: ncx_protocol::ThreadId,
+        turn_id: ncx_protocol::TurnId,
+        item: ncx_protocol::ThreadItem,
+    ) -> Result<DispatchOutcome, AppServerError> {
+        self.store
+            .append_item(&thread_id, &turn_id, item.clone(), (self.clock)())?;
+        let event = self.event(thread_id, Some(turn_id), Event::ItemAdded { item });
+        Ok(self.outcome(ResponsePayload::Ack, vec![event]))
+    }
+
+    fn update_thread_metadata(
+        &self,
+        thread_id: ncx_protocol::ThreadId,
+        update: impl FnOnce(&mut ThreadMetadata),
+    ) -> Result<DispatchOutcome, AppServerError> {
+        let mut thread = self.read_thread(&thread_id)?;
+        update(&mut thread.metadata);
+        thread.metadata.updated_at = (self.clock)();
+        self.store.update_metadata(thread.metadata.clone())?;
+        let event = self.event(
+            thread_id,
+            None,
+            Event::ThreadUpdated {
+                metadata: thread.metadata,
+            },
+        );
+        Ok(self.outcome(ResponsePayload::Ack, vec![event]))
+    }
+
+    fn read_thread(&self, thread_id: &ncx_protocol::ThreadId) -> Result<Thread, AppServerError> {
+        self.store
+            .read(thread_id)?
+            .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))
+    }
+
+    fn outcome(&self, payload: ResponsePayload, events: Vec<EventEnvelope>) -> DispatchOutcome {
+        DispatchOutcome {
             response: ServerResponse {
                 protocol_version: PROTOCOL_VERSION,
                 payload,
             },
             events,
-        })
+        }
+    }
+
+    /// Dispatch the complete public protocol, delegating only host-specific
+    /// scheduler effects to `runtime`.
+    pub fn dispatch_with_runtime(
+        &self,
+        request: ClientRequest,
+        runtime: &dyn AppServerAdapter,
+    ) -> Result<DispatchOutcome, AppServerError> {
+        match request {
+            ClientRequest::ThreadCreateActivate {
+                thread_id,
+                workspace,
+                title,
+            } => {
+                let outcome = self.dispatch(ClientRequest::ThreadCreate {
+                    thread_id: Some(thread_id.clone()),
+                    workspace,
+                    title,
+                })?;
+                runtime
+                    .create_thread(&thread_id)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(outcome)
+            }
+            ClientRequest::ThreadActivate { thread_id } => {
+                self.dispatch(ClientRequest::ThreadRead {
+                    thread_id: thread_id.clone(),
+                })?;
+                runtime
+                    .activate_thread(&thread_id)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::ThreadForkActivate {
+                thread_id,
+                new_thread_id,
+            } => {
+                let outcome = self.dispatch(ClientRequest::ThreadFork {
+                    thread_id: thread_id.clone(),
+                    new_thread_id: new_thread_id.clone(),
+                })?;
+                runtime
+                    .fork_thread(&thread_id, &new_thread_id)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(outcome)
+            }
+            ClientRequest::TurnSubmit {
+                thread_id,
+                text,
+                images,
+            } => {
+                runtime
+                    .submit_turn(&thread_id, text, images)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::TurnInterruptLatest { thread_id } => {
+                runtime
+                    .interrupt_latest(&thread_id)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::CodexPluginList => runtime
+                .list_codex_plugins()
+                .map(ResponsePayload::CodexPlugins)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::CodexPluginInstall { source, upgrade } => runtime
+                .install_codex_plugin(source, upgrade)
+                .map(ResponsePayload::CodexPlugin)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::CodexPluginSetEnabled { name, enabled } => {
+                runtime
+                    .set_codex_plugin_enabled(name, enabled)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::CodexPluginUninstall { name } => {
+                runtime
+                    .uninstall_codex_plugin(name)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::MarketplaceList => runtime
+                .list_marketplaces()
+                .map(ResponsePayload::Marketplaces)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::MarketplacePluginInstall {
+                marketplace_path,
+                plugin_name,
+                upgrade,
+            } => runtime
+                .install_marketplace_plugin(marketplace_path, plugin_name, upgrade)
+                .map(ResponsePayload::CodexPlugin)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            request => self.dispatch(request),
+        }
     }
 
     pub fn ack(&self) -> DispatchOutcome {
-        DispatchOutcome {
-            response: ServerResponse {
-                protocol_version: PROTOCOL_VERSION,
-                payload: ResponsePayload::Ack,
-            },
-            events: Vec::new(),
-        }
+        self.response(ResponsePayload::Ack)
+    }
+
+    fn response(&self, payload: ResponsePayload) -> DispatchOutcome {
+        self.outcome(payload, Vec::new())
     }
 
     fn event(
@@ -324,6 +500,19 @@ impl<S: ThreadStore> AppServer<S> {
     }
 }
 
+fn ensure_import_is_idle(threads: &[Thread]) -> Result<(), AppServerError> {
+    if threads
+        .iter()
+        .flat_map(|thread| &thread.turns)
+        .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
+    {
+        return Err(AppServerError::InvalidRequest(
+            "imported threads cannot contain active turns".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DispatchOutcome {
@@ -337,6 +526,7 @@ pub enum AppServerError {
     Store(ThreadStoreError),
     NotFound(String),
     InvalidRequest(String),
+    Runtime(String),
 }
 
 impl fmt::Display for AppServerError {
@@ -346,6 +536,7 @@ impl fmt::Display for AppServerError {
             Self::Store(error) => error.fmt(formatter),
             Self::NotFound(id) => write!(formatter, "{id} was not found"),
             Self::InvalidRequest(message) => message.fmt(formatter),
+            Self::Runtime(message) => message.fmt(formatter),
         }
     }
 }
@@ -365,198 +556,5 @@ impl From<ThreadStoreError> for AppServerError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ncx_protocol::{ClientRequest, ItemId, ResponsePayload, ThreadId, ThreadItem, TurnId};
-    use ncx_thread_store::JsonThreadStore;
-    use std::sync::atomic::AtomicU64;
-
-    static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-
-    fn server() -> AppServer<JsonThreadStore> {
-        let path = std::env::temp_dir().join(format!(
-            "ncx-app-server-{}-{}.json",
-            std::process::id(),
-            TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_file(&path);
-        AppServer::new(Arc::new(JsonThreadStore::open(path).unwrap()), || 100)
-    }
-
-    #[test]
-    fn create_and_start_turn_emit_owned_v2_events() {
-        let server = server();
-        let created = server
-            .dispatch(ClientRequest::ThreadCreate {
-                thread_id: None,
-                workspace: "workspace".into(),
-                title: "title".into(),
-            })
-            .unwrap();
-        let ResponsePayload::Thread(thread) = created.response.payload else {
-            panic!("expected created thread");
-        };
-        assert_eq!(created.events[0].thread_id, thread.metadata.id);
-        assert_eq!(created.events[0].protocol_version, PROTOCOL_VERSION);
-
-        let turn_id = TurnId::new("turn-1").unwrap();
-        let started = server
-            .dispatch(ClientRequest::TurnStart {
-                thread_id: thread.metadata.id.clone(),
-                turn_id: turn_id.clone(),
-            })
-            .unwrap();
-        assert_eq!(started.events[0].thread_id, thread.metadata.id);
-        assert_eq!(started.events[0].turn_id, Some(turn_id));
-    }
-
-    #[test]
-    fn second_concurrent_turn_is_rejected() {
-        let server = server();
-        let created = server
-            .dispatch(ClientRequest::ThreadCreate {
-                thread_id: None,
-                workspace: "workspace".into(),
-                title: "title".into(),
-            })
-            .unwrap();
-        let ResponsePayload::Thread(thread) = created.response.payload else {
-            panic!("expected thread");
-        };
-        server
-            .dispatch(ClientRequest::TurnStart {
-                thread_id: thread.metadata.id.clone(),
-                turn_id: TurnId::new("one").unwrap(),
-            })
-            .unwrap();
-        assert!(server
-            .dispatch(ClientRequest::TurnStart {
-                thread_id: ThreadId::new(thread.metadata.id.as_str()).unwrap(),
-                turn_id: TurnId::new("two").unwrap(),
-            })
-            .is_err());
-    }
-
-    #[test]
-    fn rename_and_fork_are_owned_by_the_app_server() {
-        let server = server();
-        let thread_id = ThreadId::new("source").unwrap();
-        server
-            .dispatch(ClientRequest::ThreadCreate {
-                thread_id: Some(thread_id.clone()),
-                workspace: "workspace".into(),
-                title: "old".into(),
-            })
-            .unwrap();
-        let renamed = server
-            .dispatch(ClientRequest::ThreadRename {
-                thread_id: thread_id.clone(),
-                title: "new title".into(),
-            })
-            .unwrap();
-        assert!(matches!(
-            renamed.events[0].event,
-            Event::ThreadUpdated { .. }
-        ));
-        let forked = server
-            .dispatch(ClientRequest::ThreadFork {
-                thread_id,
-                new_thread_id: ThreadId::new("target").unwrap(),
-            })
-            .unwrap();
-        let ResponsePayload::Thread(forked_thread) = forked.response.payload else {
-            panic!("expected forked thread");
-        };
-        assert_eq!(forked_thread.metadata.title, "new title");
-        assert_eq!(forked.events[0].thread_id.as_str(), "target");
-    }
-
-    #[test]
-    fn model_context_is_replaced_without_rewriting_visible_turns() {
-        let server = server();
-        let thread_id = ThreadId::new("thread").unwrap();
-        server
-            .dispatch(ClientRequest::ThreadCreate {
-                thread_id: Some(thread_id.clone()),
-                workspace: "workspace".into(),
-                title: "title".into(),
-            })
-            .unwrap();
-        let updated = server
-            .dispatch(ClientRequest::ThreadModelContextReplace {
-                thread_id: thread_id.clone(),
-                messages: vec![serde_json::json!({"role":"user","content":"compact"})],
-            })
-            .unwrap();
-        assert!(matches!(
-            updated.events[0].event,
-            Event::ModelContextUpdated { message_count: 1 }
-        ));
-        let read = server
-            .dispatch(ClientRequest::ThreadModelContextRead { thread_id })
-            .unwrap();
-        let ResponsePayload::ModelContext(Some(context)) = read.response.payload else {
-            panic!("expected stored model context");
-        };
-        assert_eq!(context.messages[0]["content"], "compact");
-    }
-
-    #[test]
-    fn visible_thread_never_returns_tool_logs_or_intermediate_assistant_text() {
-        let server = server();
-        let thread_id = ThreadId::new("visible").unwrap();
-        let turn_id = TurnId::new("turn").unwrap();
-        server
-            .dispatch(ClientRequest::ThreadCreate {
-                thread_id: Some(thread_id.clone()),
-                workspace: "workspace".into(),
-                title: "title".into(),
-            })
-            .unwrap();
-        server
-            .dispatch(ClientRequest::TurnStart {
-                thread_id: thread_id.clone(),
-                turn_id: turn_id.clone(),
-            })
-            .unwrap();
-        for item in [
-            ThreadItem::UserMessage {
-                id: ItemId::new("user").unwrap(),
-                text: "请求".into(),
-            },
-            ThreadItem::AssistantMessage {
-                id: ItemId::new("intermediate").unwrap(),
-                text: "正在执行".into(),
-            },
-            ThreadItem::ToolResult {
-                id: ItemId::new("result").unwrap(),
-                call_id: ItemId::new("call").unwrap(),
-                output: "secret tool log".into(),
-                success: true,
-            },
-            ThreadItem::AssistantMessage {
-                id: ItemId::new("final").unwrap(),
-                text: "最终结论".into(),
-            },
-        ] {
-            server
-                .dispatch(ClientRequest::ItemAppend {
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    item,
-                })
-                .unwrap();
-        }
-        let visible = server
-            .dispatch(ClientRequest::ThreadReadVisible { thread_id })
-            .unwrap();
-        let ResponsePayload::Thread(thread) = visible.response.payload else {
-            panic!("expected visible thread");
-        };
-        assert_eq!(thread.turns[0].items.len(), 2);
-        assert!(matches!(
-            &thread.turns[0].items[1],
-            ThreadItem::AssistantMessage { text, .. } if text == "最终结论"
-        ));
-    }
-}
+#[path = "tests.rs"]
+mod tests;

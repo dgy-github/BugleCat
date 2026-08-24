@@ -1073,8 +1073,8 @@
         invoke<ModelCatalogResponse>("get_model_catalog"),
         invoke<HarnessDiagnostics>("get_harness_diagnostics"),
         invoke<ExternalPlugin[]>("list_external_plugins"),
-        invoke<CodexPlugin[]>("list_codex_plugins"),
-        invoke<PluginMarketplace[]>("list_plugin_marketplaces"),
+        appServerRequest<CodexPlugin[]>({ method: "codexPluginList" }),
+        appServerRequest<PluginMarketplace[]>({ method: "marketplaceList" }),
       ]);
       settings = loadedSettings;
       configLocation = loadedLocation;
@@ -1119,8 +1119,8 @@
     const selected = await open({ directory: true, multiple: false, title: "选择包含 .codex-plugin/plugin.json 的插件目录" });
     if (!selected || Array.isArray(selected)) return;
     try {
-      await invoke("install_codex_plugin", { source: selected, upgrade: false });
-      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+      await appServerRequest({ method: "codexPluginInstall", params: { source: selected, upgrade: false } });
+      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
     } catch (e) { messages.push({ role: "note", text: `Codex 插件安装失败：${e}` }); }
   }
 
@@ -1128,29 +1128,29 @@
     const selected = await open({ directory: true, multiple: false, title: "选择新版 Codex 插件目录" });
     if (!selected || Array.isArray(selected)) return;
     try {
-      await invoke("install_codex_plugin", { source: selected, upgrade: true });
-      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+      await appServerRequest({ method: "codexPluginInstall", params: { source: selected, upgrade: true } });
+      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
     } catch (e) { messages.push({ role: "note", text: `Codex 插件升级失败：${e}` }); }
   }
 
   async function toggleCodexPlugin(plugin: CodexPlugin) {
     try {
-      await invoke("set_codex_plugin_enabled", { name: plugin.manifest.name, enabled: !plugin.enabled });
-      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+      await appServerRequest({ method: "codexPluginSetEnabled", params: { name: plugin.manifest.name, enabled: !plugin.enabled } });
+      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
     } catch (e) { messages.push({ role: "note", text: `Codex 插件状态修改失败：${e}` }); }
   }
 
   async function removeCodexPlugin(plugin: CodexPlugin) {
     try {
-      await invoke("uninstall_codex_plugin", { name: plugin.manifest.name });
-      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+      await appServerRequest({ method: "codexPluginUninstall", params: { name: plugin.manifest.name } });
+      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
     } catch (e) { messages.push({ role: "note", text: `Codex 插件卸载失败：${e}` }); }
   }
 
   async function installMarketplacePlugin(marketplacePath: string, pluginName: string, upgrade = false) {
     try {
-      await invoke("install_marketplace_plugin", { marketplacePath, pluginName, upgrade });
-      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+      await appServerRequest({ method: "marketplacePluginInstall", params: { marketplacePath, pluginName, upgrade } });
+      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
     } catch (e) { messages.push({ role: "note", text: `Marketplace 插件${upgrade ? "升级" : "安装"}失败：${e}` }); }
   }
   function stashSessionQueue(sessionId: string) {

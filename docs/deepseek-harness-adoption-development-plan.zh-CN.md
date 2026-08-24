@@ -1,5 +1,7 @@
 # DeepSeek Harness 特性吸收开发计划
 
+> 迁移状态（2026-08-24）：本文保留最初 P0-P8 的行为目标和门禁，但 P3-P5 的实现路线已由后续 OpenAI Codex 差异审查修订。当前事实源是 `ncx-protocol`、`ncx-thread-store`、`ncx-app-server` 和 Harness Profile/Bundle；不再新增平行的 SessionEvent/Agent Profile 状态机。旧 SessionIndex 仅用于一次性迁移与旧文件兼容。最新完成度与剩余结构债务见仓库根 `HANDOFF.md`。
+
 ## 1. 目标与边界
 
 目标是在不改变 nanocodex 公开 CLI、配置键、会话恢复语义、沙箱和审批执行边界的前提下，吸收 DeepSeek Harness 的生命周期和可组合性设计。

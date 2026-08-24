@@ -1,5 +1,11 @@
 //! Compatibility with OpenAI/Codex resource plugins and local marketplaces.
 
+mod marketplace;
+pub use marketplace::{
+    discover_marketplaces, resolve_local_marketplace_plugin, Marketplace, MarketplacePlugin,
+    MarketplaceSource,
+};
+
 use ncx_config::{HookConfig, McpServerConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -8,12 +14,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const MANIFEST: &str = ".codex-plugin/plugin.json";
-const MARKETPLACE_PATHS: &[&str] = &[
-    ".agents/plugins/marketplace.json",
-    ".agents/plugins/api_marketplace.json",
-    ".claude-plugin/marketplace.json",
-    ".cursor-plugin/marketplace.json",
-];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -290,54 +290,6 @@ impl CodexPluginCatalog {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Marketplace {
-    pub name: String,
-    #[serde(default)]
-    pub plugins: Vec<MarketplacePlugin>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MarketplacePlugin {
-    pub name: String,
-    pub source: MarketplaceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "source", rename_all = "lowercase")]
-pub enum MarketplaceSource {
-    Local {
-        path: String,
-    },
-    Git {
-        url: String,
-        #[serde(default)]
-        path: Option<String>,
-        #[serde(default, rename = "ref")]
-        ref_name: Option<String>,
-    },
-    Npm {
-        package: String,
-        #[serde(default)]
-        version: Option<String>,
-    },
-}
-
-pub fn discover_marketplaces(root: &Path) -> Result<Vec<(PathBuf, Marketplace)>, String> {
-    let mut found = Vec::new();
-    for relative in MARKETPLACE_PATHS {
-        let path = root.join(relative);
-        if !path.is_file() {
-            continue;
-        }
-        let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-        let marketplace = serde_json::from_str(&text)
-            .map_err(|error| format!("无效 Marketplace {}: {error}", path.display()))?;
-        found.push((path, marketplace));
-    }
-    Ok(found)
-}
-
 pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfig>, String> {
     let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
     let mut servers = Vec::new();
@@ -347,7 +299,7 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
         .filter(|plugin| plugin.enabled)
     {
         let value = if let Some(value) = plugin.manifest.mcp_servers.clone() {
-            value
+            resolve_json_resource(&plugin, "mcpServers", value)?
         } else if let Some(path) = plugin.mcp_path() {
             serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
                 .map_err(|error| format!("无效 MCP 资源 {}: {error}", path.display()))?
@@ -466,7 +418,7 @@ pub fn discover_codex_hooks(workspace: &Path) -> Result<Vec<HookConfig>, String>
         .filter(|plugin| plugin.enabled)
     {
         let value = if let Some(value) = plugin.manifest.hooks.clone() {
-            value
+            resolve_hook_resources(&plugin, value)?
         } else if let Some(path) = plugin.hooks_path() {
             serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
                 .map_err(|error| format!("无效 Hooks 资源 {}: {error}", path.display()))?
@@ -532,38 +484,62 @@ fn map_hook_event(event: &str) -> Option<&'static str> {
     }
 }
 
-pub fn resolve_local_marketplace_plugin(
-    marketplace_path: &Path,
-    plugin: &MarketplacePlugin,
-) -> Result<PathBuf, String> {
-    let MarketplaceSource::Local { path } = &plugin.source else {
-        return Err("远程 Git/NPM Marketplace 需要先物化到本地缓存".to_string());
+fn resolve_json_resource(
+    plugin: &CodexPluginRecord,
+    field: &str,
+    value: Value,
+) -> Result<Value, String> {
+    let Value::String(path) = value else {
+        return Ok(value);
     };
-    let relative = Path::new(path);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|part| matches!(part, std::path::Component::ParentDir))
-    {
-        return Err("Marketplace 本地插件路径不得越界".to_string());
+    let path = validate_resource(&plugin.root, &path)?;
+    serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?).map_err(
+        |error| {
+            format!(
+                "插件 '{}' 的 {field} 资源无效: {error}",
+                plugin.manifest.name
+            )
+        },
+    )
+}
+
+fn resolve_hook_resources(plugin: &CodexPluginRecord, value: Value) -> Result<Value, String> {
+    match value {
+        Value::String(_) => resolve_json_resource(plugin, "hooks", value),
+        Value::Array(documents) => {
+            let mut merged = serde_json::Map::new();
+            for document in documents {
+                let document = resolve_json_resource(plugin, "hooks", document)?;
+                let events = document
+                    .get("hooks")
+                    .unwrap_or(&document)
+                    .as_object()
+                    .ok_or_else(|| {
+                        format!("插件 '{}' 的 hooks 资源必须是对象", plugin.manifest.name)
+                    })?;
+                for (event, groups) in events {
+                    let target = merged
+                        .entry(event.clone())
+                        .or_insert_with(|| Value::Array(Vec::new()));
+                    let Some(target) = target.as_array_mut() else {
+                        return Err(format!(
+                            "插件 '{}' 的 hooks 事件 '{event}' 无法合并",
+                            plugin.manifest.name
+                        ));
+                    };
+                    let Some(groups) = groups.as_array() else {
+                        return Err(format!(
+                            "插件 '{}' 的 hooks 事件 '{event}' 必须是数组",
+                            plugin.manifest.name
+                        ));
+                    };
+                    target.extend(groups.iter().cloned());
+                }
+            }
+            Ok(serde_json::json!({ "hooks": merged }))
+        }
+        value => Ok(value),
     }
-    let relative_layout = MARKETPLACE_PATHS
-        .iter()
-        .find(|relative| marketplace_path.ends_with(relative))
-        .ok_or_else(|| "Marketplace 路径不在支持的清单位置".to_string())?;
-    let mut base = marketplace_path.to_path_buf();
-    for _ in Path::new(relative_layout).components() {
-        base.pop();
-    }
-    let resolved = base
-        .join(relative)
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    let base = base.canonicalize().map_err(|error| error.to_string())?;
-    if !resolved.starts_with(base) {
-        return Err("Marketplace 本地插件路径不得越界".to_string());
-    }
-    Ok(resolved)
 }
 
 fn load_record(root: PathBuf) -> Result<CodexPluginRecord, String> {
@@ -588,10 +564,43 @@ fn validate_manifest(root: &Path, manifest: &CodexPluginManifest) -> Result<(), 
             validate_resource(root, path)?;
         }
     }
+    for value in [&manifest.mcp_servers, &manifest.hooks]
+        .into_iter()
+        .flatten()
+    {
+        validate_json_resource_paths(root, value)?;
+    }
+    if let Some(interface) = manifest.interface.as_ref().and_then(Value::as_object) {
+        for field in ["composerIcon", "logo", "logoDark"] {
+            if let Some(path) = interface.get(field).and_then(Value::as_str) {
+                validate_resource(root, path)?;
+            }
+        }
+        if let Some(paths) = interface.get("screenshots").and_then(Value::as_array) {
+            for path in paths.iter().filter_map(Value::as_str) {
+                validate_resource(root, path)?;
+            }
+        }
+    }
     for conventional in ["skills", ".mcp.json", ".app.json", "hooks/hooks.json"] {
         if root.join(conventional).exists() {
             validate_resource(root, conventional)?;
         }
+    }
+    Ok(())
+}
+
+fn validate_json_resource_paths(root: &Path, value: &Value) -> Result<(), String> {
+    match value {
+        Value::String(path) => {
+            validate_resource(root, path)?;
+        }
+        Value::Array(values) => {
+            for path in values.iter().filter_map(Value::as_str) {
+                validate_resource(root, path)?;
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -647,214 +656,5 @@ fn copy_resource_tree(source: &Path, target: &Path) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp(name: &str) -> PathBuf {
-        let id = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("ncx-codex-plugin-{name}-{id}"))
-    }
-
-    fn fixture(root: &Path, name: &str) {
-        fs::create_dir_all(root.join(".codex-plugin")).unwrap();
-        fs::create_dir_all(root.join("skills")).unwrap();
-        fs::write(root.join("skills/SKILL.md"), "---\nname: demo\n---\n").unwrap();
-        fs::write(
-            root.join(MANIFEST),
-            format!(r#"{{"name":"{name}","skills":["./skills/SKILL.md"]}}"#),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn codex_plugin_installs_discovers_toggles_and_uninstalls() {
-        let source = temp("source");
-        let target = temp("target");
-        fixture(&source, "demo.plugin");
-        let catalog = CodexPluginCatalog::new(&target);
-        assert_eq!(
-            catalog.install(&source).unwrap().manifest.name,
-            "demo.plugin"
-        );
-        catalog.set_enabled("demo.plugin", false).unwrap();
-        assert!(!catalog.discover().unwrap()[0].enabled);
-        catalog.uninstall("demo.plugin").unwrap();
-        assert!(catalog.discover().unwrap().is_empty());
-    }
-
-    #[test]
-    fn codex_plugin_upgrade_replaces_resources_and_preserves_disabled_state() {
-        let source = temp("upgrade-source");
-        let target = temp("upgrade-target");
-        fixture(&source, "demo.plugin");
-        let catalog = CodexPluginCatalog::new(&target);
-        catalog.install(&source).unwrap();
-        catalog.set_enabled("demo.plugin", false).unwrap();
-        fs::write(
-            source.join(MANIFEST),
-            r#"{"name":"demo.plugin","version":"2"}"#,
-        )
-        .unwrap();
-        let upgraded = catalog.install_or_upgrade(&source, true).unwrap();
-        assert_eq!(upgraded.manifest.version.as_deref(), Some("2"));
-        assert!(!upgraded.enabled);
-    }
-
-    #[test]
-    fn catalog_recovers_interrupted_upgrade_backup_and_hides_staging() {
-        let source = temp("recovery-source");
-        let target = temp("recovery-target");
-        fixture(&source, "demo.plugin");
-        let catalog = CodexPluginCatalog::new(&target);
-        catalog.install(&source).unwrap();
-        let installed = target.join("demo.plugin");
-        let backup = target.join(".demo.plugin.backup");
-        let staging = target.join(".demo.plugin.staging");
-        fs::rename(&installed, &backup).unwrap();
-        fixture(&staging, "demo.plugin");
-
-        let discovered = catalog.discover().unwrap();
-
-        assert_eq!(discovered.len(), 1);
-        assert_eq!(discovered[0].manifest.name, "demo.plugin");
-        assert!(installed.is_dir());
-        assert!(!backup.exists());
-        assert!(!staging.exists());
-        let _ = fs::remove_dir_all(source);
-        let _ = fs::remove_dir_all(target);
-    }
-
-    #[test]
-    fn plugin_and_marketplace_paths_cannot_escape_their_roots() {
-        let source = temp("escape");
-        fs::create_dir_all(source.join(".codex-plugin")).unwrap();
-        fs::write(
-            source.join(MANIFEST),
-            r#"{"name":"bad","skills":"../secret"}"#,
-        )
-        .unwrap();
-        assert!(load_record(source).unwrap_err().contains("越界"));
-    }
-
-    #[test]
-    fn local_marketplace_sources_resolve_from_repository_root_for_all_layouts() {
-        for layout in [
-            ".agents/plugins/marketplace.json",
-            ".claude-plugin/marketplace.json",
-        ] {
-            let root = temp("marketplace-layout");
-            let manifest = root.join(layout);
-            fs::create_dir_all(manifest.parent().unwrap()).unwrap();
-            let plugin_root = root.join("plugins/demo");
-            fixture(&plugin_root, "demo");
-            fs::write(&manifest, r#"{"name":"demo","plugins":[]}"#).unwrap();
-            let plugin = MarketplacePlugin {
-                name: "demo".into(),
-                source: MarketplaceSource::Local {
-                    path: "./plugins/demo".into(),
-                },
-            };
-            assert_eq!(
-                resolve_local_marketplace_plugin(&manifest, &plugin).unwrap(),
-                plugin_root.canonicalize().unwrap()
-            );
-            let _ = fs::remove_dir_all(root);
-        }
-    }
-
-    #[test]
-    fn conventional_codex_mcp_and_hook_resources_feed_existing_runtime_types() {
-        let workspace = temp("runtime-resources");
-        let plugin = workspace.join(".ncx/codex-plugins/demo");
-        fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
-        fs::create_dir_all(plugin.join("hooks")).unwrap();
-        fs::write(plugin.join(MANIFEST), r#"{"name":"demo"}"#).unwrap();
-        fs::write(
-            plugin.join(".mcp.json"),
-            r#"{"mcpServers":{"files":{"command":"server","args":["--stdio"],"env":{"MODE":"test"}}}}"#,
-        )
-        .unwrap();
-        fs::write(
-            plugin.join("hooks/hooks.json"),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"shell","hooks":[{"type":"command","command":"check","timeout":12}]}],"PreCompact":[{"hooks":[{"type":"command","command":"before-compact"}]}],"PostCompact":[{"hooks":[{"type":"command","command":"after-compact"}]}]}}"#,
-        )
-        .unwrap();
-
-        let servers = discover_codex_mcp_servers(&workspace).unwrap();
-        assert_eq!(servers[0].name, "demo:files");
-        assert_eq!(servers[0].args, vec!["--stdio"]);
-        assert_eq!(servers[0].env.get("MODE").map(String::as_str), Some("test"));
-        let hooks = discover_codex_hooks(&workspace).unwrap();
-        let pre_tool = hooks
-            .iter()
-            .find(|hook| hook.event == "pre_tool")
-            .expect("pre-tool hook");
-        assert_eq!(pre_tool.matcher, "shell");
-        assert_eq!(pre_tool.timeout_s, 12);
-        assert!(hooks
-            .iter()
-            .any(|hook| hook.event == "pre_compact" && hook.command == "before-compact"));
-        assert!(hooks
-            .iter()
-            .any(|hook| hook.event == "post_compact" && hook.command == "after-compact"));
-
-        let inline = workspace.join(".ncx/codex-plugins/inline");
-        fs::create_dir_all(inline.join(".codex-plugin")).unwrap();
-        fs::write(
-            inline.join(MANIFEST),
-            r#"{"name":"inline","mcpServers":{"web":{"command":"web-server"}},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"finish"}]}]}}"#,
-        )
-        .unwrap();
-        assert!(discover_codex_mcp_servers(&workspace)
-            .unwrap()
-            .iter()
-            .any(|server| server.name == "inline:web"));
-        assert!(discover_codex_hooks(&workspace)
-            .unwrap()
-            .iter()
-            .any(|hook| hook.event == "stop" && hook.command == "finish"));
-
-        fs::write(inline.join(".disabled"), "disabled\n").unwrap();
-        assert!(!discover_codex_mcp_servers(&workspace)
-            .unwrap()
-            .iter()
-            .any(|server| server.name == "inline:web"));
-        assert!(!discover_codex_hooks(&workspace)
-            .unwrap()
-            .iter()
-            .any(|hook| hook.command == "finish"));
-        let _ = fs::remove_dir_all(workspace);
-    }
-
-    #[test]
-    fn codex_apps_are_parsed_as_hosted_connector_resources() {
-        let workspace = temp("apps-resources");
-        let plugin = workspace.join(".ncx/codex-plugins/demo");
-        fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
-        fs::write(
-            plugin.join(MANIFEST),
-            r#"{"name":"demo","apps":"./.app.json"}"#,
-        )
-        .unwrap();
-        fs::write(
-            plugin.join(".app.json"),
-            r#"{"apps":{"calendar":{"id":"connector-calendar"},"docs":{"connector_id":"connector-docs"}}}"#,
-        )
-        .unwrap();
-
-        let apps = discover_codex_apps(&workspace).unwrap();
-        assert_eq!(apps.len(), 2);
-        assert!(apps.iter().any(|app| {
-            app.plugin == "demo"
-                && app.name == "calendar"
-                && app.connector_id == "connector-calendar"
-        }));
-        fs::write(plugin.join(".disabled"), "disabled\n").unwrap();
-        assert!(discover_codex_apps(&workspace).unwrap().is_empty());
-        let _ = fs::remove_dir_all(workspace);
-    }
-}
+#[path = "openai_compat/tests.rs"]
+mod tests;

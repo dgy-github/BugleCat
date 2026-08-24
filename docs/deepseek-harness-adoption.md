@@ -50,8 +50,21 @@ The first tool-library compatibility slice is also adopted:
   workflow while delegating every mutation to the existing `apply_patch`
   approval and sandbox boundary.
 
-This remains deliberately smaller than DeepSeek Harness. Nanocodex does not
-import its session format, scope system, or Cordis plugin lifecycle.
+The later architecture phase replaces the old session compatibility path with
+nanocodex-owned, versioned components rather than importing DeepSeek's storage
+format:
+
+- `ncx-protocol` owns Thread, Turn, Item, request/response, and Event envelopes;
+- `ncx-thread-store` owns durable transcripts, model context, usage, and
+  cross-process per-Thread execution leases;
+- `ncx-app-server` owns protocol routing, while GUI/CLI hosts implement a small
+  scheduler/resource adapter;
+- `ncx-provider`, `ncx-sandbox`, and `ncx-context` remain the single owners of
+  Provider, Policy, and ContextFragment contracts.
+
+The GUI is now an app-server protocol client for conversation and OpenAI Codex
+plugin lifecycle requests. Tauri supplies desktop-only effects (agent queue,
+file picker, process launch), but no longer branches on protocol methods.
 
 ## Ownership retained by nanocodex
 
@@ -78,19 +91,30 @@ mode as named sections with stable ordering and explicit removal. Existing
 memory recall remains query-scoped; additional context providers append
 ephemeral notes without persisting them into session history.
 
+## OpenAI Codex resource compatibility
+
+Enabled `.codex-plugin/plugin.json` packages can contribute Skills, MCP
+servers, hosted Apps metadata, and Hooks. Official path-based `mcpServers`,
+single/multiple Hook resource paths, inline resources, and Interface asset
+paths are parsed and confined to the plugin root. Local, URL/Git-subdir, NPM,
+and legacy nanocodex Marketplace source shapes are accepted. Installation,
+upgrade recovery, enable/disable, uninstall, and Marketplace installation are
+routed through the versioned app-server boundary.
+
 ## Not adopted
 
 - No Node.js, pnpm, Cordis, or DeepSeek Harness runtime dependency.
-- No vendored upstream source or copied session format.
+- No vendored upstream runtime or copied session format.
 - No ACP transport or second approval/sandbox implementation.
-- No GUI or video pipeline restructuring.
+- No in-process native DLL/SO plugin ABI. Untrusted executable extensions stay
+  in isolated child processes; Codex plugins are resource packages.
 
 ## Verification
 
 Offline unit tests cover middleware ordering and blocking, context registration
 and removal, provider replacement, custom scheduler dispatch, bounded default
 concurrency, cancellation, model-ordered tool results, failure classification,
-read-only retry/fallback, and the Harness-compatible editor. A GUI bridge smoke
-test covers the built-in plus optional memory/skill registry combinations
-without making network calls. The repository Rust gate remains the acceptance
-check for integration regressions.
+read-only retry/fallback, Thread ownership/recovery, protocol serialization,
+plugin resource confinement, and Marketplace source compatibility. Real Tauri
+E2E covers cross-Thread concurrency, same-Thread rejection, visible history
+projection, refresh/reopen, and plugin/Marketplace listing through app-server.

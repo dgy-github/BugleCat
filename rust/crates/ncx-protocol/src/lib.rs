@@ -268,6 +268,24 @@ pub enum ClientRequest {
         turn_id: TurnId,
         item: ThreadItem,
     },
+    CodexPluginList,
+    CodexPluginInstall {
+        source: String,
+        upgrade: bool,
+    },
+    CodexPluginSetEnabled {
+        name: String,
+        enabled: bool,
+    },
+    CodexPluginUninstall {
+        name: String,
+    },
+    MarketplaceList,
+    MarketplacePluginInstall {
+        marketplace_path: String,
+        plugin_name: String,
+        upgrade: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -282,6 +300,9 @@ pub enum ResponsePayload {
     Thread(Thread),
     Threads(Vec<ThreadMetadata>),
     ModelContext(Option<StoredModelContext>),
+    CodexPlugins(Value),
+    CodexPlugin(Value),
+    Marketplaces(Value),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -456,6 +477,23 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ClientRequest>(&json).unwrap(),
             request
+        );
+
+        let marketplace = ClientRequest::MarketplacePluginInstall {
+            marketplace_path: "marketplace.json".into(),
+            plugin_name: "demo".into(),
+            upgrade: true,
+        };
+        let json = serde_json::to_string(&marketplace).unwrap();
+        assert!(
+            json.contains("\"method\":\"marketplacePluginInstall\""),
+            "{json}"
+        );
+        assert!(json.contains("\"marketplacePath\""), "{json}");
+        assert!(json.contains("\"pluginName\""), "{json}");
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&json).unwrap(),
+            marketplace
         );
     }
 }

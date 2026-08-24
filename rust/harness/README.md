@@ -76,3 +76,10 @@ capabilities = ["tool"]
 ```
 
 外部插件只允许目录内相对可执行命令，以清空后的环境变量、管道 stdin/stdout/stderr 在独立进程运行。路径穿越、符号链接和 `.dll`/`.so`/`.dylib` 原生动态库会被拒绝。升级先写入 staging，再切换目录，失败时恢复旧版本。
+
+## OpenAI Codex 资源插件与 App Server
+
+- 工作区资源插件安装到 `.ncx/codex-plugins/<plugin-name>`，清单为 `.codex-plugin/plugin.json`。
+- 支持 Skills、MCP、Apps、Hooks、Interface，以及 OpenAI 官方的路径型 MCP、多文件 Hooks 和 Marketplace `source` 形态。
+- 资源路径必须留在插件根目录内；符号链接和越界路径会被拒绝。升级使用 staging/backup，并在下次发现时恢复中断升级。
+- GUI 的 Thread/Turn 和 Codex 插件生命周期统一经 `ncx-protocol` → `ncx-app-server`；Tauri 只实现桌面调度与资源 I/O 适配，不拥有协议路由。

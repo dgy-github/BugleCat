@@ -54,12 +54,16 @@ try {
     await call("turnComplete", { threadId: a, turnId: ta, status: "completed", error: null, usage: { tokens: { prompt_tokens: 12, completion_tokens: 3 }, estimatedCost: 0.01, currency: "CNY" } });
     await call("turnComplete", { threadId: b, turnId: tb, status: "completed", error: null, usage: { tokens: {}, estimatedCost: null, currency: null } });
     const visible = await call("threadReadVisible", { threadId: a });
-    return { sameThreadRejected, visible, a, b, title };
+    const plugins = await call("codexPluginList");
+    const marketplaces = await call("marketplaceList");
+    return { sameThreadRejected, visible, plugins, marketplaces, a, b, title };
   });
   const serialized = JSON.stringify(evidence.visible);
   if (!evidence.sameThreadRejected) throw new Error("same-thread overlap was accepted");
   if (!serialized.includes("用户要求") || !serialized.includes("最终结论")) throw new Error(`visible transcript missing result: ${serialized}`);
   if (serialized.includes("SECRET_TOOL_OUTPUT") || serialized.includes("中间播报")) throw new Error(`visible transcript leaked internal output: ${serialized}`);
+  if (!Array.isArray(evidence.plugins.response.payload.data)) throw new Error("plugin list did not use protocol data response");
+  if (!Array.isArray(evidence.marketplaces.response.payload.data)) throw new Error("marketplace list did not use protocol data response");
   await page.reload();
   await page.getByRole("button", { name: /最近会话/ }).click();
   await page.getByText(evidence.title, { exact: true }).waitFor({ timeout: 15_000 });
@@ -71,7 +75,7 @@ try {
     await call("threadArchive", { threadId: a, archived: true });
     await call("threadArchive", { threadId: b, archived: true });
   }, { a: evidence.a, b: evidence.b });
-  console.log("protocol e2e: ok (concurrency, ownership, visible projection, history reload/open)");
+  console.log("protocol e2e: ok (concurrency, ownership, visible projection, history reload/open, plugin marketplace)");
 } finally {
   await browser?.close();
   stopTree(child.pid);

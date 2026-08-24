@@ -18,7 +18,7 @@ use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ncx_app_server::{AppServer, DispatchOutcome};
+use ncx_app_server::{AppServer, AppServerAdapter, DispatchOutcome};
 use ncx_config::{
     load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
@@ -250,88 +250,96 @@ fn app_server_request(
     state: tauri::State<'_, AppState>,
     app: AppHandle,
 ) -> Result<DispatchOutcome, String> {
-    match request {
-        ClientRequest::ThreadCreateActivate {
-            thread_id,
-            workspace,
-            title,
-        } => {
-            let outcome = dispatch_app_server(
-                &state.app_server,
-                &app,
-                ClientRequest::ThreadCreate {
-                    thread_id: Some(thread_id.clone()),
-                    workspace,
-                    title,
-                },
-            )?;
-            state
-                .tx
-                .send(Command::New(thread_id.to_string()))
-                .map_err(|_| "agent thread is not running".to_string())?;
-            Ok(outcome)
-        }
-        ClientRequest::ThreadActivate { thread_id } => {
-            dispatch_app_server(
-                &state.app_server,
-                &app,
-                ClientRequest::ThreadRead {
-                    thread_id: thread_id.clone(),
-                },
-            )?;
-            state
-                .tx
-                .send(Command::Resume(thread_id.to_string()))
-                .map_err(|_| "agent thread is not running".to_string())?;
-            Ok(state.app_server.ack())
-        }
-        ClientRequest::ThreadForkActivate {
-            thread_id,
-            new_thread_id,
-        } => {
-            let outcome = dispatch_app_server(
-                &state.app_server,
-                &app,
-                ClientRequest::ThreadFork {
-                    thread_id: thread_id.clone(),
-                    new_thread_id: new_thread_id.clone(),
-                },
-            )?;
-            state
-                .tx
-                .send(Command::Fork {
-                    source_id: thread_id.to_string(),
-                    target_id: new_thread_id.to_string(),
-                })
-                .map_err(|_| "agent thread is not running".to_string())?;
-            Ok(outcome)
-        }
-        ClientRequest::TurnSubmit {
-            thread_id,
-            text,
-            images,
-        } => {
-            queue_prompt(&state, thread_id.to_string(), text, images)?;
-            Ok(state.app_server.ack())
-        }
-        ClientRequest::TurnInterruptLatest { thread_id } => {
-            cancel_session(&state, thread_id.as_str());
-            Ok(state.app_server.ack())
-        }
-        request => dispatch_app_server(&state.app_server, &app, request),
-    }
+    let runtime = GuiAppServerAdapter { state: &state };
+    let outcome = state
+        .app_server
+        .dispatch_with_runtime(request, &runtime)
+        .map_err(|error| error.to_string())?;
+    emit_protocol_outcome(&app, &outcome);
+    Ok(outcome)
 }
 
-fn dispatch_app_server(
-    app_server: &AppServer<JsonThreadStore>,
-    app: &AppHandle,
-    request: ClientRequest,
-) -> Result<DispatchOutcome, String> {
-    let outcome = app_server
-        .dispatch(request)
-        .map_err(|error| error.to_string())?;
-    emit_protocol_outcome(app, &outcome);
-    Ok(outcome)
+struct GuiAppServerAdapter<'a> {
+    state: &'a AppState,
+}
+
+impl AppServerAdapter for GuiAppServerAdapter<'_> {
+    fn create_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
+        self.state
+            .tx
+            .send(Command::New(thread_id.to_string()))
+            .map_err(|_| "agent thread is not running".to_string())
+    }
+
+    fn activate_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
+        self.state
+            .tx
+            .send(Command::Resume(thread_id.to_string()))
+            .map_err(|_| "agent thread is not running".to_string())
+    }
+
+    fn fork_thread(&self, source_id: &ThreadId, target_id: &ThreadId) -> Result<(), String> {
+        self.state
+            .tx
+            .send(Command::Fork {
+                source_id: source_id.to_string(),
+                target_id: target_id.to_string(),
+            })
+            .map_err(|_| "agent thread is not running".to_string())
+    }
+
+    fn submit_turn(
+        &self,
+        thread_id: &ThreadId,
+        text: String,
+        images: Vec<String>,
+    ) -> Result<(), String> {
+        queue_prompt(self.state, thread_id.to_string(), text, images)
+    }
+
+    fn interrupt_latest(&self, thread_id: &ThreadId) -> Result<(), String> {
+        cancel_session(self.state, thread_id.as_str());
+        Ok(())
+    }
+
+    fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(list_codex_plugins()?).map_err(|error| error.to_string())
+    }
+
+    fn install_codex_plugin(
+        &self,
+        source: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String> {
+        serde_json::to_value(install_codex_plugin(source, upgrade)?)
+            .map_err(|error| error.to_string())
+    }
+
+    fn set_codex_plugin_enabled(&self, name: String, enabled: bool) -> Result<(), String> {
+        set_codex_plugin_enabled(name, enabled)
+    }
+
+    fn uninstall_codex_plugin(&self, name: String) -> Result<(), String> {
+        uninstall_codex_plugin(name)
+    }
+
+    fn list_marketplaces(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(list_plugin_marketplaces()?).map_err(|error| error.to_string())
+    }
+
+    fn install_marketplace_plugin(
+        &self,
+        marketplace_path: String,
+        plugin_name: String,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String> {
+        serde_json::to_value(install_marketplace_plugin(
+            marketplace_path,
+            plugin_name,
+            upgrade,
+        )?)
+        .map_err(|error| error.to_string())
+    }
 }
 
 /// The current workspace (process working directory).
@@ -1428,7 +1436,6 @@ fn codex_plugin_catalog() -> Result<CodexPluginCatalog, String> {
     ))
 }
 
-#[tauri::command]
 fn list_codex_plugins() -> Result<Vec<CodexPluginView>, String> {
     let (_, workspace) = configured_workspace()?;
     let apps = discover_codex_apps(&workspace)?;
@@ -1472,17 +1479,14 @@ impl CodexPluginView {
     }
 }
 
-#[tauri::command]
 fn install_codex_plugin(source: String, upgrade: bool) -> Result<CodexPluginRecord, String> {
     codex_plugin_catalog()?.install_or_upgrade(Path::new(&source), upgrade)
 }
 
-#[tauri::command]
 fn set_codex_plugin_enabled(name: String, enabled: bool) -> Result<(), String> {
     codex_plugin_catalog()?.set_enabled(&name, enabled)
 }
 
-#[tauri::command]
 fn uninstall_codex_plugin(name: String) -> Result<(), String> {
     codex_plugin_catalog()?.uninstall(&name)
 }
@@ -1493,7 +1497,6 @@ struct MarketplaceView {
     marketplace: Marketplace,
 }
 
-#[tauri::command]
 fn list_plugin_marketplaces() -> Result<Vec<MarketplaceView>, String> {
     let (_, workspace) = configured_workspace()?;
     Ok(discover_marketplaces(&workspace)?
@@ -1505,7 +1508,6 @@ fn list_plugin_marketplaces() -> Result<Vec<MarketplaceView>, String> {
         .collect())
 }
 
-#[tauri::command]
 fn install_marketplace_plugin(
     marketplace_path: String,
     plugin_name: String,
@@ -1551,6 +1553,7 @@ fn materialize_marketplace_plugin(
             url,
             path,
             ref_name,
+            sha,
         } => {
             if !(url.starts_with("https://")
                 || url.starts_with("ssh://")
@@ -1576,6 +1579,21 @@ fn materialize_marketplace_plugin(
                     String::from_utf8_lossy(&output.stderr).trim()
                 ));
             }
+            if let Some(sha) = sha.as_deref().filter(|value| !value.trim().is_empty()) {
+                let checkout = ProcessCommand::new("git")
+                    .args(["-C"])
+                    .arg(&staging)
+                    .args(["checkout", "--detach", sha])
+                    .output()
+                    .map_err(|error| format!("启动 git checkout 失败: {error}"))?;
+                if !checkout.status.success() {
+                    let _ = remove_plugin_staging(workspace, &staging);
+                    return Err(format!(
+                        "Git 插件固定版本失败: {}",
+                        String::from_utf8_lossy(&checkout.stderr).trim()
+                    ));
+                }
+            }
             let source = match resolve_staged_subpath(&staging, path.as_deref()) {
                 Ok(source) => source,
                 Err(error) => {
@@ -1585,7 +1603,11 @@ fn materialize_marketplace_plugin(
             };
             Ok((source, Some(staging)))
         }
-        MarketplaceSource::Npm { package, version } => {
+        MarketplaceSource::Npm {
+            package,
+            version,
+            registry,
+        } => {
             if !valid_npm_package(package) {
                 return Err("NPM 包名格式无效".to_string());
             }
@@ -1597,9 +1619,14 @@ fn materialize_marketplace_plugin(
                 .map(|version| format!("{package}@{version}"))
                 .unwrap_or_else(|| package.clone());
             let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
-            let output = ProcessCommand::new(npm)
+            let mut command = ProcessCommand::new(npm);
+            command
                 .args(["pack", &spec, "--pack-destination"])
-                .arg(&staging)
+                .arg(&staging);
+            if let Some(registry) = registry.as_deref().filter(|value| !value.trim().is_empty()) {
+                command.args(["--registry", registry]);
+            }
+            let output = command
                 .output()
                 .map_err(|error| format!("启动 npm pack 失败: {error}"))?;
             if !output.status.success() {
@@ -1899,12 +1926,6 @@ pub fn run() {
             list_external_plugins,
             install_external_plugin,
             set_external_plugin_enabled,
-            list_codex_plugins,
-            install_codex_plugin,
-            set_codex_plugin_enabled,
-            uninstall_codex_plugin,
-            list_plugin_marketplaces,
-            install_marketplace_plugin,
             memory_list,
             memory_consolidate,
             memory_add,
@@ -2327,6 +2348,12 @@ mod tests {
             "fork_session,",
             "archive_session,",
             "new_session,",
+            "list_codex_plugins,",
+            "install_codex_plugin,",
+            "set_codex_plugin_enabled,",
+            "uninstall_codex_plugin,",
+            "list_plugin_marketplaces,",
+            "install_marketplace_plugin,",
         ] {
             assert!(!handler.contains(legacy_command));
         }
@@ -2341,6 +2368,20 @@ mod tests {
         assert!(app.contains("protocolSequences.get(envelope.threadId) || 0"));
         assert!(app.contains("envelope.sequence <= previous"));
         assert!(app.contains("protocolSequences.set(envelope.threadId, envelope.sequence)"));
+    }
+
+    #[test]
+    fn tauri_delegates_protocol_routing_to_the_app_server() {
+        let backend = include_str!("lib.rs");
+        let body = backend
+            .split_once("fn app_server_request(")
+            .unwrap()
+            .1
+            .split_once("struct GuiAppServerAdapter")
+            .unwrap()
+            .0;
+        assert!(body.contains("dispatch_with_runtime(request, &runtime)"));
+        assert!(!body.contains("ClientRequest::"));
     }
 
     #[test]
