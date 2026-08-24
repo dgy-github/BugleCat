@@ -22,6 +22,7 @@
   import { PluginController } from "./lib/plugin-controller.svelte";
   import { SettingsController, type Settings } from "./lib/settings-controller.svelte";
   import { SlashController } from "./lib/slash-controller.svelte";
+  import { ModelControlsController, PERMISSION_MODES, REASONING_EFFORTS } from "./lib/model-controls-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -73,10 +74,14 @@
   );
   const memoryController = new MemoryController((text) => messages.push({ role: "note", text }));
   const pluginController = new PluginController((text) => messages.push({ role: "note", text }));
+  const modelControls = new ModelControlsController(
+    (text) => messages.push({ role: "note", text }),
+    (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
+  );
   const settingsController = new SettingsController(
     pluginController,
     (text) => messages.push({ role: "note", text }),
-    (model, availableModels) => { currentModel = model; models = availableModels; },
+    modelControls.applyModel,
     (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
   );
   const slashController = new SlashController(
@@ -86,7 +91,7 @@
     {
       newSession: () => newSession(),
       forkCurrent: () => currentSessionId ? void forkSession(currentSessionId, sessionTitle) : messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
-      openModel: () => (modelMenuOpen = true),
+      openModel: () => (modelControls.modelMenuOpen = true),
       openSettings: () => void openSettings(),
       showUsage: () => showUsage(),
       openCheckpoints: () => void openCheckpoints(), openFiles: () => void openFiles(), openDiff: () => void openDiff(),
@@ -141,71 +146,6 @@
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
   };
   let currentSessionId = $state("");
-  // Topbar model quick-switch
-  let currentModel = $state("");
-  let models = $state<string[]>([]);
-  let modelMenuOpen = $state(false);
-  async function selectModel(m: string) {
-    modelMenuOpen = false;
-    if (!m || m === currentModel) return;
-    const prev = currentModel;
-    currentModel = m; // optimistic; `ready` will confirm
-    try {
-      await invoke("set_model", { model: m });
-      try {
-        const updated = await invoke<Settings>("get_settings");
-        models = updated.available_models;
-        usage.setPrice(updated.price_in, updated.price_out, updated.price_currency);
-      } catch { /* 模型已切换，费用显示将在下一次状态刷新时同步 */ }
-    } catch (e) {
-      currentModel = prev;
-      messages.push({ role: "note", text: `切换模型失败：${e}` });
-    }
-  }
-  let reasoningEffort = $state("auto");
-  let reasoningMenuOpen = $state(false);
-  const REASONING_EFFORTS = [
-    { id: "auto", label: "智能体自动", desc: "普通请求用高强度，复杂智能体任务自动增强" },
-    { id: "off", label: "关闭思考", desc: "直接回答，不启用思考模式" },
-    { id: "high", label: "深度思考", desc: "启用 DeepSeek high 思考强度" },
-    { id: "max", label: "智能体增强", desc: "启用 DeepSeek max，适合复杂工具任务" },
-  ];
-  const reasoningLabel = (id: string) => REASONING_EFFORTS.find((option) => option.id === id)?.label ?? id;
-  async function selectReasoningEffort(id: string) {
-    reasoningMenuOpen = false;
-    if (!id || id === reasoningEffort) return;
-    const previous = reasoningEffort;
-    reasoningEffort = id;
-    try {
-      await invoke("save_settings", { updates: { reasoning_effort: id } });
-    } catch (e) {
-      reasoningEffort = previous;
-      messages.push({ role: "note", text: `切换思考程度失败：${e}` });
-    }
-  }
-  // Claude-Code-style permission modes (single composer selector).
-  let permissionMode = $state("accept-edits");
-  let modeMenuOpen = $state(false);
-  const PERMISSION_MODES = [
-    { id: "plan", label: "规划模式", desc: "只读，不改文件" },
-    { id: "default", label: "默认", desc: "改文件前询问" },
-    { id: "accept-edits", label: "自动接受编辑", desc: "编辑直接应用，命令询问" },
-    { id: "bypass", label: "全权放行", desc: "危险：所有操作不询问" },
-  ];
-  const modeLabel = (id: string) => PERMISSION_MODES.find((o) => o.id === id)?.label ?? id;
-  const modeIcon = (id: string) => (id === "plan" ? "📋" : id === "bypass" ? "⚠️" : "🛡");
-  async function selectMode(id: string) {
-    modeMenuOpen = false;
-    if (id === permissionMode) return;
-    const prev = permissionMode;
-    permissionMode = id; // optimistic; `ready` confirms
-    try {
-      await invoke("set_permission_mode", { mode: id });
-    } catch (e) {
-      permissionMode = prev;
-      messages.push({ role: "note", text: `切换权限模式失败：${e}` });
-    }
-  }
   let scroller = $state<HTMLDivElement>();
 
 
@@ -224,9 +164,9 @@
       const s = await invoke<{ model: string; sandbox: string; approval: string; permission_mode: string; reasoning_effort: string; price_in: number; price_out: number; price_currency: "CNY" | "USD" }>("get_status");
       header = `${s.model} · ${s.sandbox}`;
       sandboxMode = s.sandbox;
-      currentModel = s.model;
-      if (s.permission_mode) permissionMode = s.permission_mode;
-      if (s.reasoning_effort) reasoningEffort = s.reasoning_effort;
+      modelControls.currentModel = s.model;
+      if (s.permission_mode) modelControls.permissionMode = s.permission_mode;
+      if (s.reasoning_effort) modelControls.reasoningEffort = s.reasoning_effort;
       usage.setPrice(s.price_in, s.price_out, s.price_currency);
     } catch (e) {
       header = "配置错误";
@@ -250,10 +190,10 @@
           workspace = p.workspace;
           needsWorkspace = p.needs_workspace;
           sandboxMode = p.sandbox;
-          currentModel = p.model;
-          if (p.models?.length) models = p.models;
-          if (p.permission_mode) permissionMode = p.permission_mode;
-          if (p.reasoning_effort) reasoningEffort = p.reasoning_effort;
+          modelControls.currentModel = p.model;
+          if (p.models?.length) modelControls.models = p.models;
+          if (p.permission_mode) modelControls.permissionMode = p.permission_mode;
+          if (p.reasoning_effort) modelControls.reasoningEffort = p.reasoning_effort;
           // Learn the active session's real id so 最近会话 can mark/return to it.
           if (p.session_id) {
             const wasUnbound = currentSessionId === "";
@@ -966,22 +906,22 @@
     />
 
     <Composer
-      {models}
-      {currentModel}
+      models={modelControls.models}
+      currentModel={modelControls.currentModel}
       {header}
-      bind:modelMenuOpen
-      {selectModel}
-      {reasoningEffort}
-      bind:reasoningMenuOpen
+      bind:modelMenuOpen={modelControls.modelMenuOpen}
+      selectModel={modelControls.selectModel}
+      reasoningEffort={modelControls.reasoningEffort}
+      bind:reasoningMenuOpen={modelControls.reasoningMenuOpen}
       reasoningEfforts={REASONING_EFFORTS}
-      {selectReasoningEffort}
-      {reasoningLabel}
-      {permissionMode}
-      bind:modeMenuOpen
+      selectReasoningEffort={modelControls.selectReasoningEffort}
+      reasoningLabel={modelControls.reasoningLabel}
+      permissionMode={modelControls.permissionMode}
+      bind:modeMenuOpen={modelControls.modeMenuOpen}
       permissionModes={PERMISSION_MODES}
-      {selectMode}
-      {modeIcon}
-      {modeLabel}
+      selectMode={modelControls.selectMode}
+      modeIcon={modelControls.modeIcon}
+      modeLabel={modelControls.modeLabel}
       {busy}
       {workspace}
       {needsWorkspace}

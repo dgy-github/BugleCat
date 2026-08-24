@@ -2021,15 +2021,15 @@ mod tests {
 
     #[test]
     fn topbar_exposes_reasoning_effort_quick_switch() {
-        let app = include_str!("../../src/App.svelte");
         let composer = include_str!("../../src/components/Composer.svelte");
+        let controls = include_str!("../../src/lib/model-controls-controller.svelte.ts");
         assert!(composer.contains("class=\"reasoning-pill\""));
-        assert!(app.contains("思考程度"));
-        assert!(app.contains("selectReasoningEffort"));
-        assert!(app.contains("智能体自动"));
-        assert!(app.contains("智能体增强"));
-        assert!(!app.contains("{ id: \"low\", label:"));
-        assert!(!app.contains("{ id: \"medium\", label:"));
+        assert!(controls.contains("思考程度"));
+        assert!(controls.contains("selectReasoningEffort"));
+        assert!(controls.contains("智能体自动"));
+        assert!(controls.contains("智能体增强"));
+        assert!(!controls.contains("{ id: \"low\", label:"));
+        assert!(!controls.contains("{ id: \"medium\", label:"));
     }
 
     #[test]
