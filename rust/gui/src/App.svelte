@@ -16,6 +16,7 @@
   import { appendReasoning, hideCompletedToolActivity, keepConversationConclusions, settleCompletedToolGroups, toolGroupFailureCount, type ConversationMessage as Msg, type ToolEntry, type ToolGroup } from "./lib/conversation-model";
   import { UsageController } from "./lib/usage-controller.svelte";
   import { FileBrowserController } from "./lib/file-browser-controller.svelte";
+  import { GitWorkspaceController } from "./lib/git-workspace-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -160,6 +161,7 @@
     () => input,
     (value) => (input = value),
   );
+  const gitWorkspace = new GitWorkspaceController((text) => messages.push({ role: "note", text }));
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
@@ -210,20 +212,6 @@
   }
 
   // Branch / checkpoint expand-to-detail.
-  type Commit = { hash: string; subject: string; when: string };
-  let branchCommits = $state<Record<string, Commit[]>>({});
-  async function toggleBranchDetail(name: string) {
-    if (name in branchCommits) {
-      const { [name]: _drop, ...rest } = branchCommits;
-      branchCommits = rest;
-      return;
-    }
-    try {
-      branchCommits = { ...branchCommits, [name]: await invoke<Commit[]>("git_log", { name, limit: 10 }) };
-    } catch (e) {
-      branchCommits = { ...branchCommits, [name]: [{ hash: "", subject: `加载失败：${e}`, when: "" }] };
-    }
-  }
   let checkpointFiles = $state<Record<string, string[]>>({});
   async function toggleCheckpointDetail(id: string) {
     if (id in checkpointFiles) {
@@ -1012,15 +1000,6 @@
   }
 
   // ── Phase 1: git branches, diff, session history ──────────────────────────
-  type BranchInfo = { name: string; current: boolean };
-  let branchOpen = $state(false);
-  let branches = $state<BranchInfo[]>([]);
-  let newBranch = $state("");
-  let branchBusy = $state(false);
-  type FileChange = { path: string; added: number; removed: number; kind: string };
-  let diffOpen = $state(false);
-  let diffFiles = $state<FileChange[]>([]);
-  let diffOpenFiles = $state<Record<string, string>>({}); // path -> loaded diff text
   let historyOpen = $state(false);
   let sessions = $state<SessionRow[]>([]);
   let showRecent = $state(false);
@@ -1070,74 +1049,22 @@
     }
   }
 
-  async function loadBranches() {
-    branches = await invoke<BranchInfo[]>("git_branches");
-  }
   async function openBranches() {
     if (rightPanel === "branches") { rightPanel = ""; return; }
     rightPanel = "branches";
-    branchBusy = true;
-    try {
-      await loadBranches();
-    } catch (e) {
-      messages.push({ role: "note", text: `分支加载失败：${e}` });
-    }
-    branchBusy = false;
-  }
-  async function createBranch() {
-    if (!newBranch.trim()) return;
-    branchBusy = true;
-    try {
-      await invoke("git_create_branch", { name: newBranch });
-      messages.push({ role: "note", text: `已新建并切换到分支 ${newBranch}。` });
-      newBranch = "";
-      await loadBranches();
-    } catch (e) {
-      messages.push({ role: "note", text: `新建分支失败：${e}` });
-    }
-    branchBusy = false;
-  }
-  async function switchBranch(name: string) {
-    if (branchBusy) return;
-    branchBusy = true;
-    try {
-      await invoke("git_switch_branch", { name });
-      messages.push({ role: "note", text: `已切换到分支 ${name}。` });
-      await loadBranches();
-    } catch (e) {
-      messages.push({ role: "note", text: `切换失败：${e}` });
-    }
-    branchBusy = false;
+    await gitWorkspace.refreshBranches();
   }
   async function openDiff() {
     if (rightPanel === "diff") { rightPanel = ""; return; }
     rightPanel = "diff";
-    diffOpenFiles = {};
-    try {
-      diffFiles = await invoke<FileChange[]>("git_changes");
-    } catch (e) {
-      diffFiles = [];
-      messages.push({ role: "note", text: `Diff 失败：${e}` });
-    }
+    await gitWorkspace.loadDiff();
   }
-  async function toggleFile(path: string) {
-    if (path in diffOpenFiles) {
-      const { [path]: _drop, ...rest } = diffOpenFiles;
-      diffOpenFiles = rest;
-      return;
-    }
-    try {
-      const d = await invoke<string>("git_file_diff", { path });
-      diffOpenFiles = { ...diffOpenFiles, [path]: d };
-    } catch (e) {
-      diffOpenFiles = { ...diffOpenFiles, [path]: `diff failed: ${e}` };
-    }
-  }
+
   async function reloadPanel() {
     try {
       if (rightPanel === "files") await fileBrowser.load(fileBrowser.path);
-      else if (rightPanel === "branches") await loadBranches();
-      else if (rightPanel === "diff") { diffOpenFiles = {}; diffFiles = await invoke<FileChange[]>("git_changes"); }
+      else if (rightPanel === "branches") await gitWorkspace.refreshBranches();
+      else if (rightPanel === "diff") await gitWorkspace.loadDiff();
       else if (rightPanel === "memory") await loadNotes();
       else if (rightPanel === "checkpoints") await loadCheckpoints();
     } catch (e) {
@@ -1588,14 +1515,14 @@
     {toggleCheckpointDetail}
     {restoreCheckpoint}
     {busy}
-    bind:newBranch
-    {branchBusy}
-    {branches}
-    {branchCommits}
-    {createBranch}
-    {loadBranches}
-    {toggleBranchDetail}
-    {switchBranch}
+    bind:newBranch={gitWorkspace.newBranch}
+    branchBusy={gitWorkspace.busy}
+    branches={gitWorkspace.branches}
+    branchCommits={gitWorkspace.branchCommits}
+    createBranch={gitWorkspace.createBranch}
+    loadBranches={gitWorkspace.refreshBranches}
+    toggleBranchDetail={gitWorkspace.toggleBranchDetail}
+    switchBranch={gitWorkspace.switchBranch}
     {chooseWorkspace}
     bind:filePreview={fileBrowser.preview}
     filesPath={fileBrowser.path}
@@ -1603,9 +1530,9 @@
     insertMention={fileBrowser.insertMention}
     filesUp={fileBrowser.up}
     pickFile={fileBrowser.pick}
-    {diffFiles}
-    {diffOpenFiles}
-    {toggleFile}
+    diffFiles={gitWorkspace.diffFiles}
+    diffOpenFiles={gitWorkspace.diffOpenFiles}
+    toggleFile={gitWorkspace.toggleFile}
     {diffLineClass}
     bind:historyOpen
     {sessions}
