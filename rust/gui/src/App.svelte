@@ -19,6 +19,7 @@
   import { GitWorkspaceController } from "./lib/git-workspace-controller.svelte";
   import { CheckpointController } from "./lib/checkpoint-controller.svelte";
   import { MemoryController } from "./lib/memory-controller.svelte";
+  import { PluginController } from "./lib/plugin-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -86,27 +87,6 @@
   let apiKeyInput = $state("");
   let vlApiKeyInput = $state("");
   let saving = $state(false);
-  type HarnessDiagnostics = Record<"llm" | "interaction" | "policy" | "context" | "memory" | "compaction" | "mcp" | "attachment" | "media" | "cost_telemetry", boolean>;
-  type ExternalPlugin = { manifest: { id: string; name: string; version: string; capabilities: string[] }; root: string; enabled: boolean };
-  type CodexPlugin = {
-    manifest: { name: string; version?: string; description?: string; keywords: string[] };
-    root: string;
-    enabled: boolean;
-    skill_roots: number;
-    has_mcp: boolean;
-    has_apps: boolean;
-    app_count: number;
-    has_hooks: boolean;
-  };
-  type MarketplaceSource =
-    | { source: "local"; path: string }
-    | { source: "git"; url: string; path?: string; ref?: string }
-    | { source: "npm"; package: string; version?: string };
-  type PluginMarketplace = { path: string; marketplace: { name: string; plugins: { name: string; source: MarketplaceSource }[] } };
-  let harnessDiagnostics = $state<HarnessDiagnostics | null>(null);
-  let externalPlugins = $state<ExternalPlugin[]>([]);
-  let codexPlugins = $state<CodexPlugin[]>([]);
-  let pluginMarketplaces = $state<PluginMarketplace[]>([]);
 
   type CatalogModel = {
     provider_id: string;
@@ -151,6 +131,7 @@
     () => busy,
   );
   const memoryController = new MemoryController((text) => messages.push({ role: "note", text }));
+  const pluginController = new PluginController((text) => messages.push({ role: "note", text }));
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
@@ -719,30 +700,15 @@
 
   async function openSettings() {
     try {
-      const [
-        loadedSettings,
-        loadedLocation,
-        loadedCatalog,
-        diagnostics,
-        plugins,
-        loadedCodexPlugins,
-        loadedMarketplaces,
-      ] = await Promise.all([
+      const [loadedSettings, loadedLocation, loadedCatalog] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ConfigLocation>("get_config_location"),
         invoke<ModelCatalogResponse>("get_model_catalog"),
-        invoke<HarnessDiagnostics>("get_harness_diagnostics"),
-        invoke<ExternalPlugin[]>("list_external_plugins"),
-        appServerRequest<CodexPlugin[]>({ method: "codexPluginList" }),
-        appServerRequest<PluginMarketplace[]>({ method: "marketplaceList" }),
+        pluginController.load(),
       ]);
       settings = loadedSettings;
       configLocation = loadedLocation;
       modelCatalog = loadedCatalog;
-      harnessDiagnostics = diagnostics;
-      externalPlugins = plugins;
-      codexPlugins = loadedCodexPlugins;
-      pluginMarketplaces = loadedMarketplaces;
       apiKeyInput = "";
       vlApiKeyInput = "";
     } catch (e) {
@@ -750,69 +716,6 @@
     }
   }
 
-  async function addExternalPlugin() {
-    const selected = await open({ directory: true, multiple: false, title: "选择包含 plugin.toml 的插件目录" });
-    if (!selected || Array.isArray(selected)) return;
-    try {
-      await invoke("install_external_plugin", { source: selected, upgrade: false });
-      externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
-    } catch (e) { messages.push({ role: "note", text: `插件安装失败：${e}` }); }
-  }
-
-  async function upgradeExternalPlugin() {
-    const selected = await open({ directory: true, multiple: false, title: "选择更高版本的插件目录" });
-    if (!selected || Array.isArray(selected)) return;
-    try {
-      await invoke("install_external_plugin", { source: selected, upgrade: true });
-      externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
-    } catch (e) { messages.push({ role: "note", text: `插件升级失败：${e}` }); }
-  }
-
-  async function toggleExternalPlugin(plugin: ExternalPlugin) {
-    try {
-      await invoke("set_external_plugin_enabled", { id: plugin.manifest.id, enabled: !plugin.enabled });
-      externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
-    } catch (e) { messages.push({ role: "note", text: `插件状态修改失败：${e}` }); }
-  }
-
-  async function addCodexPlugin() {
-    const selected = await open({ directory: true, multiple: false, title: "选择包含 .codex-plugin/plugin.json 的插件目录" });
-    if (!selected || Array.isArray(selected)) return;
-    try {
-      await appServerRequest({ method: "codexPluginInstall", params: { source: selected, upgrade: false } });
-      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
-    } catch (e) { messages.push({ role: "note", text: `Codex 插件安装失败：${e}` }); }
-  }
-
-  async function upgradeCodexPlugin() {
-    const selected = await open({ directory: true, multiple: false, title: "选择新版 Codex 插件目录" });
-    if (!selected || Array.isArray(selected)) return;
-    try {
-      await appServerRequest({ method: "codexPluginInstall", params: { source: selected, upgrade: true } });
-      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
-    } catch (e) { messages.push({ role: "note", text: `Codex 插件升级失败：${e}` }); }
-  }
-
-  async function toggleCodexPlugin(plugin: CodexPlugin) {
-    try {
-      await appServerRequest({ method: "codexPluginSetEnabled", params: { name: plugin.manifest.name, enabled: !plugin.enabled } });
-      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
-    } catch (e) { messages.push({ role: "note", text: `Codex 插件状态修改失败：${e}` }); }
-  }
-
-  async function removeCodexPlugin(plugin: CodexPlugin) {
-    try {
-      await appServerRequest({ method: "codexPluginUninstall", params: { name: plugin.manifest.name } });
-      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
-    } catch (e) { messages.push({ role: "note", text: `Codex 插件卸载失败：${e}` }); }
-  }
-
-  async function installMarketplacePlugin(marketplacePath: string, pluginName: string, upgrade = false) {
-    try {
-      await appServerRequest({ method: "marketplacePluginInstall", params: { marketplacePath, pluginName, upgrade } });
-      codexPlugins = await appServerRequest<CodexPlugin[]>({ method: "codexPluginList" });
-    } catch (e) { messages.push({ role: "note", text: `Marketplace 插件${upgrade ? "升级" : "安装"}失败：${e}` }); }
-  }
   function stashSessionQueue(sessionId: string) {
     if (sessionId) {
       sessionQueues.set(sessionId, [...queued]);
@@ -1446,10 +1349,10 @@
     {catalogRefreshing}
     {presetSaving}
     {saving}
-    {harnessDiagnostics}
-    {externalPlugins}
-    {codexPlugins}
-    {pluginMarketplaces}
+    harnessDiagnostics={pluginController.diagnostics}
+    externalPlugins={pluginController.externalPlugins}
+    codexPlugins={pluginController.codexPlugins}
+    pluginMarketplaces={pluginController.marketplaces}
     {REASONING_EFFORTS}
     {currencySymbol}
     {currencyName}
@@ -1460,14 +1363,14 @@
     {applyModelPreset}
     {openPriceSource}
     {refreshOpenRouterModels}
-    {addExternalPlugin}
-    {upgradeExternalPlugin}
-    {toggleExternalPlugin}
-    {addCodexPlugin}
-    {upgradeCodexPlugin}
-    {toggleCodexPlugin}
-    {removeCodexPlugin}
-    {installMarketplacePlugin}
+    addExternalPlugin={pluginController.addExternal}
+    upgradeExternalPlugin={pluginController.upgradeExternal}
+    toggleExternalPlugin={pluginController.toggleExternal}
+    addCodexPlugin={pluginController.addCodex}
+    upgradeCodexPlugin={pluginController.upgradeCodex}
+    toggleCodexPlugin={pluginController.toggleCodex}
+    removeCodexPlugin={pluginController.removeCodex}
+    installMarketplacePlugin={pluginController.installMarketplace}
     {saveSettings}
   />
   </div>
