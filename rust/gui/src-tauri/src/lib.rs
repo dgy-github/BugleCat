@@ -2246,7 +2246,6 @@ mod tests {
 
     #[test]
     fn session_usage_survives_restart_and_session_switches() {
-        let app = include_str!("../../src/App.svelte");
         let usage = include_str!("../../src/lib/usage-controller.svelte.ts");
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         assert!(usage.contains("restore(sessionId: string)"));
@@ -2254,8 +2253,9 @@ mod tests {
         assert!(usage.contains("ncx.sessionUsage."));
         assert!(thread.contains("this.usage.add(event.session_id"));
         assert!(usage.contains("this.persist(sessionId)"));
-        assert!(app.matches("usage.restore(thread.currentId)").count() >= 2);
-        assert!(app.matches("usage.reset()").count() >= 2);
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        assert!(lifecycle.matches("this.usage.restore(").count() >= 2);
+        assert!(lifecycle.matches("this.usage.reset()").count() >= 2);
     }
 
     #[test]
@@ -2307,7 +2307,7 @@ mod tests {
     #[test]
     fn frontend_thread_lifecycle_uses_the_versioned_app_server_protocol() {
         let app = include_str!("../../src/App.svelte");
-        let frontend = format!("{app}\n{}", include_str!("../../src/lib/slash-controller.svelte.ts"));
+        let frontend = format!("{app}\n{}\n{}", include_str!("../../src/lib/slash-controller.svelte.ts"), include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts"));
         for method in [
             "threadCreateActivate",
             "threadActivate",
@@ -2325,11 +2325,12 @@ mod tests {
         }
         assert!(!app.contains("invoke(\"archive_session\""));
         assert!(!app.contains("invoke<SessionRow[]>(\"list_sessions\")"));
-        let refresh = app
-            .split_once("async function refreshSessions")
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let refresh = lifecycle
+            .split_once("refresh = async")
             .unwrap()
             .1
-            .split_once("function newThreadId")
+            .split_once("archive = async")
             .unwrap()
             .0;
         assert!(!refresh.contains("method: \"threadRead\""));
@@ -2408,11 +2409,12 @@ mod tests {
     #[test]
     fn switching_sessions_does_not_stop_the_previous_turn() {
         let app = include_str!("../../src/App.svelte");
-        let resume = app
-            .split_once("async function resumeSession")
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let resume = lifecycle
+            .split_once("resume = async")
             .unwrap()
             .1
-            .split_once("async function forkSession")
+            .split_once("fork = async")
             .unwrap()
             .0;
         assert!(!resume.contains("stop_generation"));
@@ -2423,27 +2425,27 @@ mod tests {
 
     #[test]
     fn history_session_switch_keeps_the_active_turn_running() {
-        let app = include_str!("../../src/App.svelte");
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let sidebar = include_str!("../../src/components/SessionSidebar.svelte");
         assert!(sidebar.contains("disabled={switchingSession || !s.has_snapshot}"));
-        let resume = app
-            .split_once("async function resumeSession")
+        let resume = lifecycle
+            .split_once("resume = async")
             .unwrap()
             .1
-            .split_once("async function forkSession")
+            .split_once("fork = async")
             .unwrap()
             .0;
         assert!(!resume.contains("stop_generation"));
-        assert!(resume.contains("thread.busy = thread.runningSessions.has(id)"));
+        assert!(resume.contains("this.thread.busy = this.thread.runningSessions.has(id)"));
         assert!(resume.contains("method: \"threadActivate\""));
     }
 
     #[test]
     fn archived_sessions_render_below_recent_sessions() {
-        let app = include_str!("../../src/App.svelte");
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let sidebar_component = include_str!("../../src/components/SessionSidebar.svelte");
-        assert!(app.contains("sessions.filter((s) => !s.archived)"));
-        assert!(app.contains("sessions.filter((s) => s.archived)"));
+        assert!(lifecycle.contains("this.sessions.filter((session) => !session.archived)"));
+        assert!(lifecycle.contains("this.sessions.filter((session) => session.archived)"));
 
         let sidebar = sidebar_component
             .split_once("<div class=\"side-recents\">")
@@ -2466,9 +2468,9 @@ mod tests {
 
     #[test]
     fn recent_sessions_are_collapsible_and_closed_by_default() {
-        let app = include_str!("../../src/App.svelte");
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let sidebar_component = include_str!("../../src/components/SessionSidebar.svelte");
-        assert!(app.contains("let showRecent = $state(false)"));
+        assert!(lifecycle.contains("showRecent = $state(false)"));
 
         let sidebar = sidebar_component
             .split_once("<div class=\"side-recents\">")

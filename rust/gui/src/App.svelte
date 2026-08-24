@@ -24,6 +24,7 @@
   import { SlashController } from "./lib/slash-controller.svelte";
   import { ModelControlsController, PERMISSION_MODES, REASONING_EFFORTS } from "./lib/model-controls-controller.svelte";
   import { ThreadController, type UiEvent } from "./lib/thread-controller.svelte";
+  import { ThreadLifecycleController } from "./lib/thread-lifecycle-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -36,7 +37,7 @@
   // UiEvent and per-Thread state are owned by ThreadController.
   let input = $state("");
   const thread = new ThreadController(usage, {
-    refreshSessions: () => void refreshSessions(),
+    refreshSessions: () => void threadLifecycle.refresh(),
     scrollDown: () => scrollDown(),
     dequeue: () => dequeue(),
     ready: (event) => {
@@ -50,6 +51,7 @@
       if (event.reasoning_effort) modelControls.reasoningEffort = event.reasoning_effort;
     },
   });
+  const threadLifecycle = new ThreadLifecycleController(thread, usage, () => workspace);
   const fileBrowser = new FileBrowserController(
     (text) => thread.messages.push({ role: "note", text }),
     () => input,
@@ -77,14 +79,14 @@
     (value) => (input = value),
     (text) => thread.messages.push({ role: "note", text }),
     {
-      newSession: () => newSession(),
-      forkCurrent: () => thread.currentId ? void forkSession(thread.currentId, thread.title) : thread.messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
+      newSession: () => void threadLifecycle.create(),
+      forkCurrent: () => thread.currentId ? void threadLifecycle.fork(thread.currentId, thread.title) : thread.messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
       openModel: () => (modelControls.modelMenuOpen = true),
       openSettings: () => void openSettings(),
       showUsage: () => showUsage(),
       openCheckpoints: () => void openCheckpoints(), openFiles: () => void openFiles(), openDiff: () => void openDiff(),
       openBranches: () => void openBranches(), openMemory: () => void openHermes(),
-      refreshSessions, currentThreadId: () => thread.currentId, currentTitle: () => thread.title,
+      refreshSessions: threadLifecycle.refresh, currentThreadId: () => thread.currentId, currentTitle: () => thread.title,
       setTitle: (title) => (thread.title = title),
     },
   );
@@ -131,13 +133,13 @@
     } catch (e) {
       header = "配置错误";
     }
-    refreshSessions();
+    void threadLifecycle.refresh();
 
     await listen<ProtocolEventEnvelope>("ncx://protocol-event", (message) => {
       const envelope = message.payload;
       if (!protocolSequenceGate.accept(envelope)) return;
       if (["threadCreated", "threadUpdated", "turnCompleted"].includes(envelope.event.type)) {
-        refreshSessions();
+        void threadLifecycle.refresh();
       }
     });
 
@@ -212,7 +214,7 @@
       // the old workspace, and set_workspace already reloaded the agent into a
       // new session. Reset the conversation-scoped UI state to match.
       thread.messages.push({ role: "note", text: `已切换工作区到 ${set}，已开始新会话。` });
-      refreshSessions();
+      void threadLifecycle.refresh();
     } catch (e) {
       thread.currentId = previousSessionId;
       thread.title = previousTitle;
@@ -344,55 +346,6 @@
   }
 
 
-  // ── Phase 1: git branches, diff, session history ──────────────────────────
-  let historyOpen = $state(false);
-  let sessions = $state<SessionRow[]>([]);
-  let showRecent = $state(false);
-  let showArchived = $state(false);
-  // Keep ordinary and archived conversations as two stable sections. The active
-  // conversation is pinned only inside its own section, never above the archive
-  // boundary.
-  const recentSessions = $derived.by(() => {
-    const visible = sessions.filter((s) => !s.archived);
-    if (!thread.currentId) return visible;
-    return [
-      ...visible.filter((s) => s.session_id === thread.currentId),
-      ...visible.filter((s) => s.session_id !== thread.currentId),
-    ];
-  });
-  const archivedSessions = $derived.by(() => {
-    const archived = sessions.filter((s) => s.archived);
-    if (!thread.currentId) return archived;
-    return [
-      ...archived.filter((s) => s.session_id === thread.currentId),
-      ...archived.filter((s) => s.session_id !== thread.currentId),
-    ];
-  });
-  const archivedCount = $derived(sessions.filter((s) => s.archived).length);
-
-  // 13-digit ms-epoch string → compact relative / date label.
-  function fmtWhen(ms: string): string {
-    // Current stamps are 13-digit ms-epoch; legacy ones are ISO strings.
-    const t = /^\d+$/.test(ms) ? Number(ms) : Date.parse(ms);
-    if (!t || Number.isNaN(t)) return "";
-    const diff = Date.now() - t;
-    if (diff < 60_000) return "刚刚";
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-    const d = new Date(t);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getMonth() + 1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
-  async function archiveSession(id: string, archived: boolean) {
-    try {
-      await appServerRequest({ method: "threadArchive", params: { threadId: id, archived } });
-      const s = sessions.find((x) => x.session_id === id);
-      if (s) s.archived = archived; // optimistic
-      refreshSessions();
-    } catch (e) {
-      thread.messages.push({ role: "note", text: `归档失败：${e}` });
-    }
-  }
 
   async function openBranches() {
     if (rightPanel === "branches") { rightPanel = ""; return; }
@@ -414,130 +367,6 @@
       else if (rightPanel === "checkpoints") await checkpointController.refresh();
     } catch (e) {
       thread.messages.push({ role: "note", text: `刷新失败：${e}` });
-    }
-  }
-  async function refreshSessions() {
-    try {
-      const metadata = await appServerRequest<{ id: string }[]>({ method: "threadList", params: { includeArchived: true } });
-      const threads = await Promise.all(metadata.slice(0, 50).map((thread) =>
-        appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: thread.id } })
-      ));
-      usage.replaceProtocolUsage(threads.map((thread) => [thread.metadata.id, thread.turns.reduce(
-          (sum, turn) => ({
-            prompt_tokens: sum.prompt_tokens + (turn.usage?.tokens?.prompt_tokens || 0),
-            completion_tokens: sum.completion_tokens + (turn.usage?.tokens?.completion_tokens || 0),
-          }),
-          { prompt_tokens: 0, completion_tokens: 0 },
-        )]));
-      sessions = threads.map(threadToSessionRow);
-      const current = sessions.find((session) => session.session_id === thread.currentId);
-      if (current) {
-        thread.title = current.title || "会话";
-        usage.restore(thread.currentId);
-      }
-    } catch (e) {
-      console.error("会话协议加载失败", e);
-    }
-  }
-  function newThreadId(): string {
-    return `thread-${crypto.randomUUID()}`;
-  }
-  async function newSession() {
-    if (thread.switching) return;
-    const previousSessionId = thread.currentId;
-    const previousTitle = thread.title;
-    const previousMessages = [...thread.messages];
-    thread.stash(previousSessionId);
-    thread.switching = true;
-    thread.busy = false;
-    thread.messages = [];
-    thread.title = "新会话";
-    thread.currentId = "";
-    usage.reset();
-    try {
-      const id = newThreadId();
-      await appServerRequest<ProtocolThread>({
-        method: "threadCreateActivate",
-        params: { threadId: id, workspace, title: "(no prompt yet)" },
-      });
-      if (thread.currentId === "") {
-        thread.currentId = id;
-        thread.restore(id);
-      }
-    } catch (e) {
-      thread.busy = false;
-      thread.stopping = false;
-      thread.switching = false;
-      thread.currentId = previousSessionId;
-      thread.title = previousTitle;
-      thread.restore(previousSessionId);
-      thread.messages = previousMessages;
-      usage.restore(thread.currentId);
-      thread.messages.push({ role: "note", text: `新建会话失败：${e}` });
-    }
-  }
-  async function resumeSession(id: string, title = "") {
-    if (thread.switching || id === thread.currentId) return;
-    const previousId = thread.currentId;
-    const previousTitle = thread.title;
-    thread.stash(previousId);
-    thread.switching = true;
-    thread.title = title || "会话";
-    thread.currentId = id;
-    usage.restore(thread.currentId);
-    thread.restore(id);
-    try {
-      thread.busy = thread.runningSessions.has(id);
-      await appServerRequest({ method: "threadActivate", params: { threadId: id } });
-    } catch (e) {
-      thread.busy = false;
-      thread.stopping = false;
-      thread.switching = false;
-      thread.currentId = previousId;
-      thread.title = previousTitle;
-      usage.restore(thread.currentId);
-      thread.restore(previousId);
-      thread.messages.push({ role: "note", text: `继续会话失败：${e}` });
-    }
-  }
-  async function forkSession(id: string, title = "") {
-    if (thread.switching) return;
-    const previousSessionId = thread.currentId;
-    const previousTitle = thread.title;
-    thread.stash(previousSessionId);
-    thread.switching = true;
-    thread.busy = false;
-    thread.title = title ? `${title}（分叉）` : "分叉";
-    thread.currentId = "";
-    usage.reset();
-    try {
-      await appServerRequest<ProtocolThread>({
-        method: "threadForkActivate",
-        params: { threadId: id, newThreadId: newThreadId() },
-      });
-    } catch (e) {
-      thread.busy = false;
-      thread.stopping = false;
-      thread.switching = false;
-      thread.currentId = previousSessionId;
-      thread.title = previousTitle;
-      usage.restore(thread.currentId);
-      thread.restore(previousSessionId);
-      thread.messages.push({ role: "note", text: `分叉失败：${e}` });
-    }
-  }
-  async function openSessionLog(id: string) {
-    try {
-      await invoke("open_session_log", { sessionId: id });
-    } catch (e) {
-      thread.messages.push({ role: "note", text: `打开会话日志失败：${e}` });
-    }
-  }
-  async function openSessionSnapshot(id: string) {
-    try {
-      await invoke("open_session_snapshot", { sessionId: id });
-    } catch (e) {
-      thread.messages.push({ role: "note", text: `打开会话快照失败：${e}` });
     }
   }
 
@@ -562,11 +391,11 @@
     switchingSession={thread.switching}
     currentSessionId={thread.currentId}
     runningSessions={thread.runningSessions}
-    {recentSessions}
-    {archivedSessions}
-    {archivedCount}
-    bind:showRecent
-    bind:showArchived
+    recentSessions={threadLifecycle.recentSessions}
+    archivedSessions={threadLifecycle.archivedSessions}
+    archivedCount={threadLifecycle.archivedCount}
+    bind:showRecent={threadLifecycle.showRecent}
+    bind:showArchived={threadLifecycle.showArchived}
     {workspace}
     sidebarResizing={sidebar.resizing}
     sidebarWidth={sidebar.width}
@@ -574,14 +403,14 @@
     {SIDEBAR_MAX_WIDTH}
     {SIDEBAR_DEFAULT_WIDTH}
     toggleSidebar={sidebar.toggle}
-    {newSession}
-    {resumeSession}
-    {forkSession}
-    {openSessionLog}
-    {archiveSession}
+    newSession={threadLifecycle.create}
+    resumeSession={threadLifecycle.resume}
+    forkSession={threadLifecycle.fork}
+    openSessionLog={threadLifecycle.openLog}
+    archiveSession={threadLifecycle.archive}
     {chooseWorkspace}
     {openSettings}
-    {fmtWhen}
+    fmtWhen={threadLifecycle.formatWhen}
     {baseName}
     beginSidebarResize={sidebar.beginResize}
     setSidebarWidth={sidebar.setWidth}
@@ -703,14 +532,14 @@
     diffOpenFiles={gitWorkspace.diffOpenFiles}
     toggleFile={gitWorkspace.toggleFile}
     {diffLineClass}
-    bind:historyOpen
-    {sessions}
+    bind:historyOpen={threadLifecycle.historyOpen}
+    sessions={threadLifecycle.sessions}
     switchingSession={thread.switching}
-    {resumeSession}
-    {forkSession}
-    {openSessionLog}
-    {openSessionSnapshot}
-    {refreshSessions}
+    resumeSession={threadLifecycle.resume}
+    forkSession={threadLifecycle.fork}
+    openSessionLog={threadLifecycle.openLog}
+    openSessionSnapshot={threadLifecycle.openSnapshot}
+    refreshSessions={threadLifecycle.refresh}
     bind:newNote={memoryController.newNote}
     bind:newNoteTags={memoryController.newNoteTags}
     hermesBusy={memoryController.busy}
