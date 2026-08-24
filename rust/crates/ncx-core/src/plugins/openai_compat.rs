@@ -63,6 +63,13 @@ pub struct CodexPluginRecord {
     pub enabled: bool,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct CodexAppResource {
+    pub plugin: String,
+    pub name: String,
+    pub connector_id: String,
+}
+
 impl CodexPluginRecord {
     pub fn skill_paths(&self) -> Vec<PathBuf> {
         let explicit = self
@@ -337,6 +344,63 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
         }
     }
     Ok(servers)
+}
+
+/// Parse enabled plugin App declarations. Apps are hosted connector resources,
+/// not local executables; callers may expose them for diagnostics and hand
+/// their connector ids to an authenticated Apps gateway when one is present.
+pub fn discover_codex_apps(workspace: &Path) -> Result<Vec<CodexAppResource>, String> {
+    let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
+    let mut apps = Vec::new();
+    for plugin in catalog
+        .discover()?
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+    {
+        let value = match plugin.manifest.apps.clone() {
+            Some(Value::String(_)) => {
+                let path = plugin
+                    .apps_path()
+                    .ok_or_else(|| format!("插件 '{}' 的 Apps 资源不存在", plugin.manifest.name))?;
+                serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
+                    .map_err(|error| format!("无效 Apps 资源 {}: {error}", path.display()))?
+            }
+            Some(value) => value,
+            None => {
+                let Some(path) = plugin.apps_path() else {
+                    continue;
+                };
+                serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
+                    .map_err(|error| format!("无效 Apps 资源 {}: {error}", path.display()))?
+            }
+        };
+        let Some(entries) = value.get("apps").unwrap_or(&value).as_object() else {
+            return Err(format!(
+                "插件 '{}' 的 Apps 资源必须是对象",
+                plugin.manifest.name
+            ));
+        };
+        for (name, config) in entries {
+            let connector_id = config
+                .get("id")
+                .or_else(|| config.get("connector_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if connector_id.is_empty() {
+                return Err(format!(
+                    "插件 '{}' 的 App '{}' 缺少 id/connector_id",
+                    plugin.manifest.name, name
+                ));
+            }
+            apps.push(CodexAppResource {
+                plugin: plugin.manifest.name.clone(),
+                name: name.clone(),
+                connector_id: connector_id.to_string(),
+            });
+        }
+    }
+    Ok(apps)
 }
 
 pub fn discover_codex_hooks(workspace: &Path) -> Result<Vec<HookConfig>, String> {
@@ -674,6 +738,34 @@ mod tests {
             .unwrap()
             .iter()
             .any(|hook| hook.command == "finish"));
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn codex_apps_are_parsed_as_hosted_connector_resources() {
+        let workspace = temp("apps-resources");
+        let plugin = workspace.join(".ncx/codex-plugins/demo");
+        fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+        fs::write(
+            plugin.join(MANIFEST),
+            r#"{"name":"demo","apps":"./.app.json"}"#,
+        )
+        .unwrap();
+        fs::write(
+            plugin.join(".app.json"),
+            r#"{"apps":{"calendar":{"id":"connector-calendar"},"docs":{"connector_id":"connector-docs"}}}"#,
+        )
+        .unwrap();
+
+        let apps = discover_codex_apps(&workspace).unwrap();
+        assert_eq!(apps.len(), 2);
+        assert!(apps.iter().any(|app| {
+            app.plugin == "demo"
+                && app.name == "calendar"
+                && app.connector_id == "connector-calendar"
+        }));
+        fs::write(plugin.join(".disabled"), "disabled\n").unwrap();
+        assert!(discover_codex_apps(&workspace).unwrap().is_empty());
         let _ = fs::remove_dir_all(workspace);
     }
 }

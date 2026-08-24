@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt;
 
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -105,6 +106,17 @@ pub enum TurnStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnUsage {
+    #[serde(default)]
+    pub tokens: BTreeMap<String, i64>,
+    #[serde(default)]
+    pub estimated_cost: Option<f64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
@@ -114,6 +126,8 @@ pub struct Turn {
     pub started_at: i64,
     pub completed_at: Option<i64>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub usage: TurnUsage,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -121,6 +135,17 @@ pub struct Turn {
 pub struct Thread {
     pub metadata: ThreadMetadata,
     pub turns: Vec<Turn>,
+}
+
+/// Provider-facing conversation state kept separately from the user-visible
+/// Thread/Turn transcript. Compaction may replace this value without deleting
+/// durable user messages or final answers from the transcript.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredModelContext {
+    pub thread_id: ThreadId,
+    pub messages: Vec<Value>,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -147,6 +172,16 @@ pub enum ClientRequest {
     },
     ThreadRead {
         thread_id: ThreadId,
+    },
+    ThreadReadVisible {
+        thread_id: ThreadId,
+    },
+    ThreadModelContextRead {
+        thread_id: ThreadId,
+    },
+    ThreadModelContextReplace {
+        thread_id: ThreadId,
+        messages: Vec<Value>,
     },
     ThreadArchive {
         thread_id: ThreadId,
@@ -189,6 +224,8 @@ pub enum ClientRequest {
         turn_id: TurnId,
         status: TurnStatus,
         error: Option<String>,
+        #[serde(default)]
+        usage: TurnUsage,
     },
     ItemAppend {
         thread_id: ThreadId,
@@ -203,6 +240,7 @@ pub enum ResponsePayload {
     Ack,
     Thread(Thread),
     Threads(Vec<ThreadMetadata>),
+    ModelContext(Option<StoredModelContext>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -230,6 +268,9 @@ pub enum Event {
     },
     ItemAdded {
         item: ThreadItem,
+    },
+    ModelContextUpdated {
+        message_count: usize,
     },
     Error {
         code: String,

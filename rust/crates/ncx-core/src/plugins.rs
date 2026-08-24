@@ -27,9 +27,9 @@ pub use composition::{
 pub use external::{ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord};
 pub use manifest::{PluginCapability, PluginManifest};
 pub use openai_compat::{
-    discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
-    resolve_local_marketplace_plugin, CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord,
-    Marketplace, MarketplacePlugin, MarketplaceSource,
+    discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
+    resolve_local_marketplace_plugin, CodexAppResource, CodexPluginCatalog, CodexPluginManifest,
+    CodexPluginRecord, Marketplace, MarketplacePlugin, MarketplaceSource,
 };
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;

@@ -511,3 +511,11 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `.codex-plugin/plugin.json`、本地 Marketplace、Git source 和 NPM source 已支持发现、校验、安装与升级；Git/NPM 会先物化到工作区 `.ncx/codex-plugin-stage`，包含子路径越界、清理边界和 NPM 包名校验。当前未使用外部真实 Marketplace 做网络 live 安装，相关安全与解析路径由单测覆盖。
 - 组合验证继续覆盖 `full`、`minimal`、`headless`：Skills/Context 属基础能力；media/MCP/attachment 等仅在相应 Profile 与已启用资源存在时装配。
 - 本轮验证：`cargo check --workspace`、GUI Tauri check、`cargo test --workspace --quiet` 全通过（`ncx-core` 222 项）；GUI Rust 52 项全通过；Vite production build 与 `git diff --check` 通过。
+
+### 2026-08-24 协议主路径与持久化上下文最终收口
+- GUI 的会话主路径已完全改为 `ncx-app-server` 协议客户端：新建、激活、分叉、归档、重命名、提交、停止和历史读取均不再回退旧 Tauri 会话命令；协议事件继续绑定 `thread_id + turn_id + sequence`，切换会话不会取消其他会话的后台任务。
+- `ncx-thread-store` 现在同时持久化用户可见 Thread/Turn/Item、Provider 使用的 `StoredModelContext` 以及每轮 `TurnUsage`。模型上下文与可见历史分离，自动压缩结果、累计 token 和估算费用都可跨重启恢复；Fork 复制最后稳定上下文但不复制运行所有权。
+- 新增后端 `ThreadReadVisible` 投影：历史 UI 只收到每轮用户消息和最后一条正式回答，工具调用、工具结果、推理和中间播报不再从后端传给前端。旧 `SessionIndex` 仅用于启动迁移和旧日志/快照兼容，不再参与 GUI 运行时读写。
+- OpenAI Apps 资源兼容补齐：支持 manifest 内联 Apps 和 `.app.json` 的 `id`/`connector_id`，禁用插件不加载，GUI 诊断显示 Apps 数量；Apps 按 Hosted Connector 资源处理，不另建第二套执行状态机。
+- 真实桌面端验证：`npm run tauri -- dev --target x86_64-pc-windows-msvc` 成功启动当前工作树的 `rust/gui/src-tauri/target/x86_64-pc-windows-msvc/debug/ncx-gui.exe`，进程响应正常。
+- 最终回归：`cargo test --workspace --quiet` 全部通过（`ncx-core` 223 项）；GUI Rust 55 项通过；Vite production build 通过；生成的独立测试 target 目录不纳入版本控制。

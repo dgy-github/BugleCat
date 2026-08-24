@@ -117,6 +117,33 @@ impl<S: ThreadStore> AppServer<S> {
                     .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
                 ResponsePayload::Thread(thread)
             }
+            ClientRequest::ThreadReadVisible { thread_id } => {
+                let thread = self
+                    .store
+                    .read(&thread_id)?
+                    .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))?;
+                ResponsePayload::Thread(visible_thread(thread))
+            }
+            ClientRequest::ThreadModelContextRead { thread_id } => {
+                if self.store.read(&thread_id)?.is_none() {
+                    return Err(AppServerError::NotFound(thread_id.to_string()));
+                }
+                ResponsePayload::ModelContext(self.store.read_model_context(&thread_id)?)
+            }
+            ClientRequest::ThreadModelContextReplace {
+                thread_id,
+                messages,
+            } => {
+                let message_count = messages.len();
+                self.store
+                    .replace_model_context(&thread_id, messages, (self.clock)())?;
+                events.push(self.event(
+                    thread_id,
+                    None,
+                    Event::ModelContextUpdated { message_count },
+                ));
+                ResponsePayload::Ack
+            }
             ClientRequest::ThreadArchive {
                 thread_id,
                 archived,
@@ -189,6 +216,7 @@ impl<S: ThreadStore> AppServer<S> {
                         started_at: now,
                         completed_at: None,
                         error: None,
+                        usage: Default::default(),
                     },
                 )?;
                 events.push(self.event(
@@ -212,6 +240,7 @@ impl<S: ThreadStore> AppServer<S> {
                     TurnStatus::Cancelled,
                     (self.clock)(),
                     None,
+                    Default::default(),
                 )?;
                 events.push(self.event(
                     thread_id,
@@ -233,6 +262,7 @@ impl<S: ThreadStore> AppServer<S> {
                 turn_id,
                 status,
                 error,
+                usage,
             } => {
                 self.store.finish_turn(
                     &thread_id,
@@ -240,6 +270,7 @@ impl<S: ThreadStore> AppServer<S> {
                     status,
                     (self.clock)(),
                     error.clone(),
+                    usage,
                 )?;
                 events.push(self.event(
                     thread_id,
@@ -293,6 +324,28 @@ impl<S: ThreadStore> AppServer<S> {
     }
 }
 
+fn visible_thread(mut thread: Thread) -> Thread {
+    for turn in &mut thread.turns {
+        let mut visible = turn
+            .items
+            .iter()
+            .filter(|item| matches!(item, ncx_protocol::ThreadItem::UserMessage { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
+        if let Some(answer) = turn
+            .items
+            .iter()
+            .rev()
+            .find(|item| matches!(item, ncx_protocol::ThreadItem::AssistantMessage { .. }))
+            .cloned()
+        {
+            visible.push(answer);
+        }
+        turn.items = visible;
+    }
+    thread
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DispatchOutcome {
@@ -336,7 +389,7 @@ impl From<ThreadStoreError> for AppServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ncx_protocol::{ClientRequest, ResponsePayload, ThreadId, TurnId};
+    use ncx_protocol::{ClientRequest, ItemId, ResponsePayload, ThreadId, ThreadItem, TurnId};
     use ncx_thread_store::JsonThreadStore;
     use std::sync::atomic::AtomicU64;
 
@@ -438,5 +491,94 @@ mod tests {
         };
         assert_eq!(forked_thread.metadata.title, "new title");
         assert_eq!(forked.events[0].thread_id.as_str(), "target");
+    }
+
+    #[test]
+    fn model_context_is_replaced_without_rewriting_visible_turns() {
+        let server = server();
+        let thread_id = ThreadId::new("thread").unwrap();
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(thread_id.clone()),
+                workspace: "workspace".into(),
+                title: "title".into(),
+            })
+            .unwrap();
+        let updated = server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: thread_id.clone(),
+                messages: vec![serde_json::json!({"role":"user","content":"compact"})],
+            })
+            .unwrap();
+        assert!(matches!(
+            updated.events[0].event,
+            Event::ModelContextUpdated { message_count: 1 }
+        ));
+        let read = server
+            .dispatch(ClientRequest::ThreadModelContextRead { thread_id })
+            .unwrap();
+        let ResponsePayload::ModelContext(Some(context)) = read.response.payload else {
+            panic!("expected stored model context");
+        };
+        assert_eq!(context.messages[0]["content"], "compact");
+    }
+
+    #[test]
+    fn visible_thread_never_returns_tool_logs_or_intermediate_assistant_text() {
+        let server = server();
+        let thread_id = ThreadId::new("visible").unwrap();
+        let turn_id = TurnId::new("turn").unwrap();
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(thread_id.clone()),
+                workspace: "workspace".into(),
+                title: "title".into(),
+            })
+            .unwrap();
+        server
+            .dispatch(ClientRequest::TurnStart {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+            })
+            .unwrap();
+        for item in [
+            ThreadItem::UserMessage {
+                id: ItemId::new("user").unwrap(),
+                text: "请求".into(),
+            },
+            ThreadItem::AssistantMessage {
+                id: ItemId::new("intermediate").unwrap(),
+                text: "正在执行".into(),
+            },
+            ThreadItem::ToolResult {
+                id: ItemId::new("result").unwrap(),
+                call_id: ItemId::new("call").unwrap(),
+                output: "secret tool log".into(),
+                success: true,
+            },
+            ThreadItem::AssistantMessage {
+                id: ItemId::new("final").unwrap(),
+                text: "最终结论".into(),
+            },
+        ] {
+            server
+                .dispatch(ClientRequest::ItemAppend {
+                    thread_id: thread_id.clone(),
+                    turn_id: turn_id.clone(),
+                    item,
+                })
+                .unwrap();
+        }
+        let visible = server
+            .dispatch(ClientRequest::ThreadReadVisible { thread_id })
+            .unwrap();
+        let ResponsePayload::Thread(thread) = visible.response.payload else {
+            panic!("expected visible thread");
+        };
+        assert_eq!(thread.turns[0].items.len(), 2);
+        assert!(matches!(
+            &thread.turns[0].items[1],
+            ThreadItem::AssistantMessage { text, .. } if text == "最终结论"
+        ));
     }
 }

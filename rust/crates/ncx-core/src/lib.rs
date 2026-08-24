@@ -63,9 +63,9 @@ pub use orchestrator::{
     AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
 };
 pub use plugins::{
-    discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
+    discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
     resolve_local_marketplace_plugin, AttachmentPlugin, AttachmentServiceDescriptor,
-    BuiltinToolsPlugin, CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord,
+    BuiltinToolsPlugin, CodexAppResource, CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord,
     CompactionPlugin, CompactionServiceDescriptor, ContextPlugin, ContextServiceDescriptor,
     CoreToolsPlugin, CostTelemetryPlugin, CostTelemetryService, CostTelemetryServiceDescriptor,
     CostTelemetrySnapshot, ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord,

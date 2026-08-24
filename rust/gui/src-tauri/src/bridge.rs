@@ -32,11 +32,12 @@ use ncx_core::{
     new_session_id, prepare_mcp_server_tools, skills_index_block, suggest_title_with_provider,
     AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
     CheckpointStore, LoopEvent, McpServiceDescriptor, MemoryStore, PromptAssembler, Session,
-    SessionGrants, SessionIndex, TextContextFragment, ToolContext, UserQuestionHandler,
-    UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
+    SessionGrants, TextContextFragment, ToolContext, UserQuestionHandler, UserQuestionRequest,
+    COMPACTED_HISTORY_PREFIX,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId, TurnStatus,
+    TurnUsage,
 };
 use ncx_sandbox::SandboxPolicy;
 use ncx_thread_store::JsonThreadStore;
@@ -269,7 +270,7 @@ pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
     let _ = app.emit(EVENT, ev);
 }
 
-fn emit_protocol_outcome(app: &AppHandle, outcome: &ncx_app_server::DispatchOutcome) {
+pub(crate) fn emit_protocol_outcome(app: &AppHandle, outcome: &ncx_app_server::DispatchOutcome) {
     for event in &outcome.events {
         let _ = app.emit(PROTOCOL_EVENT, event);
     }
@@ -620,7 +621,6 @@ fn set_active_session(active: &Arc<Mutex<String>>, session_id: &str) {
 fn spawn_title_generation(
     app: AppHandle,
     app_server: Arc<AppServer<JsonThreadStore>>,
-    session_index: Arc<Mutex<SessionIndex>>,
     session_id: String,
     workspace: PathBuf,
     request: String,
@@ -645,10 +645,6 @@ fn spawn_title_generation(
                 let Some(title) = suggest_title_with_provider(&provider, &request).await else {
                     return;
                 };
-                let persisted = session_index
-                    .lock()
-                    .map(|mut index| index.set_title(&session_id, &title))
-                    .unwrap_or(false);
                 let protocol_outcome =
                     ThreadId::new(session_id.clone())
                         .ok()
@@ -663,7 +659,7 @@ fn spawn_title_generation(
                 if let Some(outcome) = &protocol_outcome {
                     emit_protocol_outcome(&app, outcome);
                 }
-                if persisted || protocol_outcome.is_some() {
+                if protocol_outcome.is_some() {
                     emit(&app, UiEvent::SessionTitle { session_id, title });
                 }
             });
@@ -676,7 +672,7 @@ async fn build_agent(
     seed: Option<(String, Vec<Value>)>,
     grants: Rc<RefCell<SessionGrants>>,
     workspace_override: Option<PathBuf>,
-) -> Result<(AgentLoop, PathBuf, String, PathBuf, SessionIndex), String> {
+) -> Result<(AgentLoop, PathBuf, String, PathBuf), String> {
     let restored_plan = seed
         .as_ref()
         .map(|(_, messages)| latest_plan_from_messages(messages))
@@ -763,20 +759,27 @@ async fn build_agent(
         None => Session::with_log(system_prompt, Some(log_path.clone())),
     };
     let agent = runtime_profile.apply(AgentLoop::from_runtime_services(tools, session)?);
-    Ok((
-        agent,
-        cfg.workspace.clone(),
-        session_id,
-        log_path,
-        SessionIndex::default(),
-    ))
+    Ok((agent, cfg.workspace.clone(), session_id, log_path))
 }
 
 fn session_log_path(workspace: &Path, session_id: &str) -> PathBuf {
     workspace
         .join(".nanocodex")
         .join("sessions")
-        .join(format!("{session_id}.jsonl"))
+        .join(format!("{}.jsonl", safe_session_file_stem(session_id)))
+}
+
+pub(crate) fn safe_session_file_stem(session_id: &str) -> String {
+    session_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn protocol_thread_seed(
@@ -790,8 +793,61 @@ fn protocol_thread_seed(
     let ResponsePayload::Thread(thread) = outcome.response.payload else {
         return None;
     };
-    let messages = protocol_thread_messages(&thread);
-    (!messages.is_empty()).then(|| (messages, Some(thread.metadata.workspace)))
+    let messages = app_server
+        .dispatch(ClientRequest::ThreadModelContextRead {
+            thread_id: thread.metadata.id.clone(),
+        })
+        .ok()
+        .and_then(|outcome| match outcome.response.payload {
+            ResponsePayload::ModelContext(Some(context)) => Some(context.messages),
+            _ => None,
+        })
+        .unwrap_or_else(|| protocol_thread_messages(&thread));
+    Some((messages, Some(thread.metadata.workspace)))
+}
+
+fn latest_protocol_thread_seed(
+    app_server: &AppServer<JsonThreadStore>,
+    workspace: &Path,
+) -> Option<(String, Vec<Value>)> {
+    let outcome = app_server
+        .dispatch(ClientRequest::ThreadList {
+            include_archived: false,
+        })
+        .ok()?;
+    let ResponsePayload::Threads(threads) = outcome.response.payload else {
+        return None;
+    };
+    threads.into_iter().find_map(|metadata| {
+        let id = metadata.id.to_string();
+        let (messages, stored_workspace) = protocol_thread_seed(app_server, &id)?;
+        (stored_workspace.as_deref() == Some(workspace.to_string_lossy().as_ref()))
+            .then_some((id, messages))
+    })
+}
+
+fn ensure_protocol_thread(
+    app_server: &AppServer<JsonThreadStore>,
+    session_id: &str,
+    workspace: &Path,
+) -> Result<(), String> {
+    let thread_id = ThreadId::new(session_id.to_string()).map_err(|error| error.to_string())?;
+    if app_server
+        .dispatch(ClientRequest::ThreadRead {
+            thread_id: thread_id.clone(),
+        })
+        .is_ok()
+    {
+        return Ok(());
+    }
+    app_server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(thread_id),
+            workspace: workspace.display().to_string(),
+            title: "(no prompt yet)".to_string(),
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn protocol_thread_messages(thread: &Thread) -> Vec<Value> {
@@ -847,7 +903,6 @@ fn spawn_turn_worker(
     cancels: CancelRegistry,
     running: RunningSessions,
     session_grants: GrantRegistry,
-    session_index: Arc<Mutex<SessionIndex>>,
     session_id: String,
     workspace: PathBuf,
     messages: Vec<Value>,
@@ -957,7 +1012,7 @@ fn spawn_turn_worker(
                     Some(workspace.clone()),
                 )
                 .await;
-                let (mut agent, _, _, log_path, _) = match built {
+                let (mut agent, _, _, _) = match built {
                     Ok(value) => value,
                     Err(message) => {
                         emit(
@@ -1008,11 +1063,9 @@ fn spawn_turn_worker(
                 };
                 let is_cancelled = || cancel.load(Ordering::Acquire);
                 let result = agent.run_turn(user_input, Some(&is_cancelled)).await;
+                let estimated_cost = agent.estimated_cost(&result);
                 if let Ok(mut registry) = session_grants.lock() {
                     registry.insert(session_id.clone(), grants.borrow().clone());
-                }
-                if let Ok(mut index) = session_index.lock() {
-                    let _ = index.record_turn(&session_id, &workspace, &agent.session, &log_path);
                 }
                 emit(
                     &app,
@@ -1023,12 +1076,34 @@ fn spawn_turn_worker(
                         usage: serde_json::to_value(&result.usage).unwrap_or(Value::Null),
                     },
                 );
-                protocol_turn.complete(&result.stop_reason);
+                match app_server.dispatch(ClientRequest::ThreadModelContextReplace {
+                    thread_id: protocol_turn.thread_id.clone(),
+                    messages: agent.session.messages.clone(),
+                }) {
+                    Ok(outcome) => emit_protocol_outcome(&app, &outcome),
+                    Err(error) => emit(
+                        &app,
+                        UiEvent::Error {
+                            session_id: session_id.clone(),
+                            message: format!("保存模型上下文失败：{error}"),
+                        },
+                    ),
+                }
+                let (currency, estimated_cost) = estimated_cost
+                    .map(|(currency, cost)| (Some(currency), Some(cost)))
+                    .unwrap_or((None, None));
+                protocol_turn.complete_with_usage(
+                    &result.stop_reason,
+                    TurnUsage {
+                        tokens: result.usage.clone(),
+                        estimated_cost,
+                        currency,
+                    },
+                );
                 if should_generate_session_title(is_first_turn, &result.stop_reason) {
                     spawn_title_generation(
                         app.clone(),
                         app_server.clone(),
-                        session_index.clone(),
                         session_id.clone(),
                         workspace.clone(),
                         text,
@@ -1127,6 +1202,10 @@ impl ProtocolTurnGuard {
     }
 
     fn complete(&mut self, stop_reason: &str) {
+        self.complete_with_usage(stop_reason, TurnUsage::default());
+    }
+
+    fn complete_with_usage(&mut self, stop_reason: &str, usage: TurnUsage) {
         let status = match stop_reason {
             "completed" => TurnStatus::Completed,
             "cancelled" | "canceled" => TurnStatus::Cancelled,
@@ -1137,6 +1216,7 @@ impl ProtocolTurnGuard {
             turn_id: self.turn_id.clone(),
             status,
             error: (status == TurnStatus::Failed).then(|| stop_reason.to_string()),
+            usage,
         }) {
             if let Some(app) = &self.app {
                 emit_protocol_outcome(app, &outcome);
@@ -1156,6 +1236,7 @@ impl Drop for ProtocolTurnGuard {
             turn_id: self.turn_id.clone(),
             status: TurnStatus::Failed,
             error: Some("turn worker exited before completion".to_string()),
+            usage: TurnUsage::default(),
         }) {
             if let Some(app) = &self.app {
                 emit_protocol_outcome(app, &outcome);
@@ -1183,7 +1264,6 @@ pub fn spawn_worker(
     cancels: CancelRegistry,
     running: RunningSessions,
     session_grants: GrantRegistry,
-    session_index: Arc<Mutex<SessionIndex>>,
 ) {
     std::thread::Builder::new()
         .name("ncx-agent".into())
@@ -1210,46 +1290,42 @@ pub fn spawn_worker(
                 if let Some(ws) = load_last_workspace() {
                     let _ = std::env::set_current_dir(&ws);
                 }
-                let startup_seed = std::env::current_dir().ok().and_then(|workspace| {
-                    session_index
-                        .lock()
-                        .ok()
-                        .and_then(|index| index.latest_resumable_for_workspace(&workspace))
-                        .map(|(summary, messages)| (summary.session_id, messages))
-                });
+                let startup_seed = std::env::current_dir()
+                    .ok()
+                    .and_then(|workspace| latest_protocol_thread_seed(&app_server, &workspace));
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
-                let (mut agent, mut workspace, mut session_id, startup_log_path, _) =
-                    match build_agent(
-                        approver.clone(),
-                        questioner.clone(),
-                        startup_seed,
-                        grants.clone(),
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(v) => v,
-                        Err(e) => {
-                            emit(
-                                &app,
-                                UiEvent::Error {
-                                    session_id: String::new(),
-                                    message: e,
-                                },
-                            );
-                            return;
-                        }
-                    };
+                let (mut agent, mut workspace, mut session_id, _) = match build_agent(
+                    approver.clone(),
+                    questioner.clone(),
+                    startup_seed,
+                    grants.clone(),
+                    None,
+                )
+                .await
+                {
+                    Ok(v) => v,
+                    Err(e) => {
+                        emit(
+                            &app,
+                            UiEvent::Error {
+                                session_id: String::new(),
+                                message: e,
+                            },
+                        );
+                        return;
+                    }
+                };
                 set_active_session(&active_session, &session_id);
                 agent.set_event_sink(make_sink(app.clone(), session_id.clone(), None, None));
-                if let Ok(mut index) = session_index.lock() {
-                    let _ = index.record_turn(
-                        &session_id,
-                        &workspace,
-                        &agent.session,
-                        &startup_log_path,
+                if let Err(message) = ensure_protocol_thread(&app_server, &session_id, &workspace) {
+                    emit(
+                        &app,
+                        UiEvent::Error {
+                            session_id: session_id.clone(),
+                            message,
+                        },
                     );
                 }
                 emit_ready(&app, &workspace, &session_id);
@@ -1261,18 +1337,17 @@ pub fn spawn_worker(
                             text,
                             images,
                         } => {
-                            let (messages, target_workspace) = session_index
-                                .lock()
-                                .map(|index| {
-                                    let messages =
-                                        index.load_snapshot(&target_id).unwrap_or_default();
-                                    let target_workspace = index
-                                        .get(&target_id)
-                                        .map(|summary| PathBuf::from(&summary.workspace))
-                                        .unwrap_or_else(|| workspace.clone());
-                                    (messages, target_workspace)
-                                })
-                                .unwrap_or_else(|_| (Vec::new(), workspace.clone()));
+                            let (messages, target_workspace) =
+                                protocol_thread_seed(&app_server, &target_id)
+                                    .map(|(messages, stored_workspace)| {
+                                        (
+                                            messages,
+                                            stored_workspace
+                                                .map(PathBuf::from)
+                                                .unwrap_or_else(|| workspace.clone()),
+                                        )
+                                    })
+                                    .unwrap_or_else(|| (Vec::new(), workspace.clone()));
                             spawn_turn_worker(
                                 app.clone(),
                                 app_server.clone(),
@@ -1281,7 +1356,6 @@ pub fn spawn_worker(
                                 cancels.clone(),
                                 running.clone(),
                                 session_grants.clone(),
-                                session_index.clone(),
                                 target_id,
                                 target_workspace,
                                 messages,
@@ -1300,7 +1374,7 @@ pub fn spawn_worker(
                             )
                             .await
                             {
-                                Ok((a, ws, sid, lp, _)) => {
+                                Ok((a, ws, sid, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
@@ -1311,14 +1385,6 @@ pub fn spawn_worker(
                                         None,
                                         None,
                                     ));
-                                    if let Ok(mut index) = session_index.lock() {
-                                        let _ = index.record_turn(
-                                            &session_id,
-                                            &workspace,
-                                            &agent.session,
-                                            &lp,
-                                        );
-                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -1348,7 +1414,7 @@ pub fn spawn_worker(
                             )
                             .await
                             {
-                                Ok((a, ws, sid, lp, _)) => {
+                                Ok((a, ws, sid, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
@@ -1359,14 +1425,6 @@ pub fn spawn_worker(
                                         None,
                                         None,
                                     ));
-                                    if let Ok(mut index) = session_index.lock() {
-                                        let _ = index.record_turn(
-                                            &session_id,
-                                            &workspace,
-                                            &agent.session,
-                                            &lp,
-                                        );
-                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                 }
                                 Err(e) => emit(
@@ -1379,13 +1437,7 @@ pub fn spawn_worker(
                             }
                         }
                         Command::Resume(id) => {
-                            let loaded = protocol_thread_seed(&app_server, &id).or_else(|| {
-                                session_index.lock().ok().and_then(|index| {
-                                    index.load_snapshot(&id).map(|messages| {
-                                        (messages, index.get(&id).map(|s| s.workspace.clone()))
-                                    })
-                                })
-                            });
+                            let loaded = protocol_thread_seed(&app_server, &id);
                             let Some((msgs, restored_workspace)) = loaded else {
                                 emit(
                                     &app,
@@ -1411,7 +1463,7 @@ pub fn spawn_worker(
                             )
                             .await
                             {
-                                Ok((a, ws, sid, _, _)) => {
+                                Ok((a, ws, sid, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
@@ -1444,17 +1496,7 @@ pub fn spawn_worker(
                             source_id,
                             target_id,
                         } => {
-                            let loaded =
-                                protocol_thread_seed(&app_server, &source_id).or_else(|| {
-                                    session_index.lock().ok().and_then(|index| {
-                                        index.load_snapshot(&source_id).map(|messages| {
-                                            (
-                                                messages,
-                                                index.get(&source_id).map(|s| s.workspace.clone()),
-                                            )
-                                        })
-                                    })
-                                });
+                            let loaded = protocol_thread_seed(&app_server, &source_id);
                             let Some((msgs, restored_workspace)) = loaded else {
                                 emit(
                                     &app,
@@ -1479,7 +1521,7 @@ pub fn spawn_worker(
                             )
                             .await
                             {
-                                Ok((a, ws, sid, lp, _)) => {
+                                Ok((a, ws, sid, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
@@ -1490,14 +1532,6 @@ pub fn spawn_worker(
                                         None,
                                         None,
                                     ));
-                                    if let Ok(mut index) = session_index.lock() {
-                                        let _ = index.record_turn(
-                                            &session_id,
-                                            &workspace,
-                                            &agent.session,
-                                            &lp,
-                                        );
-                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -1538,9 +1572,8 @@ pub fn spawn_worker(
                             let mut m = std::collections::HashMap::new();
                             m.insert("model", model.as_str());
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            let msgs = session_index
-                                .lock()
-                                .map(|index| index.load_snapshot(&session_id).unwrap_or_default())
+                            let msgs = protocol_thread_seed(&app_server, &session_id)
+                                .map(|(messages, _)| messages)
                                 .unwrap_or_default();
                             // Same session → keep the "always allow" grants.
                             match build_agent(
@@ -1552,7 +1585,7 @@ pub fn spawn_worker(
                             )
                             .await
                             {
-                                Ok((a, ws, sid, _, _)) => {
+                                Ok((a, ws, sid, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
@@ -1584,9 +1617,8 @@ pub fn spawn_worker(
                             m.insert("sandbox_mode", sandbox);
                             m.insert("approval_policy", approval);
                             let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            let msgs = session_index
-                                .lock()
-                                .map(|index| index.load_snapshot(&session_id).unwrap_or_default())
+                            let msgs = protocol_thread_seed(&app_server, &session_id)
+                                .map(|(messages, _)| messages)
                                 .unwrap_or_default();
                             // Same session → keep the "always allow" grants.
                             match build_agent(
@@ -1598,7 +1630,7 @@ pub fn spawn_worker(
                             )
                             .await
                             {
-                                Ok((a, ws, sid, _, _)) => {
+                                Ok((a, ws, sid, _)) => {
                                     agent = a;
                                     workspace = ws;
                                     session_id = sid;
@@ -1622,10 +1654,8 @@ pub fn spawn_worker(
                         }
                         Command::RequestReady => {
                             emit_ready(&app, &workspace, &session_id);
-                            let messages = session_index
-                                .lock()
-                                .ok()
-                                .and_then(|index| index.load_snapshot(&session_id));
+                            let messages = protocol_thread_seed(&app_server, &session_id)
+                                .map(|(messages, _)| messages);
                             if let Some(messages) = messages.filter(|items| !items.is_empty()) {
                                 emit(
                                     &app,
@@ -1909,6 +1939,7 @@ mod tests {
                 started_at: 1,
                 completed_at: Some(2),
                 error: None,
+                usage: TurnUsage::default(),
             }],
         };
         let messages = protocol_thread_messages(&thread);
@@ -1922,6 +1953,41 @@ mod tests {
             2,
             "history keeps user and final conclusion only"
         );
+    }
+
+    #[test]
+    fn stored_model_context_wins_over_reconstructing_noisy_thread_items() {
+        let (server, root) = protocol_server("stored-context");
+        let mut guard = ProtocolTurnGuard::start(
+            None,
+            server.clone(),
+            "thread-context",
+            &root,
+            TurnId::new("turn-context").unwrap(),
+            "旧请求",
+        )
+        .unwrap();
+        guard.complete("completed");
+        server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: ThreadId::new("thread-context").unwrap(),
+                messages: vec![json!({
+                    "role": "user",
+                    "content": format!("{COMPACTED_HISTORY_PREFIX}]\n保留的关键结论")
+                })],
+            })
+            .unwrap();
+
+        let (messages, _) = protocol_thread_seed(&server, "thread-context").unwrap();
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("保留的关键结论"));
+        assert!(!messages
+            .iter()
+            .any(|message| message["content"] == "旧请求"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -2224,6 +2290,14 @@ mod tests {
             session_log_path(workspace, "session-1"),
             session_log_path(workspace, "session-2")
         );
+    }
+
+    #[test]
+    fn session_ids_cannot_escape_the_log_directory() {
+        assert_eq!(safe_session_file_stem("../thread\\evil"), ".._thread_evil");
+        let root = PathBuf::from("workspace");
+        let path = session_log_path(&root, "../thread\\evil");
+        assert_eq!(path.parent().unwrap(), root.join(".nanocodex/sessions"));
     }
 
     #[tokio::test]

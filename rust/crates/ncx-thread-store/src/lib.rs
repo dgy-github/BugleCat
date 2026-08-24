@@ -1,7 +1,11 @@
 //! Storage-neutral thread persistence with explicit per-thread turn ownership.
 
-use ncx_protocol::{Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus};
+use ncx_protocol::{
+    StoredModelContext, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
+    TurnUsage,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs;
@@ -13,6 +17,16 @@ pub trait ThreadStore: Send + Sync {
     fn create_many(&self, threads: Vec<Thread>) -> Result<(), ThreadStoreError>;
     fn list(&self, include_archived: bool) -> Result<Vec<ThreadMetadata>, ThreadStoreError>;
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError>;
+    fn read_model_context(
+        &self,
+        id: &ThreadId,
+    ) -> Result<Option<StoredModelContext>, ThreadStoreError>;
+    fn replace_model_context(
+        &self,
+        id: &ThreadId,
+        messages: Vec<Value>,
+        updated_at: i64,
+    ) -> Result<StoredModelContext, ThreadStoreError>;
     fn update_metadata(&self, metadata: ThreadMetadata) -> Result<(), ThreadStoreError>;
     fn fork(&self, source: &ThreadId, target: ThreadId) -> Result<Thread, ThreadStoreError>;
     fn claim_turn(&self, thread: &ThreadId, turn: Turn) -> Result<(), ThreadStoreError>;
@@ -30,12 +44,15 @@ pub trait ThreadStore: Send + Sync {
         status: TurnStatus,
         completed_at: i64,
         error: Option<String>,
+        usage: TurnUsage,
     ) -> Result<(), ThreadStoreError>;
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PersistedState {
     threads: BTreeMap<String, Thread>,
+    #[serde(default)]
+    model_contexts: BTreeMap<String, StoredModelContext>,
 }
 
 #[derive(Default)]
@@ -144,6 +161,37 @@ impl ThreadStore for JsonThreadStore {
         Ok(state.persisted.threads.get(id.as_str()).cloned())
     }
 
+    fn read_model_context(
+        &self,
+        id: &ThreadId,
+    ) -> Result<Option<StoredModelContext>, ThreadStoreError> {
+        let state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
+        Ok(state.persisted.model_contexts.get(id.as_str()).cloned())
+    }
+
+    fn replace_model_context(
+        &self,
+        id: &ThreadId,
+        messages: Vec<Value>,
+        updated_at: i64,
+    ) -> Result<StoredModelContext, ThreadStoreError> {
+        self.mutate(|state| {
+            if !state.persisted.threads.contains_key(id.as_str()) {
+                return Err(ThreadStoreError::NotFound(id.to_string()));
+            }
+            let context = StoredModelContext {
+                thread_id: id.clone(),
+                messages,
+                updated_at,
+            };
+            state
+                .persisted
+                .model_contexts
+                .insert(id.as_str().to_string(), context.clone());
+            Ok(context)
+        })
+    }
+
     fn update_metadata(&self, metadata: ThreadMetadata) -> Result<(), ThreadStoreError> {
         self.mutate(|state| {
             let id = metadata.id.as_str();
@@ -180,6 +228,17 @@ impl ThreadStore for JsonThreadStore {
                 .persisted
                 .threads
                 .insert(target.as_str().to_string(), forked.clone());
+            if let Some(source_context) =
+                state.persisted.model_contexts.get(source.as_str()).cloned()
+            {
+                state.persisted.model_contexts.insert(
+                    target.as_str().to_string(),
+                    StoredModelContext {
+                        thread_id: target,
+                        ..source_context
+                    },
+                );
+            }
             Ok(forked)
         })
     }
@@ -244,6 +303,7 @@ impl ThreadStore for JsonThreadStore {
         status: TurnStatus,
         completed_at: i64,
         error: Option<String>,
+        usage: TurnUsage,
     ) -> Result<(), ThreadStoreError> {
         self.mutate(|state| {
             require_owner(state, thread, turn)?;
@@ -251,6 +311,7 @@ impl ThreadStore for JsonThreadStore {
             stored_turn.status = status;
             stored_turn.completed_at = Some(completed_at);
             stored_turn.error = error;
+            stored_turn.usage = usage;
             state
                 .persisted
                 .threads
@@ -422,6 +483,7 @@ mod tests {
             started_at: 2,
             completed_at: None,
             error: None,
+            usage: TurnUsage::default(),
         }
     }
 
@@ -442,9 +504,29 @@ mod tests {
                 TurnStatus::Completed,
                 3,
                 None,
+                TurnUsage::default(),
             )
             .unwrap();
         store.claim_turn(&id, turn("turn-2")).unwrap();
+    }
+
+    #[test]
+    fn different_threads_hold_active_turns_concurrently() {
+        let store = temp_store("parallel-ownership");
+        let first = ThreadId::new("first").unwrap();
+        let second = ThreadId::new("second").unwrap();
+        store.create(thread("first")).unwrap();
+        store.create(thread("second")).unwrap();
+        store.claim_turn(&first, turn("turn-first")).unwrap();
+        store.claim_turn(&second, turn("turn-second")).unwrap();
+        assert_eq!(
+            store.read(&first).unwrap().unwrap().turns[0].status,
+            TurnStatus::Running
+        );
+        assert_eq!(
+            store.read(&second).unwrap().unwrap().turns[0].status,
+            TurnStatus::Running
+        );
     }
 
     #[test]
@@ -507,13 +589,69 @@ mod tests {
             let store = JsonThreadStore::open(&path).unwrap();
             store.create(thread("thread")).unwrap();
             store.claim_turn(&thread_id, turn("turn")).unwrap();
+            let usage = TurnUsage {
+                tokens: [
+                    ("prompt_tokens".to_string(), 12),
+                    ("completion_tokens".to_string(), 3),
+                ]
+                .into_iter()
+                .collect(),
+                estimated_cost: Some(0.02),
+                currency: Some("CNY".into()),
+            };
             store
-                .finish_turn(&thread_id, &turn_id, TurnStatus::Completed, 3, None)
+                .finish_turn(&thread_id, &turn_id, TurnStatus::Completed, 3, None, usage)
                 .unwrap();
         }
         let reopened = JsonThreadStore::open(&path).unwrap();
         let stored = reopened.read(&thread_id).unwrap().unwrap();
         assert_eq!(stored.turns[0].status, TurnStatus::Completed);
+        assert_eq!(stored.turns[0].usage.tokens["prompt_tokens"], 12);
+        assert_eq!(stored.turns[0].usage.estimated_cost, Some(0.02));
+    }
+
+    #[test]
+    fn compacted_model_context_is_replaced_and_survives_reopen() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ncx-model-context-{unique}.json"));
+        let thread_id = ThreadId::new("thread").unwrap();
+        {
+            let store = JsonThreadStore::open(&path).unwrap();
+            store.create(thread("thread")).unwrap();
+            store
+                .replace_model_context(
+                    &thread_id,
+                    vec![serde_json::json!({"role":"user","content":"summary"})],
+                    7,
+                )
+                .unwrap();
+        }
+        let reopened = JsonThreadStore::open(&path).unwrap();
+        let context = reopened.read_model_context(&thread_id).unwrap().unwrap();
+        assert_eq!(context.updated_at, 7);
+        assert_eq!(context.messages[0]["content"], "summary");
+    }
+
+    #[test]
+    fn fork_copies_model_context_under_the_new_thread_identity() {
+        let store = temp_store("fork-model-context");
+        let source = ThreadId::new("source").unwrap();
+        let target = ThreadId::new("target").unwrap();
+        store.create(thread("source")).unwrap();
+        store
+            .replace_model_context(
+                &source,
+                vec![serde_json::json!({"role":"assistant","content":"done"})],
+                4,
+            )
+            .unwrap();
+        store.fork(&source, target.clone()).unwrap();
+        let copied = store.read_model_context(&target).unwrap().unwrap();
+        assert_eq!(copied.thread_id, target);
+        assert_eq!(copied.messages[0]["content"], "done");
     }
 
     #[test]

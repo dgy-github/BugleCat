@@ -75,6 +75,7 @@
     skill_roots: number;
     has_mcp: boolean;
     has_apps: boolean;
+    app_count: number;
     has_hooks: boolean;
   };
   type MarketplaceSource =
@@ -176,6 +177,7 @@
   let sandboxMode = $state("");
   let tokIn = $state(0);
   let tokOut = $state(0);
+  const protocolUsageBySession = new Map<string, { prompt_tokens: number; completion_tokens: number }>();
   const sessionUsageKey = (sessionId: string) => `ncx.sessionUsage.${sessionId}`;
   function resetSessionUsage() {
     tokIn = 0;
@@ -184,6 +186,13 @@
   function restoreSessionUsage(sessionId: string) {
     resetSessionUsage();
     if (!sessionId) return;
+    const protocolUsage = protocolUsageBySession.get(sessionId);
+    if (protocolUsage) {
+      tokIn = protocolUsage.prompt_tokens;
+      tokOut = protocolUsage.completion_tokens;
+      persistSessionUsage(sessionId);
+      return;
+    }
     try {
       const stored = JSON.parse(localStorage.getItem(sessionUsageKey(sessionId)) || "null");
       if (Number.isFinite(stored?.prompt_tokens) && stored.prompt_tokens >= 0) {
@@ -1332,7 +1341,7 @@
     | { type: "contextCompaction"; id: string; summary: string; droppedItems: number };
   type ProtocolThread = {
     metadata: { id: string; workspace: string; title: string; archived: boolean; createdAt: number; updatedAt: number };
-    turns: { id: string; status: string; items: ProtocolThreadItem[]; startedAt: number; completedAt?: number }[];
+    turns: { id: string; status: string; items: ProtocolThreadItem[]; startedAt: number; completedAt?: number; usage?: { tokens?: Record<string, number>; estimatedCost?: number; currency?: string } }[];
   };
   type AppServerOutcome<T> = { response: { protocolVersion: number; payload: { type: string; data: T } } };
   type ProtocolEventEnvelope = {
@@ -1420,11 +1429,7 @@
   }
   async function archiveSession(id: string, archived: boolean) {
     try {
-      try {
-        await appServerRequest({ method: "threadArchive", params: { threadId: id, archived } });
-      } catch {
-        await invoke("archive_session", { sessionId: id, archived });
-      }
+      await appServerRequest({ method: "threadArchive", params: { threadId: id, archived } });
       const s = sessions.find((x) => x.session_id === id);
       if (s) s.archived = archived; // optimistic
       refreshSessions();
@@ -1511,13 +1516,26 @@
     try {
       const metadata = await appServerRequest<{ id: string }[]>({ method: "threadList", params: { includeArchived: true } });
       const threads = await Promise.all(metadata.slice(0, 50).map((thread) =>
-        appServerRequest<ProtocolThread>({ method: "threadRead", params: { threadId: thread.id } })
+        appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: thread.id } })
       ));
+      protocolUsageBySession.clear();
+      for (const thread of threads) {
+        protocolUsageBySession.set(thread.metadata.id, thread.turns.reduce(
+          (sum, turn) => ({
+            prompt_tokens: sum.prompt_tokens + (turn.usage?.tokens?.prompt_tokens || 0),
+            completion_tokens: sum.completion_tokens + (turn.usage?.tokens?.completion_tokens || 0),
+          }),
+          { prompt_tokens: 0, completion_tokens: 0 },
+        ));
+      }
       sessions = threads.map(threadToSessionRow);
       const current = sessions.find((session) => session.session_id === currentSessionId);
-      if (current) sessionTitle = current.title || "会话";
-    } catch {
-      sessions = await invoke<SessionRow[]>("list_sessions");
+      if (current) {
+        sessionTitle = current.title || "会话";
+        restoreSessionUsage(currentSessionId);
+      }
+    } catch (e) {
+      console.error("会话协议加载失败", e);
     }
   }
   function toggleSidebar() {
@@ -1734,8 +1752,20 @@
   function cmdSoon(name: string) {
     messages.push({ role: "note", text: `「${name}」规划中（需要专门的后台支持），下一步实现。` });
   }
-  function cmdRename() {
-    messages.push({ role: "note", text: "会话重命名规划中（需要后端写入会话索引），下一步实现。" });
+  async function cmdRename() {
+    if (!currentSessionId) return;
+    const title = window.prompt("输入新的会话名称", sessionTitle)?.trim();
+    if (!title || title === sessionTitle) return;
+    try {
+      await appServerRequest({
+        method: "threadRename",
+        params: { threadId: currentSessionId, title },
+      });
+      sessionTitle = title;
+      await refreshSessions();
+    } catch (e) {
+      messages.push({ role: "note", text: `重命名失败：${e}` });
+    }
   }
   // User-authored custom commands (.nanocodex|.claude/commands/*.md), surfaced
   // in the palette alongside built-in actions.
@@ -1760,7 +1790,7 @@
   const SLASH_COMMANDS: SlashCmd[] = [
     { id: "new", label: "新建会话", desc: "开始一个空会话", run: () => newSession() },
     { id: "fork", label: "分叉会话", desc: "从当前会话分叉一个新会话", run: () => forkCurrent() },
-    { id: "rename", label: "重命名会话", desc: "给当前会话改名（规划中）", run: () => cmdRename() },
+    { id: "rename", label: "重命名会话", desc: "给当前会话改名", run: () => cmdRename() },
     { id: "model", label: "切换模型", desc: "打开模型选择", run: () => (modelMenuOpen = true) },
     { id: "config", label: "设置", desc: "打开设置面板", run: () => openSettings() },
     { id: "usage", label: "用量", desc: "显示本会话 token / 费用", run: () => cmdUsage() },
@@ -2608,7 +2638,7 @@
               <div class="config-entry">
                 <span>{plugin.manifest.name} <code>{plugin.manifest.version || "未标版本"}</code></span>
                 <code>{plugin.manifest.description || plugin.root}</code>
-                <span>{plugin.skill_roots} Skills · MCP {plugin.has_mcp ? "有" : "无"} · Apps {plugin.has_apps ? "有" : "无"} · Hooks {plugin.has_hooks ? "有" : "无"}</span>
+                <span>{plugin.skill_roots} Skills · MCP {plugin.has_mcp ? "有" : "无"} · Apps {plugin.has_apps ? `${plugin.app_count} 个` : "无"} · Hooks {plugin.has_hooks ? "有" : "无"}</span>
                 <button class="plain" onclick={() => toggleCodexPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
                 <button class="plain" onclick={() => removeCodexPlugin(plugin)}>卸载</button>
               </div>

@@ -11,7 +11,7 @@ pub mod model_catalog;
 use model_catalog::{catalog, find_preset, parse_openrouter_models, CatalogModel, CatalogProvider};
 
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -24,23 +24,23 @@ use ncx_config::{
     VALID_SANDBOX_MODES,
 };
 use ncx_core::{
-    custom_command_prompt, discover_marketplaces, list_custom_commands,
+    custom_command_prompt, discover_codex_apps, discover_marketplaces, list_custom_commands,
     resolve_local_marketplace_plugin, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
     CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, ExternalPluginCatalog,
     ExternalPluginRecord, HarnessDiagnostics, HarnessRuntimeBuilder, Marketplace,
     MarketplacePlugin, MarketplaceSource, MemoryStore, RestoreReport, SessionIndex, ToolContext,
 };
 use ncx_protocol::{
-    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn,
-    TurnId, TurnStatus,
+    ClientRequest, ItemId, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
 };
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde::Serialize;
+use tauri::AppHandle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use bridge::{
-    request_cancel, spawn_worker, CancelRegistry, Command, GrantRegistry, PendingMap,
-    PendingQuestionMap, RunningSessions,
+    emit_protocol_outcome, request_cancel, safe_session_file_stem, spawn_worker, CancelRegistry,
+    Command, GrantRegistry, PendingMap, PendingQuestionMap, RunningSessions,
 };
 
 #[derive(Serialize)]
@@ -69,7 +69,6 @@ struct AppState {
     questions: PendingQuestionMap,
     question_counter: AtomicU64,
     cancels: CancelRegistry,
-    session_index: Arc<Mutex<SessionIndex>>,
     app_server: Arc<AppServer<JsonThreadStore>>,
     openrouter_models: Mutex<Vec<CatalogModel>>,
 }
@@ -138,16 +137,6 @@ fn validate_image_attachment_route(images: &[String], vl_model: &str) -> Result<
         );
     }
     Ok(())
-}
-
-#[tauri::command]
-fn send_prompt(
-    session_id: String,
-    text: String,
-    images: Option<Vec<String>>,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    queue_prompt(&state, session_id, text, images.unwrap_or_default())
 }
 
 fn queue_prompt(
@@ -253,82 +242,13 @@ fn request_ready(state: tauri::State<'_, AppState>) -> Result<(), String> {
         .map_err(|_| "agent thread is not running".to_string())
 }
 
-/// Archive (or unarchive) a saved session; persisted in the session index.
-fn archive_session_in_index(
-    index: &Mutex<SessionIndex>,
-    session_id: &str,
-    archived: bool,
-) -> Result<(), String> {
-    let mut index = index
-        .lock()
-        .map_err(|_| "session index lock is poisoned".to_string())?;
-    if index.set_archived(session_id, archived) {
-        Ok(())
-    } else {
-        Err(format!("unknown session {session_id}"))
-    }
-}
-
-#[tauri::command]
-fn archive_session(
-    session_id: String,
-    archived: bool,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
-    let legacy_updated =
-        archive_session_in_index(&state.session_index, &session_id, archived).is_ok();
-    let thread_id = ThreadId::new(session_id.clone()).map_err(|error| error.to_string())?;
-    let protocol_updated = if state
-        .app_server
-        .dispatch(ClientRequest::ThreadRead {
-            thread_id: thread_id.clone(),
-        })
-        .is_ok()
-    {
-        state
-            .app_server
-            .dispatch(ClientRequest::ThreadArchive {
-                thread_id,
-                archived,
-            })
-            .map_err(|error| error.to_string())?;
-        true
-    } else {
-        false
-    };
-    if !legacy_updated && !protocol_updated {
-        return Err(format!("unknown session {session_id}"));
-    }
-    Ok(())
-}
-
-/// Start a fresh session (rebuild the agent from config — new empty context).
-#[tauri::command]
-fn new_session(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let session_id = ncx_core::new_session_id();
-    let (_, workspace) = configured_workspace()?;
-    state
-        .app_server
-        .dispatch(ClientRequest::ThreadCreate {
-            thread_id: Some(ThreadId::new(session_id.clone()).map_err(|error| error.to_string())?),
-            workspace: workspace.display().to_string(),
-            title: "(no prompt yet)".to_string(),
-        })
-        .map_err(|error| error.to_string())?;
-    state
-        .tx
-        .send(Command::New(session_id.clone()))
-        .map_err(|_| "agent thread is not running".to_string())?;
-    Ok(session_id)
-}
-
-/// Versioned app-server entry point used by the GUI while legacy Tauri
-/// commands are migrated incrementally. All returned events carry threadId,
-/// optional turnId and a monotonic sequence.
+/// Versioned app-server entry point used by the GUI. All returned events carry
+/// threadId, optional turnId and a monotonic sequence.
 #[tauri::command]
 fn app_server_request(
     request: ClientRequest,
     state: tauri::State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<DispatchOutcome, String> {
     match request {
         ClientRequest::ThreadCreateActivate {
@@ -336,14 +256,15 @@ fn app_server_request(
             workspace,
             title,
         } => {
-            let outcome = state
-                .app_server
-                .dispatch(ClientRequest::ThreadCreate {
+            let outcome = dispatch_app_server(
+                &state.app_server,
+                &app,
+                ClientRequest::ThreadCreate {
                     thread_id: Some(thread_id.clone()),
                     workspace,
                     title,
-                })
-                .map_err(|error| error.to_string())?;
+                },
+            )?;
             state
                 .tx
                 .send(Command::New(thread_id.to_string()))
@@ -351,6 +272,13 @@ fn app_server_request(
             Ok(outcome)
         }
         ClientRequest::ThreadActivate { thread_id } => {
+            dispatch_app_server(
+                &state.app_server,
+                &app,
+                ClientRequest::ThreadRead {
+                    thread_id: thread_id.clone(),
+                },
+            )?;
             state
                 .tx
                 .send(Command::Resume(thread_id.to_string()))
@@ -361,13 +289,14 @@ fn app_server_request(
             thread_id,
             new_thread_id,
         } => {
-            let outcome = state
-                .app_server
-                .dispatch(ClientRequest::ThreadFork {
+            let outcome = dispatch_app_server(
+                &state.app_server,
+                &app,
+                ClientRequest::ThreadFork {
                     thread_id: thread_id.clone(),
                     new_thread_id: new_thread_id.clone(),
-                })
-                .map_err(|error| error.to_string())?;
+                },
+            )?;
             state
                 .tx
                 .send(Command::Fork {
@@ -389,33 +318,20 @@ fn app_server_request(
             cancel_session(&state, thread_id.as_str());
             Ok(state.app_server.ack())
         }
-        request => state
-            .app_server
-            .dispatch(request)
-            .map_err(|error| error.to_string()),
+        request => dispatch_app_server(&state.app_server, &app, request),
     }
 }
 
-/// Continue a saved session (reseed the agent from its snapshot, same id).
-#[tauri::command]
-fn resume_session(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state
-        .tx
-        .send(Command::Resume(session_id))
-        .map_err(|_| "agent thread is not running".to_string())
-}
-
-/// Fork a saved session (reseed a NEW session from its snapshot; source kept).
-#[tauri::command]
-fn fork_session(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let target_id = ncx_core::new_session_id();
-    state
-        .tx
-        .send(Command::Fork {
-            source_id: session_id,
-            target_id,
-        })
-        .map_err(|_| "agent thread is not running".to_string())
+fn dispatch_app_server(
+    app_server: &AppServer<JsonThreadStore>,
+    app: &AppHandle,
+    request: ClientRequest,
+) -> Result<DispatchOutcome, String> {
+    let outcome = app_server
+        .dispatch(request)
+        .map_err(|error| error.to_string())?;
+    emit_protocol_outcome(app, &outcome);
+    Ok(outcome)
 }
 
 /// The current workspace (process working directory).
@@ -424,13 +340,6 @@ fn get_workspace() -> Result<String, String> {
     std::env::current_dir()
         .map(|p| bridge::display_path(&p))
         .map_err(|e| e.to_string())
-}
-
-/// Stop the active turn. The completion event still owns the final UI reset.
-#[tauri::command]
-fn stop_generation(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    cancel_session(&state, &session_id);
-    Ok(())
 }
 
 fn cancel_session(state: &AppState, session_id: &str) {
@@ -936,19 +845,6 @@ pub struct BranchInfo {
     current: bool,
 }
 
-#[derive(Serialize)]
-pub struct SessionRow {
-    session_id: String,
-    title: String,
-    snippet: String,
-    user_messages: usize,
-    assistant_messages: usize,
-    tool_calls: usize,
-    updated_at: String,
-    has_snapshot: bool,
-    archived: bool,
-}
-
 /// Run a git command in the workspace; Ok(stdout) or Err(stderr).
 fn run_git(args: &[&str]) -> Result<String, String> {
     let ws = std::env::current_dir().map_err(|e| e.to_string())?;
@@ -1267,90 +1163,6 @@ fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-#[tauri::command]
-fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<SessionRow>, String> {
-    let legacy_entries = state
-        .session_index
-        .lock()
-        .map_err(|_| "session index lock is poisoned".to_string())?
-        .entries();
-    let listed = state
-        .app_server
-        .dispatch(ClientRequest::ThreadList {
-            include_archived: true,
-        })
-        .map_err(|error| error.to_string())?;
-    let ResponsePayload::Threads(threads) = listed.response.payload else {
-        return Err("app-server returned an invalid thread list response".to_string());
-    };
-    let mut rows = Vec::new();
-    let mut protocol_ids = HashSet::new();
-    for metadata in threads {
-        let read = state
-            .app_server
-            .dispatch(ClientRequest::ThreadRead {
-                thread_id: metadata.id.clone(),
-            })
-            .map_err(|error| error.to_string())?;
-        let ResponsePayload::Thread(thread) = read.response.payload else {
-            continue;
-        };
-        protocol_ids.insert(metadata.id.to_string());
-        rows.push(session_row_from_thread(&thread));
-    }
-    for summary in legacy_entries {
-        if protocol_ids.contains(&summary.session_id) {
-            continue;
-        }
-        rows.push(SessionRow {
-            session_id: summary.session_id,
-            title: summary.title,
-            snippet: summary.snippet,
-            user_messages: summary.user_messages,
-            assistant_messages: summary.assistant_messages,
-            tool_calls: summary.tool_calls,
-            updated_at: summary.updated_at,
-            has_snapshot: summary.has_snapshot,
-            archived: summary.archived,
-        });
-    }
-    rows.truncate(50);
-    Ok(rows)
-}
-
-fn session_row_from_thread(thread: &Thread) -> SessionRow {
-    let mut user_messages = 0;
-    let mut assistant_messages = 0;
-    let mut tool_calls = 0;
-    let mut snippet = String::new();
-    for item in thread.turns.iter().flat_map(|turn| &turn.items) {
-        match item {
-            ThreadItem::UserMessage { text, .. } => {
-                user_messages += 1;
-                snippet = text.clone();
-            }
-            ThreadItem::AssistantMessage { text, .. } => {
-                assistant_messages += 1;
-                snippet = text.clone();
-            }
-            ThreadItem::ToolCall { .. } => tool_calls += 1,
-            _ => {}
-        }
-    }
-    snippet = snippet.chars().take(200).collect();
-    SessionRow {
-        session_id: thread.metadata.id.to_string(),
-        title: thread.metadata.title.clone(),
-        snippet,
-        user_messages,
-        assistant_messages,
-        tool_calls,
-        updated_at: thread.metadata.updated_at.to_string(),
-        has_snapshot: !thread.turns.is_empty(),
-        archived: thread.metadata.archived,
-    }
-}
-
 // ── Hermes: project-memory self-evolution panel ───────────────────────────────
 
 #[derive(Serialize)]
@@ -1428,7 +1240,22 @@ fn open_memory_file() -> Result<(), String> {
 
 /// Open a saved session's raw JSONL log in the OS editor.
 #[tauri::command]
-fn open_session_log(session_id: String) -> Result<(), String> {
+fn open_session_log(session_id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    if let Ok(thread_id) = ThreadId::new(session_id.clone()) {
+        if let Ok(outcome) = state
+            .app_server
+            .dispatch(ClientRequest::ThreadRead { thread_id })
+        {
+            if let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload {
+                let path = PathBuf::from(thread.metadata.workspace)
+                    .join(".nanocodex/sessions")
+                    .join(format!("{}.jsonl", safe_session_file_stem(&session_id)));
+                if path.is_file() {
+                    return open_file(&path);
+                }
+            }
+        }
+    }
     let index = SessionIndex::default();
     let summary = index
         .get(&session_id)
@@ -1445,7 +1272,39 @@ fn open_session_log(session_id: String) -> Result<(), String> {
 
 /// Open a saved session's frozen snapshot in the OS editor.
 #[tauri::command]
-fn open_session_snapshot(session_id: String) -> Result<(), String> {
+fn open_session_snapshot(
+    session_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if let Ok(thread_id) = ThreadId::new(session_id.clone()) {
+        if let Ok(outcome) = state
+            .app_server
+            .dispatch(ClientRequest::ThreadRead { thread_id })
+        {
+            if let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload {
+                let model_context = state
+                    .app_server
+                    .dispatch(ClientRequest::ThreadModelContextRead {
+                        thread_id: thread.metadata.id.clone(),
+                    })
+                    .ok()
+                    .and_then(|outcome| match outcome.response.payload {
+                        ncx_protocol::ResponsePayload::ModelContext(context) => context,
+                        _ => None,
+                    });
+                let root = std::env::temp_dir().join("ncx-thread-exports");
+                fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+                let path = root.join(format!("{}.json", safe_session_file_stem(&session_id)));
+                let bytes = serde_json::to_vec_pretty(&serde_json::json!({
+                    "thread": thread,
+                    "modelContext": model_context,
+                }))
+                .map_err(|error| error.to_string())?;
+                fs::write(&path, bytes).map_err(|error| error.to_string())?;
+                return open_file(&path);
+            }
+        }
+    }
     let index = SessionIndex::default();
     let summary = index
         .get(&session_id)
@@ -1571,10 +1430,18 @@ fn codex_plugin_catalog() -> Result<CodexPluginCatalog, String> {
 
 #[tauri::command]
 fn list_codex_plugins() -> Result<Vec<CodexPluginView>, String> {
+    let (_, workspace) = configured_workspace()?;
+    let apps = discover_codex_apps(&workspace)?;
     Ok(codex_plugin_catalog()?
         .discover()?
         .into_iter()
-        .map(CodexPluginView::from)
+        .map(|plugin| {
+            let app_count = apps
+                .iter()
+                .filter(|app| app.plugin == plugin.manifest.name)
+                .count();
+            CodexPluginView::new(plugin, app_count)
+        })
         .collect())
 }
 
@@ -1586,15 +1453,17 @@ struct CodexPluginView {
     skill_roots: usize,
     has_mcp: bool,
     has_apps: bool,
+    app_count: usize,
     has_hooks: bool,
 }
 
-impl From<CodexPluginRecord> for CodexPluginView {
-    fn from(plugin: CodexPluginRecord) -> Self {
+impl CodexPluginView {
+    fn new(plugin: CodexPluginRecord, app_count: usize) -> Self {
         Self {
             skill_roots: plugin.skill_paths().len(),
             has_mcp: plugin.manifest.mcp_servers.is_some() || plugin.mcp_path().is_some(),
             has_apps: plugin.manifest.apps.is_some() || plugin.apps_path().is_some(),
+            app_count,
             has_hooks: plugin.manifest.hooks.is_some() || plugin.hooks_path().is_some(),
             manifest: plugin.manifest,
             root: plugin.root,
@@ -1904,6 +1773,7 @@ fn legacy_conclusion_turns(messages: &[serde_json::Value], timestamp: i64) -> Ve
             started_at: timestamp,
             completed_at: Some(timestamp),
             error: None,
+            usage: Default::default(),
         });
     };
     for message in messages {
@@ -1954,7 +1824,6 @@ pub fn run() {
     let running_for_worker = running.clone();
     let session_grants: GrantRegistry = Arc::new(Mutex::new(HashMap::new()));
     let session_index = Arc::new(Mutex::new(SessionIndex::default()));
-    let session_index_for_worker = session_index.clone();
     let thread_store = Arc::new(
         JsonThreadStore::open(default_thread_store_path())
             .expect("open the versioned nanocodex thread store"),
@@ -1974,7 +1843,6 @@ pub fn run() {
             questions,
             question_counter: AtomicU64::new(1_000_000),
             cancels,
-            session_index,
             app_server: app_server.clone(),
             openrouter_models: Mutex::new(Vec::new()),
         })
@@ -1990,15 +1858,12 @@ pub fn run() {
                 cancels_for_worker,
                 running_for_worker,
                 session_grants,
-                session_index_for_worker,
             );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
             app_server_request,
-            send_prompt,
-            stop_generation,
             approve,
             answer_question,
             e2e_ask_question,
@@ -2026,7 +1891,6 @@ pub fn run() {
             open_url,
             list_mcp,
             save_temp_image,
-            list_sessions,
             open_session_log,
             open_session_snapshot,
             get_custom_commands,
@@ -2047,10 +1911,6 @@ pub fn run() {
             open_memory_file,
             set_workspace,
             get_workspace,
-            resume_session,
-            fork_session,
-            archive_session,
-            new_session,
             set_approval,
             set_sandbox,
             set_model,
@@ -2078,22 +1938,34 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        let index_path = root.join("sessions.jsonl");
-        let mut index = SessionIndex::new(index_path.clone());
-        let mut session = ncx_core::Session::new("system");
-        session.add_user_text("other session");
-        index.record_turn(
-            "other-session",
-            &root,
-            &session,
-            &root.join("session.jsonl"),
+        let store_path = root.join("threads.json");
+        let server = AppServer::new(
+            Arc::new(JsonThreadStore::open(store_path.clone()).unwrap()),
+            || 1,
         );
-        let shared = Mutex::new(index);
+        let thread_id = ThreadId::new("other-session").unwrap();
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(thread_id.clone()),
+                workspace: root.display().to_string(),
+                title: "other session".into(),
+            })
+            .unwrap();
+        server
+            .dispatch(ClientRequest::ThreadArchive {
+                thread_id: thread_id.clone(),
+                archived: true,
+            })
+            .unwrap();
 
-        archive_session_in_index(&shared, "other-session", true).unwrap();
-
-        let reloaded = SessionIndex::new(index_path);
-        assert!(reloaded.get("other-session").unwrap().archived);
+        let reloaded = AppServer::new(Arc::new(JsonThreadStore::open(store_path).unwrap()), || 2);
+        let outcome = reloaded
+            .dispatch(ClientRequest::ThreadRead { thread_id })
+            .unwrap();
+        let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload else {
+            panic!("thread read response expected");
+        };
+        assert!(thread.metadata.archived);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2375,6 +2247,7 @@ mod tests {
     #[test]
     fn new_session_starts_with_empty_chat_and_plan_context() {
         let bridge = include_str!("bridge.rs");
+        let backend = include_str!("lib.rs");
         assert!(bridge.contains("Command::New(id)"));
         assert!(bridge.contains("Some((id, Vec::new()))"));
         let new_branch = bridge
@@ -2384,11 +2257,9 @@ mod tests {
             .split_once("Command::Reload")
             .unwrap()
             .0;
-        assert!(new_branch.contains("index.record_turn("));
-        assert!(
-            new_branch.find("index.record_turn(").unwrap()
-                < new_branch.find("UiEvent::Loaded").unwrap()
-        );
+        assert!(!new_branch.contains("record_turn("));
+        assert!(backend.contains("ClientRequest::ThreadCreateActivate"));
+        assert!(new_branch.contains("messages: Vec::new()"));
     }
 
     #[test]
@@ -2413,12 +2284,53 @@ mod tests {
             "threadForkActivate",
             "turnSubmit",
             "turnInterruptLatest",
+            "threadArchive",
+            "threadRename",
+            "threadReadVisible",
         ] {
             assert!(
                 app.contains(&format!("method: \"{method}\"")),
                 "missing app-server request for {method}"
             );
         }
+        assert!(!app.contains("invoke(\"archive_session\""));
+        assert!(!app.contains("invoke<SessionRow[]>(\"list_sessions\")"));
+        let refresh = app
+            .split_once("async function refreshSessions")
+            .unwrap()
+            .1
+            .split_once("async function loadNotes")
+            .unwrap()
+            .0;
+        assert!(!refresh.contains("method: \"threadRead\""));
+    }
+
+    #[test]
+    fn gui_runtime_no_longer_reads_or_writes_legacy_session_snapshots() {
+        let bridge = include_str!("bridge.rs");
+        let backend = include_str!("lib.rs");
+        assert!(!bridge.contains("SessionIndex"));
+        assert!(!bridge.contains("load_snapshot("));
+        assert!(!bridge.contains("record_turn("));
+        let handler = backend
+            .split_once(".invoke_handler(tauri::generate_handler![")
+            .unwrap()
+            .1
+            .split_once(".run(tauri::generate_context!())")
+            .unwrap()
+            .0;
+        for legacy_command in [
+            "send_prompt,",
+            "stop_generation,",
+            "list_sessions,",
+            "resume_session,",
+            "fork_session,",
+            "archive_session,",
+            "new_session,",
+        ] {
+            assert!(!handler.contains(legacy_command));
+        }
+        assert!(backend.contains("migrate_legacy_threads(&index, &app_server)"));
     }
 
     #[test]
