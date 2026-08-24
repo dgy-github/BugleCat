@@ -12,6 +12,13 @@ export class UsageController {
     return (this.promptTokens / 1e6) * this.priceIn + (this.completionTokens / 1e6) * this.priceOut;
   }
 
+  summary(): string {
+    const symbol = this.currency === "USD" ? "$" : "¥";
+    const formattedCost = this.cost >= 1 ? this.cost.toFixed(2) : this.cost.toFixed(4);
+    const costText = this.priceIn || this.priceOut ? ` · ≈${symbol}${formattedCost}` : "";
+    return `本会话用量：输入 ${this.promptTokens} / 输出 ${this.completionTokens} tokens${costText}`;
+  }
+
   setPrice(priceIn: number, priceOut: number, currency: "CNY" | "USD"): void {
     this.priceIn = priceIn || 0;
     this.priceOut = priceOut || 0;

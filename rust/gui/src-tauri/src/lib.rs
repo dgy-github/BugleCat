@@ -2221,11 +2221,11 @@ mod tests {
 
     #[test]
     fn stop_button_remains_retryable_until_turn_finishes() {
-        let app = include_str!("../../src/App.svelte");
+        let controller = include_str!("../../src/lib/composer-controller.svelte.ts");
         let composer = include_str!("../../src/components/Composer.svelte");
-        assert!(app.contains("if (!thread.busy) return;"));
+        assert!(controller.contains("if (!this.thread.busy) return;"));
         assert!(composer.contains("disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"));
-        assert!(!app.contains("if (!thread.busy || thread.stopping) return;"));
+        assert!(!controller.contains("if (!this.thread.busy || this.thread.stopping) return;"));
     }
 
     #[test]
@@ -2295,19 +2295,24 @@ mod tests {
     fn prompts_are_dispatched_to_independent_session_workers() {
         let bridge = include_str!("bridge.rs");
         let backend = include_str!("lib.rs");
-        let app = include_str!("../../src/App.svelte");
+        let composer = include_str!("../../src/lib/composer-controller.svelte.ts");
         assert!(bridge.contains("fn spawn_turn_worker("));
         assert!(bridge.contains("session_id: target_id"));
         assert!(bridge.contains("spawn_turn_worker("));
         assert!(backend.contains("session_id: String"));
-        assert!(app.contains("method: \"turnSubmit\""));
-        assert!(app.contains("threadId: targetSessionId"));
+        assert!(composer.contains("method: \"turnSubmit\""));
+        assert!(composer.contains("threadId: targetSessionId"));
     }
 
     #[test]
     fn frontend_thread_lifecycle_uses_the_versioned_app_server_protocol() {
         let app = include_str!("../../src/App.svelte");
-        let frontend = format!("{app}\n{}\n{}", include_str!("../../src/lib/slash-controller.svelte.ts"), include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts"));
+        let frontend = format!(
+            "{app}\n{}\n{}\n{}",
+            include_str!("../../src/lib/slash-controller.svelte.ts"),
+            include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts"),
+            include_str!("../../src/lib/composer-controller.svelte.ts"),
+        );
         for method in [
             "threadCreateActivate",
             "threadActivate",
@@ -2372,10 +2377,10 @@ mod tests {
 
     #[test]
     fn frontend_rejects_stale_or_cross_version_protocol_events() {
-        let app = include_str!("../../src/App.svelte");
+        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
         let protocol_client = include_str!("../../src/lib/app-server-client.ts");
-        assert!(app.contains("listen<ProtocolEventEnvelope>(\"ncx://protocol-event\""));
-        assert!(app.contains("protocolSequenceGate.accept(envelope)"));
+        assert!(runtime.contains("listen<ProtocolEventEnvelope>(\"ncx://protocol-event\""));
+        assert!(runtime.contains("this.sequenceGate.accept(envelope)"));
         assert!(protocol_client.contains("envelope.protocolVersion !== 2 || !envelope.threadId"));
         assert!(protocol_client.contains("this.sequences.get(envelope.threadId) || 0"));
         assert!(protocol_client.contains("envelope.sequence <= previous"));
@@ -2408,7 +2413,7 @@ mod tests {
 
     #[test]
     fn switching_sessions_does_not_stop_the_previous_turn() {
-        let app = include_str!("../../src/App.svelte");
+        let composer = include_str!("../../src/lib/composer-controller.svelte.ts");
         let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let resume = lifecycle
             .split_once("resume = async")
@@ -2418,7 +2423,7 @@ mod tests {
             .unwrap()
             .0;
         assert!(!resume.contains("stop_generation"));
-        assert!(app.contains("thread.setRunning(targetSessionId, true)"));
+        assert!(composer.contains("this.thread.setRunning(targetSessionId, true)"));
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         assert!(thread.contains("this.setRunning(event.session_id, false)"));
     }

@@ -1,5 +1,12 @@
 export type ToolOutcome = "err" | "empty" | "ok";
 
+export const baseName = (path: string): string => path.split(/[\\/]/).pop() || path;
+export const formatTokens = (value: number): string => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : `${value}`;
+export const formatCost = (value: number): string => value >= 1 ? value.toFixed(2) : value.toFixed(4);
+export const currencySymbol = (currency: "CNY" | "USD"): string => currency === "USD" ? "$" : "¥";
+export const currencyName = (currency: "CNY" | "USD"): string => currency === "USD" ? "美元" : "人民币";
+export const priceSourceName = (source: "official_direct" | "aggregator"): string => source === "official_direct" ? "厂商官方直连价" : "OpenRouter 聚合渠道价";
+
 export function toolOutcome(result = ""): ToolOutcome {
   const exit = result.match(/Exit code: (-?\d+)/);
   const trimmed = result.trimStart();

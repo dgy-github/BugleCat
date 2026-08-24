@@ -593,3 +593,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `SettingsController` 统一设置加载/保存、配置文件入口、厂商模型目录、OpenRouter 刷新、模型预设及官方价格来源；模型预设继续同步快捷模型列表、Token 单价、币种和累计费用显示。
 - `App.svelte` 从 1474 行降至 1210 行；两个新控制器均通过结构门禁。Vite build、GUI Rust 56 项、question E2E 和 protocol/Marketplace E2E 全绿。
 - 下一批只剩核心状态拆分：Thread/Turn UI 事件状态机与 Composer/Slash；在 App 结构门禁通过前保持未完成状态。
+
+### 2026-08-24 GUI 根组件与 Harness 控制器收口
+- `App.svelte` 的 Composer、附件/排队/停止、右侧面板和应用启动/协议监听职责分别下沉到 `ComposerController`、`PanelController`、`AppRuntimeController`；根组件只保留控制器装配和视图绑定。
+- `App.svelte` 已从改造前的 2674 行，逐批降到 2402、1943、1474、1210、762、591，最终为 297 行；所有本批生产文件通过结构门禁，没有修改门禁阈值或用生成标记规避检查。
+- GUI 模板回归不再错误地只读取 `App.svelte`，而是按真实所有者读取 Composer、Runtime 和 Lifecycle 控制器；继续覆盖同 Thread 防重入、跨 Thread 并发、切换不停止旧任务、停止可重试和协议序号门禁。
+- 拆分保持附件文件名展示、每会话累计 Token/费用恢复、设置/插件操作、工具活动完成态收口、历史最终结论投影和工作区面板行为不变。
+- 最终验证：Vite production build、结构门禁、GUI Rust 56 项、question E2E、protocol E2E 和 Rust workspace 全量均通过；协议 E2E 覆盖并发、所有权、可见历史刷新/恢复以及插件 Marketplace。
