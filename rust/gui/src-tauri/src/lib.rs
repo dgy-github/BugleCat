@@ -12,6 +12,7 @@ use model_catalog::{catalog, find_preset, parse_openrouter_models, CatalogModel,
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,9 +24,11 @@ use ncx_config::{
     VALID_SANDBOX_MODES,
 };
 use ncx_core::{
-    custom_command_prompt, list_custom_commands, AgentRuntimeProfile, CheckpointMeta,
-    CheckpointStore, ExternalPluginCatalog, ExternalPluginRecord, HarnessDiagnostics,
-    HarnessRuntimeBuilder, MemoryStore, RestoreReport, SessionIndex, ToolContext,
+    custom_command_prompt, discover_marketplaces, list_custom_commands,
+    resolve_local_marketplace_plugin, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
+    CodexPluginCatalog, CodexPluginRecord, ExternalPluginCatalog, ExternalPluginRecord,
+    HarnessDiagnostics, HarnessRuntimeBuilder, Marketplace, MemoryStore, RestoreReport,
+    SessionIndex, ToolContext,
 };
 use ncx_protocol::{ClientRequest, ThreadId};
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
@@ -1415,6 +1418,79 @@ fn set_external_plugin_enabled(id: String, enabled: bool) -> Result<(), String> 
     external_plugin_catalog()?.set_enabled(&id, enabled)
 }
 
+fn codex_plugin_catalog() -> Result<CodexPluginCatalog, String> {
+    let (_, workspace) = configured_workspace()?;
+    Ok(CodexPluginCatalog::new(
+        workspace.join(".ncx").join("codex-plugins"),
+    ))
+}
+
+#[tauri::command]
+fn list_codex_plugins() -> Result<Vec<CodexPluginRecord>, String> {
+    codex_plugin_catalog()?.discover()
+}
+
+#[tauri::command]
+fn install_codex_plugin(source: String, upgrade: bool) -> Result<CodexPluginRecord, String> {
+    codex_plugin_catalog()?.install_or_upgrade(Path::new(&source), upgrade)
+}
+
+#[tauri::command]
+fn set_codex_plugin_enabled(name: String, enabled: bool) -> Result<(), String> {
+    codex_plugin_catalog()?.set_enabled(&name, enabled)
+}
+
+#[tauri::command]
+fn uninstall_codex_plugin(name: String) -> Result<(), String> {
+    codex_plugin_catalog()?.uninstall(&name)
+}
+
+#[derive(Serialize)]
+struct MarketplaceView {
+    path: String,
+    marketplace: Marketplace,
+}
+
+#[tauri::command]
+fn list_plugin_marketplaces() -> Result<Vec<MarketplaceView>, String> {
+    let (_, workspace) = configured_workspace()?;
+    Ok(discover_marketplaces(&workspace)?
+        .into_iter()
+        .map(|(path, marketplace)| MarketplaceView {
+            path: path.display().to_string(),
+            marketplace,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn install_marketplace_plugin(
+    marketplace_path: String,
+    plugin_name: String,
+    upgrade: bool,
+) -> Result<CodexPluginRecord, String> {
+    let path = PathBuf::from(&marketplace_path);
+    let (_, workspace) = configured_workspace()?;
+    let canonical_path = path.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_workspace = workspace
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !canonical_path.starts_with(&canonical_workspace) {
+        return Err("Marketplace 清单必须位于当前工作区".to_string());
+    }
+    let marketplace: Marketplace = serde_json::from_str(
+        &fs::read_to_string(&canonical_path).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("无效 Marketplace: {error}"))?;
+    let plugin = marketplace
+        .plugins
+        .iter()
+        .find(|candidate| candidate.name == plugin_name)
+        .ok_or_else(|| format!("Marketplace 中不存在插件 '{plugin_name}'"))?;
+    let source = resolve_local_marketplace_plugin(&canonical_path, plugin)?;
+    codex_plugin_catalog()?.install_or_upgrade(&source, upgrade)
+}
+
 pub fn run() {
     let (tx, rx) = unbounded_channel::<Command>();
     let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
@@ -1443,7 +1519,7 @@ pub fn run() {
             question_counter: AtomicU64::new(1_000_000),
             cancels,
             session_index,
-            app_server,
+            app_server: app_server.clone(),
             openrouter_models: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
@@ -1451,6 +1527,7 @@ pub fn run() {
             // (to take prompts), and the shared pending-approvals map.
             spawn_worker(
                 app.handle().clone(),
+                app_server.clone(),
                 rx,
                 pending_for_worker,
                 questions_for_worker,
@@ -1502,6 +1579,12 @@ pub fn run() {
             list_external_plugins,
             install_external_plugin,
             set_external_plugin_enabled,
+            list_codex_plugins,
+            install_codex_plugin,
+            set_codex_plugin_enabled,
+            uninstall_codex_plugin,
+            list_plugin_marketplaces,
+            install_marketplace_plugin,
             memory_list,
             memory_consolidate,
             memory_add,
@@ -1695,7 +1778,7 @@ mod tests {
         let css = include_str!("../../src/app.css");
         let bridge = include_str!("bridge.rs");
         let core = include_str!("../../../crates/ncx-core/src/agent_loop.rs");
-        let provider = include_str!("../../../crates/ncx-core/src/model_provider.rs");
+        let provider = include_str!("../../../crates/ncx-provider/src/api.rs");
 
         assert!(provider.contains("StreamDelta::Reasoning"));
         assert!(core.contains("ReasoningDelta(String)"));

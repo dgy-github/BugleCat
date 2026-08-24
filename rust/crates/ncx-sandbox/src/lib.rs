@@ -16,3 +16,11 @@ pub use approval::{
     step_decision, ApprovalRequest, Approver, Decision, NEVER, ON_FAILURE, ON_REQUEST, UNTRUSTED,
 };
 pub use policy::{SandboxPolicy, DANGER_FULL_ACCESS, READ_ONLY, WORKSPACE_WRITE};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicySnapshot {
+    pub sandbox_mode: String,
+    pub approval_policy: String,
+    pub plan_mode: bool,
+    pub network_access: bool,
+}

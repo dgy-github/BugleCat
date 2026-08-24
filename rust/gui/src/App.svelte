@@ -68,8 +68,16 @@
   let saving = $state(false);
   type HarnessDiagnostics = Record<"llm" | "interaction" | "policy" | "context" | "memory" | "compaction" | "mcp" | "attachment" | "media" | "cost_telemetry", boolean>;
   type ExternalPlugin = { manifest: { id: string; name: string; version: string; capabilities: string[] }; root: string; enabled: boolean };
+  type CodexPlugin = { manifest: { name: string; version?: string; description?: string; keywords: string[] }; root: string; enabled: boolean };
+  type MarketplaceSource =
+    | { source: "local"; path: string }
+    | { source: "git"; url: string; path?: string; ref?: string }
+    | { source: "npm"; package: string; version?: string };
+  type PluginMarketplace = { path: string; marketplace: { name: string; plugins: { name: string; source: MarketplaceSource }[] } };
   let harnessDiagnostics = $state<HarnessDiagnostics | null>(null);
   let externalPlugins = $state<ExternalPlugin[]>([]);
+  let codexPlugins = $state<CodexPlugin[]>([]);
+  let pluginMarketplaces = $state<PluginMarketplace[]>([]);
 
   type CatalogModel = {
     provider_id: string;
@@ -1017,18 +1025,30 @@
 
   async function openSettings() {
     try {
-      const [loadedSettings, loadedLocation, loadedCatalog, diagnostics, plugins] = await Promise.all([
+      const [
+        loadedSettings,
+        loadedLocation,
+        loadedCatalog,
+        diagnostics,
+        plugins,
+        loadedCodexPlugins,
+        loadedMarketplaces,
+      ] = await Promise.all([
         invoke<Settings>("get_settings"),
         invoke<ConfigLocation>("get_config_location"),
         invoke<ModelCatalogResponse>("get_model_catalog"),
         invoke<HarnessDiagnostics>("get_harness_diagnostics"),
         invoke<ExternalPlugin[]>("list_external_plugins"),
+        invoke<CodexPlugin[]>("list_codex_plugins"),
+        invoke<PluginMarketplace[]>("list_plugin_marketplaces"),
       ]);
       settings = loadedSettings;
       configLocation = loadedLocation;
       modelCatalog = loadedCatalog;
       harnessDiagnostics = diagnostics;
       externalPlugins = plugins;
+      codexPlugins = loadedCodexPlugins;
+      pluginMarketplaces = loadedMarketplaces;
       apiKeyInput = "";
       vlApiKeyInput = "";
     } catch (e) {
@@ -1059,6 +1079,45 @@
       await invoke("set_external_plugin_enabled", { id: plugin.manifest.id, enabled: !plugin.enabled });
       externalPlugins = await invoke<ExternalPlugin[]>("list_external_plugins");
     } catch (e) { messages.push({ role: "note", text: `插件状态修改失败：${e}` }); }
+  }
+
+  async function addCodexPlugin() {
+    const selected = await open({ directory: true, multiple: false, title: "选择包含 .codex-plugin/plugin.json 的插件目录" });
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      await invoke("install_codex_plugin", { source: selected, upgrade: false });
+      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+    } catch (e) { messages.push({ role: "note", text: `Codex 插件安装失败：${e}` }); }
+  }
+
+  async function upgradeCodexPlugin() {
+    const selected = await open({ directory: true, multiple: false, title: "选择新版 Codex 插件目录" });
+    if (!selected || Array.isArray(selected)) return;
+    try {
+      await invoke("install_codex_plugin", { source: selected, upgrade: true });
+      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+    } catch (e) { messages.push({ role: "note", text: `Codex 插件升级失败：${e}` }); }
+  }
+
+  async function toggleCodexPlugin(plugin: CodexPlugin) {
+    try {
+      await invoke("set_codex_plugin_enabled", { name: plugin.manifest.name, enabled: !plugin.enabled });
+      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+    } catch (e) { messages.push({ role: "note", text: `Codex 插件状态修改失败：${e}` }); }
+  }
+
+  async function removeCodexPlugin(plugin: CodexPlugin) {
+    try {
+      await invoke("uninstall_codex_plugin", { name: plugin.manifest.name });
+      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+    } catch (e) { messages.push({ role: "note", text: `Codex 插件卸载失败：${e}` }); }
+  }
+
+  async function installMarketplacePlugin(marketplacePath: string, pluginName: string) {
+    try {
+      await invoke("install_marketplace_plugin", { marketplacePath, pluginName, upgrade: false });
+      codexPlugins = await invoke<CodexPlugin[]>("list_codex_plugins");
+    } catch (e) { messages.push({ role: "note", text: `Marketplace 插件安装失败：${e}` }); }
   }
   function stashSessionQueue(sessionId: string) {
     if (sessionId) {
@@ -2448,6 +2507,35 @@
               </div>
             {/each}
           {:else}<p class="settings-note">当前工作区未安装外部插件。</p>{/if}
+          <div class="catalog-head">
+            <div><strong>OpenAI Codex 资源插件</strong><p>兼容 .codex-plugin/plugin.json，仅装载 Skills、MCP、Apps 和 Hooks 等资源，不直接执行 DLL。</p></div>
+            <div><button class="plain" onclick={addCodexPlugin}>安装本地资源包</button><button class="plain" onclick={upgradeCodexPlugin}>升级资源包</button></div>
+          </div>
+          {#if codexPlugins.length}
+            {#each codexPlugins as plugin}
+              <div class="config-entry">
+                <span>{plugin.manifest.name} <code>{plugin.manifest.version || "未标版本"}</code></span>
+                <code>{plugin.manifest.description || plugin.root}</code>
+                <button class="plain" onclick={() => toggleCodexPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
+                <button class="plain" onclick={() => removeCodexPlugin(plugin)}>卸载</button>
+              </div>
+            {/each}
+          {:else}<p class="settings-note">当前工作区未安装 Codex 资源插件。</p>{/if}
+          <div class="catalog-head">
+            <div><strong>插件 Marketplace</strong><p>自动发现 OpenAI、Claude 与 Cursor 兼容目录；本地来源可直接安装，Git/NPM 来源会明确提示尚未物化。</p></div>
+          </div>
+          {#if pluginMarketplaces.length}
+            {#each pluginMarketplaces as entry}
+              <p class="settings-note">{entry.marketplace.name} · {entry.path}</p>
+              {#each entry.marketplace.plugins as plugin}
+                <div class="config-entry">
+                  <span>{plugin.name}</span>
+                  <code>{plugin.source.source}</code>
+                  <button class="plain" onclick={() => installMarketplacePlugin(entry.path, plugin.name)}>安装</button>
+                </div>
+              {/each}
+            {/each}
+          {:else}<p class="settings-note">当前工作区未发现 Marketplace 清单。</p>{/if}
         </section>
         <div class="abtns">
           <button class="deny" onclick={() => (settings = null)}>取消</button>

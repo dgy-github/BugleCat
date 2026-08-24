@@ -26,13 +26,7 @@ pub struct InteractionService {
     pub approver: Option<Rc<dyn ApprovalHandler>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PolicyService {
-    pub sandbox_mode: String,
-    pub approval_policy: String,
-    pub plan_mode: bool,
-    pub network_access: bool,
-}
+pub use ncx_sandbox::PolicySnapshot as PolicyService;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextServiceDescriptor {

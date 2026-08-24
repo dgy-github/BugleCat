@@ -1887,12 +1887,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ncx-context"
+version = "0.1.0"
+
+[[package]]
 name = "ncx-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
  "ncx-config",
+ "ncx-context",
  "ncx-mcp",
  "ncx-provider",
  "ncx-sandbox",
@@ -1945,6 +1950,7 @@ dependencies = [
 name = "ncx-provider"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures-util",
  "reqwest",
  "roxmltree",

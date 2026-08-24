@@ -22,17 +22,20 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use ncx_app_server::AppServer;
 use ncx_config::{
     load_config, permission_mode_to_knobs, write_nanocodex_config, ConfigPaths, Overrides,
 };
 use ncx_core::{
-    discover_skills, expand_file_mentions, install_llm_provider_factory, load_workspace_instructions,
-    model_provider_from_config, new_session_id, skills_index_block, suggest_title_with_provider,
-    AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
-    CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex, ToolContext,
-    UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
+    discover_skills, expand_file_mentions, install_llm_provider_factory,
+    load_workspace_instructions, model_provider_from_config, new_session_id, skills_index_block,
+    suggest_title_with_provider, AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler,
+    ApprovalRequest, CheckpointStore, LoopEvent, MemoryStore, Session, SessionGrants, SessionIndex,
+    ToolContext, UserQuestionHandler, UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
+use ncx_protocol::{ClientRequest, ItemId, ThreadId, ThreadItem, TurnId, TurnStatus};
 use ncx_sandbox::SandboxPolicy;
+use ncx_thread_store::JsonThreadStore;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -264,41 +267,120 @@ fn should_generate_session_title(is_first_turn: bool, stop_reason: &str) -> bool
 
 /// Build the loop's event sink (forwards [`LoopEvent`]s to the frontend). A
 /// fresh one is needed after every (re)build of the agent.
-fn make_sink(app: AppHandle, session_id: String) -> Box<dyn FnMut(LoopEvent)> {
+fn make_sink(
+    app: AppHandle,
+    session_id: String,
+    app_server: Option<Arc<AppServer<JsonThreadStore>>>,
+    turn_id: Option<TurnId>,
+) -> Box<dyn FnMut(LoopEvent)> {
+    let thread_id = ThreadId::new(session_id.clone()).ok();
+    let mut latest_tool_call = None;
     Box::new(move |ev: LoopEvent| {
-        let ui = match ev {
-            LoopEvent::AssistantDelta(text) => UiEvent::AssistantDelta {
-                session_id: session_id.clone(),
-                text,
-            },
-            LoopEvent::ReasoningDelta(text) => UiEvent::ReasoningDelta {
-                session_id: session_id.clone(),
-                text,
-            },
-            LoopEvent::ContextCompacted(stats) => UiEvent::ContextCompacted {
-                session_id: session_id.clone(),
-                original_chars: stats.original_chars,
-                edited_chars: stats.edited_chars,
-                dropped_messages: stats.dropped_messages,
-                compressed_tool_results: stats.compressed_tool_results,
-            },
-            LoopEvent::AssistantText(text) => UiEvent::Assistant {
-                session_id: session_id.clone(),
-                text,
-            },
-            LoopEvent::ToolStart { name, args } => UiEvent::ToolStart {
-                session_id: session_id.clone(),
-                name,
-                args,
-            },
-            LoopEvent::ToolResult { name, result } => UiEvent::ToolResult {
-                session_id: session_id.clone(),
-                name,
-                result,
-            },
+        let (ui, item) = match ev {
+            LoopEvent::AssistantDelta(text) => (
+                UiEvent::AssistantDelta {
+                    session_id: session_id.clone(),
+                    text,
+                },
+                None,
+            ),
+            LoopEvent::ReasoningDelta(text) => (
+                UiEvent::ReasoningDelta {
+                    session_id: session_id.clone(),
+                    text,
+                },
+                None,
+            ),
+            LoopEvent::ContextCompacted(stats) => {
+                let ui = UiEvent::ContextCompacted {
+                    session_id: session_id.clone(),
+                    original_chars: stats.original_chars,
+                    edited_chars: stats.edited_chars,
+                    dropped_messages: stats.dropped_messages,
+                    compressed_tool_results: stats.compressed_tool_results,
+                };
+                (
+                    ui,
+                    Some(ThreadItem::ContextCompaction {
+                        id: protocol_item_id("compact"),
+                        summary: format!(
+                            "{} -> {} chars",
+                            stats.original_chars, stats.edited_chars
+                        ),
+                        dropped_items: u32::try_from(stats.dropped_messages).unwrap_or(u32::MAX),
+                    }),
+                )
+            }
+            LoopEvent::AssistantText(text) => {
+                let item = ThreadItem::AssistantMessage {
+                    id: protocol_item_id("assistant"),
+                    text: text.clone(),
+                };
+                (
+                    UiEvent::Assistant {
+                        session_id: session_id.clone(),
+                        text,
+                    },
+                    Some(item),
+                )
+            }
+            LoopEvent::ToolStart { name, args } => {
+                let id = protocol_item_id("tool-call");
+                latest_tool_call = Some(id.clone());
+                let arguments =
+                    serde_json::from_str(&args).unwrap_or_else(|_| json!({ "raw": args }));
+                let item = ThreadItem::ToolCall {
+                    id,
+                    name: name.clone(),
+                    arguments,
+                };
+                (
+                    UiEvent::ToolStart {
+                        session_id: session_id.clone(),
+                        name,
+                        args,
+                    },
+                    Some(item),
+                )
+            }
+            LoopEvent::ToolResult { name, result } => {
+                let call_id = latest_tool_call
+                    .take()
+                    .unwrap_or_else(|| protocol_item_id("tool-call"));
+                let item = ThreadItem::ToolResult {
+                    id: protocol_item_id("tool-result"),
+                    call_id,
+                    output: result.clone(),
+                    success: true,
+                };
+                (
+                    UiEvent::ToolResult {
+                        session_id: session_id.clone(),
+                        name,
+                        result,
+                    },
+                    Some(item),
+                )
+            }
         };
+        if let (Some(server), Some(thread_id), Some(turn_id), Some(item)) = (
+            app_server.as_ref(),
+            thread_id.clone(),
+            turn_id.clone(),
+            item,
+        ) {
+            let _ = server.dispatch(ClientRequest::ItemAppend {
+                thread_id,
+                turn_id,
+                item,
+            });
+        }
         emit(&app, ui);
     })
+}
+
+fn protocol_item_id(kind: &str) -> ItemId {
+    ItemId::new(format!("{kind}-{}", new_session_id())).expect("generated item id is non-empty")
 }
 
 /// Tell the UI which model / sandbox / workspace / session is now active.
@@ -618,8 +700,7 @@ fn build_agent(
         Some(messages) => Session::fork(system_prompt, messages, Some(log_path.clone())),
         None => Session::with_log(system_prompt, Some(log_path.clone())),
     };
-    let agent = runtime_profile
-        .apply(AgentLoop::from_runtime_services(tools, session)?);
+    let agent = runtime_profile.apply(AgentLoop::from_runtime_services(tools, session)?);
     Ok((
         agent,
         cfg.workspace.clone(),
@@ -650,6 +731,7 @@ fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
 #[allow(clippy::too_many_arguments)]
 fn spawn_turn_worker(
     app: AppHandle,
+    app_server: Arc<AppServer<JsonThreadStore>>,
     pending: PendingMap,
     questions: PendingQuestionMap,
     cancels: CancelRegistry,
@@ -674,6 +756,31 @@ fn spawn_turn_worker(
         return;
     }
 
+    let turn_id =
+        TurnId::new(format!("turn-{}", new_session_id())).expect("generated turn id is non-empty");
+    let protocol_turn = match ProtocolTurnGuard::start(
+        app_server.clone(),
+        &session_id,
+        &workspace,
+        turn_id.clone(),
+        &text,
+    ) {
+        Ok(turn) => turn,
+        Err(message) => {
+            if let Ok(mut sessions) = running.lock() {
+                sessions.remove(&session_id);
+            }
+            emit(
+                &app,
+                UiEvent::Error {
+                    session_id,
+                    message,
+                },
+            );
+            return;
+        }
+    };
+
     let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
     if let Ok(mut registry) = cancels.lock() {
         registry.insert(session_id.clone(), cancel.clone());
@@ -689,6 +796,7 @@ fn spawn_turn_worker(
             session_id.chars().take(8).collect::<String>()
         ))
         .spawn(move || {
+            let mut protocol_turn = protocol_turn;
             let finish = || {
                 if let Ok(mut registry) = cancels.lock() {
                     registry.remove(&session_id);
@@ -750,7 +858,12 @@ fn spawn_turn_worker(
                         return;
                     }
                 };
-                agent.set_event_sink(make_sink(app.clone(), session_id.clone()));
+                agent.set_event_sink(make_sink(
+                    app.clone(),
+                    session_id.clone(),
+                    Some(app_server.clone()),
+                    Some(turn_id.clone()),
+                ));
                 let is_first_turn = agent
                     .session
                     .messages
@@ -759,7 +872,13 @@ fn spawn_turn_worker(
                 let expanded = expand_file_mentions(&text, &workspace);
                 save_auto_checkpoint(&workspace, &expanded);
                 if let Err(message) = validate_image_attachments(&agent.tools, &images) {
-                    emit(&app, UiEvent::Error { session_id: session_id.clone(), message });
+                    emit(
+                        &app,
+                        UiEvent::Error {
+                            session_id: session_id.clone(),
+                            message,
+                        },
+                    );
                     return;
                 }
                 let user_input = match build_image_user_input(&expanded, &images) {
@@ -792,6 +911,7 @@ fn spawn_turn_worker(
                         usage: serde_json::to_value(&result.usage).unwrap_or(Value::Null),
                     },
                 );
+                protocol_turn.complete(&result.stop_reason);
                 if should_generate_session_title(is_first_turn, &result.stop_reason) {
                     spawn_title_generation(
                         app.clone(),
@@ -821,6 +941,92 @@ fn spawn_turn_worker(
     }
 }
 
+struct ProtocolTurnGuard {
+    server: Arc<AppServer<JsonThreadStore>>,
+    thread_id: ThreadId,
+    turn_id: TurnId,
+    finished: bool,
+}
+
+impl ProtocolTurnGuard {
+    fn start(
+        server: Arc<AppServer<JsonThreadStore>>,
+        session_id: &str,
+        workspace: &Path,
+        turn_id: TurnId,
+        user_text: &str,
+    ) -> Result<Self, String> {
+        let thread_id = ThreadId::new(session_id.to_string()).map_err(|error| error.to_string())?;
+        if server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: thread_id.clone(),
+            })
+            .is_err()
+        {
+            server
+                .dispatch(ClientRequest::ThreadCreate {
+                    thread_id: Some(thread_id.clone()),
+                    workspace: workspace.display().to_string(),
+                    title: "(no prompt yet)".to_string(),
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        server
+            .dispatch(ClientRequest::TurnStart {
+                thread_id: thread_id.clone(),
+                turn_id: turn_id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        let mut guard = Self {
+            server,
+            thread_id,
+            turn_id,
+            finished: false,
+        };
+        if let Err(error) = guard.server.dispatch(ClientRequest::ItemAppend {
+            thread_id: guard.thread_id.clone(),
+            turn_id: guard.turn_id.clone(),
+            item: ThreadItem::UserMessage {
+                id: protocol_item_id("user"),
+                text: user_text.to_string(),
+            },
+        }) {
+            guard.complete("failed to persist user message");
+            return Err(error.to_string());
+        }
+        Ok(guard)
+    }
+
+    fn complete(&mut self, stop_reason: &str) {
+        let status = match stop_reason {
+            "completed" => TurnStatus::Completed,
+            "cancelled" | "canceled" => TurnStatus::Cancelled,
+            _ => TurnStatus::Failed,
+        };
+        let _ = self.server.dispatch(ClientRequest::TurnComplete {
+            thread_id: self.thread_id.clone(),
+            turn_id: self.turn_id.clone(),
+            status,
+            error: (status == TurnStatus::Failed).then(|| stop_reason.to_string()),
+        });
+        self.finished = true;
+    }
+}
+
+impl Drop for ProtocolTurnGuard {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let _ = self.server.dispatch(ClientRequest::TurnComplete {
+            thread_id: self.thread_id.clone(),
+            turn_id: self.turn_id.clone(),
+            status: TurnStatus::Failed,
+            error: Some("turn worker exited before completion".to_string()),
+        });
+    }
+}
+
 fn claim_session(running: &RunningSessions, session_id: &str) -> bool {
     running
         .lock()
@@ -833,6 +1039,7 @@ fn claim_session(running: &RunningSessions, session_id: &str) -> bool {
 /// different conversations can continue concurrently.
 pub fn spawn_worker(
     app: AppHandle,
+    app_server: Arc<AppServer<JsonThreadStore>>,
     mut rx: UnboundedReceiver<Command>,
     pending: PendingMap,
     questions: PendingQuestionMap,
@@ -897,7 +1104,7 @@ pub fn spawn_worker(
                         }
                     };
                 set_active_session(&active_session, &session_id);
-                agent.set_event_sink(make_sink(app.clone(), session_id.clone()));
+                agent.set_event_sink(make_sink(app.clone(), session_id.clone(), None, None));
                 if let Ok(mut index) = session_index.lock() {
                     let _ = index.record_turn(
                         &session_id,
@@ -929,6 +1136,7 @@ pub fn spawn_worker(
                                 .unwrap_or_else(|_| (Vec::new(), workspace.clone()));
                             spawn_turn_worker(
                                 app.clone(),
+                                app_server.clone(),
                                 pending.clone(),
                                 questions.clone(),
                                 cancels.clone(),
@@ -956,8 +1164,12 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     set_active_session(&active_session, &session_id);
-                                    agent
-                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    agent.set_event_sink(make_sink(
+                                        app.clone(),
+                                        session_id.clone(),
+                                        None,
+                                        None,
+                                    ));
                                     if let Ok(mut index) = session_index.lock() {
                                         let _ = index.record_turn(
                                             &session_id,
@@ -998,8 +1210,12 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     set_active_session(&active_session, &session_id);
-                                    agent
-                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    agent.set_event_sink(make_sink(
+                                        app.clone(),
+                                        session_id.clone(),
+                                        None,
+                                        None,
+                                    ));
                                     if let Ok(mut index) = session_index.lock() {
                                         let _ = index.record_turn(
                                             &session_id,
@@ -1053,8 +1269,12 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     set_active_session(&active_session, &session_id);
-                                    agent
-                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    agent.set_event_sink(make_sink(
+                                        app.clone(),
+                                        session_id.clone(),
+                                        None,
+                                        None,
+                                    ));
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -1104,8 +1324,12 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     set_active_session(&active_session, &session_id);
-                                    agent
-                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    agent.set_event_sink(make_sink(
+                                        app.clone(),
+                                        session_id.clone(),
+                                        None,
+                                        None,
+                                    ));
                                     if let Ok(mut index) = session_index.lock() {
                                         let _ = index.record_turn(
                                             &session_id,
@@ -1171,8 +1395,12 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     set_active_session(&active_session, &session_id);
-                                    agent
-                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    agent.set_event_sink(make_sink(
+                                        app.clone(),
+                                        session_id.clone(),
+                                        None,
+                                        None,
+                                    ));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
                                 Err(e) => emit(
@@ -1211,8 +1439,12 @@ pub fn spawn_worker(
                                     workspace = ws;
                                     session_id = sid;
                                     set_active_session(&active_session, &session_id);
-                                    agent
-                                        .set_event_sink(make_sink(app.clone(), session_id.clone()));
+                                    agent.set_event_sink(make_sink(
+                                        app.clone(),
+                                        session_id.clone(),
+                                        None,
+                                        None,
+                                    ));
                                     emit_ready(&app, &workspace, &session_id);
                                 }
                                 Err(e) => emit(
@@ -1329,18 +1561,33 @@ fn clipped_label(text: &str, limit: usize) -> String {
 
 // ── vision attachments (ported from the CLI) ──────────────────────────────────
 
-fn validate_image_attachments(tools: &ncx_core::ToolRegistry, images: &[String]) -> Result<(), String> {
-    if images.is_empty() { return Ok(()); }
+fn validate_image_attachments(
+    tools: &ncx_core::ToolRegistry,
+    images: &[String],
+) -> Result<(), String> {
+    if images.is_empty() {
+        return Ok(());
+    }
     let service = tools
         .service::<ncx_core::AttachmentServiceDescriptor>("attachment")
         .ok_or_else(|| "当前 Harness Profile 未启用附件插件".to_string())?;
     for value in images {
         let path = std::path::Path::new(value);
-        let extension = path.extension().and_then(|v| v.to_str()).unwrap_or("").to_ascii_lowercase();
-        if !service.extensions.iter().any(|allowed| allowed == &extension) {
+        let extension = path
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if !service
+            .extensions
+            .iter()
+            .any(|allowed| allowed == &extension)
+        {
             return Err(format!("附件格式 .{extension} 未被当前插件允许"));
         }
-        let size = std::fs::metadata(path).map_err(|e| format!("无法读取附件 {value}: {e}"))?.len();
+        let size = std::fs::metadata(path)
+            .map_err(|e| format!("无法读取附件 {value}: {e}"))?
+            .len();
         if size > service.max_bytes {
             return Err(format!("附件 {value} 超过 {} 字节限制", service.max_bytes));
         }
@@ -1410,6 +1657,81 @@ mod tests {
     use super::*;
     use ncx_core::Skill;
     use ncx_sandbox::WORKSPACE_WRITE;
+
+    fn protocol_server(name: &str) -> (Arc<AppServer<JsonThreadStore>>, PathBuf) {
+        let root = std::env::temp_dir().join(format!("ncx-protocol-{name}-{}", new_session_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = Arc::new(JsonThreadStore::open(root.join("threads.json")).unwrap());
+        (Arc::new(AppServer::new(store, || 1)), root)
+    }
+
+    #[test]
+    fn protocol_turn_persists_user_item_and_releases_ownership_on_completion() {
+        let (server, root) = protocol_server("complete");
+        let turn_id = TurnId::new("turn-1").unwrap();
+        let mut guard = ProtocolTurnGuard::start(
+            server.clone(),
+            "thread-1",
+            &root,
+            turn_id.clone(),
+            "执行任务",
+        )
+        .unwrap();
+        guard.complete("completed");
+
+        let thread_id = ThreadId::new("thread-1").unwrap();
+        let outcome = server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: thread_id.clone(),
+            })
+            .unwrap();
+        let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload else {
+            panic!("expected thread response");
+        };
+        assert_eq!(thread.turns[0].status, TurnStatus::Completed);
+        assert!(
+            matches!(thread.turns[0].items[0], ThreadItem::UserMessage { ref text, .. } if text == "执行任务")
+        );
+
+        let next = ProtocolTurnGuard::start(
+            server,
+            "thread-1",
+            &root,
+            TurnId::new("turn-2").unwrap(),
+            "下一轮",
+        );
+        assert!(next.is_ok(), "completed turn must release thread ownership");
+        drop(next);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dropped_protocol_turn_fails_and_releases_ownership() {
+        let (server, root) = protocol_server("drop");
+        let guard = ProtocolTurnGuard::start(
+            server.clone(),
+            "thread-drop",
+            &root,
+            TurnId::new("turn-drop-1").unwrap(),
+            "会异常退出",
+        )
+        .unwrap();
+        drop(guard);
+
+        let next = ProtocolTurnGuard::start(
+            server,
+            "thread-drop",
+            &root,
+            TurnId::new("turn-drop-2").unwrap(),
+            "恢复执行",
+        );
+        assert!(
+            next.is_ok(),
+            "dropped turn must not leave permanent ownership"
+        );
+        drop(next);
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn restored_history_omits_tool_calls_and_results_from_the_ui() {

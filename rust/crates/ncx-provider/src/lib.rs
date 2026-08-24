@@ -9,6 +9,7 @@
 //!   normalization including DeepSeek's cache-accounting fields.
 //! * [`provider`] — [`DeepSeekProvider`], the async HTTP client over `reqwest`.
 
+pub mod api;
 pub mod provider;
 pub mod request;
 pub mod response;
@@ -16,6 +17,7 @@ pub mod types;
 pub mod web;
 
 pub use provider::{stream_open_timeout_s, DeepSeekProvider};
+pub use api::{Provider, StreamDelta};
 pub use request::{build_body, is_deepseek_model};
 pub use response::{extract_reasoning, parse_completion};
 pub use types::{ModelResponse, ProviderError, ToolCall};

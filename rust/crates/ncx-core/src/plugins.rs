@@ -8,6 +8,7 @@ mod builtin;
 mod composition;
 mod external;
 mod manifest;
+mod openai_compat;
 mod registry;
 mod runtime;
 mod services;
@@ -25,6 +26,10 @@ pub use composition::{
 };
 pub use external::{ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord};
 pub use manifest::{PluginCapability, PluginManifest};
+pub use openai_compat::{
+    discover_marketplaces, resolve_local_marketplace_plugin, CodexPluginCatalog,
+    CodexPluginManifest, CodexPluginRecord, Marketplace, MarketplacePlugin, MarketplaceSource,
+};
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;
 pub use services::{

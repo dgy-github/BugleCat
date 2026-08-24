@@ -1446,17 +1446,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ncx-context"
+version = "0.1.0"
+
+[[package]]
 name = "ncx-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures-util",
  "ncx-config",
+ "ncx-context",
  "ncx-mcp",
  "ncx-provider",
  "ncx-sandbox",
  "ncx-tools",
  "regex",
+ "serde",
  "serde_json",
  "tokio",
  "toml 0.8.23",
@@ -1496,6 +1502,7 @@ dependencies = [
 name = "ncx-provider"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures-util",
  "reqwest 0.12.28",
  "roxmltree",

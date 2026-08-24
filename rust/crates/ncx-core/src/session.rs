@@ -12,35 +12,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
+pub use ncx_context::{ContextEditPolicy, ContextEditStats};
 
 pub const COMPACTED_HISTORY_PREFIX: &str = "[压缩后保留的会话里程碑";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContextEditPolicy {
-    pub enabled: bool,
-    pub max_chars: usize,
-    pub keep_recent_messages: usize,
-    pub max_tool_result_chars: usize,
-}
-
-impl Default for ContextEditPolicy {
-    fn default() -> Self {
-        ContextEditPolicy {
-            enabled: true,
-            max_chars: 120_000,
-            keep_recent_messages: 30,
-            max_tool_result_chars: 4_000,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ContextEditStats {
-    pub original_chars: usize,
-    pub edited_chars: usize,
-    pub compressed_tool_results: usize,
-    pub dropped_messages: usize,
-}
 
 #[derive(Debug, Clone)]
 pub struct ContextMessages {

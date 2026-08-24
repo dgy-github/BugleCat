@@ -66,6 +66,8 @@ pub use plugins::{
     CompactionServiceDescriptor, ContextPlugin, ContextServiceDescriptor, CoreToolsPlugin,
     CostTelemetryPlugin, CostTelemetryService, CostTelemetryServiceDescriptor,
     CostTelemetrySnapshot, ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord,
+    CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, Marketplace, MarketplacePlugin,
+    MarketplaceSource, discover_marketplaces, resolve_local_marketplace_plugin,
     HarnessDiagnostics, HarnessPlugin, HarnessRuntimeBuilder, InteractionPlugin,
     InteractionService, LlmProviderFactory, LlmProviderFactoryHandle, LlmProviderPlugin,
     LlmServiceDescriptor, McpPlugin, McpServiceDescriptor, MediaPlugin, MediaServiceDescriptor,

@@ -492,3 +492,11 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 新增 `ncx-app-server`：统一处理 thread create/list/read/archive/fork、turn start/interrupt/complete 和 item append，并输出版本化响应及事件。
 - GUI Tauri 后端已持有 app-server，开放 `app_server_request` 入口；新建会话使用同一 session/thread ID 双写 v2 store，归档对已迁移线程同步写入。现有 SessionIndex 和 bridge 暂时保留，避免一次性破坏旧历史。
 - 验证：三个新 crate 共 8 项测试通过；GUI 后端 44 项测试通过；GUI `cargo check` 通过。下一步把 prompt、流式 Item、完成/取消和历史读取切到 app-server，完成 GUI 协议客户端迁移后再进入 Provider/Policy/ContextFragment 拆分。
+
+### 2026-08-24 P0-P2 增量
+- GUI Prompt 已接入版本化 Turn 协议：执行前按 session/thread 创建 `TurnStart`，用户消息、助手最终回答、工具调用/结果及上下文压缩写入同一 `thread_id + turn_id`；正常结束写 Completed/Cancelled/Failed，工作线程异常退出由 Guard 写 Failed 并释放同会话所有权。
+- 新增协议回归，证明完成和异常退出都不会遗留永久占用；不同 Thread 并发、同 Thread 禁止重入的不变量继续保留。旧 `SessionIndex` 历史读取仍作为兼容层存在，下一阶段再把历史列表/恢复切成 app-server 投影后删除双写。
+- Provider 契约迁至真实所有者 `ncx-provider`，`ncx-core::model_provider` 仅保留兼容 re-export；Policy 快照归 `ncx-sandbox`；新增 `ncx-context` 持有 `ContextFragment`、编辑策略和统计，并强制片段硬字符上限。没有建立第二套 Provider 或压缩状态机。
+- 新增 OpenAI Codex 资源插件兼容：解析/校验 `.codex-plugin/plugin.json` 的 Skills、MCP、Apps、Hooks、Interface；支持本地安装、原子式升级、启停、卸载，拒绝路径穿越和符号链接。GUI 设置页可管理资源插件并查看 Marketplace。
+- Marketplace 对齐发现 `.agents/plugins/marketplace.json`、`api_marketplace.json`、`.claude-plugin/marketplace.json`、`.cursor-plugin/marketplace.json`；本地 source 从仓库根安全解析并可安装，Git/NPM source 明确返回“需先物化到本地缓存”，本阶段不擅自执行网络下载。
+- 验证：Rust workspace 全量通过（`ncx-core` 219 项及所有其他 crate）；GUI Rust 46 项全通过；Vite production build 通过；`git diff --check` 通过。
