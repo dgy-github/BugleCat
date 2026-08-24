@@ -17,6 +17,7 @@
   import { UsageController } from "./lib/usage-controller.svelte";
   import { FileBrowserController } from "./lib/file-browser-controller.svelte";
   import { GitWorkspaceController } from "./lib/git-workspace-controller.svelte";
+  import { CheckpointController } from "./lib/checkpoint-controller.svelte";
 
   const protocolSequenceGate = new ProtocolSequenceGate();
   const sidebar = new SidebarController();
@@ -133,24 +134,6 @@
     modelCatalog?.providers.find((provider) => provider.id === "openrouter") ?? null,
   );
 
-  type Checkpoint = {
-    id: string;
-    label: string;
-    created_at: string;
-    files: number;
-    skipped: number;
-    total_bytes: number;
-  };
-  type RestoreReport = {
-    checkpoint_id: string;
-    safety_checkpoint_id?: string | null;
-    restored_files: number;
-    deleted_files: number;
-  };
-  let checkpointOpen = $state(false);
-  let checkpoints = $state<Checkpoint[]>([]);
-  let checkpointLabel = $state("");
-  let checkpointBusy = $state(false);
 
 
   let messages = $state<Msg[]>([]);
@@ -162,6 +145,10 @@
     (value) => (input = value),
   );
   const gitWorkspace = new GitWorkspaceController((text) => messages.push({ role: "note", text }));
+  const checkpointController = new CheckpointController(
+    (text) => messages.push({ role: "note", text }),
+    () => busy,
+  );
   let attached = $state<string[]>([]); // absolute file paths attached to the next turn
   let queued = $state<{ text: string; images: string[]; shown: string }[]>([]); // pending turns
   const sessionQueues = new Map<string, { text: string; images: string[]; shown: string }[]>();
@@ -212,19 +199,6 @@
   }
 
   // Branch / checkpoint expand-to-detail.
-  let checkpointFiles = $state<Record<string, string[]>>({});
-  async function toggleCheckpointDetail(id: string) {
-    if (id in checkpointFiles) {
-      const { [id]: _drop, ...rest } = checkpointFiles;
-      checkpointFiles = rest;
-      return;
-    }
-    try {
-      checkpointFiles = { ...checkpointFiles, [id]: await invoke<string[]>("checkpoint_files", { id }) };
-    } catch (e) {
-      checkpointFiles = { ...checkpointFiles, [id]: [`加载失败：${e}`] };
-    }
-  }
   let rightPanel = $state(""); // "" | files | branches | diff | memory | checkpoints
   const PANEL_TITLES: Record<string, string> = {
     files: "文件", branches: "Git 分支", diff: "工作区改动", memory: "项目记忆", checkpoints: "检查点",
@@ -953,51 +927,12 @@
     saving = false;
   }
 
-  async function loadCheckpoints() {
-    checkpoints = await invoke<Checkpoint[]>("get_checkpoints");
-  }
-
   async function openCheckpoints() {
     if (rightPanel === "checkpoints") { rightPanel = ""; return; }
     rightPanel = "checkpoints";
-    checkpointBusy = true;
-    try {
-      await loadCheckpoints();
-    } catch (e) {
-      messages.push({ role: "note", text: `检查点加载失败：${e}` });
-    }
-    checkpointBusy = false;
+    await checkpointController.refresh();
   }
 
-  async function saveCheckpoint() {
-    checkpointBusy = true;
-    try {
-      const cp = await invoke<Checkpoint>("create_checkpoint", { label: checkpointLabel });
-      checkpointLabel = "";
-      await loadCheckpoints();
-      messages.push({ role: "note", text: `检查点已保存：${cp.id}` });
-    } catch (e) {
-      messages.push({ role: "note", text: `检查点失败：${e}` });
-    }
-    checkpointBusy = false;
-  }
-
-  async function restoreCheckpoint(id: string) {
-    if (busy || checkpointBusy) return;
-    if (!window.confirm(`恢复检查点 ${id}？`)) return;
-    checkpointBusy = true;
-    try {
-      const report = await invoke<RestoreReport>("restore_checkpoint", { id });
-      await loadCheckpoints();
-      messages.push({
-        role: "note",
-        text: `已恢复 ${report.checkpoint_id}：${report.restored_files} 个文件，删除 ${report.deleted_files} 个。`,
-      });
-    } catch (e) {
-      messages.push({ role: "note", text: `恢复失败：${e}` });
-    }
-    checkpointBusy = false;
-  }
 
   // ── Phase 1: git branches, diff, session history ──────────────────────────
   let historyOpen = $state(false);
@@ -1066,7 +1001,7 @@
       else if (rightPanel === "branches") await gitWorkspace.refreshBranches();
       else if (rightPanel === "diff") await gitWorkspace.loadDiff();
       else if (rightPanel === "memory") await loadNotes();
-      else if (rightPanel === "checkpoints") await loadCheckpoints();
+      else if (rightPanel === "checkpoints") await checkpointController.refresh();
     } catch (e) {
       messages.push({ role: "note", text: `刷新失败：${e}` });
     }
@@ -1506,14 +1441,14 @@
   <WorkspacePanels
     bind:rightPanel
     {reloadPanel}
-    bind:checkpointLabel
-    {checkpointBusy}
-    {checkpoints}
-    {checkpointFiles}
-    {saveCheckpoint}
-    {loadCheckpoints}
-    {toggleCheckpointDetail}
-    {restoreCheckpoint}
+    bind:checkpointLabel={checkpointController.label}
+    checkpointBusy={checkpointController.busy}
+    checkpoints={checkpointController.checkpoints}
+    checkpointFiles={checkpointController.files}
+    saveCheckpoint={checkpointController.save}
+    loadCheckpoints={checkpointController.refresh}
+    toggleCheckpointDetail={checkpointController.toggleDetail}
+    restoreCheckpoint={checkpointController.restore}
     {busy}
     bind:newBranch={gitWorkspace.newBranch}
     branchBusy={gitWorkspace.busy}
