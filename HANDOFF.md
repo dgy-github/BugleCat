@@ -580,3 +580,10 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 尚未收口：`App.svelte` 的协议事件、会话状态、工作区状态和设置编排仍集中在同一脚本中，后续必须拆成 `.svelte.ts` 控制器/store；在结构门禁通过前，不宣告 GUI 单体拆分完成。
 - 扩大回归：`cargo test --workspace --quiet` 全绿（`ncx-core` 225 项及其余 workspace crate）；GUI Rust 56 项全绿。原 GUI 模板测试只读取 `App.svelte`，组件化后已改为读取对应组件事实源。
 - 本地 `main` 已快进到组件分支 `986fd31`；HTTPS 推送功能分支和 `main` 仍均被 `Recv failure: Connection was reset` 阻断。当前桌面端已从组件工作树 MSVC debug 路径启动。
+
+### 2026-08-24 GUI 状态控制器拆分增量
+- 新增 `app-server-client.ts`：统一协议 v2 请求、Thread/Item 类型、历史行投影，以及按 Thread 的单调事件序号门禁；App 不再自行持有协议序号 Map。
+- 新增 `conversation-model.ts`：统一工具组完成、思考长度上限、完成后隐藏工具活动和“每轮用户请求 + 最终结论”投影规则。
+- 新增 `.svelte.ts` 控制器：侧栏尺寸/拖动、累计 Token/费用恢复、文件浏览、Git 分支/Diff、检查点、项目记忆。费用和币种不再散落在 App 状态中。
+- `App.svelte` 从 1943 行降至 1474 行；新增控制器均通过结构门禁。Vite production build、GUI Rust 56 项和真实 protocol E2E 全绿。
+- 尚未收口：设置/模型/插件编排、Thread/Turn UI 事件状态机、Composer/Slash 状态仍在 App；下一批继续拆，结构门禁仍未通过，不能宣告 GUI 单体改造完成。
