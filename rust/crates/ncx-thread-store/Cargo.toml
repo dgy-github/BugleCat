@@ -1,0 +1,12 @@
+[package]
+name = "ncx-thread-store"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ncx-protocol = { path = "../ncx-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+

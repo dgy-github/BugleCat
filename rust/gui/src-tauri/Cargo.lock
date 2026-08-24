@@ -1871,6 +1871,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ncx-app-server"
+version = "0.1.0"
+dependencies = [
+ "ncx-protocol",
+ "ncx-thread-store",
+ "serde",
+]
+
+[[package]]
 name = "ncx-config"
 version = "0.1.0"
 dependencies = [
@@ -1889,6 +1898,7 @@ dependencies = [
  "ncx-sandbox",
  "ncx-tools",
  "regex",
+ "serde",
  "serde_json",
  "tokio",
  "toml 0.8.23",
@@ -1900,9 +1910,12 @@ name = "ncx-gui"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ncx-app-server",
  "ncx-config",
  "ncx-core",
+ "ncx-protocol",
  "ncx-sandbox",
+ "ncx-thread-store",
  "reqwest",
  "serde",
  "serde_json",
@@ -1918,6 +1931,14 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "ncx-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1937,6 +1958,15 @@ name = "ncx-sandbox"
 version = "0.1.0"
 dependencies = [
  "regex",
+]
+
+[[package]]
+name = "ncx-thread-store"
+version = "0.1.0"
+dependencies = [
+ "ncx-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

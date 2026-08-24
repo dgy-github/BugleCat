@@ -476,3 +476,19 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - GUI 设置页新增 Harness 服务诊断、工作区外部插件列表、安装、升级、启用和停用入口。
 - M6 新增工作区外部插件 Catalog：`plugin.toml` 发现、目录复制安装、版本递增升级、启停标记和进程启动。仅允许协议 v1、目录内相对命令；拒绝路径穿越、符号链接和 DLL/SO/DYLIB，外部实现使用清空环境的独立子进程和管道通信。
 - 最终验证：`cargo test --workspace --quiet` 全部通过（`ncx-core` 215 项）；CLI 34 项、插件/外部目录/组合测试均通过；CLI/GUI Tauri check 与 Vite production build 通过。MSVC 桌面发布构建产出 `ncx-gui.exe` 和 `bundle/nsis/nanocodex_0.1.0_x64-setup.exe`。仓库默认 `tauri:build` 指向未安装的 GNU target，本轮改用已安装的 `x86_64-pc-windows-msvc` 成功验证；严格 Clippy 仅被未触及的 `ncx-tools/src/text_encoding.rs` 旧 lint 阻挡。
+
+## 2026-08-24 OpenAI Codex Harness M0-M6 差异审查
+- 对照源码：OpenAI `openai/codex` main 提交 `068c49f075cf287a1fe7d1ee36cf005efac922e7`；nanocodex 组件分支提交 `97c62d35dc2a699d5f82f504919d2b35c4fbc03b`。
+- 核心判断：现有 M0-M6 已形成可组合能力原型，应保留；但 OpenAI 架构的关键不是把全部核心做成插件，而是稳定 Agent 内核、版本化 app-server 协议、存储中立 Thread/Turn、资源型插件和 Hooks 分层。
+- 最高优先级缺口是 M3：nanocodex 的会话所有权仍分散在 GUI bridge、SessionIndex、快照和前端缓存，缺少统一的 ThreadId/TurnId/Item/Event 契约与存储接口。
+- M4 缺少 OpenAI 式类型化 ContextFragment、片段硬上限、StoredModelContext 以及 Pre/PostCompact Hook；当前 Compaction 服务主要是启用描述符。
+- M6 的 `plugin.toml` 子进程当前只有发现、安装、升级、启停和启动隔离，尚无可注册真实能力的正式协议。后续不要先扩展任意可执行插件，应优先兼容 `.codex-plugin/plugin.json` 的 Skills/MCP/Apps/Hooks 资源模型。
+- 推荐迁移顺序：P0 新增 `ncx-protocol`、`ncx-thread-store`、`ncx-app-server`；P1 拆 Provider/Policy/ToolExecutor/ContextFragment 接口；P2 兼容 OpenAI 资源插件格式并保留 Profile 作为产品预设；P3 再补 Marketplace、来源策略、健康检查、卸载、签名与资源限制。
+- 迁移不变量：多会话继续并发；切换不取消旧任务；事件绑定 thread/session 与 turn；新会话不继承旧聊天和计划；费用累计可恢复；附件、视觉、生图和视频复用现有 Provider/Skill，不建立第二套状态机。
+
+### P0 实施进度
+- 新增 `ncx-protocol`：协议 v2、强类型 `ThreadId`/`TurnId`/`ItemId`、Thread/Turn/Item、客户端请求、服务响应及所有事件统一 envelope；事件强制携带 threadId、可选 turnId、协议版本与单调序号。
+- 新增 `ncx-thread-store`：存储中立 trait 与 JSON 实现；单线程只允许一个活动 Turn，不同 Thread 可并发；支持创建、读取、列表、元数据更新、分叉、追加 Item、完成/取消 Turn；写入使用临时文件和备份回滚，完成状态可跨重启恢复。
+- 新增 `ncx-app-server`：统一处理 thread create/list/read/archive/fork、turn start/interrupt/complete 和 item append，并输出版本化响应及事件。
+- GUI Tauri 后端已持有 app-server，开放 `app_server_request` 入口；新建会话使用同一 session/thread ID 双写 v2 store，归档对已迁移线程同步写入。现有 SessionIndex 和 bridge 暂时保留，避免一次性破坏旧历史。
+- 验证：三个新 crate 共 8 项测试通过；GUI 后端 44 项测试通过；GUI `cargo check` 通过。下一步把 prompt、流式 Item、完成/取消和历史读取切到 app-server，完成 GUI 协议客户端迁移后再进入 Provider/Policy/ContextFragment 拆分。

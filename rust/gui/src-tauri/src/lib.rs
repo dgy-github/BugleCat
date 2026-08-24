@@ -17,6 +17,7 @@ use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use ncx_app_server::{AppServer, DispatchOutcome};
 use ncx_config::{
     load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
     VALID_SANDBOX_MODES,
@@ -26,6 +27,8 @@ use ncx_core::{
     CheckpointStore, ExternalPluginCatalog, ExternalPluginRecord, HarnessDiagnostics,
     HarnessRuntimeBuilder, MemoryStore, RestoreReport, SessionIndex, ToolContext,
 };
+use ncx_protocol::{ClientRequest, ThreadId};
+use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde::Serialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -61,6 +64,7 @@ struct AppState {
     question_counter: AtomicU64,
     cancels: CancelRegistry,
     session_index: Arc<Mutex<SessionIndex>>,
+    app_server: Arc<AppServer<JsonThreadStore>>,
     openrouter_models: Mutex<Vec<CatalogModel>>,
 }
 
@@ -257,18 +261,58 @@ fn archive_session(
     archived: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    archive_session_in_index(&state.session_index, &session_id, archived)
+    archive_session_in_index(&state.session_index, &session_id, archived)?;
+    let thread_id = ThreadId::new(session_id).map_err(|error| error.to_string())?;
+    if state
+        .app_server
+        .dispatch(ClientRequest::ThreadRead {
+            thread_id: thread_id.clone(),
+        })
+        .is_ok()
+    {
+        state
+            .app_server
+            .dispatch(ClientRequest::ThreadArchive {
+                thread_id,
+                archived,
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// Start a fresh session (rebuild the agent from config — new empty context).
 #[tauri::command]
 fn new_session(state: tauri::State<'_, AppState>) -> Result<String, String> {
     let session_id = ncx_core::new_session_id();
+    let (_, workspace) = configured_workspace()?;
+    state
+        .app_server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(ThreadId::new(session_id.clone()).map_err(|error| error.to_string())?),
+            workspace: workspace.display().to_string(),
+            title: "(no prompt yet)".to_string(),
+        })
+        .map_err(|error| error.to_string())?;
     state
         .tx
         .send(Command::New(session_id.clone()))
         .map_err(|_| "agent thread is not running".to_string())?;
     Ok(session_id)
+}
+
+/// Versioned app-server entry point used by the GUI while legacy Tauri
+/// commands are migrated incrementally. All returned events carry threadId,
+/// optional turnId and a monotonic sequence.
+#[tauri::command]
+fn app_server_request(
+    request: ClientRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<DispatchOutcome, String> {
+    state
+        .app_server
+        .dispatch(request)
+        .map_err(|error| error.to_string())
 }
 
 /// Continue a saved session (reseed the agent from its snapshot, same id).
@@ -1315,23 +1359,40 @@ fn expand_custom_command(slash: String, arg: String) -> Result<String, String> {
 }
 
 fn configured_workspace() -> Result<(Config, PathBuf), String> {
-    let cfg = load_config(Overrides { workspace: std::env::current_dir().ok(), ..Default::default() })
-        .map_err(|e| e.to_string())?;
+    let cfg = load_config(Overrides {
+        workspace: std::env::current_dir().ok(),
+        ..Default::default()
+    })
+    .map_err(|e| e.to_string())?;
     let workspace = cfg.workspace.clone();
     Ok((cfg, workspace))
+}
+
+fn now_epoch_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
 }
 
 #[tauri::command]
 fn get_harness_diagnostics() -> Result<HarnessDiagnostics, String> {
     let (cfg, workspace) = configured_workspace()?;
     let profile = AgentRuntimeProfile::from_config(&cfg);
-    let context = profile.apply_tool_context(ToolContext::new(workspace.clone(), profile.sandbox_policy(&workspace)));
-    Ok(HarnessRuntimeBuilder::configured(&workspace)?.build(context).harness_diagnostics())
+    let context = profile.apply_tool_context(ToolContext::new(
+        workspace.clone(),
+        profile.sandbox_policy(&workspace),
+    ));
+    Ok(HarnessRuntimeBuilder::configured(&workspace)?
+        .build(context)
+        .harness_diagnostics())
 }
 
 fn external_plugin_catalog() -> Result<ExternalPluginCatalog, String> {
     let (_, workspace) = configured_workspace()?;
-    Ok(ExternalPluginCatalog::new(workspace.join(".ncx").join("plugins")))
+    Ok(ExternalPluginCatalog::new(
+        workspace.join(".ncx").join("plugins"),
+    ))
 }
 
 #[tauri::command]
@@ -1342,7 +1403,11 @@ fn list_external_plugins() -> Result<Vec<ExternalPluginRecord>, String> {
 #[tauri::command]
 fn install_external_plugin(source: String, upgrade: bool) -> Result<ExternalPluginRecord, String> {
     let catalog = external_plugin_catalog()?;
-    if upgrade { catalog.upgrade(Path::new(&source)) } else { catalog.install(Path::new(&source)) }
+    if upgrade {
+        catalog.upgrade(Path::new(&source))
+    } else {
+        catalog.install(Path::new(&source))
+    }
 }
 
 #[tauri::command]
@@ -1363,6 +1428,11 @@ pub fn run() {
     let session_grants: GrantRegistry = Arc::new(Mutex::new(HashMap::new()));
     let session_index = Arc::new(Mutex::new(SessionIndex::default()));
     let session_index_for_worker = session_index.clone();
+    let thread_store = Arc::new(
+        JsonThreadStore::open(default_thread_store_path())
+            .expect("open the versioned nanocodex thread store"),
+    );
+    let app_server = Arc::new(AppServer::new(thread_store, now_epoch_millis));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1373,6 +1443,7 @@ pub fn run() {
             question_counter: AtomicU64::new(1_000_000),
             cancels,
             session_index,
+            app_server,
             openrouter_models: Mutex::new(Vec::new()),
         })
         .setup(move |app| {
@@ -1392,6 +1463,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
+            app_server_request,
             send_prompt,
             stop_generation,
             approve,
@@ -1639,7 +1711,7 @@ mod tests {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("REASONING_DISPLAY_MAX_CHARS"));
         assert!(app.contains("appendReasoning(m.text, p.text)"));
-        assert!(app.contains("<details class=\"reasoning-run\" class:settled={m.settled}>") );
+        assert!(app.contains("<details class=\"reasoning-run\" class:settled={m.settled}>"));
         assert!(!app.contains(
             "<details class=\"reasoning-run\" class:settled={m.settled} open={!m.settled}>"
         ));
@@ -1650,7 +1722,8 @@ mod tests {
     fn completed_turn_removes_transient_reasoning_cards() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("function removeReasoningMessages()"));
-        assert!(app.contains("removeReasoningMessages();\n          messages = hideCompletedToolActivity(messages);"));
+        assert!(app.contains("removeReasoningMessages();"));
+        assert!(app.contains("messages = hideCompletedToolActivity(messages);"));
         assert!(app.contains("case \"done\":"));
         assert!(app.contains("case \"error\":"));
         assert!(app.contains("sessionMessages.set(p.session_id, cloneMessages(messages));"));
@@ -1672,9 +1745,7 @@ mod tests {
     fn stop_button_remains_retryable_until_turn_finishes() {
         let app = include_str!("../../src/App.svelte");
         assert!(app.contains("if (!busy) return;"));
-        assert!(app.contains(
-            "disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"
-        ));
+        assert!(app.contains("disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"));
         assert!(!app.contains("if (!busy || stopping) return;"));
     }
 
