@@ -587,3 +587,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 新增 `.svelte.ts` 控制器：侧栏尺寸/拖动、累计 Token/费用恢复、文件浏览、Git 分支/Diff、检查点、项目记忆。费用和币种不再散落在 App 状态中。
 - `App.svelte` 从 1943 行降至 1474 行；新增控制器均通过结构门禁。Vite production build、GUI Rust 56 项和真实 protocol E2E 全绿。
 - 尚未收口：设置/模型/插件编排、Thread/Turn UI 事件状态机、Composer/Slash 状态仍在 App；下一批继续拆，结构门禁仍未通过，不能宣告 GUI 单体改造完成。
+
+### 2026-08-24 设置与插件控制器增量
+- `PluginController` 统一 Harness 诊断、外部插件和 Codex 资源插件的发现、安装、升级、启停、卸载与 Marketplace 安装；所有 Codex 生命周期继续走 app-server 协议。
+- `SettingsController` 统一设置加载/保存、配置文件入口、厂商模型目录、OpenRouter 刷新、模型预设及官方价格来源；模型预设继续同步快捷模型列表、Token 单价、币种和累计费用显示。
+- `App.svelte` 从 1474 行降至 1210 行；两个新控制器均通过结构门禁。Vite build、GUI Rust 56 项、question E2E 和 protocol/Marketplace E2E 全绿。
+- 下一批只剩核心状态拆分：Thread/Turn UI 事件状态机与 Composer/Slash；在 App 结构门禁通过前保持未完成状态。
