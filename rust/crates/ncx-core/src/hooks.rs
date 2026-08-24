@@ -16,6 +16,8 @@ pub enum HookEvent {
     PreTool,
     PostTool,
     UserPrompt,
+    PreCompact,
+    PostCompact,
     Stop,
 }
 
@@ -25,6 +27,8 @@ impl HookEvent {
             HookEvent::PreTool => "pre_tool",
             HookEvent::PostTool => "post_tool",
             HookEvent::UserPrompt => "user_prompt",
+            HookEvent::PreCompact => "pre_compact",
+            HookEvent::PostCompact => "post_compact",
             HookEvent::Stop => "stop",
         }
     }
@@ -104,7 +108,11 @@ async fn run_one_hook(
 
 fn render_hook_result(hook: &HookConfig, event: HookEvent, result: &ExecResult) -> HookOutcome {
     let rendered = result.render();
-    if matches!(event, HookEvent::PreTool | HookEvent::UserPrompt) && !result.ok() {
+    if matches!(
+        event,
+        HookEvent::PreTool | HookEvent::UserPrompt | HookEvent::PreCompact
+    ) && !result.ok()
+    {
         return HookOutcome {
             notes: format!(
                 "{} hook blocked execution: command={:?}\n{}",

@@ -313,6 +313,57 @@ async fn long_history_is_automatically_compacted_before_the_next_model_call() {
 }
 
 #[tokio::test]
+async fn compact_hooks_wrap_persisted_compaction_and_feed_runtime_notes() {
+    let ws = tmpdir("compact_hooks");
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut loop_ = build_with_hooks(
+        &ws,
+        Box::new(CapturingProvider { seen: seen.clone() }),
+        vec![
+            HookConfig {
+                event: "pre_compact".into(),
+                matcher: "*".into(),
+                command: "echo before-compact".into(),
+                timeout_s: 3,
+            },
+            HookConfig {
+                event: "post_compact".into(),
+                matcher: "*".into(),
+                command: "echo after-compact".into(),
+                timeout_s: 3,
+            },
+        ],
+    );
+    for i in 0..16 {
+        loop_
+            .session
+            .add_user_text(&format!("old request {i} {}", "x".repeat(80)));
+        loop_
+            .session
+            .add_assistant(&format!("old result {i}"), None, "");
+    }
+    loop_.context_edit = ContextEditPolicy {
+        enabled: true,
+        max_chars: 700,
+        keep_recent_messages: 4,
+        max_tool_result_chars: 40,
+    };
+
+    let result = loop_.run_turn(json!("continue"), None).await;
+
+    assert_eq!(result.stop_reason, "completed");
+    let messages = seen.borrow();
+    let system_notes = messages
+        .iter()
+        .filter(|message| message["role"] == "system")
+        .filter_map(|message| message["content"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(system_notes.contains("before-compact"), "{system_notes}");
+    assert!(system_notes.contains("after-compact"), "{system_notes}");
+}
+
+#[tokio::test]
 async fn runs_update_plan_and_records_state() {
     let p = ScriptedProvider::new(vec![
         {

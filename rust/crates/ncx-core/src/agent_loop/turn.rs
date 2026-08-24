@@ -54,7 +54,7 @@ pub(super) async fn run(
     cancel: Option<&dyn Fn() -> bool>,
     sink: &mut Option<EventSink>,
 ) -> TurnResult {
-    let prompt = match prepare_prompt(agent, &user_input).await {
+    let mut prompt = match prepare_prompt(agent, &user_input).await {
         Ok(prompt) => prompt,
         Err(result) => return result,
     };
@@ -74,9 +74,48 @@ pub(super) async fn run(
             .tools
             .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
             .is_some()
+            && agent.session.needs_compaction(&agent.context_edit)
         {
-            if let Some(stats) = agent.session.compact_if_needed(&agent.context_edit) {
-                emit(sink, LoopEvent::ContextCompacted(stats));
+            let hook_args = json!({
+                "max_chars": agent.context_edit.max_chars,
+                "keep_recent_messages": agent.context_edit.keep_recent_messages,
+                "max_tool_result_chars": agent.context_edit.max_tool_result_chars,
+            });
+            let pre = run_matching_hooks(
+                &agent.tools.ctx.hooks,
+                HookEvent::PreCompact,
+                "compaction",
+                &hook_args,
+                None,
+                &agent.tools.ctx.workspace,
+            )
+            .await;
+            if !pre.notes.trim().is_empty() {
+                prompt.runtime_notes.push(pre.notes);
+            }
+            if !pre.blocked {
+                if let Some(stats) = agent.session.compact_if_needed(&agent.context_edit) {
+                    let rendered = format!(
+                        "chars {} -> {}; compressed_tool_results={}; dropped_messages={}",
+                        stats.original_chars,
+                        stats.edited_chars,
+                        stats.compressed_tool_results,
+                        stats.dropped_messages
+                    );
+                    let post = run_matching_hooks(
+                        &agent.tools.ctx.hooks,
+                        HookEvent::PostCompact,
+                        "compaction",
+                        &hook_args,
+                        Some(&rendered),
+                        &agent.tools.ctx.workspace,
+                    )
+                    .await;
+                    if !post.notes.trim().is_empty() {
+                        prompt.runtime_notes.push(post.notes);
+                    }
+                    emit(sink, LoopEvent::ContextCompacted(stats));
+                }
             }
         }
 

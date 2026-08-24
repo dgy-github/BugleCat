@@ -11,8 +11,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
 pub use ncx_context::{ContextEditPolicy, ContextEditStats};
+use serde_json::{json, Value};
 
 pub const COMPACTED_HISTORY_PREFIX: &str = "[压缩后保留的会话里程碑";
 
@@ -181,11 +181,15 @@ impl Session {
     /// to the session log so later turns and restarts do not repeatedly carry
     /// old tool noise.
     pub fn compact_if_needed(&mut self, policy: &ContextEditPolicy) -> Option<ContextEditStats> {
-        if !policy.enabled || total_chars(&self.system, &[], &self.messages) <= policy.max_chars {
+        if !self.needs_compaction(policy) {
             return None;
         }
         let stats = self.compact(policy);
         (stats.compressed_tool_results > 0 || stats.dropped_messages > 0).then_some(stats)
+    }
+
+    pub fn needs_compaction(&self, policy: &ContextEditPolicy) -> bool {
+        policy.enabled && total_chars(&self.system, &[], &self.messages) > policy.max_chars
     }
 
     fn edited_body(

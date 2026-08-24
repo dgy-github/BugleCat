@@ -533,3 +533,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - Policy 服务从只读诊断快照升级为携带真实 `SandboxPolicy`、审批策略和 Plan 模式的可替换运行时服务。ToolRegistry 在每次工具执行、Middleware 和 Hooks 前读取有效 Policy/Interaction 服务，因此 Overlay/Provider 替换会真正改变执行边界，而不只是改变诊断页面。
 - 新增回归证明替换 Policy 服务后工具实际看到只读策略；Context 服务回归证明排序、替换和字符硬上限由独立 crate 统一执行。
 - 验证：`ncx-context` 3 项、`ncx-sandbox` 15 项、`ncx-core` 221 项、CLI 35 项、GUI Rust 55 项通过。
+
+### 2026-08-24 Codex 压缩 Hooks 闭环
+- OpenAI 资源插件 Hooks 新增 `PreCompact` → `pre_compact`、`PostCompact` → `post_compact` 映射，不再静默忽略压缩生命周期。
+- AgentLoop 在真实自动压缩前执行 PreCompact；失败可阻止本次压缩并把诊断作为运行时说明交给模型。压缩写回 Session/JSONL 后执行 PostCompact，并把压缩统计作为 Hook 结果输入。
+- `Session::needs_compaction` 公开纯判断，避免为了触发 Hook 先修改会话；实际压缩仍由原有唯一状态机完成，没有建立第二套 compaction 实现。
+- 回归覆盖插件资源解析和真实前/后 Hook 执行，`ncx-core` 222 项通过。

@@ -471,6 +471,8 @@ fn map_hook_event(event: &str) -> Option<&'static str> {
         "PreToolUse" => Some("pre_tool"),
         "PostToolUse" => Some("post_tool"),
         "UserPromptSubmit" => Some("user_prompt"),
+        "PreCompact" => Some("pre_compact"),
+        "PostCompact" => Some("post_compact"),
         "Stop" => Some("stop"),
         _ => None,
     }
@@ -700,7 +702,7 @@ mod tests {
         .unwrap();
         fs::write(
             plugin.join("hooks/hooks.json"),
-            r#"{"hooks":{"PreToolUse":[{"matcher":"shell","hooks":[{"type":"command","command":"check","timeout":12}]}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"shell","hooks":[{"type":"command","command":"check","timeout":12}]}],"PreCompact":[{"hooks":[{"type":"command","command":"before-compact"}]}],"PostCompact":[{"hooks":[{"type":"command","command":"after-compact"}]}]}}"#,
         )
         .unwrap();
 
@@ -709,9 +711,18 @@ mod tests {
         assert_eq!(servers[0].args, vec!["--stdio"]);
         assert_eq!(servers[0].env.get("MODE").map(String::as_str), Some("test"));
         let hooks = discover_codex_hooks(&workspace).unwrap();
-        assert_eq!(hooks[0].event, "pre_tool");
-        assert_eq!(hooks[0].matcher, "shell");
-        assert_eq!(hooks[0].timeout_s, 12);
+        let pre_tool = hooks
+            .iter()
+            .find(|hook| hook.event == "pre_tool")
+            .expect("pre-tool hook");
+        assert_eq!(pre_tool.matcher, "shell");
+        assert_eq!(pre_tool.timeout_s, 12);
+        assert!(hooks
+            .iter()
+            .any(|hook| hook.event == "pre_compact" && hook.command == "before-compact"));
+        assert!(hooks
+            .iter()
+            .any(|hook| hook.event == "post_compact" && hook.command == "after-compact"));
 
         let inline = workspace.join(".ncx/codex-plugins/inline");
         fs::create_dir_all(inline.join(".codex-plugin")).unwrap();
