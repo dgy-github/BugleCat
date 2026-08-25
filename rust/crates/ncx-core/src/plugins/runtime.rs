@@ -166,6 +166,10 @@ fn parse_embedded<T: for<'de> serde::Deserialize<'de>>(id: &str, text: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::{
+        AttachmentServiceDescriptor, CostTelemetryService, McpServiceDescriptor,
+        MediaServiceDescriptor,
+    };
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -267,6 +271,38 @@ mod tests {
         assert!(!headless_diag.media && !headless_diag.mcp && !headless_diag.attachment);
         assert!(full.schemas().len() > minimal.schemas().len());
         assert!(headless.schemas().len() > minimal.schemas().len());
+
+        let attachment = full
+            .service::<AttachmentServiceDescriptor>("attachment")
+            .expect("full profile must publish the real attachment policy");
+        assert!(attachment.max_bytes > 0 && attachment.extensions.iter().any(|ext| ext == "pdf"));
+        let media = full
+            .service::<MediaServiceDescriptor>("media")
+            .expect("full profile must publish media routing");
+        assert!(media.vision && media.image_generation && media.video_generation);
+        let mcp = full
+            .service::<McpServiceDescriptor>("mcp")
+            .expect("full profile must publish MCP lifecycle state");
+        assert!(!mcp.enabled && mcp.configured_servers == 0 && mcp.active_tools == 0);
+        let telemetry = full
+            .service::<CostTelemetryService>("cost.telemetry")
+            .expect("full profile must publish the cost accumulator");
+        telemetry.record(&std::collections::BTreeMap::from([
+            ("prompt_tokens".to_string(), 10),
+            ("completion_tokens".to_string(), 5),
+        ]));
+        assert_eq!(telemetry.snapshot().turns, 1);
+
+        for registry in [&minimal, &headless] {
+            assert!(registry
+                .service::<AttachmentServiceDescriptor>("attachment")
+                .is_none());
+            assert!(registry.service::<MediaServiceDescriptor>("media").is_none());
+            assert!(registry.service::<McpServiceDescriptor>("mcp").is_none());
+            assert!(registry
+                .service::<CostTelemetryService>("cost.telemetry")
+                .is_none());
+        }
     }
 
     #[test]

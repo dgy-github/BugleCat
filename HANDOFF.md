@@ -618,3 +618,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 外部 `plugin.toml` 插件与 OpenAI `.codex-plugin/plugin.json`、Marketplace 现在共用一个 app-server 客户端边界；Tauri 只负责工作区目录、进程和网络等宿主实现，不再拥有 GUI 路由选择。
 - 对应旧 Tauri handler 已删除，新增 App Server 路由单测与前端事实源回归，防止后续重新形成两套插件控制面。
 - 验证：协议/App Server 10 项、GUI Rust 59 项、Vite production build、结构门禁和 `git diff --check` 通过；最终交付前仍需重跑真实 protocol E2E 与 workspace 全量。
+
+### 2026-08-24 M4 Memory 控制面与组合测试加固
+- GUI 的项目记忆列表、写入和合并改走 `ncx-protocol` → `ncx-app-server`，与 AgentLoop 消费的 Memory 服务共享控制边界；只有“用系统程序打开记忆文件”保留为桌面资源命令。
+- `full`/`minimal`/`headless` 组合测试不再只检查诊断布尔值和 schema 数量：开始直接读取真实 Attachment、Media、MCP、CostTelemetry 服务，执行费用遥测记录，并断言 minimal/headless 未挂载这些服务。
+- 对应旧 Memory Tauri handler 已删除；新增 App Server 路由单测和前端事实源回归。`AppServerAdapter` 已从超限的 `lib.rs` 提取为独立模块，没有放宽结构门禁。
+- 验证：结构门禁、`git diff --check`、Vite production build 和真实 protocol E2E 通过；Protocol 4 项、App Server 11 项、Harness `full/minimal/headless` 真实组合测试、GUI Rust 60 项通过。

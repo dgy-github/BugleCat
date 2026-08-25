@@ -362,6 +362,18 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         set_external_plugin_enabled(id, enabled)
     }
 
+    fn list_memory(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(memory_list()?).map_err(|error| error.to_string())
+    }
+
+    fn add_memory(&self, note: String, tags: Vec<String>) -> Result<bool, String> {
+        memory_add(note, tags)
+    }
+
+    fn consolidate_memory(&self) -> Result<u64, String> {
+        memory_consolidate().map(|count| count as u64)
+    }
+
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
         serde_json::to_value(list_codex_plugins()?).map_err(|error| error.to_string())
     }
@@ -1257,7 +1269,6 @@ fn memory_store() -> MemoryStore {
 }
 
 /// List accumulated learnings (newest first).
-#[tauri::command]
 fn memory_list() -> Result<Vec<MemoryNote>, String> {
     let mut entries = memory_store().entries();
     entries.sort_by_key(|entry| Reverse(entry.ts));
@@ -1273,13 +1284,11 @@ fn memory_list() -> Result<Vec<MemoryNote>, String> {
 
 /// Trigger self-evolution maintenance: fold near-duplicate notes (heuristic,
 /// local — no model). Returns how many entries were removed.
-#[tauri::command]
 fn memory_consolidate() -> Result<usize, String> {
     memory_store().consolidate(0.85).map_err(|e| e.to_string())
 }
 
 /// Manually record a verified learning into project memory.
-#[tauri::command]
 fn memory_add(note: String, tags: Vec<String>) -> Result<bool, String> {
     let note = note.trim();
     if note.is_empty() {
@@ -1981,9 +1990,6 @@ pub fn run() {
             open_session_snapshot,
             get_custom_commands,
             expand_custom_command,
-            memory_list,
-            memory_consolidate,
-            memory_add,
             open_memory_file,
             get_workspace,
         ])
@@ -2530,6 +2536,25 @@ mod tests {
         ] {
             assert!(!plugins.contains(legacy), "legacy plugin command remains: {legacy}");
         }
+    }
+
+    #[test]
+    fn project_memory_uses_the_app_server_service_boundary() {
+        let memory = include_str!("../../src/lib/memory-controller.svelte.ts");
+        for method in ["memoryList", "memoryAdd", "memoryConsolidate"] {
+            assert!(
+                memory.contains(&format!("method: \"{method}\"")),
+                "missing app-server memory request for {method}"
+            );
+        }
+        for legacy in [
+            "invoke<MemoryNote[]>(\"memory_list\"",
+            "invoke<number>(\"memory_consolidate\"",
+            "invoke<boolean>(\"memory_add\"",
+        ] {
+            assert!(!memory.contains(legacy), "legacy memory command remains: {legacy}");
+        }
+        assert!(memory.contains("invoke(\"open_memory_file\""));
     }
 
     #[test]

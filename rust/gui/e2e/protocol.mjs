@@ -61,7 +61,12 @@ try {
     const visible = await call("threadReadVisible", { threadId: a });
     const plugins = await call("codexPluginList");
     const marketplaces = await call("marketplaceList");
-    return { sameThreadRejected, visible, plugins, marketplaces, a, b, title };
+    const diagnostics = await call("harnessDiagnosticsRead");
+    const externalPlugins = await call("externalPluginList");
+    const memory = await call("memoryList");
+    const settings = await call("settingsRead");
+    const modelCatalog = await call("modelCatalogRead");
+    return { sameThreadRejected, visible, plugins, marketplaces, diagnostics, externalPlugins, memory, settings, modelCatalog, a, b, title };
   });
   const serialized = JSON.stringify(evidence.visible);
   if (!evidence.sameThreadRejected) throw new Error("same-thread overlap was accepted");
@@ -69,6 +74,11 @@ try {
   if (serialized.includes("SECRET_TOOL_OUTPUT") || serialized.includes("中间播报")) throw new Error(`visible transcript leaked internal output: ${serialized}`);
   if (!Array.isArray(evidence.plugins.response.payload.data)) throw new Error("plugin list did not use protocol data response");
   if (!Array.isArray(evidence.marketplaces.response.payload.data)) throw new Error("marketplace list did not use protocol data response");
+  if (evidence.diagnostics.response.payload.data.llm !== true) throw new Error("harness diagnostics did not use protocol response");
+  if (!Array.isArray(evidence.externalPlugins.response.payload.data)) throw new Error("external plugin list did not use protocol response");
+  if (!Array.isArray(evidence.memory.response.payload.data)) throw new Error("memory list did not use protocol response");
+  if (!evidence.settings.response.payload.data.model) throw new Error("settings did not use protocol response");
+  if (!Array.isArray(evidence.modelCatalog.response.payload.data.providers)) throw new Error("model catalog did not use protocol response");
   await page.reload();
   await page.getByRole("button", { name: /最近会话/ }).click();
   await page.getByText(evidence.title, { exact: true }).waitFor({ timeout: 15_000 });
@@ -80,7 +90,7 @@ try {
     await call("threadArchive", { threadId: a, archived: true });
     await call("threadArchive", { threadId: b, archived: true });
   }, { a: evidence.a, b: evidence.b });
-  console.log("protocol e2e: ok (concurrency, ownership, visible projection, history reload/open, plugin marketplace)");
+  console.log("protocol e2e: ok (concurrency, ownership, visible projection, history reload/open, runtime settings, memory, plugins)");
 } finally {
   await browser?.close();
   stopTree(child.pid);

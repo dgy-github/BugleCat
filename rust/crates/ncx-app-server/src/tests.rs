@@ -351,6 +351,23 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(())
     }
 
+    fn list_memory(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!([{"note":"remember"}]))
+    }
+
+    fn add_memory(&self, note: String, tags: Vec<String>) -> Result<bool, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("memory-add:{note}:{}", tags.len()));
+        Ok(true)
+    }
+
+    fn consolidate_memory(&self) -> Result<u64, String> {
+        self.calls.lock().unwrap().push("memory-consolidate".into());
+        Ok(2)
+    }
+
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"name":"demo"}]))
     }
@@ -703,5 +720,45 @@ fn harness_diagnostics_and_external_plugins_use_the_same_protocol_boundary() {
             "external-install:external-dir:true",
             "external-enabled:demo.echo:false",
         ]
+    );
+}
+
+#[test]
+fn memory_service_requests_are_routed_by_the_app_server() {
+    let server = server();
+    let runtime = RecordingRuntime::default();
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(ClientRequest::MemoryList, &runtime)
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::MemoryNotes(ref value) if value.is_array()
+    ));
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(
+                ClientRequest::MemoryAdd {
+                    note: "remember".into(),
+                    tags: vec!["project".into()],
+                },
+                &runtime,
+            )
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::Bool(true)
+    ));
+    assert!(matches!(
+        server
+            .dispatch_with_runtime(ClientRequest::MemoryConsolidate, &runtime)
+            .unwrap()
+            .response
+            .payload,
+        ResponsePayload::Count(2)
+    ));
+    assert_eq!(
+        *runtime.calls.lock().unwrap(),
+        vec!["memory-add:remember:1", "memory-consolidate"]
     );
 }

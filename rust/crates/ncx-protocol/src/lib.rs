@@ -295,6 +295,12 @@ pub enum ClientRequest {
         id: String,
         enabled: bool,
     },
+    MemoryList,
+    MemoryAdd {
+        note: String,
+        tags: Vec<String>,
+    },
+    MemoryConsolidate,
     TurnComplete {
         thread_id: ThreadId,
         turn_id: TurnId,
@@ -348,6 +354,9 @@ pub enum ResponsePayload {
     HarnessDiagnostics(Value),
     ExternalPlugins(Value),
     ExternalPlugin(Value),
+    MemoryNotes(Value),
+    Count(u64),
+    Bool(bool),
     CodexPlugins(Value),
     CodexPlugin(Value),
     Marketplaces(Value),
