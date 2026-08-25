@@ -27,6 +27,7 @@ pub mod plugins;
 pub mod process_tools;
 pub mod project_instructions;
 pub mod prompt;
+pub mod runtime_assembly;
 pub mod runtime_profile;
 pub mod rust_analyzer;
 pub mod search;
@@ -85,6 +86,7 @@ pub use plugins::{
 };
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;
+pub use runtime_assembly::{ConfiguredHarnessRuntime, RuntimeContextSources, RuntimeHostBindings};
 pub use runtime_profile::{
     install_llm_provider_factory, model_provider_from_config, vision_provider_from_config,
     AgentRuntimeProfile, ConfiguredLlmProviderFactory, RuntimePermissionProfile,

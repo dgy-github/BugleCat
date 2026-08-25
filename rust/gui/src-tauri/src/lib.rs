@@ -25,11 +25,11 @@ use ncx_config::{
 };
 use ncx_core::{
     custom_command_prompt, discover_codex_apps, discover_marketplaces,
-    install_llm_provider_factory, list_custom_commands, resolve_local_marketplace_plugin,
-    AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
-    CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, ExternalPluginCatalog,
-    ExternalPluginRecord, HarnessRuntimeBuilder, Marketplace,
-    MarketplacePlugin, MarketplaceSource, MemoryStore, RestoreReport, SessionIndex, ToolContext,
+    list_custom_commands, resolve_local_marketplace_plugin, CheckpointMeta, CheckpointStore,
+    CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, ConfiguredHarnessRuntime,
+    ExternalPluginCatalog, ExternalPluginRecord, Marketplace, MarketplacePlugin,
+    MarketplaceSource, MemoryStore, RestoreReport, RuntimeContextSources, RuntimeHostBindings,
+    SessionIndex,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
@@ -1471,13 +1471,12 @@ fn now_epoch_millis() -> i64 {
 
 fn get_harness_diagnostics() -> Result<serde_json::Value, String> {
     let (cfg, workspace) = configured_workspace()?;
-    let profile = AgentRuntimeProfile::from_config(&cfg);
-    let context = profile.apply_tool_context(ToolContext::new(
+    let runtime = ConfiguredHarnessRuntime::from_config(cfg);
+    let tools = runtime.build_tools(
         workspace.clone(),
-        profile.sandbox_policy(&workspace),
-    ));
-    let mut tools = HarnessRuntimeBuilder::configured(&workspace)?.build(context);
-    install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
+        RuntimeContextSources::new(String::new(), Vec::new(), String::new()),
+        RuntimeHostBindings::default(),
+    )?;
     let mut diagnostics = serde_json::to_value(tools.harness_diagnostics())
         .map_err(|error| error.to_string())?;
     let object = diagnostics

@@ -641,3 +641,13 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 真实 Key 验收：从用户提供的密钥文件中脱敏读取两把 Key，分别请求阿里百炼原生媒体接口，均返回 HTTP 401 `InvalidApiKey`。因此代码执行链已完成，但付费 live 生图/视频成功验收仍缺少标准 DashScope Key；没有创建成功任务，也不应产生费用。
 - Windows protocol E2E 首次因 MSVC 增量链接缓存损坏出现 LNK2019/LNK1120；使用 `cargo clean --manifest-path src-tauri/Cargo.toml -p ncx-core --target x86_64-pc-windows-msvc` 做包级清理后恢复，真实 E2E 通过：跨 Thread 并发、同 Thread 所有权、可见历史投影、刷新恢复、运行设置、Memory 和两类插件控制面全部正常。
 - 最终验证：`cargo test --workspace --quiet` 全绿（`ncx-core` 234 项）；GUI Rust 60 项；`npm run build` 成功（141 模块）；真实 `npm run test:e2e:protocol` 通过；15 个目标生产文件结构门禁与 `git diff --check` 通过。
+
+### 2026-08-25 Provider / Policy / ContextFragment 统一运行时装配
+
+- 完成度审计确认：`ncx-protocol`、`ncx-thread-store`、`ncx-app-server` 和 OpenAI `.codex-plugin/plugin.json`/Marketplace 已有源码、单测与真实 WebView E2E 证据；剩余架构旁路是 CLI 主流程、GUI Agent 和并行 Runner 各自创建 Sandbox、Provider 与三段 ContextFragment。
+- 新增 `ncx-core::ConfiguredHarnessRuntime`，成为 Provider、Policy、ContextFragment 的统一配置所有者；`RuntimeContextSources` 只接收项目说明、Skills、Plan 注入、Memory、Hooks、Genome，`RuntimeHostBindings` 只接收审批、用户问答和会话授权等宿主端口。
+- CLI 主流程、GUI Agent、并行/无工具 Runner、后台会话标题和 Memory 摘要全部改走统一运行时；生产入口不再直接调用 `ToolContext::new`、`SandboxPolicy::new`、`DeepSeekProvider`、`install_llm_provider_factory` 或自行创建 `project_instructions`/`skills`/`plan_mode` Fragment。
+- 工具完整与 reasoning-only 两条路径共享同一 Provider、Policy、Interaction、Context 服务契约；新增测试证明 plan 模式生成只读 Policy、上下文按稳定顺序装配、tool-less worker 仍拥有相同服务边界和正确模型路由。
+- 验证：Rust workspace 全量通过（`ncx-core` 236 项）；`cargo clippy -p ncx-core -p ncx-cli --all-targets -- -D warnings` 通过；GUI Rust 60 项、Vite production build、真实 protocol E2E 和 question E2E 全部通过；生产入口搜索仅剩 GUI 测试夹具中的一次 `ToolContext::new`。
+- 未完成的结构门禁债务：本批触及的 `rust/crates/ncx-cli/src/main.rs` 是既有 2191 行单体，结构检查仍报文件超过 700 行且 `run` 超过 80 行；没有调低门禁。后续应按参数/启动、Runtime 装配、Thread Recorder、REPL 命令和 MCP 生命周期继续拆分，不能据此宣告所有结构改造收口。
+- GUI 严格 Clippy 仍被三个既有问题阻挡：`spawn_worker` 参数过多、历史投影可折叠 match、模型目录构造函数参数过多；本批 `cargo check` 无新增 warning，不能把 GUI `-D warnings` 宣称为通过。

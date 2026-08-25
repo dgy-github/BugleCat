@@ -27,11 +27,11 @@ use std::rc::Rc;
 
 use ncx_core::{
     custom_command_prompt, discover_codex_hooks, discover_codex_mcp_servers, discover_skills,
-    expand_file_mentions, install_llm_provider_factory, list_custom_commands,
-    load_project_instructions, new_session_id, prepare_mcp_server_tools, skills_index_block,
-    AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore, ContextEntry,
-    ContextServiceDescriptor, Genome, HarnessRuntimeBuilder, McpServiceDescriptor, MemoryStore,
-    Orchestrator, OrchestratorConfig, Session, TextContextFragment, Tool, ToolContext, TurnResult,
+    expand_file_mentions, list_custom_commands, load_project_instructions, new_session_id,
+    prepare_mcp_server_tools, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
+    ConfiguredHarnessRuntime, ContextServiceDescriptor, Genome, McpServiceDescriptor, MemoryStore,
+    Orchestrator, OrchestratorConfig, RuntimeContextSources, RuntimeHostBindings, Session, Tool,
+    TurnResult,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, TurnId,
@@ -158,7 +158,6 @@ async fn run(args: Args) -> i32 {
     }
 
     let runtime_profile = runtime_profile_for_args(&cfg, &args);
-    let policy = runtime_profile.sandbox_policy(&cfg.workspace);
     // Project memory: recalled per prompt by AgentLoop (query-scoped); the
     // `remember` tool lets the agent append verified notes (smarter on THIS repo).
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
@@ -169,7 +168,6 @@ async fn run(args: Args) -> i32 {
     // Agent Skills: inject only the name+description index (progressive
     // disclosure); the `skill` tool loads a full SKILL.md body on demand.
     let skills = discover_skills(&cfg.workspace);
-    let skills_index = skills_index_block(&skills);
     // Training-time harness overrides (NCX_GENOME). Empty/unset => no-op: the
     // base prompt stays SYSTEM_PROMPT and tool descriptions are untouched.
     let genome = Genome::from_env();
@@ -188,24 +186,6 @@ async fn run(args: Args) -> i32 {
     } else {
         String::new()
     };
-    let instruction_fragment =
-        TextContextFragment::new("project_instructions", instructions, 16_000);
-    let skills_fragment = TextContextFragment::new("skills", skills_index, 32_000);
-    let plan_fragment = TextContextFragment::new("plan_mode", plan_note, 4_000);
-    let context_entries = vec![
-        ContextEntry {
-            order: 10,
-            fragment: instruction_fragment,
-        },
-        ContextEntry {
-            order: 20,
-            fragment: skills_fragment,
-        },
-        ContextEntry {
-            order: 30,
-            fragment: plan_fragment,
-        },
-    ];
     let mut hooks = cfg.hooks.clone();
     match discover_codex_hooks(&cfg.workspace) {
         Ok(plugin_hooks) => hooks.extend(plugin_hooks),
@@ -214,23 +194,23 @@ async fn run(args: Args) -> i32 {
             return 1;
         }
     }
-    let ctx = runtime_profile
-        .apply_tool_context(ToolContext::new(cfg.workspace.clone(), policy))
-        .with_timeout(cfg.timeout_s as u64)
-        .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
+    let sources = RuntimeContextSources::new(instructions, skills, plan_note)
         .with_memory(memory)
         .with_hooks(hooks)
-        .with_skills(skills)
-        .with_context_entries(context_entries)
         .with_genome(genome);
-    let mut tools = match HarnessRuntimeBuilder::configured(&cfg.workspace) {
-        Ok(builder) => builder.build(ctx),
+    let runtime =
+        ConfiguredHarnessRuntime::new(cfg.clone(), cfg.model.clone(), runtime_profile.clone());
+    let mut tools = match runtime.build_tools(
+        cfg.workspace.clone(),
+        sources,
+        RuntimeHostBindings::default(),
+    ) {
+        Ok(tools) => tools,
         Err(error) => {
             eprintln!("ncx: Harness 配置错误: {error}");
             return 1;
         }
     };
-    install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
     let system_prompt = match tools.service::<ContextServiceDescriptor>("context") {
         Some(context) => context.assemble(base_prompt.clone()),
         None => {
@@ -300,7 +280,9 @@ async fn run(args: Args) -> i32 {
         None => Session::with_log(system_prompt, Some(log_path)),
     };
     let restored_count = session.restored_count;
-    let mut agent = runtime_profile
+    let mut agent = runtime
+        .profile()
+        .clone()
         .apply(AgentLoop::from_runtime_services(tools, session).expect("LLM factory service"));
     if args.resume {
         if restored_count > 0 {

@@ -17,12 +17,10 @@ use async_trait::async_trait;
 use ncx_config::Config;
 use ncx_core::isolate::copy_tree;
 use ncx_core::{
-    discover_skills, install_llm_provider_factory, load_project_instructions, skills_index_block,
-    AgentLoop, AgentRunner, AgentRuntimeProfile, HarnessRuntimeBuilder, MemoryStore, Session,
-    Summarizer, Tier, ToolContext, ToolRegistry,
+    discover_skills, load_project_instructions, AgentLoop, AgentRunner, AgentRuntimeProfile,
+    ConfiguredHarnessRuntime, ContextServiceDescriptor, MemoryStore, RuntimeContextSources,
+    RuntimeHostBindings, Session, Summarizer, Tier,
 };
-use ncx_provider::DeepSeekProvider;
-use ncx_sandbox::SandboxPolicy;
 use serde_json::json;
 
 pub struct LiveRunner {
@@ -73,32 +71,43 @@ impl LiveRunner {
         with_tools: bool,
     ) -> String {
         let model = self.model_for(tier);
-        let policy = SandboxPolicy::new(self.cfg.sandbox_mode.clone(), workspace)
-            .with_network_access(self.cfg.network_access);
-        let ctx = ToolContext::new(workspace.to_path_buf(), policy)
-            .with_approval_policy(self.cfg.approval_policy.clone())
-            .with_timeout(self.cfg.timeout_s as u64)
-            .with_search(
-                self.cfg.search_provider.clone(),
-                self.cfg.search_api_key.clone(),
-            )
-            .with_memory(self.memory.clone()) // memory is project-level, not per-copy
-            .with_hooks(self.cfg.hooks.clone())
-            .with_skills(discover_skills(workspace));
-        let skills_index = skills_index_block(&discover_skills(workspace));
-        let mut tools = if with_tools {
-            match HarnessRuntimeBuilder::configured(workspace) {
-                Ok(builder) => builder.build(ctx),
+        let skills = discover_skills(workspace);
+        let sources = RuntimeContextSources::new(
+            load_project_instructions(workspace, 16_000),
+            skills,
+            String::new(),
+        )
+        .with_memory(self.memory.clone())
+        .with_hooks(self.cfg.hooks.clone());
+        let runtime = ConfiguredHarnessRuntime::new(
+            self.cfg.clone(),
+            model,
+            AgentRuntimeProfile::from_legacy_permissions(&self.cfg),
+        );
+        let tools = if with_tools {
+            match runtime.build_tools(
+                workspace.to_path_buf(),
+                sources,
+                RuntimeHostBindings::default(),
+            ) {
+                Ok(tools) => tools,
                 Err(error) => return format!("Harness 配置错误：{error}"),
             }
         } else {
-            ToolRegistry::empty(ctx)
+            runtime.build_toolless(
+                workspace.to_path_buf(),
+                sources,
+                RuntimeHostBindings::default(),
+            )
         };
-        install_llm_provider_factory(&mut tools, self.cfg.clone(), model);
-        let instructions = load_project_instructions(workspace, 16_000);
-        let system = compose_system_prompt(system, &[instructions, skills_index]);
+        let system = tools
+            .service::<ContextServiceDescriptor>("context")
+            .expect("configured context service")
+            .assemble(system);
         let session = Session::new(system);
-        let mut agent = AgentRuntimeProfile::from_legacy_permissions(&self.cfg)
+        let mut agent = runtime
+            .profile()
+            .clone()
             .apply(AgentLoop::from_runtime_services(tools, session).expect("LLM factory service"));
         agent.run_turn(json!(task), None).await.final_text
     }
@@ -161,17 +170,6 @@ impl AgentRunner for LiveRunner {
 
 /// LLM-backed [`Summarizer`] for `MemoryStore::summarize_consolidate` — folds a
 /// cluster of related notes into one concise note using the FAST model.
-fn compose_system_prompt(base: &str, blocks: &[String]) -> String {
-    let mut out = base.to_string();
-    for block in blocks {
-        if !block.trim().is_empty() {
-            out.push_str("\n\n");
-            out.push_str(block.trim());
-        }
-    }
-    out
-}
-
 pub struct LiveSummarizer {
     cfg: Config,
 }
@@ -192,13 +190,12 @@ impl LiveSummarizer {
 #[async_trait(?Send)]
 impl Summarizer for LiveSummarizer {
     async fn merge(&self, facts: &[String]) -> Option<String> {
-        let provider = DeepSeekProvider::with_opts(
-            self.cfg.api_key.clone(),
-            &self.cfg.base_url,
+        let provider = ConfiguredHarnessRuntime::new(
+            self.cfg.clone(),
             self.fast_model(),
-            self.cfg.timeout_s as u64,
-            self.cfg.max_retries as u32,
+            AgentRuntimeProfile::from_legacy_permissions(&self.cfg),
         );
+        let provider = provider.primary_provider();
         let user = facts
             .iter()
             .enumerate()
@@ -209,9 +206,11 @@ impl Summarizer for LiveSummarizer {
             json!({"role": "system", "content": "Merge these related project notes into ONE concise factual note (at most 2 sentences). Output ONLY the merged note — no preamble, no list, no quotes."}),
             json!({"role": "user", "content": user}),
         ];
-        match provider.chat(&messages, None, None, None, None).await {
-            Ok(r) if !r.content.trim().is_empty() => Some(r.content.trim().to_string()),
-            _ => None,
+        let response = provider.chat(&messages, &[], None).await;
+        if response.finish_reason != "error" && !response.content.trim().is_empty() {
+            Some(response.content.trim().to_string())
+        } else {
+            None
         }
     }
 }

@@ -28,11 +28,11 @@ use ncx_config::{
 };
 use ncx_core::{
     discover_codex_hooks, discover_codex_mcp_servers, discover_skills, expand_file_mentions,
-    install_llm_provider_factory, load_workspace_instructions, model_provider_from_config,
-    new_session_id, prepare_mcp_server_tools, skills_index_block, suggest_title_with_provider,
-    AgentLoop, AgentRuntimeProfile, ApprovalDecision, ApprovalHandler, ApprovalRequest,
-    CheckpointStore, ContextEntry, ContextServiceDescriptor, LoopEvent, McpServiceDescriptor,
-    MemoryStore, Session, SessionGrants, TextContextFragment, ToolContext, UserQuestionHandler,
+    load_workspace_instructions, new_session_id, prepare_mcp_server_tools,
+    suggest_title_with_provider, AgentLoop, ApprovalDecision,
+    ApprovalHandler, ApprovalRequest, CheckpointStore, ConfiguredHarnessRuntime,
+    ContextServiceDescriptor, LoopEvent, McpServiceDescriptor, MemoryStore, RuntimeContextSources,
+    RuntimeHostBindings, Session, SessionGrants, UserQuestionHandler,
     UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
 use ncx_protocol::{
@@ -41,6 +41,8 @@ use ncx_protocol::{
 };
 #[cfg(test)]
 use ncx_sandbox::SandboxPolicy;
+#[cfg(test)]
+use ncx_core::ToolContext;
 use ncx_thread_store::JsonThreadStore;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -640,8 +642,8 @@ fn spawn_title_generation(
                 }) else {
                     return;
                 };
-                let provider = model_provider_from_config(&cfg, cfg.model.clone());
-                let Some(title) = suggest_title_with_provider(&provider, &request).await else {
+                let provider = ConfiguredHarnessRuntime::from_config(cfg).primary_provider();
+                let Some(title) = suggest_title_with_provider(provider.as_ref(), &request).await else {
                     return;
                 };
                 let protocol_outcome =
@@ -684,55 +686,32 @@ async fn build_agent(
     let cfg = load_config(overrides).map_err(|e| e.to_string())?;
     cfg.validate().map_err(|e| e.to_string())?;
 
-    let runtime_profile = AgentRuntimeProfile::from_config(&cfg);
-    let policy = runtime_profile.sandbox_policy(&cfg.workspace);
+    let runtime = ConfiguredHarnessRuntime::from_config(cfg.clone());
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     // Memory is recalled per prompt by AgentLoop (query-scoped), not dumped here.
     // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
     // files (their handoff protocol would make a plain "hi" read HANDOFF.md etc.).
     let instructions = load_workspace_instructions(&cfg.workspace, 16_000);
     let skills = discover_skills(&cfg.workspace);
-    let skills_index = skills_index_block(&skills);
-    let plan_note = if runtime_profile.permissions.plan_mode {
+    let plan_note = if runtime.profile().permissions.plan_mode {
         PLAN_MODE_NOTE.to_string()
     } else {
         String::new()
     };
-    let instruction_fragment =
-        TextContextFragment::new("project_instructions", instructions, 16_000);
-    let skills_fragment = TextContextFragment::new("skills", skills_index, 32_000);
-    let plan_fragment = TextContextFragment::new("plan_mode", plan_note, 4_000);
-    let context_entries = vec![
-        ContextEntry {
-            order: 10,
-            fragment: instruction_fragment,
-        },
-        ContextEntry {
-            order: 20,
-            fragment: skills_fragment,
-        },
-        ContextEntry {
-            order: 30,
-            fragment: plan_fragment,
-        },
-    ];
     let mut hooks = cfg.hooks.clone();
     hooks.extend(discover_codex_hooks(&cfg.workspace)?);
-    let ctx = runtime_profile
-        .apply_tool_context(ToolContext::new(cfg.workspace.clone(), policy))
-        .with_session_grants(grants)
-        .with_timeout(cfg.timeout_s as u64)
-        .with_search(cfg.search_provider.clone(), cfg.search_api_key.clone())
+    let sources = RuntimeContextSources::new(instructions, skills, plan_note)
         .with_memory(memory)
-        .with_hooks(hooks)
-        .with_skills(skills)
-        .with_context_entries(context_entries)
-        .with_approver(approver)
-        .with_user_question_handler(questioner);
+        .with_hooks(hooks);
+    let bindings = RuntimeHostBindings {
+        approver: Some(approver),
+        questioner: Some(questioner),
+        grants: Some(grants),
+    };
+    let mut tools = runtime.build_tools(cfg.workspace.clone(), sources, bindings)?;
     if !restored_plan.is_empty() {
-        ctx.plan.replace(restored_plan);
+        tools.ctx.plan.replace(restored_plan);
     }
-    let mut tools = ncx_core::HarnessRuntimeBuilder::configured(&cfg.workspace)?.build(ctx);
     let mcp_servers = discover_codex_mcp_servers(&cfg.workspace)?;
     if !mcp_servers.is_empty() {
         let mut prepared = Vec::new();
@@ -754,7 +733,6 @@ async fn build_agent(
             }),
         );
     }
-    install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
     let system_prompt = tools
         .service::<ContextServiceDescriptor>("context")
         .ok_or_else(|| "Harness Context 服务未启用".to_string())?
@@ -770,7 +748,10 @@ async fn build_agent(
         Some(messages) => Session::fork(system_prompt, messages, Some(log_path.clone())),
         None => Session::with_log(system_prompt, Some(log_path.clone())),
     };
-    let agent = runtime_profile.apply(AgentLoop::from_runtime_services(tools, session)?);
+    let agent = runtime
+        .profile()
+        .clone()
+        .apply(AgentLoop::from_runtime_services(tools, session)?);
     Ok((agent, cfg.workspace.clone(), session_id, log_path))
 }
 
