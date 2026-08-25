@@ -651,3 +651,22 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 验证：Rust workspace 全量通过（`ncx-core` 236 项）；`cargo clippy -p ncx-core -p ncx-cli --all-targets -- -D warnings` 通过；GUI Rust 60 项、Vite production build、真实 protocol E2E 和 question E2E 全部通过；生产入口搜索仅剩 GUI 测试夹具中的一次 `ToolContext::new`。
 - 未完成的结构门禁债务：本批触及的 `rust/crates/ncx-cli/src/main.rs` 是既有 2191 行单体，结构检查仍报文件超过 700 行且 `run` 超过 80 行；没有调低门禁。后续应按参数/启动、Runtime 装配、Thread Recorder、REPL 命令和 MCP 生命周期继续拆分，不能据此宣告所有结构改造收口。
 - GUI 严格 Clippy 仍被三个既有问题阻挡：`spawn_worker` 参数过多、历史投影可折叠 match、模型目录构造函数参数过多；本批 `cargo check` 无新增 warning，不能把 GUI `-D warnings` 宣称为通过。
+
+### 2026-08-25 CLI 单体拆分收口
+
+- `rust/crates/ncx-cli/src/main.rs` 从 2191 行降到 436 行，不修改结构门禁阈值；主文件只保留进程入口、REPL/Slash 调度、MCP reload 和 orchestrator 门面。
+- 新增 `cli_app.rs`：把原 227 行 `run` 拆成配置加载、早退出/Memory 合并、Harness Runtime 构建、MCP 接入、Thread/Agent 恢复和单轮执行，所有函数低于 80 个逻辑行；Codex MCP 资源发现失败仍保持原行为并以退出码 1 终止，普通 MCP 加载/注册失败保持降级继续。
+- 新增 `session_recorder.rs`、`usage.rs`、`command_support.rs`、`runtime_support.rs`，分别拥有 Thread Store 持久化与使用量、Slash/导出/配置渲染、Checkpoint/附件/Runtime 辅助逻辑；原内联测试迁入 `main_tests.rs`，测试内容和私有边界保持不变。
+- 8 个受影响 CLI 生产文件全部通过结构门禁；`cargo clippy -p ncx-cli --all-targets -- -D warnings` 通过；CLI 35 项和 Rust workspace 全量通过（`ncx-core` 236 项）；`ncx --version` 与 `ncx --help` 真实命令输出正常。
+
+### 2026-08-25 五层架构完成度审计
+
+1. `ncx-protocol`：统一 Thread、Turn、Item、Event 与 GUI 控制请求；JSON 字段、版本、Thread/Turn 归属和单调事件序号均有往返测试。
+2. `ncx-thread-store`：会话持久化和活动 Turn 所有权的唯一事实源；跨进程文件锁与 Thread 租约证明同 Thread 禁止重入、不同 Thread 并发、孤儿 Turn 可恢复。
+3. `ncx-app-server`：拥有协议路由和可见历史投影；GUI 只通过 `app_server_request` 使用 Thread、Turn、运行设置、Memory 和插件控制面，剩余 Tauri 命令仅处理打开文件/URL、Git、目录读取、临时图片等桌面资源 I/O。
+4. Provider / Policy / ContextFragment：`ConfiguredHarnessRuntime` 成为 CLI、GUI、Runner、标题和摘要的统一装配所有者；生产入口搜索不存在直接 Sandbox/DeepSeek Provider/固定 Fragment 拼装旁路。
+5. OpenAI 插件与 Marketplace：兼容 `.codex-plugin/plugin.json` 的 Skills、MCP、Apps、Hooks、Interface 和官方/本地/Git/NPM Marketplace source；安装、升级、启停、卸载、路径边界和真实 WebView 协议调用均有测试。
+
+- M5/M6 补充链路：附件、视觉、图片、视频、Cost/Telemetry、外部进程插件协议 v1 和 `full/minimal/headless` 组合均已进入同一 Profile/Bundle 与 app-server 诊断边界。
+- 总体验证证据：`cargo test --workspace --quiet` 全绿，`ncx-core` 236 项；CLI 严格 Clippy 通过；GUI Rust 60 项；Vite build；protocol/question E2E；相对 `origin/main` 的 25 个生产文件结构门禁和 `git diff --check` 均通过。
+- 外部验收限制不改变架构完成度：现有两把阿里 Key 均返回 401，尚不能证明付费 live 生图/视频成功；GitHub HTTPS 当前不可达且本机 SSH Key 无仓库权限，三个本地提交尚未同步远端。
