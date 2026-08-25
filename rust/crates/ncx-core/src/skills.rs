@@ -7,6 +7,7 @@
 //! ---
 //! name: pdf-forms
 //! description: Fill, read, and flatten PDF form fields. Use when the user mentions PDFs or forms.
+//! capability: general
 //! ---
 //!
 //! # How to fill a PDF form
@@ -29,6 +30,44 @@ use std::path::{Path, PathBuf};
 const INDEX_HEADER: &str = "Available skills (author-provided playbooks; when a task matches a \
 description, call the `skill` tool with its name to load the full instructions before proceeding):";
 
+/// Runtime capability a skill requires before it may be advertised or loaded.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SkillCapability {
+    #[default]
+    General,
+    Vision,
+    ImageGeneration,
+    VideoGeneration,
+    Unsupported,
+}
+
+impl SkillCapability {
+    fn parse(value: Option<String>) -> Self {
+        match value.as_deref().map(str::trim) {
+            Some("vision") => Self::Vision,
+            Some("image-generation") => Self::ImageGeneration,
+            Some("video-generation") => Self::VideoGeneration,
+            None | Some("") | Some("general") => Self::General,
+            Some(_) => Self::Unsupported,
+        }
+    }
+
+    pub fn is_available(
+        self,
+        vision: bool,
+        image_generation: bool,
+        video_generation: bool,
+    ) -> bool {
+        match self {
+            Self::General => true,
+            Self::Vision => vision,
+            Self::ImageGeneration => image_generation,
+            Self::VideoGeneration => video_generation,
+            Self::Unsupported => false,
+        }
+    }
+}
+
 /// A discovered skill. The body is loaded lazily (on `skill` invocation) so the
 /// always-on index stays cheap even with many large skills.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +76,8 @@ pub struct Skill {
     pub name: String,
     /// One-line "when to use this" summary (frontmatter `description:`).
     pub description: String,
+    /// Explicit Harness capability required by this skill.
+    pub capability: SkillCapability,
     /// Path to the `SKILL.md` file (a synthetic `<builtin>` path for builtins).
     pub path: PathBuf,
     /// The skill's directory (holds `SKILL.md` and any bundled resource files).
@@ -71,13 +112,14 @@ pub fn builtin_skills() -> Vec<Skill> {
     const BUILTINS: &[&str] = &[include_str!("../builtin_skills/commit-message/SKILL.md")];
     let mut out = Vec::new();
     for text in BUILTINS {
-        let (name, description) = parse_frontmatter(text);
+        let (name, description, capability) = parse_frontmatter(text);
         let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
             continue; // a builtin without a name is a packaging bug; skip defensively.
         };
         out.push(Skill {
             name: name.trim().to_string(),
             description: description.unwrap_or_default().trim().to_string(),
+            capability: SkillCapability::parse(capability),
             path: PathBuf::from("<builtin>"),
             dir: PathBuf::from("<builtin>"),
             embedded: Some(strip_frontmatter(text).trim().to_string()),
@@ -149,7 +191,7 @@ fn scan_skill_path(path: &Path) -> Vec<Skill> {
 fn load_skill_file(manifest: &Path) -> Option<Skill> {
     let text = std::fs::read_to_string(manifest).ok()?;
     let dir = manifest.parent()?.to_path_buf();
-    let (name, description) = parse_frontmatter(&text);
+    let (name, description, capability) = parse_frontmatter(&text);
     let name = name.unwrap_or_else(|| {
         dir.file_name()
             .map(|value| value.to_string_lossy().to_string())
@@ -161,6 +203,7 @@ fn load_skill_file(manifest: &Path) -> Option<Skill> {
     Some(Skill {
         name: name.trim().to_string(),
         description: description.unwrap_or_default().trim().to_string(),
+        capability: SkillCapability::parse(capability),
         path: manifest.to_path_buf(),
         dir,
         embedded: None,
@@ -202,19 +245,21 @@ pub fn skills_index_block(skills: &[Skill]) -> String {
     out
 }
 
-/// Parse `name:` and `description:` from a leading `---`-fenced YAML block.
-/// Returns `(name, description)`; either may be `None` if absent.
-fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>) {
+/// Parse supported metadata from a leading `---`-fenced YAML block.
+fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>, Option<String>) {
     let mut name = None;
     let mut description = None;
+    let mut capability = None;
     for line in frontmatter_lines(text) {
         if let Some(v) = line.strip_prefix("name:") {
             name = Some(unquote(v.trim()));
         } else if let Some(v) = line.strip_prefix("description:") {
             description = Some(unquote(v.trim()));
+        } else if let Some(v) = line.strip_prefix("capability:") {
+            capability = Some(unquote(v.trim()));
         }
     }
-    (name, description)
+    (name, description, capability)
 }
 
 /// The lines inside the leading `---` … `---` fence (empty if there is none).
@@ -314,7 +359,33 @@ mod tests {
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "pdf-forms");
         assert_eq!(skills[0].description, "Fill PDF forms. Use for PDFs.");
+        assert_eq!(skills[0].capability, SkillCapability::General);
         assert_eq!(skills[0].load_body().unwrap(), "# Body\nDetails here.");
+    }
+
+    #[test]
+    fn parses_explicit_media_capabilities_without_guessing_from_names() {
+        let ws = tmp("capabilities");
+        write_skill(
+            &ws,
+            "plain-name",
+            "---\nname: plain-name\ndescription: render media\ncapability: image-generation\n---\nbody",
+        );
+        let skills = fs_only(discover_skills_with_home(&ws, None));
+        assert_eq!(skills[0].capability, SkillCapability::ImageGeneration);
+    }
+
+    #[test]
+    fn unknown_capability_is_never_silently_exposed_as_general() {
+        let ws = tmp("unknown-capability");
+        write_skill(
+            &ws,
+            "typo",
+            "---\nname: typo\ndescription: typo\ncapability: image-genration\n---\nbody",
+        );
+        let skills = fs_only(discover_skills_with_home(&ws, None));
+        assert_eq!(skills[0].capability, SkillCapability::Unsupported);
+        assert!(!skills[0].capability.is_available(true, true, true));
     }
 
     #[test]

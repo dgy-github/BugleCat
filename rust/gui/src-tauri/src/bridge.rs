@@ -2307,6 +2307,7 @@ mod tests {
         let skill = Skill {
             name: "smoke-skill".into(),
             description: "GUI registry smoke fixture".into(),
+            capability: Default::default(),
             path: PathBuf::from("<builtin>/smoke-skill/SKILL.md"),
             dir: PathBuf::from("<builtin>/smoke-skill"),
             embedded: Some("Use the fixture.".into()),

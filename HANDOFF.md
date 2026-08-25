@@ -624,3 +624,9 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `full`/`minimal`/`headless` 组合测试不再只检查诊断布尔值和 schema 数量：开始直接读取真实 Attachment、Media、MCP、CostTelemetry 服务，执行费用遥测记录，并断言 minimal/headless 未挂载这些服务。
 - 对应旧 Memory Tauri handler 已删除；新增 App Server 路由单测和前端事实源回归。`AppServerAdapter` 已从超限的 `lib.rs` 提取为独立模块，没有放宽结构门禁。
 - 验证：结构门禁、`git diff --check`、Vite production build 和真实 protocol E2E 通过；Protocol 4 项、App Server 11 项、Harness `full/minimal/headless` 真实组合测试、GUI Rust 60 项通过。
+
+### 2026-08-25 M5 媒体 Skill 能力门禁
+- `Skill` frontmatter 新增类型化 `capability`：`general`、`vision`、`image-generation`、`video-generation`；缺省保持 `general` 兼容旧 Skill，未知值按不支持处理，禁止因拼写错误误放行。
+- `HarnessRuntimeBuilder` 成为 CLI/GUI 共用的能力装配入口：根据最终 Profile/Overlay 的 `ncx.media` 配置，在工具安装前同步过滤 `ToolContext.skills` 和 `skills` ContextFragment。`full` 可见媒体 Skill，`minimal`/`headless` 不再暴露媒体 Skill 或提示词目录。
+- 这一步建立了生图/视频真实消费者门禁，但仓库仍没有已确认可执行的 Wan/生图 Skill 实现；不能据此宣告完整媒体执行链已完成。
+- 验证：Rust workspace 全量通过（含 `ncx-core` 228 项、跨进程 Thread 租约）、GUI Rust 60 项、Vite production build、结构门禁和 `git diff --check` 通过。

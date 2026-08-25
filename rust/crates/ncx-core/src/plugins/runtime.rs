@@ -9,10 +9,13 @@ use super::{
     McpPlugin, MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
     ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
+use crate::skills::skills_index_block;
 use crate::tools::{ToolContext, ToolRegistry};
+use ncx_context::{ContextEntry, ContextFragment, TextContextFragment};
 
 pub struct HarnessRuntimeBuilder {
     plugins: PluginRegistry,
+    media: Option<super::MediaServiceDescriptor>,
 }
 
 impl Default for HarnessRuntimeBuilder {
@@ -25,6 +28,7 @@ impl HarnessRuntimeBuilder {
     pub fn empty() -> Self {
         Self {
             plugins: PluginRegistry::new(),
+            media: None,
         }
     }
 
@@ -36,6 +40,13 @@ impl HarnessRuntimeBuilder {
             builder
                 .plugins
                 .register_configured(plugin, entry.config.clone())?;
+            if entry.plugin == "ncx.media" {
+                builder.media = Some(super::MediaServiceDescriptor {
+                    vision: media_flag(&entry.config, "vision"),
+                    image_generation: media_flag(&entry.config, "image_generation"),
+                    video_generation: media_flag(&entry.config, "video_generation"),
+                });
+            }
         }
         Ok(builder)
     }
@@ -94,13 +105,73 @@ impl HarnessRuntimeBuilder {
         self.build_with_report(context).0
     }
 
-    pub fn build_with_report(self, context: ToolContext) -> (ToolRegistry, PluginInstallReport) {
+    pub fn build_with_report(
+        self,
+        mut context: ToolContext,
+    ) -> (ToolRegistry, PluginInstallReport) {
+        filter_skills_for_media(&mut context, self.media.as_ref());
         let mut tools = ToolRegistry::empty(context);
         let report = self
             .plugins
             .install_into(&mut tools)
             .expect("default Harness plugin composition must be valid");
         (tools, report)
+    }
+}
+
+fn media_flag(config: &toml::Value, name: &str) -> bool {
+    config
+        .get(name)
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn filter_skills_for_media(
+    context: &mut ToolContext,
+    media: Option<&super::MediaServiceDescriptor>,
+) {
+    let (vision, image_generation, video_generation) = media
+        .map(|service| {
+            (
+                service.vision,
+                service.image_generation,
+                service.video_generation,
+            )
+        })
+        .unwrap_or_default();
+    let skills = context
+        .skills
+        .iter()
+        .filter(|skill| {
+            skill
+                .capability
+                .is_available(vision, image_generation, video_generation)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    context.skills = Rc::new(skills);
+
+    let skills_fragment = context
+        .context_entries
+        .iter()
+        .find(|entry| entry.fragment.source() == "skills")
+        .map(|entry| (entry.order, entry.fragment.max_chars()));
+    if let Some((order, max_chars)) = skills_fragment {
+        let mut entries = context
+            .context_entries
+            .iter()
+            .filter(|entry| entry.fragment.source() != "skills")
+            .cloned()
+            .collect::<Vec<_>>();
+        entries.push(ContextEntry {
+            order,
+            fragment: TextContextFragment::new(
+                "skills",
+                skills_index_block(context.skills.as_ref()),
+                max_chars,
+            ),
+        });
+        context.context_entries = Rc::new(entries);
     }
 }
 
@@ -178,6 +249,17 @@ mod tests {
         let workspace = PathBuf::from("runtime-plugin-test");
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
         ToolContext::new(workspace, policy)
+    }
+
+    fn skill(name: &str, capability: crate::SkillCapability) -> crate::Skill {
+        crate::Skill {
+            name: name.into(),
+            description: format!("{name} description"),
+            capability,
+            path: PathBuf::from("<test>"),
+            dir: PathBuf::from("<test>"),
+            embedded: Some("test body".into()),
+        }
     }
 
     #[test]
@@ -297,12 +379,63 @@ mod tests {
             assert!(registry
                 .service::<AttachmentServiceDescriptor>("attachment")
                 .is_none());
-            assert!(registry.service::<MediaServiceDescriptor>("media").is_none());
+            assert!(registry
+                .service::<MediaServiceDescriptor>("media")
+                .is_none());
             assert!(registry.service::<McpServiceDescriptor>("mcp").is_none());
             assert!(registry
                 .service::<CostTelemetryService>("cost.telemetry")
                 .is_none());
         }
+    }
+
+    #[test]
+    fn profiles_filter_media_skills_before_tool_and_context_installation() {
+        use crate::SkillCapability::{General, ImageGeneration, VideoGeneration, Vision};
+
+        let skills = vec![
+            skill("general", General),
+            skill("vision", Vision),
+            skill("image", ImageGeneration),
+            skill("video", VideoGeneration),
+        ];
+        let build = |profile: &str| {
+            let index = skills_index_block(&skills);
+            let context = context()
+                .with_skills(skills.clone())
+                .with_context_entries(vec![ContextEntry {
+                    order: 20,
+                    fragment: TextContextFragment::new("skills", index, 32_000),
+                }]);
+            HarnessRuntimeBuilder::builtin(profile)
+                .unwrap()
+                .build(context)
+        };
+
+        let full = build("full");
+        assert_eq!(full.ctx.skills.len(), 4);
+        let minimal = build("minimal");
+        assert_eq!(
+            minimal
+                .ctx
+                .skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["general"]
+        );
+        let prompt = minimal
+            .ctx
+            .context_entries
+            .iter()
+            .find(|entry| entry.fragment.source() == "skills")
+            .unwrap()
+            .fragment
+            .render();
+        assert!(prompt.contains("general: general description"));
+        assert!(!prompt.contains("image: image description"));
+        assert!(!prompt.contains("video: video description"));
+        assert!(!prompt.contains("vision: vision description"));
     }
 
     #[test]

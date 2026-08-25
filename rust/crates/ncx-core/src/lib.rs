@@ -91,7 +91,7 @@ pub use session::{
 };
 pub use session_index::{new_session_id, SessionIndex, SessionSummary};
 pub use session_query_tools::session_query_tools;
-pub use skills::{discover_skills, skills_index_block, Skill};
+pub use skills::{discover_skills, skills_index_block, Skill, SkillCapability};
 pub use slash::{parse_slash, split_loop_arg, SLASH_HELP};
 pub use tool_middleware::{ToolMiddleware, ToolMiddlewareDecision};
 pub use tool_recovery::{ToolCapability, ToolFailureClass};

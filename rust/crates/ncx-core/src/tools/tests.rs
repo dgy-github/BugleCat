@@ -404,6 +404,7 @@ mod tests {
         let skill = Skill {
             name: "greeter".into(),
             description: "say hi".into(),
+            capability: Default::default(),
             path: dir.join("SKILL.md"),
             dir: dir.clone(),
             embedded: None,
@@ -431,6 +432,7 @@ mod tests {
             .with_skills(vec![Skill {
                 name: "x".into(),
                 description: String::new(),
+                capability: Default::default(),
                 path: ws.join("SKILL.md"),
                 dir: ws.clone(),
                 embedded: None,
