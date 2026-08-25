@@ -2,12 +2,20 @@
 //!
 //! Native dynamic libraries are intentionally rejected. External plugins are
 //! declarative directories whose executable runs as a child process and can
-//! only communicate through a future versioned JSON protocol.
+//! only communicate through the versioned line-delimited JSON protocol.
+
+mod protocol;
+
+pub use protocol::{
+    ExternalPluginHandshake, ExternalPluginRegistration, ExternalProcessTool,
+    ExternalProtocolRequest, ExternalProtocolResponse, ExternalToolDescriptor,
+};
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExternalPluginManifest {
@@ -49,6 +57,23 @@ impl ExternalPluginRecord {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("启动隔离插件失败: {e}"))
+    }
+
+    /// Probe and validate the executable's protocol-v1 capability handshake.
+    pub fn handshake(&self) -> Result<ExternalPluginRegistration, String> {
+        protocol::handshake(self, Duration::from_secs(5))
+    }
+
+    /// Build model-facing tools only after a successful capability handshake.
+    pub fn tools(&self) -> Result<Vec<Box<dyn crate::Tool>>, String> {
+        let registration = self.handshake()?;
+        Ok(registration
+            .tools
+            .into_iter()
+            .map(|descriptor| {
+                Box::new(ExternalProcessTool::new(self.clone(), descriptor)) as Box<dyn crate::Tool>
+            })
+            .collect())
     }
 }
 
@@ -179,6 +204,9 @@ fn validate_manifest(m: &ExternalPluginManifest, root: &Path) -> Result<(), Stri
     }
     if m.protocol != 1 {
         return Err(format!("不支持插件协议版本 {}", m.protocol));
+    }
+    if m.capabilities.iter().any(|capability| capability != "tool") {
+        return Err("插件协议 v1 仅支持声明 tool 能力".into());
     }
     let command = Path::new(&m.command);
     if command.is_absolute() || m.command.contains("..") {

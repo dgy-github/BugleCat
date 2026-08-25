@@ -275,6 +275,24 @@ impl HarnessPlugin for MediaPlugin {
     }
 }
 
+/// Enables discovery of process-isolated protocol plugins for this profile.
+pub struct ExternalHostPlugin;
+impl HarnessPlugin for ExternalHostPlugin {
+    fn id(&self) -> &str {
+        "ncx.external"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.external",
+            "External Plugin Host",
+            PluginCapability::External,
+        )
+    }
+    fn install(&self, _host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 pub struct CostTelemetryPlugin;
 impl HarnessPlugin for CostTelemetryPlugin {
     fn id(&self) -> &str {

@@ -66,7 +66,7 @@
     {#each externalPlugins as plugin}
       <div class="config-entry">
         <span>{plugin.manifest.name} <code>{plugin.manifest.version}</code></span>
-        <code>{plugin.manifest.id}</code>
+        <code>{plugin.manifest.id} · 协议 v1 · 正式能力握手</code>
         <button class="plain" onclick={() => toggleExternalPlugin(plugin)}>{plugin.enabled ? "停用" : "启用"}</button>
       </div>
     {/each}

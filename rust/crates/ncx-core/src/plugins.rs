@@ -17,14 +17,18 @@ pub(crate) use api::PluginRuntimeState;
 pub use api::{HarnessPlugin, PluginHost};
 pub use builtin::{
     AttachmentPlugin, BuiltinToolsPlugin, CompactionPlugin, ContextPlugin, CoreToolsPlugin,
-    CostTelemetryPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin, MediaPlugin,
-    MemoryPlugin, PolicyPlugin, ProcessToolsPlugin, SearchToolsPlugin, SessionToolsPlugin,
-    WorkspaceToolsPlugin,
+    CostTelemetryPlugin, ExternalHostPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
+    MediaPlugin, MemoryPlugin, PolicyPlugin, ProcessToolsPlugin, SearchToolsPlugin,
+    SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 pub use composition::{
     BundleSpec, HarnessComposition, OverlayEntry, OverlaySpec, PluginEntry, ProfileSpec,
 };
-pub use external::{ExternalPluginCatalog, ExternalPluginManifest, ExternalPluginRecord};
+pub use external::{
+    ExternalPluginCatalog, ExternalPluginHandshake, ExternalPluginManifest, ExternalPluginRecord,
+    ExternalPluginRegistration, ExternalProtocolRequest, ExternalProtocolResponse,
+    ExternalToolDescriptor,
+};
 pub use manifest::{PluginCapability, PluginManifest};
 pub use openai_compat::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,

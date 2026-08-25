@@ -109,7 +109,11 @@ impl Skill {
 /// can customize them.
 pub fn builtin_skills() -> Vec<Skill> {
     // (name, SKILL.md contents). Add new builtins here.
-    const BUILTINS: &[&str] = &[include_str!("../builtin_skills/commit-message/SKILL.md")];
+    const BUILTINS: &[&str] = &[
+        include_str!("../builtin_skills/commit-message/SKILL.md"),
+        include_str!("../builtin_skills/dashscope-image/SKILL.md"),
+        include_str!("../builtin_skills/dashscope-video/SKILL.md"),
+    ];
     let mut out = Vec::new();
     for text in BUILTINS {
         let (name, description, capability) = parse_frontmatter(text);

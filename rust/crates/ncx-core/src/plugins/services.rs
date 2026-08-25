@@ -93,6 +93,7 @@ pub struct CostTelemetryService {
     turns: Cell<u64>,
     prompt_tokens: Cell<i64>,
     completion_tokens: Cell<i64>,
+    media_cost: Cell<f64>,
 }
 
 impl CostTelemetryService {
@@ -102,6 +103,7 @@ impl CostTelemetryService {
             turns: Cell::new(0),
             prompt_tokens: Cell::new(0),
             completion_tokens: Cell::new(0),
+            media_cost: Cell::new(0.0),
         }
     }
     pub fn record(&self, usage: &std::collections::BTreeMap<String, i64>) {
@@ -117,6 +119,11 @@ impl CostTelemetryService {
                 + usage.get("completion_tokens").copied().unwrap_or(0).max(0),
         );
     }
+    pub fn record_media_cost(&self, cost: f64) {
+        if self.config.telemetry_enabled && cost.is_finite() && cost > 0.0 {
+            self.media_cost.set(self.media_cost.get() + cost);
+        }
+    }
     pub fn snapshot(&self) -> CostTelemetrySnapshot {
         CostTelemetrySnapshot {
             turns: self.turns.get(),
@@ -124,7 +131,9 @@ impl CostTelemetryService {
             completion_tokens: self.completion_tokens.get(),
             estimated_cost: self
                 .config
-                .estimate(self.prompt_tokens.get(), self.completion_tokens.get()),
+                .estimate(self.prompt_tokens.get(), self.completion_tokens.get())
+                + self.media_cost.get(),
+            media_cost: self.media_cost.get(),
             currency: self.config.currency.clone(),
         }
     }
@@ -136,6 +145,7 @@ pub struct CostTelemetrySnapshot {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub estimated_cost: f64,
+    pub media_cost: f64,
     pub currency: String,
 }
 
@@ -180,8 +190,10 @@ mod tests {
         .into_iter()
         .collect();
         service.record(&usage);
+        service.record_media_cost(1.2);
         let snapshot = service.snapshot();
         assert_eq!(snapshot.turns, 1);
-        assert_eq!(snapshot.estimated_cost, 2.0);
+        assert_eq!(snapshot.media_cost, 1.2);
+        assert_eq!(snapshot.estimated_cost, 3.2);
     }
 }

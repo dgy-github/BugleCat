@@ -218,7 +218,7 @@
         />
       </label>
       <p class="settings-note">
-        图片附件会发送到下面的视觉解析模型。接口地址或密钥留空时，会沿用上面的主模型配置。
+        图片附件会发送到下面的视觉解析模型；阿里百炼生图和 Wan 视频也复用这里保存的第二套密钥。视觉接口留空可沿用主模型，媒体生成不会把主模型密钥发送给阿里云。
       </p>
       <label>
         <span>图片/文件解析模型</span>
@@ -229,11 +229,11 @@
         <input bind:value={settings.vl_base_url} placeholder="留空则沿用主模型接口" />
       </label>
       <label>
-        <span>解析接口密钥</span>
+        <span>视觉解析 / 阿里百炼媒体密钥</span>
         <input
           type="password"
           bind:value={vlApiKeyInput}
-          placeholder={settings.has_vl_api_key ? `保持当前（${settings.vl_api_key_masked}）` : "留空则沿用主模型密钥"}
+          placeholder={settings.has_vl_api_key ? `保持当前（${settings.vl_api_key_masked}）` : "媒体生成需要单独配置 DASHSCOPE Key"}
         />
       </label>
       <PluginSettings

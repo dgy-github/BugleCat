@@ -24,10 +24,11 @@ use ncx_config::{
     VALID_SANDBOX_MODES,
 };
 use ncx_core::{
-    custom_command_prompt, discover_codex_apps, discover_marketplaces, list_custom_commands,
-    resolve_local_marketplace_plugin, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
+    custom_command_prompt, discover_codex_apps, discover_marketplaces,
+    install_llm_provider_factory, list_custom_commands, resolve_local_marketplace_plugin,
+    AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
     CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, ExternalPluginCatalog,
-    ExternalPluginRecord, HarnessDiagnostics, HarnessRuntimeBuilder, Marketplace,
+    ExternalPluginRecord, HarnessRuntimeBuilder, Marketplace,
     MarketplacePlugin, MarketplaceSource, MemoryStore, RestoreReport, SessionIndex, ToolContext,
 };
 use ncx_protocol::{
@@ -342,7 +343,7 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
     }
 
     fn harness_diagnostics(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(get_harness_diagnostics()?).map_err(|error| error.to_string())
+        get_harness_diagnostics()
     }
 
     fn list_external_plugins(&self) -> Result<serde_json::Value, String> {
@@ -1468,16 +1469,38 @@ fn now_epoch_millis() -> i64 {
         .unwrap_or(0)
 }
 
-fn get_harness_diagnostics() -> Result<HarnessDiagnostics, String> {
+fn get_harness_diagnostics() -> Result<serde_json::Value, String> {
     let (cfg, workspace) = configured_workspace()?;
     let profile = AgentRuntimeProfile::from_config(&cfg);
     let context = profile.apply_tool_context(ToolContext::new(
         workspace.clone(),
         profile.sandbox_policy(&workspace),
     ));
-    Ok(HarnessRuntimeBuilder::configured(&workspace)?
-        .build(context)
-        .harness_diagnostics())
+    let mut tools = HarnessRuntimeBuilder::configured(&workspace)?.build(context);
+    install_llm_provider_factory(&mut tools, cfg.clone(), cfg.model.clone());
+    let mut diagnostics = serde_json::to_value(tools.harness_diagnostics())
+        .map_err(|error| error.to_string())?;
+    let object = diagnostics
+        .as_object_mut()
+        .ok_or_else(|| "Harness 诊断格式无效".to_string())?;
+    object.insert(
+        "image_generation_ready".into(),
+        serde_json::Value::Bool(tools.get("generate_image").is_some()),
+    );
+    object.insert(
+        "video_generation_ready".into(),
+        serde_json::Value::Bool(tools.get("generate_video").is_some()),
+    );
+    object.insert(
+        "external_tools_ready".into(),
+        serde_json::Value::Bool(
+            tools
+                .schemas()
+                .iter()
+                .any(|schema| schema["function"]["name"].as_str().is_some_and(|name| name.contains("__"))),
+        ),
+    );
+    Ok(diagnostics)
 }
 
 fn external_plugin_catalog() -> Result<ExternalPluginCatalog, String> {

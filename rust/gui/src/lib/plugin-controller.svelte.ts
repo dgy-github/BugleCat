@@ -1,7 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { appServerRequest } from "./app-server-client";
 
-export type HarnessDiagnostics = Record<"llm" | "interaction" | "policy" | "context" | "memory" | "compaction" | "mcp" | "attachment" | "media" | "cost_telemetry", boolean>;
+export type HarnessDiagnostics = Record<"llm" | "interaction" | "policy" | "context" | "memory" | "compaction" | "mcp" | "attachment" | "media" | "cost_telemetry" | "image_generation_ready" | "video_generation_ready" | "external_tools_ready", boolean>;
 export type ExternalPlugin = { manifest: { id: string; name: string; version: string; capabilities: string[] }; root: string; enabled: boolean };
 export type CodexPlugin = {
   manifest: { name: string; version?: string; description?: string; keywords: string[] };

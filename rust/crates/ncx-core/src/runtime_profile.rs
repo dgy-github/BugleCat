@@ -4,12 +4,13 @@ use std::path::Path;
 use std::rc::Rc;
 
 use ncx_config::{permission_mode_to_knobs, Config};
-use ncx_provider::DeepSeekProvider;
+use ncx_provider::{DashScopeMediaProvider, DeepSeekProvider};
 use ncx_sandbox::SandboxPolicy;
 
 use crate::plugins::{LlmProviderFactory, LlmProviderFactoryHandle};
 use crate::{
-    AgentLoop, ContextEditPolicy, Provider, RustAnalyzerProvider, TaskBudget, ToolContext,
+    AgentLoop, ContextEditPolicy, GenerateImageTool, GenerateVideoTool, MediaGenerationService,
+    MediaPrice, Provider, RustAnalyzerProvider, TaskBudget, ToolContext,
 };
 
 const DEFAULT_MAX_MODEL_CALLS: usize = 60;
@@ -189,6 +190,7 @@ pub fn install_llm_provider_factory(
     cfg: Config,
     model: impl Into<String>,
 ) {
+    install_media_provider(tools, &cfg);
     let pricing = crate::plugins::CostTelemetryServiceDescriptor {
         currency: cfg.price_currency.clone(),
         input_per_million: cfg.price_in,
@@ -209,6 +211,54 @@ pub fn install_llm_provider_factory(
             "cost.telemetry",
             Rc::new(crate::plugins::CostTelemetryService::new(pricing)),
         );
+    }
+}
+
+fn install_media_provider(tools: &mut crate::ToolRegistry, cfg: &Config) {
+    let Some(capabilities) = tools.service::<crate::plugins::MediaServiceDescriptor>("media")
+    else {
+        return;
+    };
+    if cfg.vl_api_key.trim().is_empty() {
+        return;
+    }
+    let telemetry = tools.service::<crate::plugins::CostTelemetryService>("cost.telemetry");
+    let service = Rc::new(MediaGenerationService {
+        provider: Rc::new(DashScopeMediaProvider::new(
+            cfg.vl_api_key.clone(),
+            cfg.timeout_s as u64,
+        )),
+        image: media_price("NANOCODEX_IMAGE_PRICE_CNY", 0.14, "张"),
+        video: media_price("NANOCODEX_VIDEO_PRICE_CNY_PER_SECOND", 0.24, "秒"),
+        telemetry,
+    });
+    let mut additions: Vec<Box<dyn crate::Tool>> = Vec::new();
+    if capabilities.image_generation {
+        additions.push(Box::new(GenerateImageTool::new(service.clone())));
+    }
+    if capabilities.video_generation {
+        additions.push(Box::new(GenerateVideoTool::new(service.clone())));
+    }
+    if !additions.is_empty() {
+        tools
+            .replace_tools(&[], additions)
+            .expect("media tool names must not conflict with builtins");
+        tools.replace_service("media.generation", service);
+    }
+}
+
+fn media_price(env_name: &str, fallback: f64, unit: &str) -> MediaPrice {
+    let amount = std::env::var(env_name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value: &f64| value.is_finite() && *value >= 0.0)
+        .unwrap_or(fallback);
+    MediaPrice {
+        amount,
+        unit: unit.into(),
+        currency: "CNY".into(),
+        source: "https://help.aliyun.com/zh/model-studio/model-pricing".into(),
+        audited_at: "2026-08-25（当前网络未能重新打开官方页，可用环境变量覆盖）".into(),
     }
 }
 
@@ -347,5 +397,42 @@ mod tests {
         assert_eq!(profile.permissions.approval_policy, "never");
         assert!(!profile.permissions.require_edit_approval);
         assert!(!profile.permissions.plan_mode);
+    }
+
+    #[test]
+    fn media_tools_require_both_full_profile_capability_and_dashscope_key() {
+        let workspace = PathBuf::from("media-install-test");
+        let context = || {
+            ToolContext::new(
+                workspace.clone(),
+                ncx_sandbox::SandboxPolicy::new(ncx_sandbox::WORKSPACE_WRITE, &workspace),
+            )
+        };
+        let cfg = Config {
+            vl_api_key: "dashscope-secret".into(),
+            ..Default::default()
+        };
+        let mut full = crate::HarnessRuntimeBuilder::builtin("full")
+            .unwrap()
+            .build(context());
+        install_llm_provider_factory(&mut full, cfg.clone(), cfg.model.clone());
+        assert!(full.get("generate_image").is_some());
+        assert!(full.get("generate_video").is_some());
+        assert!(full
+            .service::<MediaGenerationService>("media.generation")
+            .is_some());
+
+        let mut minimal = crate::HarnessRuntimeBuilder::builtin("minimal")
+            .unwrap()
+            .build(context());
+        install_llm_provider_factory(&mut minimal, cfg.clone(), cfg.model.clone());
+        assert!(minimal.get("generate_image").is_none());
+        assert!(minimal.get("generate_video").is_none());
+
+        let mut no_key = crate::HarnessRuntimeBuilder::builtin("full")
+            .unwrap()
+            .build(context());
+        install_llm_provider_factory(&mut no_key, Config::default(), "model");
+        assert!(no_key.get("generate_image").is_none());
     }
 }

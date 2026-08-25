@@ -630,3 +630,14 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - `HarnessRuntimeBuilder` 成为 CLI/GUI 共用的能力装配入口：根据最终 Profile/Overlay 的 `ncx.media` 配置，在工具安装前同步过滤 `ToolContext.skills` 和 `skills` ContextFragment。`full` 可见媒体 Skill，`minimal`/`headless` 不再暴露媒体 Skill 或提示词目录。
 - 这一步建立了生图/视频真实消费者门禁，但仓库仍没有已确认可执行的 Wan/生图 Skill 实现；不能据此宣告完整媒体执行链已完成。
 - 验证：Rust workspace 全量通过（含 `ncx-core` 228 项、跨进程 Thread 租约）、GUI Rust 60 项、Vite production build、结构门禁和 `git diff --check` 通过。
+
+### 2026-08-25 M5/M6 外部插件协议与阿里媒体执行链
+
+- 外部 `plugin.toml` 插件不再只是启动子进程：新增 line-delimited JSON 协议 v1，包含 `handshake`、`toolCall`、`toolResult`，校验协议版本、插件 ID、能力、工具 schema 和参数对象；外部工具强制使用插件命名空间，不能覆盖 `shell` 等内置工具。
+- 外部工具每次调用使用独立子进程、最小环境、超时终止；`HarnessRuntimeBuilder::configured` 会发现工作区 `.ncx/plugins`、完成握手并注册真实工具。`full` Profile 新增 `external` Bundle，`minimal` 与 `headless` 不加载外部插件。
+- 新增阿里百炼 `DashScopeMediaProvider`、`generate_image`、`generate_video` 与两个内置 Skill；默认模型为 `wan2.2-t2i-flash` 和 `wan2.1-t2v-turbo`。只有 `full` 且存在第二套 `vl_api_key`/`DASHSCOPE_API_KEY` 时才装配，绝不回退使用 DeepSeek 主 Key。
+- 媒体结果返回模型、任务 ID、真实 URL、币种、计价单位、价格来源、核对日期和本次预估费用，并写入 `CostTelemetryService`。当前内置估算为图片 `0.14 CNY/张`、视频 `0.24 CNY/秒`，分别可由 `NANOCODEX_IMAGE_PRICE_CNY`、`NANOCODEX_VIDEO_PRICE_CNY_PER_SECOND` 覆盖；由于当前网络未能重新打开官方价格页，不能宣称该价格已实时官方核验。
+- GUI Harness 诊断新增图片、视频、外部工具就绪状态；设置页明确第二套密钥用于视觉与阿里媒体，媒体不复用主模型 Key；外部插件显示“协议 v1 · 正式能力握手”。
+- 真实 Key 验收：从用户提供的密钥文件中脱敏读取两把 Key，分别请求阿里百炼原生媒体接口，均返回 HTTP 401 `InvalidApiKey`。因此代码执行链已完成，但付费 live 生图/视频成功验收仍缺少标准 DashScope Key；没有创建成功任务，也不应产生费用。
+- Windows protocol E2E 首次因 MSVC 增量链接缓存损坏出现 LNK2019/LNK1120；使用 `cargo clean --manifest-path src-tauri/Cargo.toml -p ncx-core --target x86_64-pc-windows-msvc` 做包级清理后恢复，真实 E2E 通过：跨 Thread 并发、同 Thread 所有权、可见历史投影、刷新恢复、运行设置、Memory 和两类插件控制面全部正常。
+- 最终验证：`cargo test --workspace --quiet` 全绿（`ncx-core` 234 项）；GUI Rust 60 项；`npm run build` 成功（141 模块）；真实 `npm run test:e2e:protocol` 通过；15 个目标生产文件结构门禁与 `git diff --check` 通过。

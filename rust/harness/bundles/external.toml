@@ -1,0 +1,5 @@
+id = "external"
+
+[[plugins]]
+id = "external-host"
+plugin = "ncx.external"

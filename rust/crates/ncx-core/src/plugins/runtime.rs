@@ -3,10 +3,12 @@
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use super::external::{ExternalPluginRegistration, ExternalProcessTool};
 use super::{
     AttachmentPlugin, BundleSpec, CompactionPlugin, ContextPlugin, CoreToolsPlugin,
-    CostTelemetryPlugin, HarnessComposition, HarnessPlugin, InteractionPlugin, LlmProviderPlugin,
-    McpPlugin, MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
+    CostTelemetryPlugin, ExternalHostPlugin, ExternalPluginCatalog, ExternalPluginRecord,
+    HarnessComposition, HarnessPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
+    MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
     ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 use crate::skills::skills_index_block;
@@ -16,6 +18,8 @@ use ncx_context::{ContextEntry, ContextFragment, TextContextFragment};
 pub struct HarnessRuntimeBuilder {
     plugins: PluginRegistry,
     media: Option<super::MediaServiceDescriptor>,
+    external: Vec<(ExternalPluginRecord, ExternalPluginRegistration)>,
+    external_enabled: bool,
 }
 
 impl Default for HarnessRuntimeBuilder {
@@ -29,6 +33,8 @@ impl HarnessRuntimeBuilder {
         Self {
             plugins: PluginRegistry::new(),
             media: None,
+            external: Vec::new(),
+            external_enabled: false,
         }
     }
 
@@ -46,6 +52,9 @@ impl HarnessRuntimeBuilder {
                     image_generation: media_flag(&entry.config, "image_generation"),
                     video_generation: media_flag(&entry.config, "video_generation"),
                 });
+            }
+            if entry.plugin == "ncx.external" {
+                builder.external_enabled = true;
             }
         }
         Ok(builder)
@@ -89,7 +98,24 @@ impl HarnessRuntimeBuilder {
         } else {
             builtin_composition(&profile)?.apply_overlay_files(&overlays)?
         };
-        Self::from_composition(&composition)
+        let mut builder = Self::from_composition(&composition)?;
+        let mut names = std::collections::HashSet::new();
+        if builder.external_enabled {
+            for plugin in ExternalPluginCatalog::new(workspace.join(".ncx").join("plugins"))
+                .discover()?
+                .into_iter()
+                .filter(|plugin| plugin.enabled)
+            {
+                let registration = plugin.handshake()?;
+                for tool in &registration.tools {
+                    if !names.insert(tool.name.clone()) {
+                        return Err(format!("外部插件工具 '{}' 重名", tool.name));
+                    }
+                }
+                builder.external.push((plugin, registration));
+            }
+        }
+        Ok(builder)
     }
 
     pub fn register(&mut self, plugin: Rc<dyn HarnessPlugin>) -> Result<&mut Self, String> {
@@ -115,6 +141,19 @@ impl HarnessRuntimeBuilder {
             .plugins
             .install_into(&mut tools)
             .expect("default Harness plugin composition must be valid");
+        let external_tools = self
+            .external
+            .into_iter()
+            .flat_map(|(plugin, registration)| {
+                registration.tools.into_iter().map(move |descriptor| {
+                    Box::new(ExternalProcessTool::new(plugin.clone(), descriptor))
+                        as Box<dyn crate::Tool>
+                })
+            })
+            .collect::<Vec<_>>();
+        tools
+            .replace_tools(&[], external_tools)
+            .expect("validated external plugin tool names must be unique");
         (tools, report)
     }
 }
@@ -213,6 +252,7 @@ fn builtin_plugin(id: &str) -> Option<Rc<dyn HarnessPlugin>> {
         "ncx.attachment" => Some(Rc::new(AttachmentPlugin)),
         "ncx.media" => Some(Rc::new(MediaPlugin)),
         "ncx.cost-telemetry" => Some(Rc::new(CostTelemetryPlugin)),
+        "ncx.external" => Some(Rc::new(ExternalHostPlugin)),
         _ => None,
     }
 }
@@ -225,6 +265,7 @@ fn embedded_bundle(id: &str) -> Result<BundleSpec, String> {
         "process" => include_str!("../../../../harness/bundles/process.toml"),
         "session" => include_str!("../../../../harness/bundles/session.toml"),
         "media" => include_str!("../../../../harness/bundles/media.toml"),
+        "external" => include_str!("../../../../harness/bundles/external.toml"),
         _ => return Err(format!("unknown built-in Harness bundle '{id}'")),
     };
     parse_embedded(id, text)
@@ -282,11 +323,12 @@ mod tests {
                 "ncx.mcp",
                 "ncx.attachment",
                 "ncx.media",
-                "ncx.cost-telemetry"
+                "ncx.cost-telemetry",
+                "ncx.external"
             ]
         );
         let (_, report) = builder.build_with_report(context());
-        assert_eq!(report.installed.len(), 15);
+        assert_eq!(report.installed.len(), 16);
     }
 
     #[test]
@@ -329,6 +371,8 @@ mod tests {
         );
         let headless = HarnessRuntimeBuilder::builtin("headless").unwrap();
         assert!(!headless.plugin_ids().any(|id| id == "ncx.media"));
+        assert!(!headless.plugin_ids().any(|id| id == "ncx.external"));
+        assert!(!minimal.plugin_ids().any(|id| id == "ncx.external"));
         assert!(headless.plugin_ids().any(|id| id == "ncx.process"));
     }
 
