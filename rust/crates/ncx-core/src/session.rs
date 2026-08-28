@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use ncx_context::{ContextEditPolicy, ContextEditStats};
@@ -20,6 +21,26 @@ pub const COMPACTED_HISTORY_PREFIX: &str = "[压缩后保留的会话里程碑";
 pub struct ContextMessages {
     pub messages: Vec<Value>,
     pub stats: ContextEditStats,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompactionSafetySnapshot {
+    pub original_requirements: Vec<String>,
+    pub confirmed_decisions: Vec<String>,
+    pub prohibitions: Vec<String>,
+    pub completed: Vec<String>,
+    pub pending: Vec<String>,
+    pub files: Vec<String>,
+    pub git_diff_summary: String,
+    pub recent_tests: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeCompactionResult {
+    pub stats: ContextEditStats,
+    pub before: CompactionSafetySnapshot,
+    pub after: CompactionSafetySnapshot,
+    pub conflicts: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +209,35 @@ impl Session {
         (stats.compressed_tool_results > 0 || stats.dropped_messages > 0).then_some(stats)
     }
 
+    pub fn compact_safely_if_needed(
+        &mut self,
+        policy: &ContextEditPolicy,
+        workspace: &Path,
+    ) -> Option<SafeCompactionResult> {
+        if !self.needs_compaction(policy) {
+            return None;
+        }
+        let before = safety_snapshot(&self.messages, workspace);
+        let marker = safety_marker(&before);
+        let stats = self.compact(policy);
+        if stats.dropped_messages == 0 && stats.compressed_tool_results == 0 {
+            return None;
+        }
+        if !marker.is_empty() {
+            self.messages
+                .insert(0, json!({"role": "user", "content": marker}));
+            self.rewrite_log();
+        }
+        let after = safety_snapshot(&self.messages, workspace);
+        let conflicts = compare_safety_snapshots(&before, &after);
+        Some(SafeCompactionResult {
+            stats,
+            before,
+            after,
+            conflicts,
+        })
+    }
+
     pub fn needs_compaction(&self, policy: &ContextEditPolicy) -> bool {
         policy.enabled && total_chars(&self.system, &[], &self.messages) > policy.max_chars
     }
@@ -345,6 +395,165 @@ impl Session {
             }
         }
     }
+}
+
+fn safety_snapshot(messages: &[Value], workspace: &Path) -> CompactionSafetySnapshot {
+    let users = messages
+        .iter()
+        .filter(|m| role(m) == Some("user"))
+        .map(message_content_text)
+        .filter(|s| !s.trim().is_empty())
+        .collect::<Vec<_>>();
+    let all = messages
+        .iter()
+        .map(message_content_text)
+        .filter(|s| !s.trim().is_empty())
+        .collect::<Vec<_>>();
+    let pick = |needles: &[&str], limit: usize| {
+        all.iter()
+            .rev()
+            .filter(|text| needles.iter().any(|needle| text.contains(needle)))
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let mut files = Vec::new();
+    for text in &all {
+        for token in text.split_whitespace() {
+            let clean = token.trim_matches(|c: char| "`'\"()[]{}，。,:：；".contains(c));
+            if (clean.contains('/') || clean.contains('\\'))
+                && clean
+                    .rsplit('.')
+                    .next()
+                    .is_some_and(|ext| (1..=8).contains(&ext.len()))
+            {
+                if !files.iter().any(|item| item == clean) {
+                    files.push(clean.to_string());
+                }
+            }
+        }
+    }
+    files.truncate(24);
+    let confirmed_decisions = all
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, text)| {
+            ["确认", "决定", "就按", "可以这么做", "方案"]
+                .iter()
+                .any(|needle| text.contains(needle))
+        })
+        .take(8)
+        .map(|(index, text)| {
+            format!(
+                "D{} {}{}",
+                index + 1,
+                if ["替代", "改为", "后来", "不再"]
+                    .iter()
+                    .any(|needle| text.contains(needle))
+                {
+                    "[替代旧决策] "
+                } else {
+                    ""
+                },
+                text
+            )
+        })
+        .collect();
+    CompactionSafetySnapshot {
+        original_requirements: users.iter().take(4).cloned().collect(),
+        confirmed_decisions,
+        prohibitions: pick(
+            &[
+                "不要",
+                "不能",
+                "禁止",
+                "先别",
+                "不允许",
+                "不要恢复",
+                "不要删除",
+                "不要提交",
+            ],
+            12,
+        ),
+        completed: pick(&["已完成", "已经修复", "通过", "完成"], 8),
+        pending: pick(&["未完成", "待办", "下一步", "还没", "需要"], 8),
+        files,
+        git_diff_summary: git_diff_summary(workspace),
+        recent_tests: pick(&["test", "测试", "passed", "通过"], 8),
+    }
+}
+
+fn git_diff_summary(workspace: &Path) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(["diff", "--stat", "--", "."])
+        .output();
+    output
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .chars()
+                .take(2_000)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn safety_marker(snapshot: &CompactionSafetySnapshot) -> String {
+    let section = |name: &str, values: &[String]| {
+        if values.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n{name}:\n{}",
+                values
+                    .iter()
+                    .map(|v| format!("- {}", v.chars().take(500).collect::<String>()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        }
+    };
+    format!("[压缩安全快照；仅用于恢复方向，代码事实须重新核对工作区/diff/测试]{}{}{}{}{}{}\ngit diff 摘要:\n{}",
+        section("原始要求", &snapshot.original_requirements), section("已确认决策", &snapshot.confirmed_decisions),
+        section("不可丢失禁止事项", &snapshot.prohibitions), section("已完成", &snapshot.completed),
+        section("未完成", &snapshot.pending), section("涉及文件", &snapshot.files), snapshot.git_diff_summary)
+}
+
+fn compare_safety_snapshots(
+    before: &CompactionSafetySnapshot,
+    after: &CompactionSafetySnapshot,
+) -> Vec<String> {
+    let mut conflicts = Vec::new();
+    for (name, expected, actual) in [
+        (
+            "任务目标",
+            &before.original_requirements,
+            &after.original_requirements,
+        ),
+        (
+            "已确认决策",
+            &before.confirmed_decisions,
+            &after.confirmed_decisions,
+        ),
+        ("禁止事项", &before.prohibitions, &after.prohibitions),
+        ("涉及文件", &before.files, &after.files),
+    ] {
+        if expected.iter().any(|item| {
+            !actual
+                .iter()
+                .any(|candidate| candidate.contains(item) || item.contains(candidate))
+        }) {
+            conflicts.push(format!("{name}在压缩后不一致"));
+        }
+    }
+    if before.git_diff_summary != after.git_diff_summary {
+        conflicts.push("压缩期间 git diff 状态发生变化".into());
+    }
+    conflicts
 }
 
 fn role(msg: &Value) -> Option<&str> {
@@ -791,6 +1000,42 @@ mod tests {
 
         assert!(stats.is_none());
         assert_eq!(s.messages.len(), 2);
+    }
+
+    #[test]
+    fn safe_compaction_preserves_prohibitions_and_workspace_evidence() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx_safe_compact_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut session = Session::new("system");
+        session.add_user_text("原始要求：修改 src/app.rs，但不要删除旧实现，不要提交代码");
+        for index in 0..20 {
+            session.add_assistant(&format!("普通讨论 {index} {}", "x".repeat(120)), None, "");
+            session.add_user_text(&format!("继续讨论 {index}"));
+        }
+        let result = session
+            .compact_safely_if_needed(
+                &ContextEditPolicy {
+                    enabled: true,
+                    max_chars: 900,
+                    keep_recent_messages: 4,
+                    max_tool_result_chars: 40,
+                },
+                &root,
+            )
+            .expect("compaction");
+        let rendered = serde_json::to_string(&session.messages).unwrap();
+        assert!(rendered.contains("不要删除旧实现"));
+        assert!(rendered.contains("不要提交代码"));
+        assert!(rendered.contains("代码事实须重新核对"));
+        assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

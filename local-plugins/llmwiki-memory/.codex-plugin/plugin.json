@@ -1,0 +1,19 @@
+{
+  "name": "llmwiki-memory",
+  "version": "0.1.0",
+  "description": "BugleCat 本地跨 Agent 长期记忆，连接 D:\\LLMWIKI 并复用 llm-wiki-template 协议。",
+  "author": {
+    "name": "BugleCat Local"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "LLM Wiki 长期记忆",
+    "shortDescription": "读写 D:\\LLMWIKI 的用户与项目记忆。",
+    "longDescription": "通过本地 MCP 的单一 llmwiki 工具和 llmwiki-memory Skill，为 BugleCat 提供可追溯的跨 Agent 长期记忆。",
+    "developerName": "BugleCat Local",
+    "category": "Productivity",
+    "capabilities": ["MCP", "Skills", "Local memory"],
+    "defaultPrompt": "读取 LLM Wiki 中的用户偏好和当前项目快照。"
+  },
+  "mcpServers": "./.mcp.json"
+}

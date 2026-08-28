@@ -36,7 +36,7 @@ pub struct CatalogProvider {
     pub models: Vec<CatalogModel>,
 }
 
-const UPDATED_AT: &str = "2026-08-17";
+const UPDATED_AT: &str = "2026-08-27";
 const DEEPSEEK_PRICING: &str = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing";
 const BAILIAN_PRICING: &str = "https://help.aliyun.com/zh/model-studio/qwen3-7-max";
 const ARK_PRICING: &str = "https://www.volcengine.com/product/ark";
@@ -46,6 +46,7 @@ const MINIMAX_PRICING: &str = "https://platform.minimaxi.com/docs/guides/pricing
 const OPENAI_PRICING: &str = "https://developers.openai.com/api/docs/models/compare";
 const GEMINI_PRICING: &str = "https://ai.google.dev/gemini-api/docs/latest-model";
 const OPENROUTER_PRICING: &str = "https://openrouter.ai/models";
+const YUNMO_HOME: &str = "https://api.yunmo-ai.com/";
 
 fn model(
     provider_id: &str,
@@ -110,28 +111,39 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "deepseek".into(),
             name: "DeepSeek".into(),
             models: vec![
-                model(
+                with_pricing_note(model(
                     "deepseek",
                     "deepseek-v4-flash",
                     "DeepSeek V4 Flash",
                     "https://api.deepseek.com",
-                    1.0,
-                    2.0,
+                    3.0,
+                    9.0,
                     "CNY",
                     DEEPSEEK_PRICING,
                     Some(1_000_000),
-                ),
-                model(
+                ), "显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
+                with_pricing_note(model(
                     "deepseek",
                     "deepseek-v4-pro",
                     "DeepSeek V4 Pro",
                     "https://api.deepseek.com",
-                    3.0,
-                    6.0,
+                    9.0,
+                    27.0,
                     "CNY",
                     DEEPSEEK_PRICING,
                     Some(1_000_000),
-                ),
+                ), "显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
+                with_pricing_note(model(
+                    "deepseek",
+                    "deepseek-v4-flash-vision-exp",
+                    "DeepSeek V4 Flash Vision Exp",
+                    "https://api.deepseek.com",
+                    3.0,
+                    9.0,
+                    "CNY",
+                    DEEPSEEK_PRICING,
+                    Some(1_000_000),
+                ), "实验性视觉模型；显示高峰期缓存未命中价，空闲时段半价，缓存命中另计"),
             ],
         },
         CatalogProvider {
@@ -301,6 +313,27 @@ pub fn catalog() -> Vec<CatalogProvider> {
             ],
         },
         CatalogProvider {
+            id: "yunmo".into(),
+            name: "云末 AI（中转）".into(),
+            models: vec![{
+                let mut preset = model(
+                    "yunmo",
+                    "gpt-5.6-sol",
+                    "GPT-5.6 Sol（云末中转）",
+                    "https://api.yunmo-ai.com/v1",
+                    0.0,
+                    0.0,
+                    "USD",
+                    YUNMO_HOME,
+                    None,
+                );
+                preset.price_source = PriceSource::Aggregator;
+                preset.pricing_note =
+                    Some("中转站实际计费以云末控制台为准；模型 ID 已通过 /v1/models 实测。".into());
+                preset
+            }],
+        },
+        CatalogProvider {
             id: "gemini".into(),
             name: "Google Gemini".into(),
             models: vec![with_pricing_note(
@@ -344,51 +377,53 @@ pub fn find_preset(provider_id: &str, model_id: &str) -> Option<CatalogModel> {
         })
 }
 
+pub fn yunmo_model(model_id: &str) -> CatalogModel {
+    let mut preset = model(
+        "yunmo",
+        model_id,
+        model_id,
+        "https://api.yunmo-ai.com/v1",
+        0.0,
+        0.0,
+        "USD",
+        YUNMO_HOME,
+        None,
+    );
+    preset.price_source = PriceSource::Aggregator;
+    preset.pricing_note =
+        Some("由云末 /v1/models 实时返回；实际模型能力与费用以中转站为准。".into());
+    preset
+}
+
+pub fn openrouter_model(model: ncx_core::DiscoveredProviderModel) -> CatalogModel {
+    CatalogModel {
+        provider_id: "openrouter".into(),
+        model_id: model.id.clone(),
+        display_name: model.name,
+        base_url: "https://openrouter.ai/api/v1".into(),
+        price_in: model.input_price_per_million.unwrap_or(0.0),
+        price_out: model.output_price_per_million.unwrap_or(0.0),
+        price_currency: "USD".into(),
+        price_source: PriceSource::Aggregator,
+        pricing_note: None,
+        source_url: OPENROUTER_PRICING.into(),
+        updated_at: UPDATED_AT.into(),
+        context_length: model.context_length,
+        direct_available: true,
+    }
+}
+
 /// Convert OpenRouter's public per-token prices into the per-million-token
 /// display unit used by nanocodex. An absent price is kept as zero (unknown).
 pub fn parse_openrouter_models(json: &str) -> Result<Vec<CatalogModel>, String> {
     let root: Value =
         serde_json::from_str(json).map_err(|e| format!("OpenRouter 目录格式错误：{e}"))?;
-    let rows = root
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "OpenRouter 目录缺少 data 数组".to_string())?;
-    let mut models = Vec::new();
-    for row in rows {
-        let Some(model_id) = row
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty())
-        else {
-            return Err("OpenRouter 目录存在缺少模型 ID 的条目".into());
-        };
-        let price = |field: &str| {
-            row.get("pricing")
-                .and_then(|value| value.get(field))
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<f64>().ok())
-                .map(|value| value * 1_000_000.0)
-                .unwrap_or(0.0)
-        };
-        models.push(CatalogModel {
-            provider_id: "openrouter".into(),
-            model_id: model_id.into(),
-            display_name: row
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or(model_id)
-                .into(),
-            base_url: "https://openrouter.ai/api/v1".into(),
-            price_in: price("prompt"),
-            price_out: price("completion"),
-            price_currency: "USD".into(),
-            price_source: PriceSource::Aggregator,
-            pricing_note: None,
-            source_url: OPENROUTER_PRICING.into(),
-            updated_at: UPDATED_AT.into(),
-            context_length: row.get("context_length").and_then(Value::as_u64),
-            direct_available: true,
-        });
+    let models = ncx_core::parse_catalog_models(&root)
+        .into_iter()
+        .map(openrouter_model)
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        return Err("OpenRouter 目录没有返回可用模型".to_string());
     }
     Ok(models)
 }
@@ -410,6 +445,7 @@ mod tests {
             "openai",
             "gemini",
             "openrouter",
+            "yunmo",
         ] {
             let provider = providers
                 .iter()
@@ -429,7 +465,7 @@ mod tests {
     fn official_catalog_and_openrouter_catalog_have_distinct_price_sources() {
         for provider in catalog()
             .into_iter()
-            .filter(|provider| provider.id != "openrouter")
+            .filter(|provider| !matches!(provider.id.as_str(), "openrouter" | "yunmo"))
         {
             assert!(provider
                 .models
@@ -456,15 +492,28 @@ mod tests {
             .map(|model| model.model_id.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(ids, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
+        assert_eq!(
+            ids,
+            vec![
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "deepseek-v4-flash-vision-exp",
+            ]
+        );
         assert!(deepseek
             .models
             .iter()
             .all(|model| model.price_currency == "CNY"));
-        assert_eq!(deepseek.models[0].price_in, 1.0);
-        assert_eq!(deepseek.models[0].price_out, 2.0);
-        assert_eq!(deepseek.models[1].price_in, 3.0);
-        assert_eq!(deepseek.models[1].price_out, 6.0);
+        assert_eq!(deepseek.models[0].price_in, 3.0);
+        assert_eq!(deepseek.models[0].price_out, 9.0);
+        assert_eq!(deepseek.models[1].price_in, 9.0);
+        assert_eq!(deepseek.models[1].price_out, 27.0);
+        assert_eq!(deepseek.models[2].price_in, 3.0);
+        assert_eq!(deepseek.models[2].price_out, 9.0);
+        assert!(deepseek
+            .models
+            .iter()
+            .all(|model| model.pricing_note.is_some()));
     }
 
     #[test]
@@ -480,6 +529,7 @@ mod tests {
                 vec!["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
             ),
             ("gemini", vec!["gemini-3.7-flash"]),
+            ("yunmo", vec!["gpt-5.6-sol"]),
         ];
 
         let providers = catalog();

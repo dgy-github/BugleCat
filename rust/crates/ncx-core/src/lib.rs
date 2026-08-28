@@ -14,15 +14,19 @@ pub mod checkpoint;
 pub mod custom_commands;
 pub mod editor_tool;
 pub mod genome;
+pub mod goal_tools;
 pub mod hooks;
 pub mod isolate;
 pub mod lsp_tool;
 pub mod mcp_tool;
 pub mod media_tools;
 pub mod memory;
+mod memory_merge;
+mod memory_summarizer;
 pub mod mentions;
 pub mod model_provider;
 pub mod orchestrator;
+pub mod orchestrator_runner;
 pub mod plugins;
 pub mod process_tools;
 pub mod project_instructions;
@@ -43,6 +47,7 @@ pub mod tool_scheduler;
 pub mod tools;
 pub mod turn_context;
 pub mod user_question;
+mod workspace_promotion;
 pub mod workspace_tools;
 
 pub use agent_loop::{
@@ -55,18 +60,25 @@ pub use custom_commands::{
 };
 pub use editor_tool::StrReplaceEditorTool;
 pub use genome::Genome;
+pub use goal_tools::{GoalAuthoritySource, GoalToolService, GoalTurnAuthority};
 pub use hooks::{HookEvent, HookOutcome};
 pub use lsp_tool::{LspProvider, LspRequest, LspTool};
 pub use mcp_tool::{prepare_mcp_server_tools, register_mcp_server};
 pub use media_tools::{GenerateImageTool, GenerateVideoTool, MediaGenerationService, MediaPrice};
 pub use memory::{MemoryEntry, MemoryStore, Summarizer};
+pub use memory_merge::MemoryMergeDraft;
+pub use memory_summarizer::ProviderMemorySummarizer;
 pub use mentions::{expand_file_mentions, find_mentions};
 pub use ncx_context::{
     ContextAssembler, ContextEntry, ContextFragment, ContextService, TextContextFragment,
 };
+pub use ncx_provider::{parse_catalog_models, DiscoveredProviderModel};
 pub use orchestrator::{
-    AgentRunner, Complexity, Orchestrator, OrchestratorConfig, OrchestratorOutcome, Tier,
+    AgentCallResult, AgentRunner, Complexity, Orchestrator, OrchestratorConfig,
+    OrchestratorControl, OrchestratorEvent, OrchestratorOutcome, OrchestratorStage,
+    OrchestratorTelemetry, Tier,
 };
+pub use orchestrator_runner::{HarnessAgentRunner, HarnessRunnerEvent};
 pub use plugins::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
     resolve_local_marketplace_plugin, AttachmentPlugin, AttachmentServiceDescriptor,
@@ -81,15 +93,18 @@ pub use plugins::{
     LlmProviderPlugin, LlmServiceDescriptor, Marketplace, MarketplacePlugin, MarketplaceSource,
     McpPlugin, McpServiceDescriptor, MediaPlugin, MediaServiceDescriptor, MemoryPlugin,
     MemoryServiceDescriptor, PluginCapability, PluginHost, PluginInstallReport, PluginManifest,
-    PluginRegistry, PolicyPlugin, PolicyService, ProcessToolsPlugin, SearchToolsPlugin,
-    SessionToolsPlugin, WorkspaceToolsPlugin,
+    PluginRegistry, PolicyPlugin, PolicyService, ProcessToolsPlugin, ProviderCatalogPlugin,
+    ProviderCatalogService, ProviderChatProbePlugin, ProviderChatProbeService,
+    ProviderDirectoryDiagnostics, ProviderDirectoryPlugin, ProviderDirectoryService,
+    SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 pub use project_instructions::{load_project_instructions, load_workspace_instructions};
 pub use prompt::PromptAssembler;
 pub use runtime_assembly::{ConfiguredHarnessRuntime, RuntimeContextSources, RuntimeHostBindings};
 pub use runtime_profile::{
-    install_llm_provider_factory, model_provider_from_config, vision_provider_from_config,
-    AgentRuntimeProfile, ConfiguredLlmProviderFactory, RuntimePermissionProfile,
+    install_llm_provider_factory, model_provider_from_config, model_supports_native_vision,
+    vision_provider_from_config, AgentRuntimeProfile, ConfiguredLlmProviderFactory,
+    RuntimePermissionProfile,
 };
 pub use rust_analyzer::RustAnalyzerProvider;
 pub use session::{

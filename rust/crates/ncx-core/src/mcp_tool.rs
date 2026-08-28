@@ -36,6 +36,21 @@ impl McpTool {
             read_only,
         }
     }
+
+    fn call_is_read_only(&self, args: &Value) -> bool {
+        mcp_call_is_read_only(&self.def.name, self.read_only, args)
+    }
+}
+
+fn mcp_call_is_read_only(name: &str, tool_is_read_only: bool, args: &Value) -> bool {
+    if tool_is_read_only {
+        return true;
+    }
+    name == "llmwiki"
+        && matches!(
+            args.get("action").and_then(Value::as_str),
+            Some("recall_user" | "recall_project" | "project_status" | "status" | "corpus")
+        )
 }
 
 /// Heuristic: tool names that look like reads/queries don't require approval.
@@ -68,7 +83,7 @@ impl Tool for McpTool {
     }
 
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
-        if !self.read_only {
+        if !self.call_is_read_only(args) {
             let decision = Approver::new(&ctx.approval_policy).classify(&self.def.name, true);
             match decision {
                 Decision::AutoDeny => {
@@ -175,6 +190,35 @@ mod tests {
         assert!(!is_read_only_name("execute_code"));
     }
 
+    #[test]
+    fn llmwiki_read_actions_bypass_approval_but_mutations_do_not() {
+        for action in [
+            "recall_user",
+            "recall_project",
+            "project_status",
+            "status",
+            "corpus",
+        ] {
+            assert!(mcp_call_is_read_only(
+                "llmwiki",
+                false,
+                &serde_json::json!({"action": action})
+            ));
+        }
+        for action in ["initialize_project", "record_project", "propose", "approve"] {
+            assert!(!mcp_call_is_read_only(
+                "llmwiki",
+                false,
+                &serde_json::json!({"action": action})
+            ));
+        }
+        assert!(!mcp_call_is_read_only(
+            "llmwiki",
+            false,
+            &serde_json::json!({})
+        ));
+    }
+
     // A live round-trip (connect → list_tools → register → execute echo tool)
     // against the same Python mock server used in ncx-mcp's own tests.
     fn write_mock_server() -> std::path::PathBuf {
@@ -194,7 +238,8 @@ for line in sys.stdin:
     elif method == "tools/list":
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"tools":[
             {"name":"echo","description":"echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}},
-            {"name":"write_note","description":"write a note","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}}
+            {"name":"write_note","description":"write a note","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}},
+            {"name":"llmwiki","description":"memory actions","inputSchema":{"type":"object","properties":{"action":{"type":"string"}}}}
         ]}}), flush=True)
     elif method == "tools/call":
         args = msg.get("params",{}).get("arguments",{})
@@ -238,7 +283,7 @@ for line in sys.stdin:
                 return;
             }
         };
-        assert_eq!(n, 2);
+        assert_eq!(n, 3);
 
         // echo is read-only by heuristic (starts with "echo"… actually not)
         // write_note is non-read-only — check it's registered.
@@ -250,5 +295,15 @@ for line in sys.stdin:
             .execute("echo", &serde_json::json!({"text": "hello mcp"}))
             .await;
         assert_eq!(out, "echo: hello mcp");
+
+        reg.ctx.approval_policy = "never".into();
+        let recalled = reg
+            .execute("llmwiki", &serde_json::json!({"action": "recall_user"}))
+            .await;
+        assert!(!recalled.contains("denied by approval policy"));
+        let mutation = reg
+            .execute("llmwiki", &serde_json::json!({"action": "record_project"}))
+            .await;
+        assert!(mutation.contains("denied by approval policy 'never'"));
     }
 }

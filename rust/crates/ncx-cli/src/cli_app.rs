@@ -90,7 +90,7 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
         return None;
     }
     let memory = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
-    let summarizer = LiveSummarizer::new(cfg.clone());
+    let summarizer = memory_summarizer(cfg);
     Some(
         match memory.summarize_consolidate(&summarizer, 0.85).await {
             Ok(count) => {

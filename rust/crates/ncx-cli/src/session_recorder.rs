@@ -46,6 +46,7 @@ impl SessionRecorder {
                     thread_id: Some(thread_id.clone()),
                     workspace: workspace_text,
                     title: "(no prompt yet)".to_string(),
+                    harness_profile: "full".to_string(),
                 })
                 .map_err(|e| e.to_string())?;
             thread_id
@@ -87,12 +88,21 @@ impl SessionRecorder {
     }
 
     pub(crate) fn start_turn(&mut self, user_text: &str) -> Result<TurnId, String> {
+        self.start_turn_with_mode(user_text, ncx_protocol::ExecutionMode::Agent)
+    }
+
+    pub(crate) fn start_turn_with_mode(
+        &mut self,
+        user_text: &str,
+        execution_mode: ncx_protocol::ExecutionMode,
+    ) -> Result<TurnId, String> {
         let turn_id =
             TurnId::new(format!("turn-{}", new_session_id())).map_err(|error| error.to_string())?;
         self.server
             .dispatch(ClientRequest::TurnStart {
                 thread_id: self.thread_id.clone(),
                 turn_id: turn_id.clone(),
+                execution_mode,
             })
             .map_err(|error| error.to_string())?;
         self.server
@@ -142,6 +152,8 @@ impl SessionRecorder {
                     id: ItemId::new(format!("assistant-{}", new_session_id()))
                         .map_err(|error| error.to_string())?,
                     text: result.final_text.clone(),
+                    model: None,
+                    confirmed_model: None,
                 },
             })
             .map_err(|error| error.to_string())?;
@@ -206,6 +218,8 @@ impl SessionRecorder {
                     id: ItemId::new(format!("assistant-{}", new_session_id()))
                         .map_err(|failure| failure.to_string())?,
                     text: final_text.to_string(),
+                    model: None,
+                    confirmed_model: None,
                 },
             })
             .map_err(|failure| failure.to_string())?;

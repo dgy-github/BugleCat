@@ -5,7 +5,11 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
+
+fn default_harness_profile() -> String {
+    "full".to_string()
+}
 
 macro_rules! durable_id {
     ($name:ident, $label:literal) => {
@@ -38,6 +42,64 @@ macro_rules! durable_id {
 durable_id!(ThreadId, "threadId");
 durable_id!(TurnId, "turnId");
 durable_id!(ItemId, "itemId");
+durable_id!(GoalId, "goalId");
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GoalPhase {
+    Active,
+    Paused,
+    Blocked,
+    Complete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalBlockReason {
+    pub code: String,
+    pub message: String,
+}
+
+/// Durable goal state. Automatic scheduling authority is deliberately absent:
+/// `armed` / `disarmed` belongs to the live App Server runtime and is reset on
+/// every lifecycle replacement or restart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalSnapshot {
+    pub id: GoalId,
+    pub revision: u64,
+    pub objective: String,
+    pub phase: GoalPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<GoalBlockReason>,
+    pub max_goal_rounds: u32,
+    pub rounds_started: u32,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalRef {
+    pub id: GoalId,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GoalActivation {
+    Armed,
+    Disarmed,
+}
+
+/// Runtime projection combining durable goal state with process-local
+/// continuation authority. Only `goal` is persisted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalView {
+    pub goal: GoalSnapshot,
+    pub activation: GoalActivation,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +108,8 @@ pub struct ThreadMetadata {
     pub workspace: String,
     pub title: String,
     pub archived: bool,
+    #[serde(default = "default_harness_profile")]
+    pub harness_profile: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -61,9 +125,22 @@ pub enum ThreadItem {
         id: ItemId,
         text: String,
     },
+    /// Synthetic continuation prompt admitted by the Goal round driver. It is
+    /// retained for model replay and audit but excluded from visible history.
+    GoalMessage {
+        id: ItemId,
+        text: String,
+        goal_id: GoalId,
+        revision: u64,
+        round: u32,
+    },
     AssistantMessage {
         id: ItemId,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confirmed_model: Option<String>,
     },
     Reasoning {
         id: ItemId,
@@ -80,6 +157,12 @@ pub enum ThreadItem {
         output: String,
         success: bool,
     },
+    Artifact {
+        id: ItemId,
+        kind: String,
+        name: String,
+        url: String,
+    },
     ContextCompaction {
         id: ItemId,
         summary: String,
@@ -91,10 +174,12 @@ impl ThreadItem {
     pub fn id(&self) -> &ItemId {
         match self {
             Self::UserMessage { id, .. }
+            | Self::GoalMessage { id, .. }
             | Self::AssistantMessage { id, .. }
             | Self::Reasoning { id, .. }
             | Self::ToolCall { id, .. }
             | Self::ToolResult { id, .. }
+            | Self::Artifact { id, .. }
             | Self::ContextCompaction { id, .. } => id,
         }
     }
@@ -108,6 +193,14 @@ pub enum TurnStatus {
     Completed,
     Cancelled,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExecutionMode {
+    #[default]
+    Agent,
+    Orchestrator,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -126,6 +219,8 @@ pub struct TurnUsage {
 pub struct Turn {
     pub id: TurnId,
     pub status: TurnStatus,
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
     pub items: Vec<ThreadItem>,
     pub started_at: i64,
     pub completed_at: Option<i64>,
@@ -150,7 +245,12 @@ impl Thread {
             let mut visible = turn
                 .items
                 .iter()
-                .filter(|item| matches!(item, ThreadItem::UserMessage { .. }))
+                .filter(|item| {
+                    matches!(
+                        item,
+                        ThreadItem::UserMessage { .. } | ThreadItem::Artifact { .. }
+                    )
+                })
                 .cloned()
                 .collect::<Vec<_>>();
             if let Some(answer) = turn
@@ -191,11 +291,15 @@ pub enum ClientRequest {
         thread_id: Option<ThreadId>,
         workspace: String,
         title: String,
+        #[serde(default = "default_harness_profile")]
+        harness_profile: String,
     },
     ThreadCreateActivate {
         thread_id: ThreadId,
         workspace: String,
         title: String,
+        #[serde(default = "default_harness_profile")]
+        harness_profile: String,
     },
     ThreadImport {
         thread: Thread,
@@ -227,6 +331,52 @@ pub enum ClientRequest {
         thread_id: ThreadId,
         title: String,
     },
+    ThreadHarnessProfileSet {
+        thread_id: ThreadId,
+        harness_profile: String,
+    },
+    GoalRead {
+        thread_id: ThreadId,
+    },
+    GoalCreate {
+        thread_id: ThreadId,
+        objective: String,
+        max_goal_rounds: u32,
+    },
+    GoalEdit {
+        thread_id: ThreadId,
+        goal: GoalRef,
+        objective: String,
+        max_goal_rounds: u32,
+    },
+    GoalPause {
+        thread_id: ThreadId,
+        goal: GoalRef,
+    },
+    GoalResume {
+        thread_id: ThreadId,
+        goal: GoalRef,
+    },
+    GoalBlock {
+        thread_id: ThreadId,
+        goal: GoalRef,
+        reason: GoalBlockReason,
+    },
+    GoalComplete {
+        thread_id: ThreadId,
+        goal: GoalRef,
+    },
+    GoalClear {
+        thread_id: ThreadId,
+        goal: GoalRef,
+    },
+    GoalRoundStart {
+        thread_id: ThreadId,
+        turn_id: TurnId,
+        goal: GoalRef,
+        round: u32,
+        prompt: String,
+    },
     ThreadFork {
         thread_id: ThreadId,
         new_thread_id: ThreadId,
@@ -241,12 +391,16 @@ pub enum ClientRequest {
     TurnStart {
         thread_id: ThreadId,
         turn_id: TurnId,
+        #[serde(default)]
+        execution_mode: ExecutionMode,
     },
     TurnSubmit {
         thread_id: ThreadId,
         text: String,
         #[serde(default)]
         images: Vec<String>,
+        #[serde(default)]
+        execution_mode: ExecutionMode,
     },
     TurnInterrupt {
         thread_id: ThreadId,
@@ -285,6 +439,29 @@ pub enum ClientRequest {
         provider_id: String,
         model_id: String,
     },
+    CustomProviderList,
+    CustomProviderSave {
+        id: Option<String>,
+        name: String,
+        protocol: String,
+        base_url: String,
+        api_key: Option<String>,
+        models: Vec<String>,
+    },
+    CustomProviderDelete {
+        id: String,
+    },
+    CustomProviderModelsDiscover {
+        id: String,
+    },
+    CustomProviderActivate {
+        id: String,
+        model: String,
+    },
+    CustomProviderChatProbe {
+        id: String,
+        model: String,
+    },
     HarnessDiagnosticsRead,
     ExternalPluginList,
     ExternalPluginInstall {
@@ -301,6 +478,20 @@ pub enum ClientRequest {
         tags: Vec<String>,
     },
     MemoryConsolidate,
+    MemoryMergeStart,
+    MemoryMergeStatusRead,
+    MemoryMergeCancel,
+    ForgeRuntimeStatusRead,
+    ForgeJobStart {
+        rounds: u8,
+        repeats: u8,
+        timeout_s: u64,
+        budget_s: u64,
+        teacher: String,
+        accept_margin: u8,
+    },
+    ForgeJobStatusRead,
+    ForgeJobCancel,
     TurnComplete {
         thread_id: ThreadId,
         turn_id: TurnId,
@@ -332,6 +523,18 @@ pub enum ClientRequest {
         plugin_name: String,
         upgrade: bool,
     },
+    DshMarketplaceSearch {
+        source: String,
+        manifest_url: Option<String>,
+        query: String,
+    },
+    DshMarketplacePreview {
+        item: Value,
+    },
+    DshMarketplaceInstall {
+        item: Value,
+        upgrade: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -346,20 +549,30 @@ pub enum ResponsePayload {
     Thread(Thread),
     Threads(Vec<ThreadMetadata>),
     ModelContext(Option<StoredModelContext>),
+    Goal(Option<GoalView>),
     RuntimeStatus(Value),
     Workspace(String),
     Settings(Value),
     ModelCatalog(Value),
     ModelPreset(Value),
+    CustomProviders(Value),
+    CustomProvider(Value),
+    ProviderChatProbe(Value),
+    Models(Vec<String>),
     HarnessDiagnostics(Value),
     ExternalPlugins(Value),
     ExternalPlugin(Value),
     MemoryNotes(Value),
+    MemoryMergeOperation(Value),
+    ForgeRuntime(Value),
+    ForgeJob(Value),
     Count(u64),
     Bool(bool),
     CodexPlugins(Value),
     CodexPlugin(Value),
     Marketplaces(Value),
+    DshMarketplace(Value),
+    DshMarketplacePreview(Value),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -395,6 +608,9 @@ pub enum Event {
     },
     ModelContextUpdated {
         message_count: usize,
+    },
+    GoalChanged {
+        goal: Option<GoalView>,
     },
     Error {
         code: String,
@@ -440,138 +656,5 @@ impl fmt::Display for ProtocolError {
 impl std::error::Error for ProtocolError {}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn event_round_trip_preserves_thread_and_turn_ownership() {
-        let event = EventEnvelope::new(
-            7,
-            ThreadId::new("thread-1").unwrap(),
-            Some(TurnId::new("turn-2").unwrap()),
-            Event::TurnStarted {
-                status: TurnStatus::Running,
-            },
-        );
-        let json = serde_json::to_string(&event).unwrap();
-        let decoded: EventEnvelope = serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded, event);
-        assert!(json.contains("\"threadId\":\"thread-1\""));
-        assert!(json.contains("\"turnId\":\"turn-2\""));
-    }
-
-    #[test]
-    fn durable_ids_reject_empty_values() {
-        assert!(ThreadId::new("  ").is_err());
-        assert!(TurnId::new("").is_err());
-        assert!(ItemId::new("item").is_ok());
-    }
-
-    #[test]
-    fn visible_projection_keeps_each_request_and_only_the_final_answer() {
-        let thread = Thread {
-            metadata: ThreadMetadata {
-                id: ThreadId::new("thread-1").unwrap(),
-                workspace: "workspace".into(),
-                title: "title".into(),
-                archived: false,
-                created_at: 1,
-                updated_at: 2,
-            },
-            turns: vec![Turn {
-                id: TurnId::new("turn-1").unwrap(),
-                status: TurnStatus::Completed,
-                items: vec![
-                    ThreadItem::UserMessage {
-                        id: ItemId::new("u").unwrap(),
-                        text: "request".into(),
-                    },
-                    ThreadItem::AssistantMessage {
-                        id: ItemId::new("a1").unwrap(),
-                        text: "progress".into(),
-                    },
-                    ThreadItem::ToolResult {
-                        id: ItemId::new("r").unwrap(),
-                        call_id: ItemId::new("c").unwrap(),
-                        output: "secret".into(),
-                        success: true,
-                    },
-                    ThreadItem::AssistantMessage {
-                        id: ItemId::new("a2").unwrap(),
-                        text: "done".into(),
-                    },
-                ],
-                started_at: 1,
-                completed_at: Some(2),
-                error: None,
-                usage: TurnUsage::default(),
-            }],
-        };
-        let visible = thread.into_visible();
-        assert_eq!(visible.turns[0].items.len(), 2);
-        assert!(
-            matches!(&visible.turns[0].items[1], ThreadItem::AssistantMessage { text, .. } if text == "done")
-        );
-    }
-
-    #[test]
-    fn client_request_and_item_fields_use_frontend_camel_case() {
-        let request = ClientRequest::ItemAppend {
-            thread_id: ThreadId::new("thread-1").unwrap(),
-            turn_id: TurnId::new("turn-1").unwrap(),
-            item: ThreadItem::ToolResult {
-                id: ItemId::new("result-1").unwrap(),
-                call_id: ItemId::new("call-1").unwrap(),
-                output: "ok".into(),
-                success: true,
-            },
-        };
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"threadId\""), "{json}");
-        assert!(json.contains("\"turnId\""), "{json}");
-        assert!(json.contains("\"callId\""), "{json}");
-        assert!(!json.contains("thread_id"), "{json}");
-        assert_eq!(
-            serde_json::from_str::<ClientRequest>(&json).unwrap(),
-            request
-        );
-
-        let marketplace = ClientRequest::MarketplacePluginInstall {
-            marketplace_path: "marketplace.json".into(),
-            plugin_name: "demo".into(),
-            upgrade: true,
-        };
-        let json = serde_json::to_string(&marketplace).unwrap();
-        assert!(
-            json.contains("\"method\":\"marketplacePluginInstall\""),
-            "{json}"
-        );
-        assert!(json.contains("\"marketplacePath\""), "{json}");
-        assert!(json.contains("\"pluginName\""), "{json}");
-        assert_eq!(
-            serde_json::from_str::<ClientRequest>(&json).unwrap(),
-            marketplace
-        );
-
-        let interaction = ClientRequest::InteractionAnswer {
-            thread_id: Some(ThreadId::new("thread-2").unwrap()),
-            id: 9,
-            answer: Some("继续".into()),
-        };
-        let json = serde_json::to_string(&interaction).unwrap();
-        assert!(json.contains("\"method\":\"interactionAnswer\""), "{json}");
-        assert!(json.contains("\"threadId\":\"thread-2\""), "{json}");
-        assert_eq!(
-            serde_json::from_str::<ClientRequest>(&json).unwrap(),
-            interaction
-        );
-
-        let settings = ClientRequest::SettingsUpdate {
-            updates: BTreeMap::from([("reasoning_effort".into(), "high".into())]),
-        };
-        let json = serde_json::to_string(&settings).unwrap();
-        assert!(json.contains("\"method\":\"settingsUpdate\""), "{json}");
-        assert!(json.contains("\"reasoning_effort\":\"high\""), "{json}");
-        assert_eq!(serde_json::from_str::<ClientRequest>(&json).unwrap(), settings);
-    }
-}
+#[path = "tests.rs"]
+mod tests;

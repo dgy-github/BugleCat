@@ -12,6 +12,76 @@ use crate::tools::{
 use crate::StrReplaceEditorTool;
 use std::rc::Rc;
 
+/// Publishes the durable model-provider directory as a Harness service.
+pub struct ProviderDirectoryPlugin;
+impl HarnessPlugin for ProviderDirectoryPlugin {
+    fn id(&self) -> &str {
+        "ncx.provider-directory"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.provider-directory",
+            "Provider Directory",
+            PluginCapability::Llm,
+        )
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "provider.directory",
+            Rc::new(crate::plugins::ProviderDirectoryService::default()),
+        )
+    }
+}
+
+/// Publishes the replaceable provider model-catalog transport.
+pub struct ProviderCatalogPlugin;
+impl HarnessPlugin for ProviderCatalogPlugin {
+    fn id(&self) -> &str {
+        "ncx.provider-catalog"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.provider-catalog",
+            "Provider Catalog",
+            PluginCapability::Llm,
+        )
+    }
+    fn inject(&self) -> &[&str] {
+        &["provider.directory"]
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "provider.catalog",
+            Rc::new(crate::plugins::ProviderCatalogService::default()),
+        )
+    }
+}
+
+/// Publishes the explicit, billable chat-plane probe separately from catalog
+/// discovery so hosts cannot accidentally run it during passive refreshes.
+pub struct ProviderChatProbePlugin;
+impl HarnessPlugin for ProviderChatProbePlugin {
+    fn id(&self) -> &str {
+        "ncx.provider-chat-probe"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.provider-chat-probe",
+            "Provider Chat Probe",
+            PluginCapability::Llm,
+        )
+    }
+    fn inject(&self) -> &[&str] {
+        &["provider.directory"]
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "provider.chat-probe",
+            Rc::new(crate::plugins::ProviderChatProbeService::default()),
+        )
+    }
+}
+
 /// File editing, shell execution, planning and dynamic tool discovery.
 pub struct CoreToolsPlugin;
 
@@ -132,6 +202,11 @@ impl HarnessPlugin for SessionToolsPlugin {
     fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         for tool in crate::session_query_tools::session_query_tools() {
             host.tool(tool);
+        }
+        if host.context().goal_service.is_some() {
+            for tool in crate::goal_tools::goal_tools() {
+                host.tool(tool);
+            }
         }
         let question_handler = host.context().user_question_handler.clone();
         let has_memory = host.context().memory.is_some();

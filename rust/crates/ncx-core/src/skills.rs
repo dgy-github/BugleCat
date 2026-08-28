@@ -78,6 +78,8 @@ pub struct Skill {
     pub description: String,
     /// Explicit Harness capability required by this skill.
     pub capability: SkillCapability,
+    /// Inject the full body into every session instead of waiting for model selection.
+    pub always_apply: bool,
     /// Path to the `SKILL.md` file (a synthetic `<builtin>` path for builtins).
     pub path: PathBuf,
     /// The skill's directory (holds `SKILL.md` and any bundled resource files).
@@ -116,7 +118,7 @@ pub fn builtin_skills() -> Vec<Skill> {
     ];
     let mut out = Vec::new();
     for text in BUILTINS {
-        let (name, description, capability) = parse_frontmatter(text);
+        let (name, description, capability, always_apply) = parse_frontmatter(text);
         let Some(name) = name.filter(|n| !n.trim().is_empty()) else {
             continue; // a builtin without a name is a packaging bug; skip defensively.
         };
@@ -124,6 +126,7 @@ pub fn builtin_skills() -> Vec<Skill> {
             name: name.trim().to_string(),
             description: description.unwrap_or_default().trim().to_string(),
             capability: SkillCapability::parse(capability),
+            always_apply,
             path: PathBuf::from("<builtin>"),
             dir: PathBuf::from("<builtin>"),
             embedded: Some(strip_frontmatter(text).trim().to_string()),
@@ -151,13 +154,9 @@ fn discover_skills_with_home(workspace: &Path, home: Option<&Path>) -> Vec<Skill
     }
     roots.push(workspace.join(".ncx").join("skills"));
 
-    let codex_catalog =
-        crate::plugins::CodexPluginCatalog::new(workspace.join(".ncx").join("codex-plugins"));
-    let codex_skill_paths = codex_catalog
-        .discover()
+    let codex_skill_paths = crate::plugins::discover_enabled_codex_plugins(workspace)
         .unwrap_or_default()
         .into_iter()
-        .filter(|plugin| plugin.enabled)
         .flat_map(|plugin| plugin.skill_paths())
         .collect::<Vec<_>>();
 
@@ -195,7 +194,7 @@ fn scan_skill_path(path: &Path) -> Vec<Skill> {
 fn load_skill_file(manifest: &Path) -> Option<Skill> {
     let text = std::fs::read_to_string(manifest).ok()?;
     let dir = manifest.parent()?.to_path_buf();
-    let (name, description, capability) = parse_frontmatter(&text);
+    let (name, description, capability, always_apply) = parse_frontmatter(&text);
     let name = name.unwrap_or_else(|| {
         dir.file_name()
             .map(|value| value.to_string_lossy().to_string())
@@ -208,6 +207,7 @@ fn load_skill_file(manifest: &Path) -> Option<Skill> {
         name: name.trim().to_string(),
         description: description.unwrap_or_default().trim().to_string(),
         capability: SkillCapability::parse(capability),
+        always_apply,
         path: manifest.to_path_buf(),
         dir,
         embedded: None,
@@ -246,14 +246,23 @@ pub fn skills_index_block(skills: &[Skill]) -> String {
             out.push_str(&format!("\n- {}: {}", s.name, s.description));
         }
     }
+    for s in skills.iter().filter(|skill| skill.always_apply) {
+        if let Ok(body) = s.load_body() {
+            out.push_str(&format!(
+                "\n\nAlways-active skill `{}` (apply these instructions in this session):\n{}",
+                s.name, body
+            ));
+        }
+    }
     out
 }
 
 /// Parse supported metadata from a leading `---`-fenced YAML block.
-fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>, Option<String>) {
+fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>, Option<String>, bool) {
     let mut name = None;
     let mut description = None;
     let mut capability = None;
+    let mut always_apply = false;
     for line in frontmatter_lines(text) {
         if let Some(v) = line.strip_prefix("name:") {
             name = Some(unquote(v.trim()));
@@ -261,9 +270,14 @@ fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>, Option<Stri
             description = Some(unquote(v.trim()));
         } else if let Some(v) = line.strip_prefix("capability:") {
             capability = Some(unquote(v.trim()));
+        } else if let Some(v) = line.strip_prefix("always_apply:") {
+            always_apply = matches!(
+                unquote(v.trim()).to_ascii_lowercase().as_str(),
+                "true" | "yes" | "1"
+            );
         }
     }
-    (name, description, capability)
+    (name, description, capability, always_apply)
 }
 
 /// The lines inside the leading `---` … `---` fence (empty if there is none).
@@ -458,6 +472,22 @@ mod tests {
         let block = skills_index_block(&skills);
         assert!(block.contains("call the `skill` tool"));
         assert!(block.contains("alpha: do alpha things"));
+    }
+
+    #[test]
+    fn always_apply_skill_body_is_injected_without_model_selection() {
+        let ws = tmp("always_apply");
+        write_skill(
+            &ws,
+            "memory",
+            "---\nname: memory\ndescription: session memory\nalways_apply: true\n---\nRECALL_AT_SESSION_START",
+        );
+        let skills = discover_skills_with_home(&ws, None);
+        let memory = skills.iter().find(|skill| skill.name == "memory").unwrap();
+        assert!(memory.always_apply);
+        let block = skills_index_block(&skills);
+        assert!(block.contains("Always-active skill `memory`"));
+        assert!(block.contains("RECALL_AT_SESSION_START"));
     }
 
     #[test]

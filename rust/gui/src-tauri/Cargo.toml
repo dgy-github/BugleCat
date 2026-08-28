@@ -28,7 +28,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "time", "macros", "sync"] }
 async-trait = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+base64 = "0.22"
+sha2 = "0.10"
 
 ncx-config = { path = "../../crates/ncx-config" }
 ncx-sandbox = { path = "../../crates/ncx-sandbox" }
@@ -36,6 +38,9 @@ ncx-core = { path = "../../crates/ncx-core" }
 ncx-protocol = { path = "../../crates/ncx-protocol" }
 ncx-thread-store = { path = "../../crates/ncx-thread-store" }
 ncx-app-server = { path = "../../crates/ncx-app-server" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [profile.release]
 strip = false

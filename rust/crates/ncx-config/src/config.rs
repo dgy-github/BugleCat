@@ -65,7 +65,15 @@ pub struct HookConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub api_key: String,
+    /// Saved direct DeepSeek credential for provider switching.
+    pub deepseek_api_key: String,
+    /// Saved Yunmo relay credential for provider switching.
+    pub yunmo_api_key: String,
     pub base_url: String,
+    /// Wire protocol for the active text provider: openai or anthropic.
+    pub provider_protocol: String,
+    /// Stable ID of the active custom provider route, or `legacy` for presets.
+    pub active_provider_id: String,
     pub model: String,
     /// Optional cheaper/faster model for sub-agent workers (flash+pro tiering).
     /// Empty = sub-agents use `model`. Shares base_url/api_key with the main model.
@@ -80,6 +88,12 @@ pub struct Config {
     pub vl_base_url: String,
     pub vl_api_key: String,
     pub vl_model: String,
+    /// Opt-in local plugin that routes attachments through the configured Alibaba vision model.
+    pub alibaba_attachment_parser_enabled: bool,
+    /// Alibaba Cloud Model Studio Token Plan credential (`sk-sp-*`).
+    pub dashscope_token_plan_key: String,
+    /// Alibaba Cloud Model Studio workspace credential (`sk-ws-*`) used by media skills.
+    pub dashscope_workspace_key: String,
     /// Volcengine ARK key for Seedance video rendering (storyboard).
     pub ark_api_key: String,
     /// Web search backend: "duckduckgo" (default, keyless) or "tavily".
@@ -92,6 +106,11 @@ pub struct Config {
     pub max_iterations: i64,
     pub max_tool_calls: i64,
     pub max_parallel_tool_calls: i64,
+    pub orchestrator_workers: i64,
+    pub orchestrator_high_workers: i64,
+    pub orchestrator_verify_retries: i64,
+    pub orchestrator_max_depth: i64,
+    pub orchestrator_max_subtasks: i64,
     pub timeout_s: i64,
     /// SDK retry count for transient errors (408/409/429/5xx); default 3.
     pub max_retries: i64,
@@ -118,7 +137,11 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             api_key: String::new(),
+            deepseek_api_key: String::new(),
+            yunmo_api_key: String::new(),
             base_url: DEFAULT_BASE_URL.to_string(),
+            provider_protocol: "openai".to_string(),
+            active_provider_id: "legacy".to_string(),
             model: DEFAULT_MODEL.to_string(),
             fast_model: String::new(),
             sandbox_mode: "workspace-write".to_string(),
@@ -128,6 +151,9 @@ impl Default for Config {
             vl_base_url: String::new(),
             vl_api_key: String::new(),
             vl_model: String::new(),
+            alibaba_attachment_parser_enabled: false,
+            dashscope_token_plan_key: String::new(),
+            dashscope_workspace_key: String::new(),
             ark_api_key: String::new(),
             search_provider: "duckduckgo".to_string(),
             search_api_key: String::new(),
@@ -137,6 +163,11 @@ impl Default for Config {
             max_iterations: 150,
             max_tool_calls: 300,
             max_parallel_tool_calls: 8,
+            orchestrator_workers: 2,
+            orchestrator_high_workers: 3,
+            orchestrator_verify_retries: 1,
+            orchestrator_max_depth: 1,
+            orchestrator_max_subtasks: 6,
             timeout_s: 120,
             max_retries: 3,
             context_token_budget: 512_000,
@@ -195,6 +226,7 @@ impl Config {
                 self.max_parallel_tool_calls
             )));
         }
+        validate_orchestrator_budget(self)?;
         for (idx, hook) in self.hooks.iter().enumerate() {
             if !VALID_HOOK_EVENTS.contains(&hook.event.as_str()) {
                 return Err(ConfigError(format!(
@@ -231,7 +263,11 @@ impl Config {
         };
         let mut m = HashMap::new();
         m.insert("api_key", mask(&self.api_key));
+        m.insert("deepseek_api_key", mask(&self.deepseek_api_key));
+        m.insert("yunmo_api_key", mask(&self.yunmo_api_key));
         m.insert("base_url", self.base_url.clone());
+        m.insert("provider_protocol", self.provider_protocol.clone());
+        m.insert("active_provider_id", self.active_provider_id.clone());
         m.insert("model", self.model.clone());
         m.insert("sandbox_mode", self.sandbox_mode.clone());
         m.insert("approval_policy", self.approval_policy.clone());
@@ -240,14 +276,17 @@ impl Config {
         m.insert("vl_base_url", self.vl_base_url.clone());
         m.insert("vl_api_key", mask(&self.vl_api_key));
         m.insert("vl_model", self.vl_model.clone());
+        m.insert(
+            "dashscope_token_plan_key",
+            mask(&self.dashscope_token_plan_key),
+        );
+        m.insert(
+            "dashscope_workspace_key",
+            mask(&self.dashscope_workspace_key),
+        );
         m.insert("ark_api_key", mask(&self.ark_api_key));
         m.insert("workspace", self.workspace.to_string_lossy().to_string());
-        m.insert("max_iterations", self.max_iterations.to_string());
-        m.insert("max_tool_calls", self.max_tool_calls.to_string());
-        m.insert(
-            "max_parallel_tool_calls",
-            self.max_parallel_tool_calls.to_string(),
-        );
+        insert_redacted_runtime_budget(&mut m, self);
         m.insert("timeout_s", self.timeout_s.to_string());
         m.insert("max_retries", self.max_retries.to_string());
         m.insert(
@@ -268,6 +307,67 @@ impl Config {
         );
         m.insert("hooks", self.hooks.len().to_string());
         m
+    }
+}
+
+fn validate_orchestrator_budget(config: &Config) -> Result<(), ConfigError> {
+    for (name, value, min, max) in [
+        ("orchestrator_workers", config.orchestrator_workers, 1, 4),
+        (
+            "orchestrator_high_workers",
+            config.orchestrator_high_workers,
+            1,
+            6,
+        ),
+        (
+            "orchestrator_verify_retries",
+            config.orchestrator_verify_retries,
+            0,
+            3,
+        ),
+        (
+            "orchestrator_max_depth",
+            config.orchestrator_max_depth,
+            0,
+            2,
+        ),
+        (
+            "orchestrator_max_subtasks",
+            config.orchestrator_max_subtasks,
+            1,
+            12,
+        ),
+    ] {
+        if !(min..=max).contains(&value) {
+            return Err(ConfigError(format!(
+                "Invalid {name} {value}; expected an integer from {min} to {max}."
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn insert_redacted_runtime_budget(map: &mut HashMap<&'static str, String>, config: &Config) {
+    for (name, value) in [
+        ("max_iterations", config.max_iterations),
+        ("max_tool_calls", config.max_tool_calls),
+        ("max_parallel_tool_calls", config.max_parallel_tool_calls),
+        ("orchestrator_workers", config.orchestrator_workers),
+        (
+            "orchestrator_high_workers",
+            config.orchestrator_high_workers,
+        ),
+        (
+            "orchestrator_verify_retries",
+            config.orchestrator_verify_retries,
+        ),
+        ("orchestrator_max_depth", config.orchestrator_max_depth),
+        (
+            "orchestrator_max_subtasks",
+            config.orchestrator_max_subtasks,
+        ),
+    ] {
+        map.insert(name, value.to_string());
     }
 }
 
@@ -342,6 +442,46 @@ mod tests {
             };
             let err = cfg.validate().unwrap_err();
             assert!(err.to_string().contains("max_parallel_tool_calls"));
+        }
+    }
+
+    #[test]
+    fn orchestrator_budget_defaults_and_bounds_are_validated() {
+        let defaults = Config::default();
+        assert_eq!(
+            (
+                defaults.orchestrator_workers,
+                defaults.orchestrator_high_workers,
+                defaults.orchestrator_verify_retries,
+                defaults.orchestrator_max_depth,
+                defaults.orchestrator_max_subtasks,
+            ),
+            (2, 3, 1, 1, 6)
+        );
+        let invalid_cases: [(&str, fn(&mut Config)); 5] = [
+            ("orchestrator_workers", |cfg: &mut Config| {
+                cfg.orchestrator_workers = 5
+            }),
+            ("orchestrator_high_workers", |cfg: &mut Config| {
+                cfg.orchestrator_high_workers = 0
+            }),
+            ("orchestrator_verify_retries", |cfg: &mut Config| {
+                cfg.orchestrator_verify_retries = 4
+            }),
+            ("orchestrator_max_depth", |cfg: &mut Config| {
+                cfg.orchestrator_max_depth = 3
+            }),
+            ("orchestrator_max_subtasks", |cfg: &mut Config| {
+                cfg.orchestrator_max_subtasks = 13
+            }),
+        ];
+        for (name, mutate) in invalid_cases {
+            let mut cfg = Config {
+                api_key: "k".into(),
+                ..Config::default()
+            };
+            mutate(&mut cfg);
+            assert!(cfg.validate().unwrap_err().to_string().contains(name));
         }
     }
 }

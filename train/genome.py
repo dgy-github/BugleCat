@@ -20,6 +20,7 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parent.parent / "bench"
 sys.path.insert(0, str(BENCH))
 import run as bench  # noqa: E402  -> bench.NCX
+from process_control import run_owned  # noqa: E402
 
 # Headroom over the measured baseline so a faithful (e.g. apply_patch) description
 # is never rejected, while still bounding teacher-introduced bloat.
@@ -77,7 +78,7 @@ class Genome:
 
 def extract_current() -> Genome:
     """Run `ncx --dump-genome` and parse the default genome."""
-    r = subprocess.run(
+    r = run_owned(
         [str(bench.NCX), "--dump-genome"],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
     )

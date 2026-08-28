@@ -9,7 +9,8 @@ use super::{
     CostTelemetryPlugin, ExternalHostPlugin, ExternalPluginCatalog, ExternalPluginRecord,
     HarnessComposition, HarnessPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
     MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
-    ProcessToolsPlugin, ProfileSpec, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
+    ProcessToolsPlugin, ProfileSpec, ProviderCatalogPlugin, ProviderChatProbePlugin,
+    ProviderDirectoryPlugin, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 use crate::skills::skills_index_block;
 use crate::tools::{ToolContext, ToolRegistry};
@@ -74,8 +75,20 @@ impl HarnessRuntimeBuilder {
     }
 
     pub fn configured(workspace: &Path) -> Result<Self, String> {
-        let profile =
-            std::env::var("NANOCODEX_HARNESS_PROFILE").unwrap_or_else(|_| "full".to_string());
+        Self::configured_for_profile(workspace, None)
+    }
+
+    /// Compose a runtime for one durable Thread. An explicit session profile
+    /// wins the process environment so concurrent sessions never race through
+    /// `NANOCODEX_HARNESS_PROFILE`.
+    pub fn configured_for_profile(
+        workspace: &Path,
+        session_profile: Option<&str>,
+    ) -> Result<Self, String> {
+        let profile = session_profile
+            .map(str::to_string)
+            .or_else(|| std::env::var("NANOCODEX_HARNESS_PROFILE").ok())
+            .unwrap_or_else(|| "full".to_string());
         let workspace_root = workspace.join(".ncx").join("harness");
         let external_root = std::env::var_os("NANOCODEX_HARNESS_ROOT")
             .map(PathBuf::from)
@@ -243,6 +256,9 @@ fn builtin_plugin(id: &str) -> Option<Rc<dyn HarnessPlugin>> {
         "ncx.process" => Some(Rc::new(ProcessToolsPlugin)),
         "ncx.session" => Some(Rc::new(SessionToolsPlugin)),
         "ncx.llm" => Some(Rc::new(LlmProviderPlugin)),
+        "ncx.provider-directory" => Some(Rc::new(ProviderDirectoryPlugin)),
+        "ncx.provider-catalog" => Some(Rc::new(ProviderCatalogPlugin)),
+        "ncx.provider-chat-probe" => Some(Rc::new(ProviderChatProbePlugin)),
         "ncx.interaction" => Some(Rc::new(InteractionPlugin)),
         "ncx.policy" => Some(Rc::new(PolicyPlugin)),
         "ncx.context" => Some(Rc::new(ContextPlugin)),
@@ -297,6 +313,7 @@ mod tests {
             name: name.into(),
             description: format!("{name} description"),
             capability,
+            always_apply: false,
             path: PathBuf::from("<test>"),
             dir: PathBuf::from("<test>"),
             embedded: Some("test body".into()),
@@ -311,6 +328,9 @@ mod tests {
             vec![
                 "ncx.core",
                 "ncx.llm",
+                "ncx.provider-directory",
+                "ncx.provider-catalog",
+                "ncx.provider-chat-probe",
                 "ncx.interaction",
                 "ncx.policy",
                 "ncx.context",
@@ -328,7 +348,7 @@ mod tests {
             ]
         );
         let (_, report) = builder.build_with_report(context());
-        assert_eq!(report.installed.len(), 16);
+        assert_eq!(report.installed.len(), 19);
     }
 
     #[test]
@@ -345,6 +365,9 @@ mod tests {
             vec![
                 "ncx.core",
                 "ncx.llm",
+                "ncx.provider-directory",
+                "ncx.provider-catalog",
+                "ncx.provider-chat-probe",
                 "ncx.interaction",
                 "ncx.policy",
                 "ncx.context",
@@ -361,6 +384,9 @@ mod tests {
             vec![
                 "ncx.core",
                 "ncx.llm",
+                "ncx.provider-directory",
+                "ncx.provider-catalog",
+                "ncx.provider-chat-probe",
                 "ncx.interaction",
                 "ncx.policy",
                 "ncx.context",
@@ -391,7 +417,13 @@ mod tests {
         let minimal_diag = minimal.harness_diagnostics();
         let headless_diag = headless.harness_diagnostics();
         assert!(
-            full_diag.media && full_diag.attachment && full_diag.cost_telemetry && full_diag.mcp
+            full_diag.media
+                && full_diag.attachment
+                && full_diag.cost_telemetry
+                && full_diag.mcp
+                && full_diag.provider_directory
+                && full_diag.provider_catalog
+                && full_diag.provider_chat_probe
         );
         assert!(!minimal_diag.media && !minimal_diag.mcp && !minimal_diag.attachment);
         assert!(!headless_diag.media && !headless_diag.mcp && !headless_diag.attachment);

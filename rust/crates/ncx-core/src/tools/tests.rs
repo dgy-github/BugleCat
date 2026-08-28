@@ -405,6 +405,7 @@ mod tests {
             name: "greeter".into(),
             description: "say hi".into(),
             capability: Default::default(),
+            always_apply: false,
             path: dir.join("SKILL.md"),
             dir: dir.clone(),
             embedded: None,
@@ -422,7 +423,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn skill_tool_registered_only_when_skills_present() {
+async fn skill_tool_registered_only_when_skills_present() {
         use crate::skills::Skill;
         let ws = tmp_ws("skill_reg");
         let bare = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
@@ -433,6 +434,7 @@ mod tests {
                 name: "x".into(),
                 description: String::new(),
                 capability: Default::default(),
+                always_apply: false,
                 path: ws.join("SKILL.md"),
                 dir: ws.clone(),
                 embedded: None,
@@ -477,5 +479,18 @@ mod tests {
         assert!(out.contains("ok"), "{out}");
         assert!(out.contains("[hook output]"), "{out}");
         assert!(out.contains("post-ok"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn compaction_recovery_blocks_writes_but_keeps_reads_available() {
+        let ws = tmp_ws("compaction_recovery");
+        std::fs::write(ws.join("evidence.txt"), "workspace fact").unwrap();
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        ctx.compaction_read_only_recovery.set(true);
+        let registry = ToolRegistry::new(ctx);
+        let blocked = registry.execute("apply_patch", &json!({"patch": "invalid"})).await;
+        assert!(blocked.contains("context compaction consistency check"), "{blocked}");
+        let read = registry.execute("read_file", &json!({"path": "evidence.txt"})).await;
+        assert!(read.contains("workspace fact"), "{read}");
     }
 }

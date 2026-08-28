@@ -9,6 +9,18 @@ id = "llm-provider"
 plugin = "ncx.llm"
 
 [[plugins]]
+id = "provider-directory"
+plugin = "ncx.provider-directory"
+
+[[plugins]]
+id = "provider-catalog"
+plugin = "ncx.provider-catalog"
+
+[[plugins]]
+id = "provider-chat-probe"
+plugin = "ncx.provider-chat-probe"
+
+[[plugins]]
 id = "interaction"
 plugin = "ncx.interaction"
 

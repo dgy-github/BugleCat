@@ -2,8 +2,8 @@
 
 use fs2::FileExt;
 use ncx_protocol::{
-    StoredModelContext, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
-    TurnUsage,
+    GoalRef, GoalSnapshot, StoredModelContext, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn,
+    TurnId, TurnStatus, TurnUsage,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,6 +28,24 @@ pub trait ThreadStore: Send + Sync {
         messages: Vec<Value>,
         updated_at: i64,
     ) -> Result<StoredModelContext, ThreadStoreError>;
+    fn read_goal(&self, id: &ThreadId) -> Result<Option<GoalSnapshot>, ThreadStoreError>;
+    /// Atomically compare and replace the thread's durable goal under the same
+    /// cross-process transaction used for all other thread mutations.
+    fn compare_and_set_goal(
+        &self,
+        id: &ThreadId,
+        expected: GoalExpectation,
+        replacement: Option<GoalSnapshot>,
+    ) -> Result<Option<GoalSnapshot>, ThreadStoreError>;
+    /// Atomically admit one exact automatic Goal round together with its Turn,
+    /// synthetic prompt, lease, and durable `roundsStarted` increment.
+    fn claim_goal_round(
+        &self,
+        thread: &ThreadId,
+        expected: GoalRef,
+        round: u32,
+        turn: Turn,
+    ) -> Result<GoalSnapshot, ThreadStoreError>;
     fn update_metadata(&self, metadata: ThreadMetadata) -> Result<(), ThreadStoreError>;
     fn fork(&self, source: &ThreadId, target: ThreadId) -> Result<Thread, ThreadStoreError>;
     fn claim_turn(&self, thread: &ThreadId, turn: Turn) -> Result<(), ThreadStoreError>;
@@ -54,6 +72,14 @@ struct PersistedState {
     threads: BTreeMap<String, Thread>,
     #[serde(default)]
     model_contexts: BTreeMap<String, StoredModelContext>,
+    #[serde(default)]
+    goals: BTreeMap<String, GoalSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GoalExpectation {
+    Absent,
+    Exact(GoalRef),
 }
 
 struct ActiveTurn {
@@ -205,6 +231,53 @@ impl ThreadStore for JsonThreadStore {
         })
     }
 
+    fn read_goal(&self, id: &ThreadId) -> Result<Option<GoalSnapshot>, ThreadStoreError> {
+        self.inspect(|persisted| persisted.goals.get(id.as_str()).cloned())
+    }
+
+    fn compare_and_set_goal(
+        &self,
+        id: &ThreadId,
+        expected: GoalExpectation,
+        replacement: Option<GoalSnapshot>,
+    ) -> Result<Option<GoalSnapshot>, ThreadStoreError> {
+        self.mutate(|state| {
+            if !state.persisted.threads.contains_key(id.as_str()) {
+                return Err(ThreadStoreError::NotFound(id.to_string()));
+            }
+            let current = state.persisted.goals.get(id.as_str());
+            let matches = match (&expected, current) {
+                (GoalExpectation::Absent, None) => true,
+                (GoalExpectation::Exact(expected), Some(actual)) => {
+                    expected.id == actual.id && expected.revision == actual.revision
+                }
+                _ => false,
+            };
+            if !matches {
+                return Err(ThreadStoreError::StaleGoal {
+                    expected,
+                    actual: current.map(|goal| GoalRef {
+                        id: goal.id.clone(),
+                        revision: goal.revision,
+                    }),
+                });
+            }
+            match replacement {
+                Some(goal) => {
+                    state
+                        .persisted
+                        .goals
+                        .insert(id.as_str().to_string(), goal.clone());
+                    Ok(Some(goal))
+                }
+                None => {
+                    state.persisted.goals.remove(id.as_str());
+                    Ok(None)
+                }
+            }
+        })
+    }
+
     fn update_metadata(&self, metadata: ThreadMetadata) -> Result<(), ThreadStoreError> {
         self.mutate(|state| {
             let id = metadata.id.as_str();
@@ -215,6 +288,79 @@ impl ThreadStore for JsonThreadStore {
                 .ok_or_else(|| ThreadStoreError::NotFound(id.to_string()))?;
             thread.metadata = metadata;
             Ok(())
+        })
+    }
+
+    fn claim_goal_round(
+        &self,
+        thread: &ThreadId,
+        expected: GoalRef,
+        round: u32,
+        turn: Turn,
+    ) -> Result<GoalSnapshot, ThreadStoreError> {
+        let store_path = self.path.clone();
+        self.mutate(|state| {
+            let current = state.persisted.goals.get(thread.as_str()).cloned();
+            let Some(mut goal) = current else {
+                return Err(ThreadStoreError::StaleGoal {
+                    expected: GoalExpectation::Exact(expected),
+                    actual: None,
+                });
+            };
+            if goal.id != expected.id || goal.revision != expected.revision {
+                return Err(ThreadStoreError::StaleGoal {
+                    expected: GoalExpectation::Exact(expected),
+                    actual: Some(GoalRef {
+                        id: goal.id,
+                        revision: goal.revision,
+                    }),
+                });
+            }
+            if goal.phase != ncx_protocol::GoalPhase::Active {
+                return Err(ThreadStoreError::InvalidGoalRound(
+                    "goal must be active before admitting a round".into(),
+                ));
+            }
+            if round == 0 || round != goal.rounds_started.saturating_add(1) {
+                return Err(ThreadStoreError::InvalidGoalRound(format!(
+                    "round {round} is not the next round after {}",
+                    goal.rounds_started
+                )));
+            }
+            if round > goal.max_goal_rounds {
+                return Err(ThreadStoreError::InvalidGoalRound(format!(
+                    "round {round} exceeds the configured limit {}",
+                    goal.max_goal_rounds
+                )));
+            }
+            let valid_prompt = matches!(
+                turn.items.as_slice(),
+                [ThreadItem::GoalMessage {
+                    goal_id,
+                    revision,
+                    round: item_round,
+                    text,
+                    ..
+                }] if goal_id == &goal.id
+                    && *revision == goal.revision
+                    && *item_round == round
+                    && !text.trim().is_empty()
+            );
+            if turn.status != TurnStatus::Running || !valid_prompt {
+                return Err(ThreadStoreError::InvalidGoalRound(
+                    "goal round turn must start running with one matching non-empty goal message"
+                        .into(),
+                ));
+            }
+            let started_at = turn.started_at;
+            claim_turn_in_state(state, &store_path, thread, turn)?;
+            goal.rounds_started = round;
+            goal.updated_at = started_at.max(goal.updated_at);
+            state
+                .persisted
+                .goals
+                .insert(thread.as_str().to_string(), goal.clone());
+            Ok(goal)
         })
     }
 
@@ -247,10 +393,16 @@ impl ThreadStore for JsonThreadStore {
                 state.persisted.model_contexts.insert(
                     target.as_str().to_string(),
                     StoredModelContext {
-                        thread_id: target,
+                        thread_id: target.clone(),
                         ..source_context
                     },
                 );
+            }
+            if let Some(source_goal) = state.persisted.goals.get(source.as_str()).cloned() {
+                state
+                    .persisted
+                    .goals
+                    .insert(target.as_str().to_string(), source_goal);
             }
             Ok(forked)
         })
@@ -258,44 +410,7 @@ impl ThreadStore for JsonThreadStore {
 
     fn claim_turn(&self, thread: &ThreadId, turn: Turn) -> Result<(), ThreadStoreError> {
         let store_path = self.path.clone();
-        self.mutate(|state| {
-            let key = thread.as_str().to_string();
-            if let Some(owner) = state.active_turns.get(&key) {
-                return Err(ThreadStoreError::Busy {
-                    thread: key,
-                    turn: owner.turn_id.clone(),
-                });
-            }
-            let stored = state
-                .persisted
-                .threads
-                .get_mut(&key)
-                .ok_or_else(|| ThreadStoreError::NotFound(key.clone()))?;
-            if stored.turns.iter().any(|current| current.id == turn.id) {
-                return Err(ThreadStoreError::AlreadyExists(turn.id.to_string()));
-            }
-            if let Some(owner) =
-                stored.turns.iter().rev().find(|current| {
-                    matches!(current.status, TurnStatus::Queued | TurnStatus::Running)
-                })
-            {
-                return Err(ThreadStoreError::Busy {
-                    thread: key,
-                    turn: owner.id.clone(),
-                });
-            }
-            let lease = acquire_turn_lease(&store_path, &key)?;
-            state.active_turns.insert(
-                key,
-                ActiveTurn {
-                    turn_id: turn.id.clone(),
-                    _lease: lease,
-                },
-            );
-            stored.metadata.updated_at = turn.started_at;
-            stored.turns.push(turn);
-            Ok(())
-        })
+        self.mutate(|state| claim_turn_in_state(state, &store_path, thread, turn))
     }
 
     fn append_item(
@@ -354,6 +469,51 @@ impl ThreadStore for JsonThreadStore {
             Ok(())
         })
     }
+}
+
+fn claim_turn_in_state(
+    state: &mut StoreState,
+    store_path: &Path,
+    thread: &ThreadId,
+    turn: Turn,
+) -> Result<(), ThreadStoreError> {
+    let key = thread.as_str().to_string();
+    if let Some(owner) = state.active_turns.get(&key) {
+        return Err(ThreadStoreError::Busy {
+            thread: key,
+            turn: owner.turn_id.clone(),
+        });
+    }
+    let stored = state
+        .persisted
+        .threads
+        .get_mut(&key)
+        .ok_or_else(|| ThreadStoreError::NotFound(key.clone()))?;
+    if stored.turns.iter().any(|current| current.id == turn.id) {
+        return Err(ThreadStoreError::AlreadyExists(turn.id.to_string()));
+    }
+    if let Some(owner) = stored
+        .turns
+        .iter()
+        .rev()
+        .find(|current| matches!(current.status, TurnStatus::Queued | TurnStatus::Running))
+    {
+        return Err(ThreadStoreError::Busy {
+            thread: key,
+            turn: owner.id.clone(),
+        });
+    }
+    let lease = acquire_turn_lease(store_path, &key)?;
+    state.active_turns.insert(
+        key,
+        ActiveTurn {
+            turn_id: turn.id.clone(),
+            _lease: lease,
+        },
+    );
+    stored.metadata.updated_at = turn.started_at;
+    stored.turns.push(turn);
+    Ok(())
 }
 
 fn require_owner(
@@ -544,9 +704,17 @@ fn save_state(path: &Path, state: &PersistedState) -> Result<(), ThreadStoreErro
 pub enum ThreadStoreError {
     AlreadyExists(String),
     NotFound(String),
-    Busy { thread: String, turn: TurnId },
+    Busy {
+        thread: String,
+        turn: TurnId,
+    },
     TurnNotActive(String),
     LeaseBusy(String),
+    StaleGoal {
+        expected: GoalExpectation,
+        actual: Option<GoalRef>,
+    },
+    InvalidGoalRound(String),
     Poisoned,
     Io(std::io::Error),
     Decode(serde_json::Error),
@@ -561,6 +729,13 @@ impl fmt::Display for ThreadStoreError {
             Self::Busy { thread, turn } => write!(formatter, "thread {thread} is owned by {turn}"),
             Self::TurnNotActive(id) => write!(formatter, "turn {id} is not active"),
             Self::LeaseBusy(id) => write!(formatter, "thread {id} is owned by another process"),
+            Self::StaleGoal { expected, actual } => {
+                write!(
+                    formatter,
+                    "stale goal revision: expected {expected:?}, actual {actual:?}"
+                )
+            }
+            Self::InvalidGoalRound(message) => message.fmt(formatter),
             Self::Poisoned => write!(formatter, "thread store lock is poisoned"),
             Self::Io(error) => error.fmt(formatter),
             Self::Decode(error) | Self::Encode(error) => error.fmt(formatter),

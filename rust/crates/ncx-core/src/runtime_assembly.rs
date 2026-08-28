@@ -11,6 +11,7 @@ use std::rc::Rc;
 use ncx_config::{Config, HookConfig};
 use ncx_context::{ContextEntry, TextContextFragment};
 
+use crate::goal_tools::GoalToolService;
 use crate::{
     install_llm_provider_factory, AgentRuntimeProfile, ApprovalHandler, Genome,
     HarnessRuntimeBuilder, MemoryStore, SessionGrants, Skill, ToolContext, ToolRegistry,
@@ -61,11 +62,12 @@ impl RuntimeContextSources {
 
 /// Frontend-specific interaction ports. No policy or model configuration is
 /// accepted here; those belong to the configured Harness runtime.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct RuntimeHostBindings {
     pub approver: Option<Rc<dyn ApprovalHandler>>,
     pub questioner: Option<Rc<dyn UserQuestionHandler>>,
     pub grants: Option<Rc<RefCell<SessionGrants>>>,
+    pub goal_service: Option<Rc<dyn GoalToolService>>,
 }
 
 /// Single owner for Provider, Policy, and ContextFragment runtime assembly.
@@ -73,6 +75,7 @@ pub struct ConfiguredHarnessRuntime {
     cfg: Config,
     model: String,
     profile: AgentRuntimeProfile,
+    harness_profile: Option<String>,
 }
 
 impl ConfiguredHarnessRuntime {
@@ -81,6 +84,7 @@ impl ConfiguredHarnessRuntime {
             cfg,
             model: model.into(),
             profile,
+            harness_profile: None,
         }
     }
 
@@ -94,13 +98,15 @@ impl ConfiguredHarnessRuntime {
         &self.profile
     }
 
+    pub fn with_harness_profile(mut self, profile: impl Into<String>) -> Self {
+        self.harness_profile = Some(profile.into());
+        self
+    }
+
     /// Resolve the configured primary Provider through the same runtime owner
     /// used by full agents and background helpers such as titles/summaries.
     pub fn primary_provider(&self) -> Box<dyn crate::Provider> {
-        Box::new(crate::model_provider_from_config(
-            &self.cfg,
-            self.model.clone(),
-        ))
+        crate::model_provider_from_config(&self.cfg, self.model.clone())
     }
 
     /// Build the complete registry through the selected Profile/Bundle path.
@@ -111,7 +117,18 @@ impl ConfiguredHarnessRuntime {
         bindings: RuntimeHostBindings,
     ) -> Result<ToolRegistry, String> {
         let context = self.build_context(workspace.clone(), sources, bindings);
-        let mut tools = HarnessRuntimeBuilder::configured(&workspace)?.build(context);
+        let mut tools = HarnessRuntimeBuilder::configured_for_profile(
+            &workspace,
+            self.harness_profile.as_deref(),
+        )?
+        .build(context);
+        if tools.ctx.goal_service.is_some() {
+            for tool in crate::goal_tools::goal_tools() {
+                if tools.get(tool.name()).is_none() {
+                    tools.register(tool);
+                }
+            }
+        }
         install_llm_provider_factory(&mut tools, self.cfg.clone(), self.model.clone());
         Ok(tools)
     }
@@ -171,6 +188,9 @@ impl ConfiguredHarnessRuntime {
         if let Some(memory) = sources.memory {
             context = context.with_memory(memory);
         }
+        if let Some(goal_service) = bindings.goal_service {
+            context = context.with_goal_service(goal_service);
+        }
         if let Some(grants) = bindings.grants {
             context = context.with_session_grants(grants);
         }
@@ -213,6 +233,32 @@ fn context_entries(sources: &RuntimeContextSources) -> Vec<ContextEntry> {
 mod tests {
     use super::*;
     use ncx_config::Config;
+    use ncx_protocol::{GoalBlockReason, GoalRef, GoalView};
+
+    struct TestGoalService;
+    impl GoalToolService for TestGoalService {
+        fn get(&self) -> Result<Option<GoalView>, String> {
+            Ok(None)
+        }
+        fn create(&self, _: String, _: u32) -> Result<GoalView, String> {
+            Err("unused".into())
+        }
+        fn edit(&self, _: GoalRef, _: String, _: u32) -> Result<GoalView, String> {
+            Err("unused".into())
+        }
+        fn pause(&self, _: GoalRef) -> Result<GoalView, String> {
+            Err("unused".into())
+        }
+        fn resume(&self, _: GoalRef) -> Result<GoalView, String> {
+            Err("unused".into())
+        }
+        fn complete(&self, _: GoalRef) -> Result<GoalView, String> {
+            Err("unused".into())
+        }
+        fn block(&self, _: GoalRef, _: GoalBlockReason) -> Result<GoalView, String> {
+            Err("unused".into())
+        }
+    }
 
     #[test]
     fn configured_runtime_owns_policy_provider_and_context_fragments() {
@@ -273,5 +319,33 @@ mod tests {
             tools.ctx.policy.mode,
             runtime.profile.permissions.sandbox_mode
         );
+    }
+
+    #[test]
+    fn goal_tools_remain_executable_in_every_session_profile() {
+        let cfg = Config {
+            workspace: PathBuf::from("runtime-minimal-goal-test"),
+            api_key: "test-key".into(),
+            ..Default::default()
+        };
+        let tools = ConfiguredHarnessRuntime::from_config(cfg.clone())
+            .with_harness_profile("minimal")
+            .build_tools(
+                cfg.workspace,
+                RuntimeContextSources::new(String::new(), Vec::new(), String::new()),
+                RuntimeHostBindings {
+                    goal_service: Some(Rc::new(TestGoalService)),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        for name in ["get_goal", "create_goal", "update_goal"] {
+            assert!(tools.get(name).is_some(), "missing executable {name}");
+            assert!(tools.schemas().iter().any(|schema| schema
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str)
+                == Some(name)));
+        }
     }
 }

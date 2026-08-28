@@ -63,12 +63,15 @@ mod tests {
     }
 
     #[test]
-    fn vision_provider_only_built_when_vl_model_set() {
+    fn attachment_vision_provider_requires_model_and_explicit_plugin_enablement() {
         let mut cfg = ncx_config::Config::default();
         // No vl_model -> image turns stay on the main provider.
         assert!(vision_provider_from_config(&cfg).is_none());
-        // vl_model set -> a dedicated vision provider is constructed.
+        // Configuration alone must not silently enable the local attachment parser.
         cfg.vl_model = "qwen-vl-max".into();
+        assert!(vision_provider_from_config(&cfg).is_none());
+        // The opt-in plugin flag and a model together construct the provider.
+        cfg.alibaba_attachment_parser_enabled = true;
         assert!(vision_provider_from_config(&cfg).is_some());
     }
 
@@ -198,6 +201,7 @@ mod tests {
             created_at: 1,
             updated_at: 2,
             archived: false,
+            harness_profile: "full".into(),
         }];
         let out = render_history(&rows, 10);
         assert!(out.contains("sid"));

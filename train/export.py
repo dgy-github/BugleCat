@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
+from process_control import run_owned  # noqa: E402
 import genome as G  # noqa: E402
 
 SCHEMA = "ncx-forge-trajectory/v1"
@@ -93,7 +94,7 @@ def _run_and_capture(task: Path, genome_path: str | None, timeout: int,
             env.pop("NCX_GENOME", None)
         tokens = 0
         try:
-            proc = subprocess.run(
+            proc = run_owned(
                 ev._agent_cmd(prompt, model),
                 cwd=str(ws), env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout,

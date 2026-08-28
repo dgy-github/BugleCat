@@ -10,7 +10,11 @@ use std::path::Path;
 // Keys the GUI Settings dialog may write, in on-disk order.
 pub const WRITABLE_KEYS: &[&str] = &[
     "api_key",
+    "deepseek_api_key",
+    "yunmo_api_key",
     "base_url",
+    "provider_protocol",
+    "active_provider_id",
     "model",
     "fast_model",
     "sandbox_mode",
@@ -20,10 +24,18 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "vl_base_url",
     "vl_api_key",
     "vl_model",
+    "alibaba_attachment_parser_enabled",
+    "dashscope_token_plan_key",
+    "dashscope_workspace_key",
     "ark_api_key",
     "max_iterations",
     "max_tool_calls",
     "max_parallel_tool_calls",
+    "orchestrator_workers",
+    "orchestrator_high_workers",
+    "orchestrator_verify_retries",
+    "orchestrator_max_depth",
+    "orchestrator_max_subtasks",
     "context_edit_enabled",
     "context_edit_max_chars",
     "context_edit_keep_recent_messages",
@@ -160,7 +172,10 @@ mod tests {
 
         let parsed: toml::Value = std::fs::read_to_string(target).unwrap().parse().unwrap();
         assert_eq!(parsed["price_currency"].as_str(), Some("USD"));
-        assert_eq!(parsed["available_models"].as_str(), Some("gpt-5,gpt-5-mini"));
+        assert_eq!(
+            parsed["available_models"].as_str(),
+            Some("gpt-5,gpt-5-mini")
+        );
     }
 
     #[test]
@@ -225,6 +240,11 @@ mod tests {
             ("max_iterations", "12"),
             ("max_tool_calls", "34"),
             ("max_parallel_tool_calls", "6"),
+            ("orchestrator_workers", "3"),
+            ("orchestrator_high_workers", "5"),
+            ("orchestrator_verify_retries", "2"),
+            ("orchestrator_max_depth", "2"),
+            ("orchestrator_max_subtasks", "9"),
             ("context_edit_enabled", "false"),
             ("context_edit_max_chars", "9000"),
             ("context_edit_keep_recent_messages", "8"),
@@ -234,6 +254,11 @@ mod tests {
         assert_eq!(parsed["max_iterations"].as_str().unwrap(), "12");
         assert_eq!(parsed["max_tool_calls"].as_str().unwrap(), "34");
         assert_eq!(parsed["max_parallel_tool_calls"].as_str().unwrap(), "6");
+        assert_eq!(parsed["orchestrator_workers"].as_str().unwrap(), "3");
+        assert_eq!(parsed["orchestrator_high_workers"].as_str().unwrap(), "5");
+        assert_eq!(parsed["orchestrator_verify_retries"].as_str().unwrap(), "2");
+        assert_eq!(parsed["orchestrator_max_depth"].as_str().unwrap(), "2");
+        assert_eq!(parsed["orchestrator_max_subtasks"].as_str().unwrap(), "9");
         assert_eq!(parsed["context_edit_enabled"].as_str().unwrap(), "false");
         assert_eq!(parsed["context_edit_max_chars"].as_str().unwrap(), "9000");
         assert_eq!(

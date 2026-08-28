@@ -94,7 +94,11 @@ pub(super) async fn run(
                 prompt.runtime_notes.push(pre.notes);
             }
             if !pre.blocked {
-                if let Some(stats) = agent.session.compact_if_needed(&agent.context_edit) {
+                if let Some(safe) = agent
+                    .session
+                    .compact_safely_if_needed(&agent.context_edit, &agent.tools.ctx.workspace)
+                {
+                    let stats = safe.stats;
                     let rendered = format!(
                         "chars {} -> {}; compressed_tool_results={}; dropped_messages={}",
                         stats.original_chars,
@@ -113,6 +117,13 @@ pub(super) async fn run(
                     .await;
                     if !post.notes.trim().is_empty() {
                         prompt.runtime_notes.push(post.notes);
+                    }
+                    if !safe.conflicts.is_empty() {
+                        agent.tools.ctx.compaction_read_only_recovery.set(true);
+                        prompt.runtime_notes.push(format!(
+                            "压缩一致性校验失败，已进入只读恢复模式：{}。重新读取工作区、git diff、测试结果和最近有效决策；证据不足时暂停并询问用户。",
+                            safe.conflicts.join("；")
+                        ));
                     }
                     emit(sink, LoopEvent::ContextCompacted(stats));
                 }
@@ -323,7 +334,14 @@ fn finish_response(
         }
         let text = "连接模型服务失败，已自动重试多次。当前会话和你的问题都已保留，网络恢复后可以直接重试，无需重新描述任务。".to_string();
         agent.session.add_assistant(&text, None, "");
-        emit(sink, LoopEvent::AssistantText(text.clone()));
+        emit(
+            sink,
+            LoopEvent::AssistantText {
+                text: text.clone(),
+                model: agent.provider.model().to_string(),
+                confirmed_model: agent.provider.confirmed_model(),
+            },
+        );
         return Some((text, "error"));
     }
     if response.finish_reason == "error" {
@@ -353,7 +371,14 @@ fn finish_response(
             MAX_CONSECUTIVE_EMPTY_RESPONSES
         );
         agent.session.add_assistant(&error, None, "");
-        emit(sink, LoopEvent::AssistantText(error.clone()));
+        emit(
+            sink,
+            LoopEvent::AssistantText {
+                text: error.clone(),
+                model: agent.provider.model().to_string(),
+                confirmed_model: agent.provider.confirmed_model(),
+            },
+        );
         return Some((error, "error"));
     }
 
@@ -371,7 +396,14 @@ fn finish_response(
     agent
         .session
         .add_assistant(&text, None, &response.reasoning);
-    emit(sink, LoopEvent::AssistantText(text.clone()));
+    emit(
+        sink,
+        LoopEvent::AssistantText {
+            text: text.clone(),
+            model: agent.provider.model().to_string(),
+            confirmed_model: agent.provider.confirmed_model(),
+        },
+    );
     if has_unfinished_plan(agent) {
         return None;
     }

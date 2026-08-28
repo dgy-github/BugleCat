@@ -32,6 +32,7 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parent.parent / "bench"
 sys.path.insert(0, str(BENCH))
 import run as bench  # noqa: E402  (bench/run.py)
+from process_control import run_owned  # noqa: E402
 
 SESSION_LOG_REL = Path(".nanocodex") / "session.jsonl"
 # Substrings whose presence in a trajectory line marks it as grader-tainted.
@@ -173,7 +174,7 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int,
         timed_out = False
         tokens = 0
         try:
-            proc = subprocess.run(
+            proc = run_owned(
                 _agent_cmd(prompt, model),
                 cwd=str(ws), env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout,

@@ -5,9 +5,19 @@ import type { UsageController } from "./usage-controller.svelte";
 
 export class ThreadLifecycleController {
   sessions = $state<SessionRow[]>([]);
-  showRecent = $state(false);
   showArchived = $state(false);
   historyOpen = $state(false);
+  selectedHarnessProfile = $state("full");
+  activeHarnessProfile = $state("full");
+  harnessProfileMenuOpen = $state(false);
+
+  readonly harnessProfiles = [
+    { id: "full", label: "全功能", desc: "完整工具与上下文，适合复杂任务" },
+    { id: "coding", label: "编程", desc: "面向代码开发的工具组合" },
+    { id: "readonly", label: "只读", desc: "仅分析与读取，不修改工作区" },
+    { id: "minimal", label: "轻量", desc: "减少工具和上下文，响应更轻" },
+    { id: "headless", label: "自动化", desc: "适合无界面批处理与流水线" },
+  ];
 
   constructor(
     private readonly thread: ThreadController,
@@ -18,6 +28,36 @@ export class ThreadLifecycleController {
   get recentSessions(): SessionRow[] { return this.pinActive(this.sessions.filter((session) => !session.archived)); }
   get archivedSessions(): SessionRow[] { return this.pinActive(this.sessions.filter((session) => session.archived)); }
   get archivedCount(): number { return this.sessions.filter((session) => session.archived).length; }
+  get harnessProfileLocked(): boolean {
+    const current = this.sessions.find((session) => session.session_id === this.thread.currentId);
+    return Boolean(current?.has_snapshot || this.thread.messages.some((message) => message.role === "user"));
+  }
+  harnessProfileLabel = (id: string): string => this.harnessProfiles.find((profile) => profile.id === id)?.label || id;
+
+  selectHarnessProfile = async (profile: string): Promise<void> => {
+    this.harnessProfileMenuOpen = false;
+    if (this.harnessProfileLocked) {
+      this.thread.messages.push({ role: "note", text: "Profile 决定工具和上下文；本会话已有消息，已锁定。请新建会话后切换。" });
+      return;
+    }
+    if (!this.thread.currentId) {
+      this.selectedHarnessProfile = profile;
+      this.activeHarnessProfile = profile;
+      return;
+    }
+    try {
+      await appServerRequest({ method: "threadHarnessProfileSet", params: { threadId: this.thread.currentId, harnessProfile: profile } });
+      // Rebuild the empty active Thread immediately so its first turn uses the
+      // persisted composition instead of the profile used at creation time.
+      await appServerRequest({ method: "threadActivate", params: { threadId: this.thread.currentId } });
+      this.selectedHarnessProfile = profile;
+      this.activeHarnessProfile = profile;
+      const current = this.sessions.find((session) => session.session_id === this.thread.currentId);
+      if (current) current.harness_profile = profile;
+    } catch (error) {
+      this.thread.messages.push({ role: "note", text: `切换 Harness Profile 失败：${error}` });
+    }
+  };
 
   refresh = async (): Promise<void> => {
     try {
@@ -32,7 +72,12 @@ export class ThreadLifecycleController {
       )]));
       this.sessions = threads.map(threadToSessionRow);
       const current = this.sessions.find((session) => session.session_id === this.thread.currentId);
-      if (current) { this.thread.title = current.title || "会话"; this.usage.restore(this.thread.currentId); }
+      if (current) {
+        this.thread.title = current.title || "会话";
+        this.activeHarnessProfile = current.harness_profile || "full";
+        this.selectedHarnessProfile = this.activeHarnessProfile;
+        this.usage.restore(this.thread.currentId);
+      }
     } catch (error) { console.error("会话协议加载失败", error); }
   };
 
@@ -43,6 +88,17 @@ export class ThreadLifecycleController {
       if (session) session.archived = archived;
       void this.refresh();
     } catch (error) { this.thread.messages.push({ role: "note", text: `归档失败：${error}` }); }
+  };
+
+  rename = async (id: string, value: string): Promise<void> => {
+    const title = value.trim().replace(/\s+/g, " ");
+    if (!title) throw new Error("会话名称不能为空");
+    if ([...title].length > 36) throw new Error("会话名称不能超过 36 个字符");
+    await appServerRequest({ method: "threadRename", params: { threadId: id, title } });
+    const session = this.sessions.find((item) => item.session_id === id);
+    if (session) session.title = title;
+    if (this.thread.currentId === id) this.thread.title = title;
+    await this.refresh();
   };
 
   create = async (): Promise<void> => {
@@ -59,7 +115,8 @@ export class ThreadLifecycleController {
     this.usage.reset();
     try {
       const id = this.newThreadId();
-      await appServerRequest<ProtocolThread>({ method: "threadCreateActivate", params: { threadId: id, workspace: this.workspace(), title: "(no prompt yet)" } });
+      const created = await appServerRequest<ProtocolThread>({ method: "threadCreateActivate", params: { threadId: id, workspace: this.workspace(), title: "(no prompt yet)", harnessProfile: this.selectedHarnessProfile } });
+      this.activeHarnessProfile = created.metadata.harnessProfile || this.selectedHarnessProfile;
       if (this.thread.currentId === "") { this.thread.currentId = id; this.thread.restore(id); }
     } catch (error) {
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;
@@ -70,7 +127,7 @@ export class ThreadLifecycleController {
   };
 
   resume = async (id: string, title = ""): Promise<void> => {
-    if (this.thread.switching || id === this.thread.currentId) return;
+    if (this.thread.switching) return;
     const previousId = this.thread.currentId;
     const previousTitle = this.thread.title;
     this.thread.stash(previousId);
@@ -81,7 +138,29 @@ export class ThreadLifecycleController {
     this.thread.restore(id);
     try {
       this.thread.busy = this.thread.runningSessions.has(id);
+      // Activation emits a legacy snapshot through `loaded`. Suppress that one
+      // event, then make the protocol Thread the final authority so a stale
+      // snapshot cannot erase later durable turns (for example, Goal worker
+      // rounds completed after the last legacy snapshot write).
+      this.thread.skipNextLoaded(id);
       await appServerRequest({ method: "threadActivate", params: { threadId: id } });
+      const visible = await appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: id } });
+      this.activeHarnessProfile = visible.metadata.harnessProfile || "full";
+      this.selectedHarnessProfile = this.activeHarnessProfile;
+      if (!this.thread.busy || this.thread.messages.length === 0) {
+        this.thread.messages = visible.turns.flatMap((turn) => turn.items.flatMap((item) => {
+          if (item.type === "userMessage") return [{ role: "user" as const, text: item.text }];
+          if (item.type === "assistantMessage") return [{
+            role: "assistant" as const,
+            text: item.text,
+            model: item.model,
+            confirmedModel: item.confirmedModel,
+          }];
+          if (item.type === "artifact") return [{ role: "artifact" as const, kind: item.kind, name: item.name, url: item.url }];
+          return [];
+        }));
+      }
+      this.thread.switching = false;
     } catch (error) {
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.usage.restore(previousId);
@@ -96,9 +175,16 @@ export class ThreadLifecycleController {
     const previousTitle = this.thread.title;
     this.thread.stash(previousId);
     this.thread.switching = true; this.thread.busy = false;
-    this.thread.title = title ? `${title}（分叉）` : "分叉"; this.thread.currentId = ""; this.usage.reset();
+    const forkTitle = this.nextForkTitle(title || "分叉会话");
+    this.thread.title = forkTitle; this.thread.currentId = ""; this.usage.reset();
     try {
-      await appServerRequest<ProtocolThread>({ method: "threadForkActivate", params: { threadId: id, newThreadId: this.newThreadId() } });
+      const newThreadId = this.newThreadId();
+      const forked = await appServerRequest<ProtocolThread>({ method: "threadForkActivate", params: { threadId: id, newThreadId } });
+      this.activeHarnessProfile = forked.metadata.harnessProfile || "full";
+      this.selectedHarnessProfile = this.activeHarnessProfile;
+      await appServerRequest({ method: "threadRename", params: { threadId: newThreadId, title: forkTitle } });
+      this.thread.currentId = newThreadId; this.thread.title = forkTitle;
+      await this.refresh();
     } catch (error) {
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.usage.restore(previousId); this.thread.restore(previousId);
@@ -126,6 +212,14 @@ export class ThreadLifecycleController {
   }
 
   private newThreadId(): string { return `thread-${crypto.randomUUID()}`; }
+
+  private nextForkTitle(source: string): string {
+    const base = source.replace(/\s+\(\d+\)$/u, "").trim() || "分叉会话";
+    const titles = new Set(this.sessions.map((session) => session.title));
+    let index = 1;
+    while (titles.has(`${base} (${index})`)) index += 1;
+    return `${base} (${index})`;
+  }
 
   private openSessionResource = async (command: string, id: string, label: string): Promise<void> => {
     try { await invoke(command, { sessionId: id }); }

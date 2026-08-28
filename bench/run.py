@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,9 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parent
 TASKS = BENCH / "tasks"
 REPORTS = BENCH / "reports"
-NCX = BENCH.parent / "rust" / "target" / "release" / "ncx.exe"
+NCX = Path(os.environ.get(
+    "NCX_FORGE_NCX_BIN", BENCH.parent / "rust" / "target" / "release" / "ncx.exe"
+)).resolve()
 HIDDEN = {"check.py", "prompt.txt"}
 ALL_AGENTS = ["nanocodex", "nanocodex-orch", "opencode", "claude"]
 

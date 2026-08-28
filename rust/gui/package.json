@@ -8,10 +8,15 @@
     "build": "vite build",
     "test:e2e:question": "node e2e/question.mjs",
     "test:e2e:protocol": "node e2e/protocol.mjs",
+    "test:e2e:provider-switch": "node e2e/provider-switch.mjs",
+    "test:e2e:slash": "node e2e/slash.mjs",
+    "test:e2e:orchestrator": "node e2e/orchestrator.mjs",
+    "test:e2e:goal-worker": "node e2e/goal-worker.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:build": "tauri build --target x86_64-pc-windows-gnu",
-    "tauri:installer": "tauri build --target x86_64-pc-windows-gnu --bundles nsis"
+    "tauri:build": "tauri build --target x86_64-pc-windows-msvc",
+    "tauri:installer": "tauri build --target x86_64-pc-windows-msvc --bundles nsis",
+    "tauri:installer:forge": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-forge-runtime.ps1 && tauri build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.forge.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "2.8.0",

@@ -232,10 +232,7 @@ pub fn resolve_unique_missing_read(workspace: &Path, args: &Value) -> Option<(St
     if requested_path.is_absolute() {
         return None;
     }
-    let basename = requested_path
-        .file_name()?
-        .to_string_lossy()
-        .to_string();
+    let basename = requested_path.file_name()?.to_string_lossy().to_string();
     let candidates = crate::search::find_files_by_name(workspace, &basename, true, 2);
     if candidates.len() != 1 {
         return None;

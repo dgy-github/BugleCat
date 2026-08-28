@@ -15,7 +15,7 @@
 //!   request/response round-trip that crosses the thread boundary mid-turn.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -24,35 +24,47 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use ncx_app_server::AppServer;
 use ncx_config::{
-    load_config, permission_mode_to_knobs, write_nanocodex_config, ConfigPaths, Overrides,
+    load_config, permission_mode_to_knobs, write_nanocodex_config, Config, ConfigPaths, Overrides,
 };
+#[cfg(test)]
+use ncx_core::ToolContext;
 use ncx_core::{
     discover_codex_hooks, discover_codex_mcp_servers, discover_skills, expand_file_mentions,
     load_workspace_instructions, new_session_id, prepare_mcp_server_tools,
-    suggest_title_with_provider, AgentLoop, ApprovalDecision,
-    ApprovalHandler, ApprovalRequest, CheckpointStore, ConfiguredHarnessRuntime,
-    ContextServiceDescriptor, LoopEvent, McpServiceDescriptor, MemoryStore, RuntimeContextSources,
-    RuntimeHostBindings, Session, SessionGrants, UserQuestionHandler,
+    suggest_title_with_provider, AgentLoop, ApprovalDecision, ApprovalHandler, ApprovalRequest,
+    CheckpointStore, ConfiguredHarnessRuntime, ContextServiceDescriptor, GoalToolService,
+    HarnessAgentRunner, HarnessRunnerEvent, LoopEvent, McpServiceDescriptor, MemoryStore,
+    Orchestrator, OrchestratorConfig, OrchestratorControl, OrchestratorEvent,
+    RuntimeContextSources, RuntimeHostBindings, Session, SessionGrants, UserQuestionHandler,
     UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
 use ncx_protocol::{
-    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId, TurnStatus,
-    TurnUsage,
+    ClientRequest, ExecutionMode, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId,
+    TurnStatus, TurnUsage,
 };
 #[cfg(test)]
 use ncx_sandbox::SandboxPolicy;
-#[cfg(test)]
-use ncx_core::ToolContext;
 use ncx_thread_store::JsonThreadStore;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 
-const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use native workspace tools \
+mod goal_turn;
+mod orchestrated_turn;
+
+const SYSTEM_PROMPT: &str = "You are BugleCat (妙脆角猫咪), the warm, curious, and precise coding agent inside nanocodex. \
+    Speak the user's language and lead with useful results. Your personality is friendly and confident, never childish: \
+    an occasional subtle cat-themed phrase is welcome in greetings or celebrations, but never add it to errors, warnings, \
+    code, logs, or serious technical explanations. Accuracy, action, and verification always come before role-play. \
+    Use native workspace tools \
     (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
     inspection, and prefer them over shell commands. Use apply_patch for edits and update_plan for \
     multi-step work. If a path is incomplete, search recursively instead of guessing. Keep responses concise. \
+    Use goal tools only for genuinely long-running same-session objectives. Call get_goal before update_goal; \
+    copy the exact goal id and revision. After resume, fork, or restart, continuation is disarmed until a direct \
+    human request resumes it. Mark blocked only after the same concrete blocker persists for at least three admitted \
+    goal rounds; difficulty or remaining work is not a blocker. \
     The final answer should contain only the execution result and a brief recommended next action; \
     do not recap tool calls, logs, or intermediate process.";
 
@@ -76,7 +88,86 @@ pub type PendingQuestionMap = Arc<Mutex<HashMap<u64, (String, oneshot::Sender<Op
 /// Shared cooperative cancellation state for the active GUI turn.
 pub type CancelFlag = Arc<AtomicBool>;
 pub type CancelRegistry = Arc<Mutex<HashMap<String, CancelFlag>>>;
-pub type RunningSessions = Arc<Mutex<HashSet<String>>>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionRunKind {
+    Human,
+    Goal,
+}
+pub type RunningSessions = Arc<Mutex<HashMap<String, SessionRunKind>>>;
+#[derive(Clone)]
+pub struct DeferredPrompt {
+    pub text: String,
+    pub images: Vec<String>,
+    pub execution_mode: ExecutionMode,
+}
+pub type DeferredPrompts = Arc<Mutex<HashMap<String, DeferredPrompt>>>;
+pub struct WorkerLifecycle {
+    shutting_down: AtomicBool,
+    handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
+}
+
+impl Default for WorkerLifecycle {
+    fn default() -> Self {
+        Self {
+            shutting_down: AtomicBool::new(false),
+            handles: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl WorkerLifecycle {
+    fn accepts_work(&self) -> bool {
+        !self.shutting_down.load(Ordering::Acquire)
+    }
+
+    fn track(&self, handle: std::thread::JoinHandle<()>) {
+        if !self.accepts_work() {
+            let _ = handle.join();
+            return;
+        }
+        if let Ok(mut handles) = self.handles.lock() {
+            let mut active = Vec::with_capacity(handles.len() + 1);
+            for current in handles.drain(..) {
+                if current.is_finished() {
+                    let _ = current.join();
+                } else {
+                    active.push(current);
+                }
+            }
+            active.push(handle);
+            *handles = active;
+        }
+    }
+
+    pub fn shutdown_and_join(
+        &self,
+        tx: &tokio::sync::mpsc::UnboundedSender<Command>,
+        cancels: &CancelRegistry,
+    ) {
+        if self.shutting_down.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Ok(registry) = cancels.lock() {
+            for cancel in registry.values() {
+                cancel.store(true, Ordering::Release);
+            }
+        }
+        let _ = tx.send(Command::Shutdown);
+        loop {
+            let handles = self
+                .handles
+                .lock()
+                .map(|mut handles| handles.drain(..).collect::<Vec<_>>())
+                .unwrap_or_default();
+            if handles.is_empty() {
+                break;
+            }
+            for handle in handles {
+                let _ = handle.join();
+            }
+        }
+    }
+}
 pub type GrantRegistry = Arc<Mutex<HashMap<String, SessionGrants>>>;
 
 static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -149,13 +240,17 @@ pub enum Command {
         session_id: String,
         text: String,
         images: Vec<String>,
+        execution_mode: ExecutionMode,
     },
     /// Rebuild the agent from the (just-saved) config — applies model / sandbox
     /// / key changes live. Starts a fresh session.
     Reload,
     /// Start a new empty conversation with an id allocated before it enters the
     /// serial worker queue. Project files remain shared; chat and plans do not.
-    New(String),
+    New {
+        id: String,
+        harness_profile: String,
+    },
     /// Continue a saved session: reseed the agent from its snapshot, keeping the
     /// same session id (future turns append to it).
     Resume(String),
@@ -168,9 +263,13 @@ pub enum Command {
     /// Change the approval policy live (no session reset) + persist it.
     /// Change the sandbox mode live (no session reset) + persist it. Used by the
     /// "auto-execute" mode (danger-full-access).
-    /// Switch the model: persist it and rebuild the agent reseeded with the
-    /// current transcript, so the conversation survives the swap.
+    /// Notify the worker that a complete provider route/model transaction was
+    /// committed. The current transcript stays in place and the next turn
+    /// resolves the new route.
     SetModel(String),
+    /// Run an explicitly armed persisted Goal in this existing conversation.
+    ContinueGoal(String),
+    Shutdown,
     /// Switch the CC permission mode (plan / default / accept-edits / bypass):
     /// persist it (+ derived sandbox/approval) and rebuild reseeded so the new
     /// gating + plan nudge take effect without losing the conversation.
@@ -188,6 +287,8 @@ pub enum UiEvent {
     /// The agent thread is ready (config loaded) — carries a status snapshot.
     Ready {
         model: String,
+        provider_id: String,
+        provider_protocol: String,
         sandbox: String,
         workspace: String,
         session_id: String,
@@ -200,9 +301,15 @@ pub enum UiEvent {
         needs_workspace: bool,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
-    AssistantDelta { session_id: String, text: String },
+    AssistantDelta {
+        session_id: String,
+        text: String,
+    },
     /// A chunk from the provider's explicit reasoning stream.
-    ReasoningDelta { session_id: String, text: String },
+    ReasoningDelta {
+        session_id: String,
+        text: String,
+    },
     ContextCompacted {
         session_id: String,
         original_chars: usize,
@@ -210,8 +317,31 @@ pub enum UiEvent {
         dropped_messages: usize,
         compressed_tool_results: usize,
     },
+    OrchestratorStage {
+        session_id: String,
+        stage: String,
+        detail: String,
+    },
+    OrchestratorActivity {
+        session_id: String,
+        worker: usize,
+        tool: String,
+        phase: String,
+        failure: Option<String>,
+    },
+    GoalRunStarted {
+        session_id: String,
+    },
+    HumanTurnStarted {
+        session_id: String,
+    },
     /// Assistant's final visible text (finalize the streamed bubble).
-    Assistant { session_id: String, text: String },
+    Assistant {
+        session_id: String,
+        text: String,
+        model: String,
+        confirmed_model: Option<String>,
+    },
     /// A tool is about to run.
     ToolStart {
         session_id: String,
@@ -249,7 +379,10 @@ pub enum UiEvent {
         usage: Value,
     },
     /// A compact title was generated and persisted for a newly completed session.
-    SessionTitle { session_id: String, title: String },
+    SessionTitle {
+        session_id: String,
+        title: String,
+    },
     /// A session was resumed/forked — the UI should replace its transcript with
     /// these restored messages.
     Loaded {
@@ -257,7 +390,10 @@ pub enum UiEvent {
         messages: Vec<UiMsg>,
     },
     /// Fatal setup/turn error.
-    Error { session_id: String, message: String },
+    Error {
+        session_id: String,
+        message: String,
+    },
 }
 
 /// A restored conversation message for the `loaded` event.
@@ -265,6 +401,10 @@ pub enum UiEvent {
 pub struct UiMsg {
     pub role: String,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmed_model: Option<String>,
 }
 
 pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
@@ -279,6 +419,71 @@ pub(crate) fn emit_protocol_outcome(app: &AppHandle, outcome: &ncx_app_server::D
 
 fn should_generate_session_title(is_first_turn: bool, stop_reason: &str) -> bool {
     is_first_turn && stop_reason == "completed"
+}
+
+fn fallback_session_title(request: &str) -> Option<String> {
+    let normalized = request.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut title = normalized.trim();
+    if title.is_empty() {
+        return None;
+    }
+    if matches!(
+        title,
+        "你好" | "您好" | "在吗" | "嗨" | "hello" | "Hello" | "hi" | "Hi"
+    ) {
+        return Some("日常问候".into());
+    }
+    for prefix in [
+        "可以帮我",
+        "能不能帮我",
+        "能否帮我",
+        "请帮我",
+        "麻烦帮我",
+        "帮我",
+    ] {
+        if let Some(stripped) = title.strip_prefix(prefix) {
+            title = stripped.trim_start_matches([' ', '，', ',', '：', ':']);
+            break;
+        }
+    }
+    let mut compact = title
+        .trim_matches([' ', '。', '.', '！', '!', '？', '?', '，', ',', '：', ':'])
+        .chars()
+        .take(24)
+        .collect::<String>();
+    if title.chars().count() > 24 {
+        compact.push('…');
+    }
+    (!compact.is_empty()).then_some(compact)
+}
+
+fn rename_session(
+    app: &AppHandle,
+    app_server: &AppServer<JsonThreadStore>,
+    session_id: &str,
+    title: &str,
+) -> bool {
+    let outcome = ThreadId::new(session_id.to_string())
+        .ok()
+        .and_then(|thread_id| {
+            app_server
+                .dispatch(ClientRequest::ThreadRename {
+                    thread_id,
+                    title: title.to_string(),
+                })
+                .ok()
+        });
+    if let Some(outcome) = &outcome {
+        emit_protocol_outcome(app, outcome);
+        emit(
+            app,
+            UiEvent::SessionTitle {
+                session_id: session_id.to_string(),
+                title: title.to_string(),
+            },
+        );
+    }
+    outcome.is_some()
 }
 
 /// Build the loop's event sink (forwards [`LoopEvent`]s to the frontend). A
@@ -327,15 +532,23 @@ fn make_sink(
                     }),
                 )
             }
-            LoopEvent::AssistantText(text) => {
+            LoopEvent::AssistantText {
+                text,
+                model,
+                confirmed_model,
+            } => {
                 let item = ThreadItem::AssistantMessage {
                     id: protocol_item_id("assistant"),
                     text: text.clone(),
+                    model: Some(model.clone()),
+                    confirmed_model: confirmed_model.clone(),
                 };
                 (
                     UiEvent::Assistant {
                         session_id: session_id.clone(),
                         text,
+                        model,
+                        confirmed_model,
                     },
                     Some(item),
                 )
@@ -360,6 +573,19 @@ fn make_sink(
                 )
             }
             LoopEvent::ToolResult { name, result } => {
+                if let (Some(server), Some(thread_id), Some(turn_id)) =
+                    (app_server.as_ref(), thread_id.clone(), turn_id.clone())
+                {
+                    for artifact in media_artifact_items(&name, &result) {
+                        if let Ok(outcome) = server.dispatch(ClientRequest::ItemAppend {
+                            thread_id: thread_id.clone(),
+                            turn_id: turn_id.clone(),
+                            item: artifact,
+                        }) {
+                            emit_protocol_outcome(&app, &outcome);
+                        }
+                    }
+                }
                 let call_id = latest_tool_call
                     .take()
                     .unwrap_or_else(|| protocol_item_id("tool-call"));
@@ -397,6 +623,43 @@ fn make_sink(
     })
 }
 
+fn media_artifact_items(tool_name: &str, result: &str) -> Vec<ThreadItem> {
+    let kind = match tool_name {
+        "generate_image" => "image",
+        "generate_video" => "video",
+        _ => return Vec::new(),
+    };
+    let Ok(payload) = serde_json::from_str::<Value>(result) else {
+        return Vec::new();
+    };
+    if payload.get("status").and_then(Value::as_str) != Some("succeeded") {
+        return Vec::new();
+    }
+    payload
+        .get("urls")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|url| url.starts_with("https://") || url.starts_with("http://"))
+        .enumerate()
+        .map(|(index, url)| ThreadItem::Artifact {
+            id: protocol_item_id("artifact"),
+            kind: kind.to_string(),
+            name: format!(
+                "{} {}",
+                if kind == "image" {
+                    "生成图片"
+                } else {
+                    "生成视频"
+                },
+                index + 1
+            ),
+            url: url.to_string(),
+        })
+        .collect()
+}
+
 fn protocol_item_id(kind: &str) -> ItemId {
     ItemId::new(format!("{kind}-{}", new_session_id())).expect("generated item id is non-empty")
 }
@@ -407,10 +670,13 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
         workspace: Some(workspace.to_path_buf()),
         ..Default::default()
     }) {
+        let provider_id = visible_provider_id(&cfg);
         emit(
             app,
             UiEvent::Ready {
                 model: cfg.model,
+                provider_id,
+                provider_protocol: cfg.provider_protocol,
                 sandbox: cfg.sandbox_mode,
                 workspace: display_path(workspace),
                 session_id: session_id.to_string(),
@@ -421,6 +687,25 @@ fn emit_ready(app: &AppHandle, workspace: &std::path::Path, session_id: &str) {
             },
         );
     }
+}
+
+fn visible_provider_id(cfg: &Config) -> String {
+    if cfg.active_provider_id != "legacy" {
+        return cfg.active_provider_id.clone();
+    }
+    let active_base = cfg.base_url.trim_end_matches('/');
+    crate::model_catalog::catalog()
+        .into_iter()
+        .find(|provider| {
+            provider.models.iter().any(|model| {
+                model
+                    .base_url
+                    .trim_end_matches('/')
+                    .eq_ignore_ascii_case(active_base)
+            })
+        })
+        .map(|provider| provider.id)
+        .unwrap_or_else(|| "manual".into())
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -508,6 +793,29 @@ struct GuiQuestioner {
     app: AppHandle,
     active_session: Arc<Mutex<String>>,
     pending: PendingQuestionMap,
+}
+
+struct GuiOrchestratorControl {
+    app: AppHandle,
+    session_id: String,
+    cancel: CancelFlag,
+}
+
+impl OrchestratorControl for GuiOrchestratorControl {
+    fn emit(&self, event: OrchestratorEvent) {
+        emit(
+            &self.app,
+            UiEvent::OrchestratorStage {
+                session_id: self.session_id.clone(),
+                stage: format!("{:?}", event.stage).to_lowercase(),
+                detail: event.detail,
+            },
+        );
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Acquire)
+    }
 }
 
 #[async_trait(?Send)]
@@ -626,6 +934,9 @@ fn spawn_title_generation(
     workspace: PathBuf,
     request: String,
 ) {
+    if let Some(title) = fallback_session_title(&request) {
+        rename_session(&app, app_server.as_ref(), &session_id, &title);
+    }
     let _ = std::thread::Builder::new()
         .name("ncx-title".into())
         .spawn(move || {
@@ -643,28 +954,106 @@ fn spawn_title_generation(
                     return;
                 };
                 let provider = ConfiguredHarnessRuntime::from_config(cfg).primary_provider();
-                let Some(title) = suggest_title_with_provider(provider.as_ref(), &request).await else {
+                let Some(title) = suggest_title_with_provider(provider.as_ref(), &request).await
+                else {
                     return;
                 };
-                let protocol_outcome =
-                    ThreadId::new(session_id.clone())
-                        .ok()
-                        .and_then(|thread_id| {
-                            app_server
-                                .dispatch(ClientRequest::ThreadRename {
-                                    thread_id,
-                                    title: title.clone(),
-                                })
-                                .ok()
-                        });
-                if let Some(outcome) = &protocol_outcome {
-                    emit_protocol_outcome(&app, outcome);
-                }
-                if protocol_outcome.is_some() {
-                    emit(&app, UiEvent::SessionTitle { session_id, title });
-                }
+                rename_session(&app, app_server.as_ref(), &session_id, &title);
             });
         });
+}
+
+struct GuiGoalToolService {
+    app_server: Arc<AppServer<JsonThreadStore>>,
+    thread_id: ThreadId,
+}
+
+impl GuiGoalToolService {
+    fn dispatch(&self, request: ClientRequest) -> Result<ncx_protocol::GoalView, String> {
+        let outcome = self
+            .app_server
+            .dispatch(request)
+            .map_err(|error| error.to_string())?;
+        match outcome.response.payload {
+            ResponsePayload::Goal(Some(goal)) => Ok(goal),
+            ResponsePayload::Goal(None) => Err("current goal was not found".into()),
+            _ => Err("App Server returned an unexpected goal response".into()),
+        }
+    }
+}
+
+impl GoalToolService for GuiGoalToolService {
+    fn get(&self) -> Result<Option<ncx_protocol::GoalView>, String> {
+        let outcome = self
+            .app_server
+            .dispatch(ClientRequest::GoalRead {
+                thread_id: self.thread_id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        match outcome.response.payload {
+            ResponsePayload::Goal(goal) => Ok(goal),
+            _ => Err("App Server returned an unexpected goal response".into()),
+        }
+    }
+
+    fn create(
+        &self,
+        objective: String,
+        max_goal_rounds: u32,
+    ) -> Result<ncx_protocol::GoalView, String> {
+        self.dispatch(ClientRequest::GoalCreate {
+            thread_id: self.thread_id.clone(),
+            objective,
+            max_goal_rounds,
+        })
+    }
+
+    fn edit(
+        &self,
+        goal: ncx_protocol::GoalRef,
+        objective: String,
+        max_goal_rounds: u32,
+    ) -> Result<ncx_protocol::GoalView, String> {
+        self.dispatch(ClientRequest::GoalEdit {
+            thread_id: self.thread_id.clone(),
+            goal,
+            objective,
+            max_goal_rounds,
+        })
+    }
+
+    fn pause(&self, goal: ncx_protocol::GoalRef) -> Result<ncx_protocol::GoalView, String> {
+        self.dispatch(ClientRequest::GoalPause {
+            thread_id: self.thread_id.clone(),
+            goal,
+        })
+    }
+
+    fn resume(&self, goal: ncx_protocol::GoalRef) -> Result<ncx_protocol::GoalView, String> {
+        self.dispatch(ClientRequest::GoalResume {
+            thread_id: self.thread_id.clone(),
+            goal,
+        })
+    }
+
+    fn complete(&self, goal: ncx_protocol::GoalRef) -> Result<ncx_protocol::GoalView, String> {
+        self.dispatch(ClientRequest::GoalComplete {
+            thread_id: self.thread_id.clone(),
+            goal,
+        })
+    }
+
+    fn block(
+        &self,
+        goal: ncx_protocol::GoalRef,
+        reason: ncx_protocol::GoalBlockReason,
+    ) -> Result<ncx_protocol::GoalView, String> {
+        self.dispatch(ClientRequest::GoalBlock {
+            thread_id: self.thread_id.clone(),
+            goal,
+            reason,
+        })
+    }
 }
 
 async fn build_agent(
@@ -673,11 +1062,17 @@ async fn build_agent(
     seed: Option<(String, Vec<Value>)>,
     grants: Rc<RefCell<SessionGrants>>,
     workspace_override: Option<PathBuf>,
+    harness_profile: Option<String>,
+    app_server: Arc<AppServer<JsonThreadStore>>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf), String> {
     let restored_plan = seed
         .as_ref()
         .map(|(_, messages)| latest_plan_from_messages(messages))
         .unwrap_or_default();
+    let (session_id, seed_messages) = match seed {
+        Some((id, messages)) => (id, Some(messages)),
+        None => (new_session_id(), None),
+    };
     let workspace = workspace_override.or_else(|| std::env::current_dir().ok());
     let overrides = Overrides {
         workspace,
@@ -686,7 +1081,10 @@ async fn build_agent(
     let cfg = load_config(overrides).map_err(|e| e.to_string())?;
     cfg.validate().map_err(|e| e.to_string())?;
 
-    let runtime = ConfiguredHarnessRuntime::from_config(cfg.clone());
+    let mut runtime = ConfiguredHarnessRuntime::from_config(cfg.clone());
+    if let Some(profile) = harness_profile {
+        runtime = runtime.with_harness_profile(profile);
+    }
     let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
     // Memory is recalled per prompt by AgentLoop (query-scoped), not dumped here.
     // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
@@ -707,6 +1105,10 @@ async fn build_agent(
         approver: Some(approver),
         questioner: Some(questioner),
         grants: Some(grants),
+        goal_service: Some(Rc::new(GuiGoalToolService {
+            app_server,
+            thread_id: ThreadId::new(session_id.clone()).map_err(|error| error.to_string())?,
+        })),
     };
     let mut tools = runtime.build_tools(cfg.workspace.clone(), sources, bindings)?;
     if !restored_plan.is_empty() {
@@ -736,11 +1138,11 @@ async fn build_agent(
     let system_prompt = tools
         .service::<ContextServiceDescriptor>("context")
         .ok_or_else(|| "Harness Context 服务未启用".to_string())?
-        .assemble(SYSTEM_PROMPT);
-    let (session_id, seed_messages) = match seed {
-        Some((id, messages)) => (id, Some(messages)),
-        None => (new_session_id(), None),
-    };
+        .assemble(&runtime_system_prompt(
+            &cfg.active_provider_id,
+            &cfg.provider_protocol,
+            &cfg.model,
+        ));
     let log_dir = cfg.workspace.join(".nanocodex").join("sessions");
     std::fs::create_dir_all(&log_dir).map_err(|error| error.to_string())?;
     let log_path = session_log_path(&cfg.workspace, &session_id);
@@ -753,6 +1155,17 @@ async fn build_agent(
         .clone()
         .apply(AgentLoop::from_runtime_services(tools, session)?);
     Ok((agent, cfg.workspace.clone(), session_id, log_path))
+}
+
+fn runtime_system_prompt(provider_id: &str, protocol: &str, model: &str) -> String {
+    format!(
+        "{SYSTEM_PROMPT} Runtime route metadata from the local client: provider ID = {:?}, protocol = {:?}, requested model ID = {:?}. \
+         When the user asks which model or provider is active, report these exact client-selected values. \
+         Do not replace the requested model ID with a family name inferred from your training identity, and do not claim \
+         that the requested ID proves the upstream vendor's internal implementation. If response metadata is available in \
+         the conversation UI, distinguish its confirmed model ID from the requested model ID.",
+        provider_id, protocol, model
+    )
 }
 
 fn session_log_path(workspace: &Path, session_id: &str) -> PathBuf {
@@ -795,8 +1208,39 @@ fn protocol_thread_seed(
             ResponsePayload::ModelContext(Some(context)) => Some(context.messages),
             _ => None,
         })
-        .unwrap_or_else(|| protocol_thread_messages(&thread));
+        .unwrap_or_else(|| protocol_thread_messages(&thread, false));
     Some((messages, Some(thread.metadata.workspace)))
+}
+
+fn protocol_thread_profile(app_server: &AppServer<JsonThreadStore>, session_id: &str) -> String {
+    let Ok(thread_id) = ThreadId::new(session_id.to_string()) else {
+        return "full".into();
+    };
+    app_server
+        .dispatch(ClientRequest::ThreadRead { thread_id })
+        .ok()
+        .and_then(|outcome| match outcome.response.payload {
+            ResponsePayload::Thread(thread) => Some(thread.metadata.harness_profile),
+            _ => None,
+        })
+        .unwrap_or_else(|| "full".into())
+}
+
+/// Restore the visible transcript from durable thread turns, never from the
+/// compacted model context. Context compaction is an LLM optimization and must
+/// not remove messages from the user's conversation history.
+fn protocol_thread_ui(
+    app_server: &AppServer<JsonThreadStore>,
+    session_id: &str,
+) -> Option<Vec<UiMsg>> {
+    let thread_id = ThreadId::new(session_id.to_string()).ok()?;
+    let outcome = app_server
+        .dispatch(ClientRequest::ThreadRead { thread_id })
+        .ok()?;
+    let ResponsePayload::Thread(thread) = outcome.response.payload else {
+        return None;
+    };
+    Some(snapshot_to_ui(&protocol_thread_messages(&thread, true)))
 }
 
 fn latest_protocol_thread_seed(
@@ -838,12 +1282,13 @@ fn ensure_protocol_thread(
             thread_id: Some(thread_id),
             workspace: workspace.display().to_string(),
             title: "(no prompt yet)".to_string(),
+            harness_profile: "full".to_string(),
         })
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
 
-fn protocol_thread_messages(thread: &Thread) -> Vec<Value> {
+fn protocol_thread_messages(thread: &Thread, include_ui_metadata: bool) -> Vec<Value> {
     thread
         .turns
         .iter()
@@ -852,9 +1297,25 @@ fn protocol_thread_messages(thread: &Thread) -> Vec<Value> {
             ThreadItem::UserMessage { text, .. } => {
                 Some(json!({"role": "user", "content": text}))
             }
-            ThreadItem::AssistantMessage { text, .. } => {
-                Some(json!({"role": "assistant", "content": text}))
+            ThreadItem::GoalMessage { text, .. } if !include_ui_metadata => {
+                Some(json!({"role": "user", "content": text}))
             }
+            ThreadItem::GoalMessage { .. } => None,
+            ThreadItem::AssistantMessage {
+                text,
+                model,
+                confirmed_model,
+                ..
+            } => Some(if include_ui_metadata {
+                json!({
+                    "role": "assistant",
+                    "content": text,
+                    "_ncx_model": model,
+                    "_ncx_confirmed_model": confirmed_model,
+                })
+            } else {
+                json!({"role": "assistant", "content": text})
+            }),
             ThreadItem::ToolCall {
                 id,
                 name,
@@ -882,7 +1343,7 @@ fn protocol_thread_messages(thread: &Thread) -> Vec<Value> {
                 "role": "user",
                 "content": format!("{COMPACTED_HISTORY_PREFIX}；协议存储]\n{summary}")
             })),
-            ThreadItem::Reasoning { .. } => None,
+            ThreadItem::Reasoning { .. } | ThreadItem::Artifact { .. } => None,
         })
         .collect()
 }
@@ -895,14 +1356,21 @@ fn spawn_turn_worker(
     questions: PendingQuestionMap,
     cancels: CancelRegistry,
     running: RunningSessions,
+    deferred_prompts: DeferredPrompts,
+    lifecycle: Arc<WorkerLifecycle>,
     session_grants: GrantRegistry,
     session_id: String,
     workspace: PathBuf,
     messages: Vec<Value>,
     text: String,
     images: Vec<String>,
+    execution_mode: ExecutionMode,
+    harness_profile: String,
 ) {
-    let inserted = claim_session(&running, &session_id);
+    if !lifecycle.accepts_work() {
+        return;
+    }
+    let inserted = claim_session(&running, &session_id, SessionRunKind::Human);
     if !inserted {
         emit(
             &app,
@@ -923,6 +1391,8 @@ fn spawn_turn_worker(
         &workspace,
         turn_id.clone(),
         &text,
+        execution_mode,
+        &harness_profile,
     ) {
         Ok(turn) => turn,
         Err(message) => {
@@ -949,12 +1419,23 @@ fn spawn_turn_worker(
     let cleanup_running = running.clone();
     let cleanup_session_id = session_id.clone();
     let failure_app = app.clone();
+    let thread_lifecycle = lifecycle.clone();
     let spawned = std::thread::Builder::new()
         .name(format!(
             "ncx-turn-{}",
             session_id.chars().take(8).collect::<String>()
         ))
         .spawn(move || {
+            let goal_pending = pending.clone();
+            let goal_questions = questions.clone();
+            let goal_cancels = cancels.clone();
+            let goal_running = running.clone();
+            let goal_deferred = deferred_prompts.clone();
+            let goal_lifecycle = thread_lifecycle.clone();
+            let goal_grants = session_grants.clone();
+            let goal_app = app.clone();
+            let goal_server = app_server.clone();
+            let goal_session_id = session_id.clone();
             let mut protocol_turn = protocol_turn;
             let finish = || {
                 if let Ok(mut registry) = cancels.lock() {
@@ -997,12 +1478,34 @@ fn spawn_turn_worker(
                     .and_then(|registry| registry.get(&session_id).cloned())
                     .unwrap_or_default();
                 let grants = Rc::new(RefCell::new(initial_grants));
+                if execution_mode == ExecutionMode::Orchestrator {
+                    orchestrated_turn::run(
+                        app.clone(),
+                        app_server.clone(),
+                        session_grants.clone(),
+                        session_id.clone(),
+                        workspace.clone(),
+                        messages,
+                        text,
+                        images,
+                        cancel.clone(),
+                        approver,
+                        questioner,
+                        grants,
+                        &mut protocol_turn,
+                        harness_profile.clone(),
+                    )
+                    .await;
+                    return;
+                }
                 let built = build_agent(
                     approver,
                     questioner,
                     Some((session_id.clone(), messages)),
                     grants.clone(),
                     Some(workspace.clone()),
+                    Some(harness_profile),
+                    app_server.clone(),
                 )
                 .await;
                 let (mut agent, _, _, _) = match built {
@@ -1104,8 +1607,24 @@ fn spawn_turn_worker(
                 }
             });
             finish();
+            if goal_is_armed(&goal_server, &goal_session_id) {
+                spawn_goal_worker(
+                    goal_app,
+                    goal_server,
+                    goal_pending,
+                    goal_questions,
+                    goal_cancels,
+                    goal_running,
+                    goal_deferred,
+                    goal_lifecycle,
+                    goal_grants,
+                    goal_session_id,
+                );
+            }
         });
-    if spawned.is_err() {
+    if let Ok(handle) = spawned {
+        lifecycle.track(handle);
+    } else {
         if let Ok(mut registry) = cleanup_cancels.lock() {
             registry.remove(&cleanup_session_id);
         }
@@ -1117,6 +1636,189 @@ fn spawn_turn_worker(
             UiEvent::Error {
                 session_id: cleanup_session_id,
                 message: "无法启动会话执行线程。".into(),
+            },
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_goal_worker(
+    app: AppHandle,
+    app_server: Arc<AppServer<JsonThreadStore>>,
+    pending: PendingMap,
+    questions: PendingQuestionMap,
+    cancels: CancelRegistry,
+    running: RunningSessions,
+    deferred_prompts: DeferredPrompts,
+    lifecycle: Arc<WorkerLifecycle>,
+    session_grants: GrantRegistry,
+    session_id: String,
+) {
+    if !lifecycle.accepts_work() {
+        if let Ok(thread_id) = ThreadId::new(session_id) {
+            let _ = app_server.disarm_goal(&thread_id);
+        }
+        return;
+    }
+    if !claim_session(&running, &session_id, SessionRunKind::Goal) {
+        // A human turn that won the lease is allowed to finish first. The Goal
+        // remains armed and can be resumed explicitly without corrupting it.
+        return;
+    }
+    let Some((_, stored_workspace)) = protocol_thread_seed(&app_server, &session_id) else {
+        if let Ok(mut sessions) = running.lock() {
+            sessions.remove(&session_id);
+        }
+        let _ = ThreadId::new(session_id.clone())
+            .ok()
+            .and_then(|thread_id| app_server.disarm_goal(&thread_id).ok());
+        emit(
+            &app,
+            UiEvent::Error {
+                session_id,
+                message: "长期目标对应的会话不存在，自动续轮已关闭。".into(),
+            },
+        );
+        return;
+    };
+    let workspace = stored_workspace
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
+    if let Ok(mut registry) = cancels.lock() {
+        registry.insert(session_id.clone(), cancel.clone());
+    }
+    let cleanup_session = session_id.clone();
+    let cleanup_running = running.clone();
+    let cleanup_cancels = cancels.clone();
+    let failure_app = app.clone();
+    let failure_server = app_server.clone();
+    let thread_lifecycle = lifecycle.clone();
+    let spawned = std::thread::Builder::new()
+        .name(format!(
+            "ncx-goal-{}",
+            session_id.chars().take(8).collect::<String>()
+        ))
+        .spawn(move || {
+            let deferred_pending = pending.clone();
+            let deferred_questions = questions.clone();
+            let deferred_cancels = cancels.clone();
+            let deferred_running = running.clone();
+            let deferred_grants = session_grants.clone();
+            let deferred_lifecycle = thread_lifecycle.clone();
+            let deferred_app = app.clone();
+            let deferred_server = app_server.clone();
+            let deferred_session_id = session_id.clone();
+            let finish = || {
+                if let Ok(mut registry) = cancels.lock() {
+                    registry.remove(&session_id);
+                }
+                if let Ok(mut sessions) = running.lock() {
+                    sessions.remove(&session_id);
+                }
+            };
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                if let Ok(thread_id) = ThreadId::new(session_id.clone()) {
+                    let _ = app_server.disarm_goal(&thread_id);
+                }
+                emit(
+                    &app,
+                    UiEvent::Error {
+                        session_id: session_id.clone(),
+                        message: "无法创建长期目标执行线程，自动续轮已关闭。".into(),
+                    },
+                );
+                finish();
+                return;
+            };
+            runtime.block_on(async {
+                let active_session = Arc::new(Mutex::new(session_id.clone()));
+                let approver: Rc<dyn ApprovalHandler> = Rc::new(GuiApprover {
+                    app: app.clone(),
+                    active_session: active_session.clone(),
+                    pending,
+                });
+                let questioner: Rc<dyn UserQuestionHandler> = Rc::new(GuiQuestioner {
+                    app: app.clone(),
+                    active_session,
+                    pending: questions,
+                });
+                goal_turn::run(
+                    app.clone(),
+                    app_server.clone(),
+                    session_grants.clone(),
+                    session_id.clone(),
+                    workspace.clone(),
+                    cancel,
+                    approver,
+                    questioner,
+                )
+                .await;
+            });
+            finish();
+            let deferred = deferred_prompts
+                .lock()
+                .ok()
+                .and_then(|mut prompts| prompts.remove(&deferred_session_id));
+            if let Some(prompt) = deferred {
+                emit(
+                    &deferred_app,
+                    UiEvent::HumanTurnStarted {
+                        session_id: deferred_session_id.clone(),
+                    },
+                );
+                let (messages, target_workspace) =
+                    protocol_thread_seed(&deferred_server, &deferred_session_id)
+                        .map(|(messages, stored_workspace)| {
+                            (
+                                messages,
+                                stored_workspace
+                                    .map(PathBuf::from)
+                                    .unwrap_or_else(|| workspace.clone()),
+                            )
+                        })
+                        .unwrap_or_else(|| (Vec::new(), workspace));
+                let profile = protocol_thread_profile(&deferred_server, &deferred_session_id);
+                spawn_turn_worker(
+                    deferred_app,
+                    deferred_server,
+                    deferred_pending,
+                    deferred_questions,
+                    deferred_cancels,
+                    deferred_running,
+                    deferred_prompts.clone(),
+                    deferred_lifecycle,
+                    deferred_grants,
+                    deferred_session_id,
+                    target_workspace,
+                    messages,
+                    prompt.text,
+                    prompt.images,
+                    prompt.execution_mode,
+                    profile,
+                );
+            }
+        });
+    if let Ok(handle) = spawned {
+        lifecycle.track(handle);
+    } else {
+        if let Ok(mut registry) = cleanup_cancels.lock() {
+            registry.remove(&cleanup_session);
+        }
+        if let Ok(mut sessions) = cleanup_running.lock() {
+            sessions.remove(&cleanup_session);
+        }
+        if let Ok(thread_id) = ThreadId::new(cleanup_session.clone()) {
+            let _ = failure_server.disarm_goal(&thread_id);
+        }
+        emit(
+            &failure_app,
+            UiEvent::Error {
+                session_id: cleanup_session,
+                message: "无法启动长期目标执行线程，自动续轮已关闭。".into(),
             },
         );
     }
@@ -1138,6 +1840,8 @@ impl ProtocolTurnGuard {
         workspace: &Path,
         turn_id: TurnId,
         user_text: &str,
+        execution_mode: ExecutionMode,
+        harness_profile: &str,
     ) -> Result<Self, String> {
         let thread_id = ThreadId::new(session_id.to_string()).map_err(|error| error.to_string())?;
         if server
@@ -1151,6 +1855,7 @@ impl ProtocolTurnGuard {
                     thread_id: Some(thread_id.clone()),
                     workspace: workspace.display().to_string(),
                     title: "(no prompt yet)".to_string(),
+                    harness_profile: harness_profile.to_string(),
                 })
                 .map_err(|error| error.to_string())?;
             if let Some(app) = &app {
@@ -1161,6 +1866,7 @@ impl ProtocolTurnGuard {
             .dispatch(ClientRequest::TurnStart {
                 thread_id: thread_id.clone(),
                 turn_id: turn_id.clone(),
+                execution_mode,
             })
             .map_err(|error| error.to_string())?;
         if let Some(app) = &app {
@@ -1238,10 +1944,27 @@ impl Drop for ProtocolTurnGuard {
     }
 }
 
-fn claim_session(running: &RunningSessions, session_id: &str) -> bool {
+fn claim_session(running: &RunningSessions, session_id: &str, kind: SessionRunKind) -> bool {
     running
         .lock()
-        .map(|mut sessions| sessions.insert(session_id.to_string()))
+        .map(|mut sessions| sessions.insert(session_id.to_string(), kind).is_none())
+        .unwrap_or(false)
+}
+
+fn goal_is_armed(app_server: &AppServer<JsonThreadStore>, session_id: &str) -> bool {
+    let Ok(thread_id) = ThreadId::new(session_id.to_string()) else {
+        return false;
+    };
+    app_server
+        .dispatch(ClientRequest::GoalRead { thread_id })
+        .ok()
+        .and_then(|outcome| match outcome.response.payload {
+            ResponsePayload::Goal(Some(goal)) => Some(
+                goal.activation == ncx_protocol::GoalActivation::Armed
+                    && goal.goal.phase == ncx_protocol::GoalPhase::Active,
+            ),
+            _ => None,
+        })
         .unwrap_or(false)
 }
 
@@ -1256,9 +1979,12 @@ pub fn spawn_worker(
     questions: PendingQuestionMap,
     cancels: CancelRegistry,
     running: RunningSessions,
+    deferred_prompts: DeferredPrompts,
+    lifecycle: Arc<WorkerLifecycle>,
     session_grants: GrantRegistry,
 ) {
-    std::thread::Builder::new()
+    let coordinator_lifecycle = lifecycle.clone();
+    let spawned = std::thread::Builder::new()
         .name("ncx-agent".into())
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -1286,6 +2012,9 @@ pub fn spawn_worker(
                 let startup_seed = std::env::current_dir()
                     .ok()
                     .and_then(|workspace| latest_protocol_thread_seed(&app_server, &workspace));
+                let startup_profile = startup_seed
+                    .as_ref()
+                    .map(|(id, _)| protocol_thread_profile(&app_server, id));
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
@@ -1295,6 +2024,8 @@ pub fn spawn_worker(
                     startup_seed,
                     grants.clone(),
                     None,
+                    startup_profile,
+                    app_server.clone(),
                 )
                 .await
                 {
@@ -1329,6 +2060,7 @@ pub fn spawn_worker(
                             session_id: target_id,
                             text,
                             images,
+                            execution_mode,
                         } => {
                             let (messages, target_workspace) =
                                 protocol_thread_seed(&app_server, &target_id)
@@ -1341,6 +2073,7 @@ pub fn spawn_worker(
                                         )
                                     })
                                     .unwrap_or_else(|| (Vec::new(), workspace.clone()));
+                            let harness_profile = protocol_thread_profile(&app_server, &target_id);
                             spawn_turn_worker(
                                 app.clone(),
                                 app_server.clone(),
@@ -1348,15 +2081,22 @@ pub fn spawn_worker(
                                 questions.clone(),
                                 cancels.clone(),
                                 running.clone(),
+                                deferred_prompts.clone(),
+                                lifecycle.clone(),
                                 session_grants.clone(),
                                 target_id,
                                 target_workspace,
                                 messages,
                                 text,
                                 images,
+                                execution_mode,
+                                harness_profile,
                             );
                         }
-                        Command::New(id) => {
+                        Command::New {
+                            id,
+                            harness_profile,
+                        } => {
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(
                                 approver.clone(),
@@ -1364,6 +2104,8 @@ pub fn spawn_worker(
                                 Some((id, Vec::new())),
                                 grants.clone(),
                                 None,
+                                Some(harness_profile),
+                                app_server.clone(),
                             )
                             .await
                             {
@@ -1404,6 +2146,8 @@ pub fn spawn_worker(
                                 None,
                                 grants.clone(),
                                 None,
+                                None,
+                                app_server.clone(),
                             )
                             .await
                             {
@@ -1441,49 +2185,36 @@ pub fn spawn_worker(
                                 );
                                 continue;
                             };
-                            let ui = snapshot_to_ui(&msgs);
+                            let ui = protocol_thread_ui(&app_server, &id)
+                                .unwrap_or_else(|| snapshot_to_ui(&msgs));
                             // Reopen the conversation in ITS original workspace, not
                             // whatever dir we're currently in — otherwise a resumed
                             // session runs against the wrong project.
                             restore_session_workspace(restored_workspace.as_deref());
+                            workspace = restored_workspace
+                                .as_deref()
+                                .map(strip_verbatim_prefix)
+                                .map(PathBuf::from)
+                                .filter(|path| path.is_dir())
+                                .unwrap_or_else(|| workspace.clone());
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
-                            match build_agent(
-                                approver.clone(),
-                                questioner.clone(),
-                                Some((id.clone(), msgs)),
-                                grants.clone(),
-                                None,
-                            )
-                            .await
-                            {
-                                Ok((a, ws, sid, _)) => {
-                                    agent = a;
-                                    workspace = ws;
-                                    session_id = sid;
-                                    set_active_session(&active_session, &session_id);
-                                    agent.set_event_sink(make_sink(
-                                        app.clone(),
-                                        session_id.clone(),
-                                        None,
-                                        None,
-                                    ));
-                                    emit_ready(&app, &workspace, &session_id);
-                                    emit(
-                                        &app,
-                                        UiEvent::Loaded {
-                                            session_id: session_id.clone(),
-                                            messages: ui,
-                                        },
-                                    );
-                                }
-                                Err(e) => emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: id,
-                                        message: e,
-                                    },
-                                ),
+                            if let Ok(mut registry) = session_grants.lock() {
+                                registry.remove(&id);
                             }
+                            session_id = id;
+                            set_active_session(&active_session, &session_id);
+                            // A resumed thread is a state/navigation operation. Building
+                            // tools, plugins and the current Provider Route belongs to the
+                            // per-turn worker below; awaiting it here blocks the command
+                            // queue and can strand a later prompt in optimistic "busy" UI.
+                            emit_ready(&app, &workspace, &session_id);
+                            emit(
+                                &app,
+                                UiEvent::Loaded {
+                                    session_id: session_id.clone(),
+                                    messages: ui,
+                                },
+                            );
                         }
                         Command::Fork {
                             source_id,
@@ -1502,15 +2233,19 @@ pub fn spawn_worker(
                                 );
                                 continue;
                             };
-                            let ui = snapshot_to_ui(&msgs);
+                            let ui = protocol_thread_ui(&app_server, &source_id)
+                                .unwrap_or_else(|| snapshot_to_ui(&msgs));
                             restore_session_workspace(restored_workspace.as_deref());
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            let harness_profile = protocol_thread_profile(&app_server, &target_id);
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
                                 Some((target_id, msgs)),
                                 grants.clone(),
                                 None,
+                                Some(harness_profile),
+                                app_server.clone(),
                             )
                             .await
                             {
@@ -1544,46 +2279,26 @@ pub fn spawn_worker(
                             }
                         }
                         Command::SetModel(model) => {
-                            // Persist the model, then rebuild reseeded with the current
-                            // transcript so the conversation survives the swap. We do NOT
-                            // emit Loaded — the UI keeps its richer transcript as-is.
-                            let mut m = std::collections::HashMap::new();
-                            m.insert("model", model.as_str());
-                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            let msgs = protocol_thread_seed(&app_server, &session_id)
-                                .map(|(messages, _)| messages)
-                                .unwrap_or_default();
-                            // Same session → keep the "always allow" grants.
-                            match build_agent(
-                                approver.clone(),
-                                questioner.clone(),
-                                Some((session_id.clone(), msgs)),
-                                grants.clone(),
-                                None,
-                            )
-                            .await
-                            {
-                                Ok((a, ws, sid, _)) => {
-                                    agent = a;
-                                    workspace = ws;
-                                    session_id = sid;
-                                    set_active_session(&active_session, &session_id);
-                                    agent.set_event_sink(make_sink(
-                                        app.clone(),
-                                        session_id.clone(),
-                                        None,
-                                        None,
-                                    ));
-                                    emit_ready(&app, &workspace, &session_id);
-                                }
-                                Err(e) => emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: session_id.clone(),
-                                        message: e,
-                                    },
-                                ),
-                            }
+                            // The caller has already atomically committed the complete
+                            // provider route. Prompt workers resolve config per turn, so
+                            // rebuilding the whole Harness here would only risk an
+                            // unrelated MCP/skill failure and disturb live state.
+                            let _ = model;
+                            emit_ready(&app, &workspace, &session_id);
+                        }
+                        Command::ContinueGoal(target_id) => {
+                            spawn_goal_worker(
+                                app.clone(),
+                                app_server.clone(),
+                                pending.clone(),
+                                questions.clone(),
+                                cancels.clone(),
+                                running.clone(),
+                                deferred_prompts.clone(),
+                                lifecycle.clone(),
+                                session_grants.clone(),
+                                target_id,
+                            );
                         }
                         Command::SetPermissionMode(mode) => {
                             // Persist the mode (+ derived sandbox/approval for consistency),
@@ -1605,6 +2320,8 @@ pub fn spawn_worker(
                                 Some((session_id.clone(), msgs)),
                                 grants.clone(),
                                 None,
+                                Some(protocol_thread_profile(&app_server, &session_id)),
+                                app_server.clone(),
                             )
                             .await
                             {
@@ -1632,23 +2349,25 @@ pub fn spawn_worker(
                         }
                         Command::RequestReady => {
                             emit_ready(&app, &workspace, &session_id);
-                            let messages = protocol_thread_seed(&app_server, &session_id)
-                                .map(|(messages, _)| messages);
+                            let messages = protocol_thread_ui(&app_server, &session_id);
                             if let Some(messages) = messages.filter(|items| !items.is_empty()) {
                                 emit(
                                     &app,
                                     UiEvent::Loaded {
                                         session_id: session_id.clone(),
-                                        messages: snapshot_to_ui(&messages),
+                                        messages,
                                     },
                                 );
                             }
                         }
+                        Command::Shutdown => break,
                     }
                 }
             });
-        })
-        .expect("spawn ncx-agent thread");
+        });
+    if let Ok(handle) = spawned {
+        coordinator_lifecycle.track(handle);
+    }
 }
 
 /// Convert a full model snapshot into the lightweight visible transcript.
@@ -1656,21 +2375,34 @@ pub fn spawn_worker(
 /// model continuity, but never cross the backend/UI boundary during restore.
 fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
     let mut out = Vec::new();
-    let mut final_assistant: Option<String> = None;
+    let mut final_assistant: Option<UiMsg> = None;
     let mut saw_user = false;
+    let mut tool_names = HashMap::<String, String>::new();
 
-    let flush_final = |out: &mut Vec<UiMsg>, pending: &mut Option<String>| {
-        if let Some(text) = pending.take() {
-            out.push(UiMsg {
-                role: "assistant".into(),
-                text,
-            });
+    let flush_final = |out: &mut Vec<UiMsg>, pending: &mut Option<UiMsg>| {
+        if let Some(message) = pending.take() {
+            out.push(message);
         }
     };
 
     for m in messages {
         let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
         let content = snapshot_text_content(m.get("content"));
+        if role == "assistant" {
+            for call in m
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let (Some(id), Some(name)) = (
+                    call.get("id").and_then(Value::as_str),
+                    call.pointer("/function/name").and_then(Value::as_str),
+                ) {
+                    tool_names.insert(id.to_string(), name.to_string());
+                }
+            }
+        }
         match role {
             "user" => {
                 flush_final(&mut out, &mut final_assistant);
@@ -1678,6 +2410,8 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
                     out.push(UiMsg {
                         role: "compact".into(),
                         text: "较早的会话内容已自动压缩，关键要求和完成结果已保留。".into(),
+                        model: None,
+                        confirmed_model: None,
                     });
                     continue;
                 }
@@ -1685,13 +2419,48 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
                     out.push(UiMsg {
                         role: "user".into(),
                         text: content,
+                        model: None,
+                        confirmed_model: None,
                     });
                     saw_user = true;
                 }
             }
             "assistant" => {
                 if saw_user && !content.trim().is_empty() {
-                    final_assistant = Some(content);
+                    final_assistant = Some(UiMsg {
+                        role: "assistant".into(),
+                        text: content,
+                        model: m
+                            .get("_ncx_model")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        confirmed_model: m
+                            .get("_ncx_confirmed_model")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                    });
+                }
+            }
+            "tool" => {
+                let Some(name) = m
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .and_then(|id| tool_names.get(id))
+                else {
+                    continue;
+                };
+                for artifact in media_artifact_items(name, &content) {
+                    if let ThreadItem::Artifact {
+                        kind, name, url, ..
+                    } = artifact
+                    {
+                        out.push(UiMsg {
+                            role: format!("artifact_{kind}"),
+                            text: format!("{name}\n{url}"),
+                            model: None,
+                            confirmed_model: None,
+                        });
+                    }
                 }
             }
             _ => {} // system/tool/unsupported roles never reach restored UI
@@ -1737,12 +2506,24 @@ fn validate_image_attachments(
     tools: &ncx_core::ToolRegistry,
     images: &[String],
 ) -> Result<(), String> {
+    let service = tools.service::<ncx_core::AttachmentServiceDescriptor>("attachment");
+    validate_image_attachment_paths(service.as_deref(), images)
+}
+
+fn validate_image_attachment_paths(
+    service: Option<&ncx_core::AttachmentServiceDescriptor>,
+    images: &[String],
+) -> Result<(), String> {
     if images.is_empty() {
         return Ok(());
     }
-    let service = tools
-        .service::<ncx_core::AttachmentServiceDescriptor>("attachment")
-        .ok_or_else(|| "当前 Harness Profile 未启用附件插件".to_string())?;
+    // Image transport is a core chat capability. Harness attachment services
+    // may tighten its policy, but their absence must not block a native
+    // multimodal model or the separately configured parser fallback.
+    let max_bytes = service
+        .map(|service| service.max_bytes)
+        .unwrap_or(20 * 1024 * 1024);
+    const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp"];
     for value in images {
         let path = std::path::Path::new(value);
         let extension = path
@@ -1750,18 +2531,17 @@ fn validate_image_attachments(
             .and_then(|v| v.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if !service
-            .extensions
-            .iter()
-            .any(|allowed| allowed == &extension)
-        {
+        let allowed = service
+            .map(|service| service.extensions.iter().any(|value| value == &extension))
+            .unwrap_or_else(|| IMAGE_EXTENSIONS.contains(&extension.as_str()));
+        if !allowed {
             return Err(format!("附件格式 .{extension} 未被当前插件允许"));
         }
         let size = std::fs::metadata(path)
             .map_err(|e| format!("无法读取附件 {value}: {e}"))?
             .len();
-        if size > service.max_bytes {
-            return Err(format!("附件 {value} 超过 {} 字节限制", service.max_bytes));
+        if size > max_bytes {
+            return Err(format!("附件 {value} 超过 {max_bytes} 字节限制"));
         }
     }
     Ok(())
@@ -1838,6 +2618,79 @@ mod tests {
     }
 
     #[test]
+    fn native_image_transport_does_not_require_harness_attachment_service() {
+        let root = std::env::temp_dir().join(format!("ncx-native-image-{}", new_session_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let image = root.join("sample.png");
+        std::fs::write(&image, b"png").unwrap();
+        assert!(
+            validate_image_attachment_paths(None, &[image.to_string_lossy().into_owned()]).is_ok()
+        );
+        let input =
+            build_image_user_input("inspect", &[image.to_string_lossy().into_owned()]).unwrap();
+        assert_eq!(input[1]["type"], "image_url");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gui_goal_tool_service_routes_through_app_server_domain() {
+        let (server, root) = protocol_server("goal-tools");
+        let thread_id = ThreadId::new("goal-thread").unwrap();
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(thread_id.clone()),
+                workspace: root.to_string_lossy().into_owned(),
+                title: "goal".into(),
+                harness_profile: "full".into(),
+            })
+            .unwrap();
+        let service = GuiGoalToolService {
+            app_server: server,
+            thread_id,
+        };
+        let created = service.create("finish migration".into(), 8).unwrap();
+        assert_eq!(created.goal.objective, "finish migration");
+        assert_eq!(created.activation, ncx_protocol::GoalActivation::Disarmed);
+        assert_eq!(service.get().unwrap(), Some(created));
+    }
+
+    #[test]
+    fn goal_round_prompt_replays_to_model_but_stays_out_of_visible_history() {
+        let thread = Thread {
+            metadata: ncx_protocol::ThreadMetadata {
+                id: ThreadId::new("goal-history").unwrap(),
+                workspace: "workspace".into(),
+                title: "goal".into(),
+                archived: false,
+                harness_profile: "full".into(),
+                created_at: 1,
+                updated_at: 2,
+            },
+            turns: vec![ncx_protocol::Turn {
+                id: TurnId::new("goal-turn").unwrap(),
+                status: TurnStatus::Completed,
+                execution_mode: ExecutionMode::Agent,
+                items: vec![ThreadItem::GoalMessage {
+                    id: ItemId::new("goal-message").unwrap(),
+                    text: "automatic continuation".into(),
+                    goal_id: ncx_protocol::GoalId::new("goal").unwrap(),
+                    revision: 2,
+                    round: 1,
+                }],
+                started_at: 1,
+                completed_at: Some(2),
+                error: None,
+                usage: Default::default(),
+            }],
+        };
+        let replay = protocol_thread_messages(&thread, false);
+        assert_eq!(replay.len(), 1);
+        assert_eq!(replay[0]["role"], "user");
+        assert_eq!(replay[0]["content"], "automatic continuation");
+        assert!(protocol_thread_messages(&thread, true).is_empty());
+    }
+
+    #[test]
     fn protocol_turn_persists_user_item_and_releases_ownership_on_completion() {
         let (server, root) = protocol_server("complete");
         let turn_id = TurnId::new("turn-1").unwrap();
@@ -1848,6 +2701,8 @@ mod tests {
             &root,
             turn_id.clone(),
             "执行任务",
+            ExecutionMode::Agent,
+            "full",
         )
         .unwrap();
         guard.complete("completed");
@@ -1873,9 +2728,58 @@ mod tests {
             &root,
             TurnId::new("turn-2").unwrap(),
             "下一轮",
+            ExecutionMode::Agent,
+            "full",
         );
         assert!(next.is_ok(), "completed turn must release thread ownership");
         drop(next);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn visible_history_uses_full_turns_when_model_context_is_compacted() {
+        let (server, root) = protocol_server("visible-history");
+        let turn_id = TurnId::new("turn-history").unwrap();
+        let mut guard = ProtocolTurnGuard::start(
+            None,
+            server.clone(),
+            "thread-history",
+            &root,
+            turn_id.clone(),
+            "必须保留的原始问题",
+            ExecutionMode::Agent,
+            "full",
+        )
+        .unwrap();
+        server
+            .dispatch(ClientRequest::ItemAppend {
+                thread_id: ThreadId::new("thread-history").unwrap(),
+                turn_id,
+                item: ThreadItem::AssistantMessage {
+                    id: ItemId::new("assistant-history").unwrap(),
+                    text: "完整回答".into(),
+                    model: None,
+                    confirmed_model: None,
+                },
+            })
+            .unwrap();
+        guard.complete("completed");
+        server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: ThreadId::new("thread-history").unwrap(),
+                messages: vec![json!({
+                    "role": "user",
+                    "content": format!("{COMPACTED_HISTORY_PREFIX}]\n内部摘要")
+                })],
+            })
+            .unwrap();
+
+        let visible = protocol_thread_ui(&server, "thread-history").unwrap();
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].role, "user");
+        assert_eq!(visible[0].text, "必须保留的原始问题");
+        assert_eq!(visible[1].text, "完整回答");
+        assert!(visible.iter().all(|message| message.role != "compact"));
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1887,12 +2791,14 @@ mod tests {
                 workspace: "workspace".into(),
                 title: "projection".into(),
                 archived: false,
+                harness_profile: "full".into(),
                 created_at: 1,
                 updated_at: 2,
             },
             turns: vec![ncx_protocol::Turn {
                 id: TurnId::new("turn-projection").unwrap(),
                 status: TurnStatus::Completed,
+                execution_mode: ExecutionMode::Agent,
                 items: vec![
                     ThreadItem::UserMessage {
                         id: ItemId::new("user").unwrap(),
@@ -1912,6 +2818,8 @@ mod tests {
                     ThreadItem::AssistantMessage {
                         id: ItemId::new("assistant").unwrap(),
                         text: "PDF 已生成".into(),
+                        model: None,
+                        confirmed_model: None,
                     },
                 ],
                 started_at: 1,
@@ -1920,7 +2828,7 @@ mod tests {
                 usage: TurnUsage::default(),
             }],
         };
-        let messages = protocol_thread_messages(&thread);
+        let messages = protocol_thread_messages(&thread, false);
         assert_eq!(messages[0]["role"], "user");
         assert_eq!(messages[1]["tool_calls"][0]["id"], "call");
         assert_eq!(messages[2]["tool_call_id"], "call");
@@ -1943,6 +2851,8 @@ mod tests {
             &root,
             TurnId::new("turn-context").unwrap(),
             "旧请求",
+            ExecutionMode::Agent,
+            "full",
         )
         .unwrap();
         guard.complete("completed");
@@ -1978,6 +2888,8 @@ mod tests {
             &root,
             TurnId::new("turn-drop-1").unwrap(),
             "会异常退出",
+            ExecutionMode::Agent,
+            "full",
         )
         .unwrap();
         drop(guard);
@@ -1989,6 +2901,8 @@ mod tests {
             &root,
             TurnId::new("turn-drop-2").unwrap(),
             "恢复执行",
+            ExecutionMode::Agent,
+            "full",
         );
         assert!(
             next.is_ok(),
@@ -2021,7 +2935,7 @@ mod tests {
             }),
             json!({"role": "tool", "tool_call_id": "call-shell", "content": "Exit code: 0\nfile.txt"}),
             json!({"role": "tool", "tool_call_id": "call-patch", "content": "Error: patch rejected"}),
-            json!({"role": "assistant", "content": "处理完成。"}),
+            json!({"role": "assistant", "content": "处理完成。", "_ncx_model": "gpt-requested", "_ncx_confirmed_model": "gpt-confirmed"}),
         ];
 
         let restored = serde_json::to_value(snapshot_to_ui(&messages)).unwrap();
@@ -2029,6 +2943,8 @@ mod tests {
         assert_eq!(restored[0]["role"], "user");
         assert_eq!(restored[1]["role"], "assistant");
         assert_eq!(restored[1]["text"], "处理完成。");
+        assert_eq!(restored[1]["model"], "gpt-requested");
+        assert_eq!(restored[1]["confirmed_model"], "gpt-confirmed");
         assert!(restored[1].get("tools").is_none());
     }
 
@@ -2118,6 +3034,92 @@ mod tests {
     }
 
     #[test]
+    fn fallback_title_handles_greetings_and_removes_request_prefixes() {
+        assert_eq!(fallback_session_title("你好"), Some("日常问候".into()));
+        assert_eq!(
+            fallback_session_title("帮我修复历史会话打不开的问题"),
+            Some("修复历史会话打不开的问题".into())
+        );
+    }
+
+    #[test]
+    fn fallback_title_normalizes_multiline_requests_and_limits_length() {
+        let title = fallback_session_title(
+            "请帮我  修复历史会话名称没有自动生成的问题\n并且确保模型失败时也能正常显示",
+        )
+        .unwrap();
+
+        assert!(!title.contains('\n'));
+        assert!(title.chars().count() <= 25);
+        assert_ne!(title, "新会话");
+    }
+
+    #[test]
+    fn fallback_title_rejects_empty_requests() {
+        assert_eq!(fallback_session_title(" \n\t "), None);
+    }
+
+    #[test]
+    fn system_prompt_defines_the_buglecat_persona_without_sacrificing_safety() {
+        assert!(SYSTEM_PROMPT.contains("BugleCat (妙脆角猫咪)"));
+        assert!(SYSTEM_PROMPT
+            .contains("Accuracy, action, and verification always come before role-play"));
+        assert!(SYSTEM_PROMPT.contains("never add it to errors, warnings"));
+    }
+
+    #[test]
+    fn runtime_prompt_reports_the_exact_client_selected_route() {
+        let prompt = runtime_system_prompt("yunmo", "openai", "gpt-5.6-sol");
+
+        assert!(prompt.contains("provider ID = \"yunmo\""));
+        assert!(prompt.contains("protocol = \"openai\""));
+        assert!(prompt.contains("requested model ID = \"gpt-5.6-sol\""));
+        assert!(prompt.contains("do not claim"));
+    }
+
+    #[test]
+    fn ready_snapshot_hides_the_internal_legacy_provider_marker() {
+        let mut cfg = Config::default();
+        cfg.active_provider_id = "legacy".into();
+        cfg.base_url = "https://api.yunmo-ai.com/v1/".into();
+        assert_eq!(visible_provider_id(&cfg), "yunmo");
+        cfg.base_url = "https://unlisted.example/v1".into();
+        assert_eq!(visible_provider_id(&cfg), "manual");
+        cfg.active_provider_id = "company-relay".into();
+        assert_eq!(visible_provider_id(&cfg), "company-relay");
+    }
+
+    #[test]
+    fn successful_media_tool_results_become_clickable_artifacts() {
+        let items = media_artifact_items(
+            "generate_image",
+            r#"{"status":"succeeded","urls":["https://example.com/a.png"]}"#,
+        );
+        assert!(matches!(
+            &items[0],
+            ThreadItem::Artifact { kind, name, url, .. }
+                if kind == "image" && name == "生成图片 1" && url == "https://example.com/a.png"
+        ));
+        assert!(media_artifact_items("shell", "https://example.com/a.png").is_empty());
+        assert!(media_artifact_items("generate_image", "Error: failed").is_empty());
+    }
+
+    #[test]
+    fn restored_media_tool_results_keep_the_artifact_link() {
+        let messages = vec![
+            json!({"role":"user","content":"生成图片"}),
+            json!({"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"generate_image","arguments":"{}"}}]}),
+            json!({"role":"tool","tool_call_id":"call-1","content":"{\"status\":\"succeeded\",\"urls\":[\"https://example.com/a.png\"]}"}),
+            json!({"role":"assistant","content":"图片已生成。"}),
+        ];
+        let visible = snapshot_to_ui(&messages);
+        assert!(visible
+            .iter()
+            .any(|message| message.role == "artifact_image"
+                && message.text.contains("https://example.com/a.png")));
+    }
+
+    #[test]
     fn session_title_event_uses_the_frontend_contract() {
         let event = serde_json::to_value(UiEvent::SessionTitle {
             session_id: "session-1".into(),
@@ -2135,9 +3137,13 @@ mod tests {
         let event = serde_json::to_value(UiEvent::Assistant {
             session_id: "session-1".into(),
             text: "完成".into(),
+            model: "gpt-5.6-sol".into(),
+            confirmed_model: Some("gpt-5.6-sol".into()),
         })
         .unwrap();
         assert_eq!(event["session_id"], "session-1");
+        assert_eq!(event["model"], "gpt-5.6-sol");
+        assert_eq!(event["confirmed_model"], "gpt-5.6-sol");
 
         let loaded = serde_json::to_value(UiEvent::Loaded {
             session_id: "session-2".into(),
@@ -2254,11 +3260,49 @@ mod tests {
 
     #[test]
     fn distinct_sessions_can_run_concurrently_but_one_session_cannot_overlap_itself() {
-        let running: RunningSessions = Arc::new(Mutex::new(HashSet::new()));
-        assert!(claim_session(&running, "session-1"));
-        assert!(claim_session(&running, "session-2"));
-        assert!(!claim_session(&running, "session-1"));
+        let running: RunningSessions = Arc::new(Mutex::new(HashMap::new()));
+        assert!(claim_session(&running, "session-1", SessionRunKind::Human));
+        assert!(claim_session(&running, "session-2", SessionRunKind::Goal));
+        assert!(!claim_session(&running, "session-1", SessionRunKind::Goal));
         assert_eq!(running.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn shutdown_cancels_and_joins_every_owned_worker() {
+        let lifecycle = WorkerLifecycle::default();
+        let cancels: CancelRegistry = Arc::new(Mutex::new(HashMap::new()));
+        let cancel = Arc::new(AtomicBool::new(false));
+        cancels
+            .lock()
+            .unwrap()
+            .insert("goal-thread".into(), cancel.clone());
+        let worker_finished = Arc::new(AtomicBool::new(false));
+        let finished = worker_finished.clone();
+        lifecycle.track(std::thread::spawn(move || {
+            while !cancel.load(Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+            finished.store(true, Ordering::Release);
+        }));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let coordinator_finished = Arc::new(AtomicBool::new(false));
+        let coordinator_done = coordinator_finished.clone();
+        lifecycle.track(std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                assert!(matches!(rx.recv().await, Some(Command::Shutdown)));
+            });
+            coordinator_done.store(true, Ordering::Release);
+        }));
+
+        lifecycle.shutdown_and_join(&tx, &cancels);
+
+        assert!(worker_finished.load(Ordering::Acquire));
+        assert!(coordinator_finished.load(Ordering::Acquire));
+        assert!(!lifecycle.accepts_work());
+        lifecycle.shutdown_and_join(&tx, &cancels);
     }
 
     #[test]
@@ -2289,6 +3333,7 @@ mod tests {
             name: "smoke-skill".into(),
             description: "GUI registry smoke fixture".into(),
             capability: Default::default(),
+            always_apply: false,
             path: PathBuf::from("<builtin>/smoke-skill/SKILL.md"),
             dir: PathBuf::from("<builtin>/smoke-skill"),
             embedded: Some("Use the fixture.".into()),

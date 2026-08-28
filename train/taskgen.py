@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import teacher as T  # noqa: E402
+from process_control import run_owned  # noqa: E402
 
 BENCH_TASKS = Path(__file__).resolve().parent.parent / "bench" / "tasks"
 NAME_RE = re.compile(r"[^a-z0-9_]")
@@ -103,7 +104,7 @@ def _run_check(check_src: str, files: dict[str, str], timeout: int = 60) -> tupl
             p.write_text(content, encoding="utf-8")
         (ws / "_check.py").write_text(check_src, encoding="utf-8")
         try:
-            r = subprocess.run([sys.executable, "_check.py"], cwd=str(ws),
+            r = run_owned([sys.executable, "_check.py"], cwd=str(ws),
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=timeout)
             tail = (r.stdout + r.stderr).strip().splitlines()

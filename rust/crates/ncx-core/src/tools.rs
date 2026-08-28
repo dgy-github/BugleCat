@@ -21,6 +21,7 @@ use ncx_tools::{
 use serde_json::{json, Value};
 
 use crate::genome::Genome;
+use crate::goal_tools::{GoalToolService, GoalTurnAuthority};
 use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::lsp_tool::LspProvider;
 use crate::memory::MemoryStore;
@@ -39,6 +40,9 @@ const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
     "read_file",
     "apply_patch",
     "update_plan",
+    "get_goal",
+    "create_goal",
+    "update_goal",
     "shell",
     "tool_search",
     "skill",
@@ -109,6 +113,9 @@ pub struct ToolContext {
     /// When true (CC "plan" mode), `apply_patch` refuses all edits: investigate
     /// and propose a plan, change nothing.
     pub plan_mode: bool,
+    /// Set when compaction safety validation detects lost or conflicting state.
+    /// All mutating tools remain blocked until a fresh agent runtime is built.
+    pub compaction_read_only_recovery: Rc<Cell<bool>>,
     /// Session-scoped "always allow" grants (shell commands / all edits).
     pub session_grants: Rc<RefCell<SessionGrants>>,
     /// Default command timeout (seconds) for the `shell` tool.
@@ -120,6 +127,12 @@ pub struct ToolContext {
     pub plan_turn_id: Rc<Cell<Option<u64>>>,
     /// User turn currently being executed by the agent loop.
     pub active_turn_id: Rc<Cell<Option<u64>>>,
+    /// Host-attested source for the exact active turn. Goal tools reject a
+    /// missing or stale binding rather than inferring authority from text.
+    pub goal_turn_authority: Rc<RefCell<Option<GoalTurnAuthority>>>,
+    /// Thread-bound App Server adapter. When absent, goal tools are not
+    /// advertised (for example in unpersisted workers).
+    pub goal_service: Option<Rc<dyn GoalToolService>>,
     /// Optional approval prompt. `None` = no prompting (escalations then rely on
     /// the policy alone, i.e. an out-of-sandbox write simply fails).
     pub approver: Option<Rc<dyn ApprovalHandler>>,
@@ -159,11 +172,14 @@ impl ToolContext {
             approval_policy: "on-request".to_string(),
             require_edit_approval: false,
             plan_mode: false,
+            compaction_read_only_recovery: Rc::new(Cell::new(false)),
             session_grants: Rc::new(RefCell::new(SessionGrants::default())),
             timeout_s: 120,
             plan: Rc::new(RefCell::new(Vec::new())),
             plan_turn_id: Rc::new(Cell::new(None)),
             active_turn_id: Rc::new(Cell::new(None)),
+            goal_turn_authority: Rc::new(RefCell::new(None)),
+            goal_service: None,
             approver: None,
             user_question_handler: None,
             lsp_provider: None,
@@ -203,6 +219,11 @@ impl ToolContext {
     /// Attach an interactive user-question handler.
     pub fn with_user_question_handler(mut self, handler: Rc<dyn UserQuestionHandler>) -> Self {
         self.user_question_handler = Some(handler);
+        self
+    }
+
+    pub fn with_goal_service(mut self, service: Rc<dyn GoalToolService>) -> Self {
+        self.goal_service = Some(service);
         self
     }
 
@@ -337,6 +358,15 @@ impl ToolRegistry {
                 .is_some(),
             cost_telemetry: self
                 .service::<crate::plugins::CostTelemetryService>("cost.telemetry")
+                .is_some(),
+            provider_directory: self
+                .service::<crate::plugins::ProviderDirectoryService>("provider.directory")
+                .is_some(),
+            provider_catalog: self
+                .service::<crate::plugins::ProviderCatalogService>("provider.catalog")
+                .is_some(),
+            provider_chat_probe: self
+                .service::<crate::plugins::ProviderChatProbeService>("provider.chat-probe")
                 .is_some(),
         }
     }
@@ -570,178 +600,13 @@ impl ToolRegistry {
             .map(|t| self.schema_for(t.as_ref()))
             .collect()
     }
-
-    /// Run a tool by name. Unknown tool -> an error string for the model.
-    pub async fn execute(&self, name: &str, args: &Value) -> String {
-        self.execute_attempt(name, args).await
-    }
-
-    /// Execute with one conservative retry and argument-compatible read-only fallbacks.
-    pub async fn execute_with_recovery(&self, name: &str, args: &Value) -> String {
-        let first = self.execute_attempt(name, args).await;
-        let Some(mut failure) = classify_tool_result(&first) else {
-            return first;
-        };
-        if !self.is_read_only(name) {
-            return first;
-        }
-
-        if name == "read_file" && failure == crate::tool_recovery::ToolFailureClass::NotFound {
-            if let Some((resolved, recovered_args)) =
-                resolve_unique_missing_read(&self.ctx.workspace, args)
-            {
-                let recovered = self.execute_attempt(name, &recovered_args).await;
-                if classify_tool_result(&recovered).is_none() {
-                    return format!(
-                        "[recovery: recursively resolved missing file to {resolved}]\n{recovered}"
-                    );
-                }
-            }
-        }
-
-        let mut latest = first.clone();
-        if failure.retryable() {
-            latest = self.execute_attempt(name, args).await;
-            let Some(retry_failure) = classify_tool_result(&latest) else {
-                return format!("[recovery: retried {name} after {failure}]\n{latest}");
-            };
-            failure = retry_failure;
-        }
-
-        if let Some((fallback_name, fallback_args)) = fallback_call(name, args, failure) {
-            if self.is_read_only(fallback_name) {
-                let fallback = self.execute_attempt(fallback_name, &fallback_args).await;
-                if classify_tool_result(&fallback).is_none() {
-                    return format!(
-                        "[recovery: {name} -> {fallback_name} after {failure}]\n{fallback}"
-                    );
-                }
-                return format!(
-                    "Error: {name} failed ({failure}); fallback {fallback_name} also failed.\n\
-                     primary: {first}\nfallback: {fallback}"
-                );
-            }
-        }
-        latest
-    }
-
-    async fn execute_attempt(&self, name: &str, args: &Value) -> String {
-        match self.get(name) {
-            Some(tool) => {
-                let context = self.effective_context();
-                let (entered, blocked) = self.enter_middleware(&context, name, args).await;
-                let result = match blocked {
-                    Some(result) => result,
-                    None => self.execute_with_hooks(&context, tool, name, args).await,
-                };
-                self.leave_middleware(&context, entered, name, args, result)
-                    .await
-            }
-            None => format!("Error: unknown tool '{name}'."),
-        }
-    }
-
-    fn effective_context(&self) -> ToolContext {
-        let mut context = self.ctx.clone();
-        if let Some(policy) = self.service::<crate::plugins::PolicyService>("policy") {
-            context.policy = policy.sandbox.clone();
-            context.approval_policy = policy.approval_policy.clone();
-            context.plan_mode = policy.plan_mode;
-        }
-        if let Some(interaction) = self.service::<crate::plugins::InteractionService>("interaction")
-        {
-            context.approver = interaction.approver.clone();
-        }
-        context
-    }
-
-    async fn enter_middleware(
-        &self,
-        context: &ToolContext,
-        name: &str,
-        args: &Value,
-    ) -> (usize, Option<String>) {
-        for (index, middleware) in self.middleware.iter().enumerate() {
-            match middleware.before_execute(context, name, args).await {
-                ToolMiddlewareDecision::Continue => {}
-                ToolMiddlewareDecision::Block { reason } => {
-                    return (
-                        index + 1,
-                        Some(format!(
-                            "Error: {name} blocked by tool middleware '{}': {reason}",
-                            middleware.name()
-                        )),
-                    );
-                }
-            }
-        }
-        (self.middleware.len(), None)
-    }
-
-    async fn leave_middleware(
-        &self,
-        context: &ToolContext,
-        entered: usize,
-        name: &str,
-        args: &Value,
-        mut result: String,
-    ) -> String {
-        for middleware in self.middleware[..entered].iter().rev() {
-            if let Some(replacement) = middleware.after_execute(context, name, args, &result).await
-            {
-                result = replacement;
-            }
-        }
-        result
-    }
-
-    async fn execute_with_hooks(
-        &self,
-        context: &ToolContext,
-        tool: &dyn Tool,
-        name: &str,
-        args: &Value,
-    ) -> String {
-        let pre = run_matching_hooks(
-            &context.hooks,
-            HookEvent::PreTool,
-            name,
-            args,
-            None,
-            &context.workspace,
-        )
-        .await;
-        if pre.blocked {
-            return format!("Error: {name} blocked by pre_tool hook.\n{}", pre.notes);
-        }
-
-        let mut result = tool.execute(context, args).await;
-        let post = run_matching_hooks(
-            &context.hooks,
-            HookEvent::PostTool,
-            name,
-            args,
-            Some(&result),
-            &context.workspace,
-        )
-        .await;
-        let hook_notes = [pre.notes, post.notes]
-            .into_iter()
-            .filter(|note| !note.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        if !hook_notes.is_empty() {
-            result.push_str("\n\n[hook output]\n");
-            result.push_str(&hook_notes);
-        }
-        result
-    }
 }
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ concrete tools Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 // Physical responsibility split; include! preserves the established crate::tools API.
 include!("tools/catalog.rs");
+include!("tools/execution.rs");
 include!("tools/file.rs");
 include!("tools/builtins.rs");
 include!("tools/tests.rs");

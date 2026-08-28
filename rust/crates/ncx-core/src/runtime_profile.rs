@@ -4,7 +4,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use ncx_config::{permission_mode_to_knobs, Config};
-use ncx_provider::{DashScopeMediaProvider, DeepSeekProvider};
+use ncx_provider::{AnthropicProvider, DashScopeMediaProvider, DeepSeekProvider};
 use ncx_sandbox::SandboxPolicy;
 
 use crate::plugins::{LlmProviderFactory, LlmProviderFactoryHandle};
@@ -126,19 +126,28 @@ impl AgentRuntimeProfile {
 
 /// Build the primary or tier-specific OpenAI-compatible provider with the
 /// shared timeout, retry, endpoint, and API-key mapping.
-pub fn model_provider_from_config(cfg: &Config, model: impl Into<String>) -> DeepSeekProvider {
-    DeepSeekProvider::with_opts(
+pub fn model_provider_from_config(cfg: &Config, model: impl Into<String>) -> Box<dyn Provider> {
+    let model = model.into();
+    if cfg.provider_protocol == "anthropic" {
+        return Box::new(AnthropicProvider::new(
+            cfg.api_key.clone(),
+            &cfg.base_url,
+            model,
+            cfg.timeout_s as u64,
+        ));
+    }
+    Box::new(DeepSeekProvider::with_opts(
         cfg.api_key.clone(),
         &cfg.base_url,
         model,
         cfg.timeout_s as u64,
         cfg.max_retries as u32,
-    )
+    ))
 }
 
 /// Build the optional vision provider using the main endpoint/key as fallback.
 pub fn vision_provider_from_config(cfg: &Config) -> Option<Box<dyn Provider>> {
-    if cfg.vl_model.trim().is_empty() {
+    if !cfg.alibaba_attachment_parser_enabled || cfg.vl_model.trim().is_empty() {
         return None;
     }
     let base_url = if cfg.vl_base_url.trim().is_empty() {
@@ -160,6 +169,16 @@ pub fn vision_provider_from_config(cfg: &Config) -> Option<Box<dyn Provider>> {
     )))
 }
 
+/// Conservative built-in capability catalog used before sending image blocks.
+/// Unknown model IDs fail closed and can opt into the local parser plugin.
+pub fn model_supports_native_vision(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.contains("vision")
+        || model.contains("-vl")
+        || model.starts_with("gpt-5.6-")
+        || model.starts_with("gemini-")
+}
+
 /// Frontend configuration adapter installed as the Harness LLM service.
 pub struct ConfiguredLlmProviderFactory {
     cfg: Config,
@@ -177,7 +196,7 @@ impl ConfiguredLlmProviderFactory {
 
 impl LlmProviderFactory for ConfiguredLlmProviderFactory {
     fn primary(&self) -> Box<dyn Provider> {
-        Box::new(model_provider_from_config(&self.cfg, self.model.clone()))
+        model_provider_from_config(&self.cfg, self.model.clone())
     }
 
     fn vision(&self) -> Option<Box<dyn Provider>> {
@@ -219,13 +238,18 @@ fn install_media_provider(tools: &mut crate::ToolRegistry, cfg: &Config) {
     else {
         return;
     };
-    if cfg.vl_api_key.trim().is_empty() {
+    let media_key = if cfg.dashscope_workspace_key.trim().is_empty() {
+        cfg.vl_api_key.trim()
+    } else {
+        cfg.dashscope_workspace_key.trim()
+    };
+    if media_key.is_empty() {
         return;
     }
     let telemetry = tools.service::<crate::plugins::CostTelemetryService>("cost.telemetry");
     let service = Rc::new(MediaGenerationService {
         provider: Rc::new(DashScopeMediaProvider::new(
-            cfg.vl_api_key.clone(),
+            media_key.to_string(),
             cfg.timeout_s as u64,
         )),
         image: media_price("NANOCODEX_IMAGE_PRICE_CNY", 0.14, "张"),
@@ -288,11 +312,7 @@ mod tests {
         let tools = ToolRegistry::empty(context);
         let provider = model_provider_from_config(cfg, cfg.model.clone());
         profile
-            .apply(AgentLoop::new(
-                Box::new(provider),
-                tools,
-                Session::new(frontend),
-            ))
+            .apply(AgentLoop::new(provider, tools, Session::new(frontend)))
             .with_vision_provider(vision_provider_from_config(cfg))
     }
 
@@ -383,6 +403,24 @@ mod tests {
     }
 
     #[test]
+    fn alibaba_attachment_parser_is_opt_in_and_native_vision_is_catalogued() {
+        let disabled = Config {
+            vl_model: "qwen3.7-plus".into(),
+            vl_api_key: "secret".into(),
+            ..Default::default()
+        };
+        assert!(vision_provider_from_config(&disabled).is_none());
+
+        let enabled = Config {
+            alibaba_attachment_parser_enabled: true,
+            ..disabled
+        };
+        assert!(vision_provider_from_config(&enabled).is_some());
+        assert!(model_supports_native_vision("gpt-5.6-sol"));
+        assert!(!model_supports_native_vision("deepseek-v4-pro"));
+    }
+
+    #[test]
     fn explicit_legacy_permissions_remain_available_for_cli_flags() {
         let cfg = Config {
             sandbox_mode: "read-only".into(),
@@ -409,7 +447,7 @@ mod tests {
             )
         };
         let cfg = Config {
-            vl_api_key: "dashscope-secret".into(),
+            dashscope_workspace_key: "dashscope-workspace-secret".into(),
             ..Default::default()
         };
         let mut full = crate::HarnessRuntimeBuilder::builtin("full")
@@ -434,5 +472,15 @@ mod tests {
             .build(context());
         install_llm_provider_factory(&mut no_key, Config::default(), "model");
         assert!(no_key.get("generate_image").is_none());
+
+        let mut legacy = crate::HarnessRuntimeBuilder::builtin("full")
+            .unwrap()
+            .build(context());
+        let legacy_cfg = Config {
+            vl_api_key: "legacy-dashscope-secret".into(),
+            ..Default::default()
+        };
+        install_llm_provider_factory(&mut legacy, legacy_cfg.clone(), legacy_cfg.model.clone());
+        assert!(legacy.get("generate_image").is_some());
     }
 }

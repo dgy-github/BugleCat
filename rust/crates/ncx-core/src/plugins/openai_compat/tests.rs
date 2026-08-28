@@ -37,6 +37,24 @@ fn codex_plugin_installs_discovers_toggles_and_uninstalls() {
 }
 
 #[test]
+fn global_plugins_are_available_and_workspace_plugins_shadow_same_name() {
+    let home = temp("global-home");
+    let workspace = temp("global-workspace");
+    let global = home.join(".ncx/codex-plugins/shared");
+    let local = workspace.join(".ncx/codex-plugins/shared");
+    fixture(&global, "shared");
+    fixture(&local, "shared");
+    fs::write(local.join("local-marker"), "workspace").unwrap();
+
+    let plugins = discover_enabled_codex_plugins_with_home(&workspace, Some(&home)).unwrap();
+
+    assert_eq!(plugins.len(), 1);
+    assert!(plugins[0].root.join("local-marker").is_file());
+    let _ = fs::remove_dir_all(home);
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
 fn codex_plugin_upgrade_replaces_resources_and_preserves_disabled_state() {
     let source = temp("upgrade-source");
     let target = temp("upgrade-target");

@@ -66,7 +66,11 @@ pub enum LoopEvent {
     ContextCompacted(ContextEditStats),
     /// The assistant's final visible text for this step. The UI finalizes the
     /// streamed bubble with this authoritative text (or creates one if no deltas).
-    AssistantText(String),
+    AssistantText {
+        text: String,
+        model: String,
+        confirmed_model: Option<String>,
+    },
     /// A tool is about to run.
     ToolStart { name: String, args: String },
     /// A tool finished with this (possibly truncated by the UI) result.
@@ -368,13 +372,57 @@ impl AgentLoop {
         user_input: Value,
         cancel_check: Option<&dyn Fn() -> bool>,
     ) -> TurnResult {
+        self.run_turn_with_authority(
+            user_input,
+            cancel_check,
+            crate::goal_tools::GoalAuthoritySource::DirectHuman,
+        )
+        .await
+    }
+
+    /// Admit one host-reserved automatic goal round. Callers must have already
+    /// fenced the exact durable goal revision and round in the App Server.
+    pub async fn run_goal_round(
+        &mut self,
+        user_input: Value,
+        cancel_check: Option<&dyn Fn() -> bool>,
+        goal_id: ncx_protocol::GoalId,
+        revision: u64,
+        round: u32,
+    ) -> TurnResult {
+        self.run_turn_with_authority(
+            user_input,
+            cancel_check,
+            crate::goal_tools::GoalAuthoritySource::GoalRound {
+                goal_id,
+                revision,
+                round,
+            },
+        )
+        .await
+    }
+
+    async fn run_turn_with_authority(
+        &mut self,
+        user_input: Value,
+        cancel_check: Option<&dyn Fn() -> bool>,
+        authority: crate::goal_tools::GoalAuthoritySource,
+    ) -> TurnResult {
         self.next_turn_id = self.next_turn_id.wrapping_add(1).max(1);
         self.tools.ctx.active_turn_id.set(Some(self.next_turn_id));
+        self.tools
+            .ctx
+            .goal_turn_authority
+            .replace(Some(crate::goal_tools::GoalTurnAuthority {
+                turn_id: self.next_turn_id,
+                source: authority,
+            }));
         // Take the sink out so the inner loop can emit through a local without
         // borrow-conflicting with `&mut self`; restore it after (one return path).
         let mut sink = self.event_sink.take();
         let result = turn::run(self, user_input, cancel_check, &mut sink).await;
         let result = self.apply_stop_hook(result, &mut sink).await;
+        self.tools.ctx.goal_turn_authority.replace(None);
         self.tools.ctx.active_turn_id.set(None);
         self.event_sink = sink;
         if let Some(service) = &self.cost_service {
@@ -407,7 +455,14 @@ impl AgentLoop {
         }
         let note = format!("[stop hook output]\n{}", hook.notes);
         self.session.add_assistant(&note, None, "");
-        emit(sink, LoopEvent::AssistantText(note.clone()));
+        emit(
+            sink,
+            LoopEvent::AssistantText {
+                text: note.clone(),
+                model: self.provider.model().to_string(),
+                confirmed_model: self.provider.confirmed_model(),
+            },
+        );
         result.final_text.push_str("\n\n");
         result.final_text.push_str(&note);
         result

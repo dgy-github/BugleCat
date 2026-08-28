@@ -53,6 +53,7 @@ impl McpClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        hide_child_console(&mut cmd);
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -181,6 +182,16 @@ impl McpClient {
         Ok(format_content(&res))
     }
 }
+
+#[cfg(windows)]
+fn hide_child_console(command: &mut Command) {
+    // MCP servers are background stdio sidecars. In a GUI application Windows
+    // must not allocate a visible console for Python/Node-based servers.
+    command.creation_flags(0x0800_0000);
+}
+
+#[cfg(not(windows))]
+fn hide_child_console(_: &mut Command) {}
 
 impl Drop for McpClient {
     fn drop(&mut self) {

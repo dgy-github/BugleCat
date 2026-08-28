@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "nanocodex",
+  "productName": "BugleCat",
   "version": "0.1.0",
   "identifier": "dev.nanocodex.gui",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "nanocodex",
+        "title": "BugleCat",
         "width": 1000,
         "height": 740,
         "minWidth": 640,
@@ -31,8 +31,8 @@
     "homepage": "https://github.com/dgy-github/nanocodex",
     "license": "MIT",
     "category": "DeveloperTool",
-    "shortDescription": "A local coding agent desktop for nanocodex.",
-    "longDescription": "nanocodex desktop wraps the Rust agent loop, workspace tools, approvals, checkpoints, and runtime settings in a Windows desktop app.",
+    "shortDescription": "BugleCat — a local coding agent desktop.",
+    "longDescription": "BugleCat wraps the nanocodex Rust agent loop, workspace tools, approvals, checkpoints, and runtime settings in a Windows desktop app.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -50,7 +50,7 @@
         "languages": ["English", "SimpChinese"],
         "displayLanguageSelector": true,
         "compression": "lzma",
-        "startMenuFolder": "nanocodex"
+        "startMenuFolder": "BugleCat"
       }
     }
   }

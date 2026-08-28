@@ -1,0 +1,6 @@
+{
+  "source": "buglecat_ui_asset_sheet.png",
+  "grid": "4x4",
+  "sizes": [24, 32, 48, 64],
+  "names": ["avatar", "new-chat", "project", "coding", "thinking", "processing", "success", "error", "waiting", "search", "upload", "download", "archive", "empty", "security", "sleeping"]
+}

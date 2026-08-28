@@ -34,9 +34,9 @@ use ncx_core::{
     custom_command_prompt, discover_codex_hooks, discover_codex_mcp_servers, discover_skills,
     expand_file_mentions, list_custom_commands, load_project_instructions, new_session_id,
     prepare_mcp_server_tools, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
-    ConfiguredHarnessRuntime, ContextServiceDescriptor, Genome, McpServiceDescriptor, MemoryStore,
-    Orchestrator, OrchestratorConfig, RuntimeContextSources, RuntimeHostBindings, Session, Tool,
-    TurnResult,
+    ConfiguredHarnessRuntime, ContextServiceDescriptor, Genome, HarnessAgentRunner,
+    McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig, RuntimeContextSources,
+    RuntimeHostBindings, Session, Tool, TurnResult,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, TurnId,
@@ -47,7 +47,7 @@ use serde_json::{json, Value};
 
 use args::{parse_args, Args};
 use cli_app::run;
-use runner::{LiveRunner, LiveSummarizer};
+use runner::memory_summarizer;
 
 const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use native workspace tools \
     (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
@@ -98,15 +98,17 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
         cfg.fast_model.clone()
     };
     eprintln!("[orchestrator] main={}  fast={}", cfg.model, fast);
-    let turn_id = match recorder.start_turn(prompt) {
-        Ok(turn_id) => turn_id,
-        Err(error) => {
-            eprintln!("ncx: cannot start orchestrated turn: {error}");
-            return 1;
-        }
-    };
-    let runner = LiveRunner::new(cfg);
-    let orch = Orchestrator::new(&runner, OrchestratorConfig::default());
+    let turn_id =
+        match recorder.start_turn_with_mode(prompt, ncx_protocol::ExecutionMode::Orchestrator) {
+            Ok(turn_id) => turn_id,
+            Err(error) => {
+                eprintln!("ncx: cannot start orchestrated turn: {error}");
+                return 1;
+            }
+        };
+    let orchestrator_config = OrchestratorConfig::from_runtime_config(&cfg);
+    let runner = HarnessAgentRunner::new(cfg);
+    let orch = Orchestrator::new(&runner, orchestrator_config);
     let outcome = orch.handle(prompt).await;
     eprintln!(
         "[orchestrator] complexity={:?}  verify={}  rounds={}  best_worker={}",
@@ -119,7 +121,9 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
         outcome.verify_rounds,
         outcome.best_worker,
     );
-    let status = if outcome.verify_passed {
+    let status = if outcome.cancelled {
+        TurnStatus::Cancelled
+    } else if outcome.verify_passed {
         TurnStatus::Completed
     } else {
         TurnStatus::Failed
@@ -129,7 +133,8 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
         prompt,
         &outcome.final_text,
         status,
-        (!outcome.verify_passed).then(|| "orchestrator verification failed".to_string()),
+        (!outcome.verify_passed && !outcome.cancelled)
+            .then(|| "orchestrator verification failed".to_string()),
     ) {
         eprintln!("ncx: cannot persist orchestrated turn: {error}");
         return 1;

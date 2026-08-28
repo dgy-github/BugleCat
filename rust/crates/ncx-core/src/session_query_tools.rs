@@ -289,12 +289,14 @@ mod tests {
                     workspace: root.display().to_string(),
                     title: "find widget".into(),
                     archived: false,
+                    harness_profile: "full".into(),
                     created_at: 1,
                     updated_at: 2,
                 },
                 turns: vec![Turn {
                     id: TurnId::new("t1").unwrap(),
                     status: TurnStatus::Completed,
+                    execution_mode: ncx_protocol::ExecutionMode::Agent,
                     items: vec![
                         ThreadItem::UserMessage {
                             id: ItemId::new("u1").unwrap(),
@@ -309,6 +311,8 @@ mod tests {
                         ThreadItem::AssistantMessage {
                             id: ItemId::new("a1").unwrap(),
                             text: "widget located".into(),
+                            model: None,
+                            confirmed_model: None,
                         },
                     ],
                     started_at: 1,

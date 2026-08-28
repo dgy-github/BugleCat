@@ -24,7 +24,10 @@ pub fn find_mentions(text: &str) -> Vec<String> {
         if chars[i] == '@' {
             let at_boundary = i == 0 || chars[i - 1].is_whitespace();
             if at_boundary {
-                let quoted = chars.get(i + 1).copied().filter(|c| *c == '"' || *c == '\'');
+                let quoted = chars
+                    .get(i + 1)
+                    .copied()
+                    .filter(|c| *c == '"' || *c == '\'');
                 let (raw, next) = if let Some(quote) = quoted {
                     let mut j = i + 2;
                     while j < chars.len() && chars[j] != quote {

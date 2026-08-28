@@ -8,11 +8,12 @@
 //! * a bounded wait for streaming response *headers* (`NANOCODEX_STREAM_OPEN_TIMEOUT_S`),
 //! * Server-Sent-Events decoding for `chat_stream`.
 
+use std::cell::RefCell;
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::{json, Value};
-use tokio::time::timeout;
+use tokio::time::{timeout, timeout_at, Instant};
 
 use crate::request::{build_body, to_request_json};
 use crate::response::{extract_reasoning, extract_usage, parse_args, parse_completion};
@@ -21,6 +22,9 @@ use crate::types::{ModelResponse, ProviderError, ToolCall};
 const DEFAULT_STREAM_OPEN_TIMEOUT_S: u64 = 45;
 const STREAM_OPEN_TIMEOUT_MIN_S: u64 = 5;
 const STREAM_OPEN_TIMEOUT_MAX_S: u64 = 300;
+const DEFAULT_STREAM_IDLE_TIMEOUT_S: u64 = 30;
+const STREAM_IDLE_TIMEOUT_MIN_S: u64 = 5;
+const STREAM_IDLE_TIMEOUT_MAX_S: u64 = 120;
 const MAX_SSE_LINE_BYTES: usize = 8 * 1024 * 1024;
 
 /// Bounded override for the streaming response-header wait (seconds).
@@ -49,6 +53,24 @@ fn stream_open_timeout_from(raw: Option<&str>) -> u64 {
     }
 }
 
+fn stream_idle_timeout_s() -> u64 {
+    stream_idle_timeout_from(
+        std::env::var("NANOCODEX_STREAM_IDLE_TIMEOUT_S")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn stream_idle_timeout_from(raw: Option<&str>) -> u64 {
+    let Some(raw) = raw.filter(|value| !value.is_empty()) else {
+        return DEFAULT_STREAM_IDLE_TIMEOUT_S;
+    };
+    match raw.parse::<u64>() {
+        Ok(secs) => secs.clamp(STREAM_IDLE_TIMEOUT_MIN_S, STREAM_IDLE_TIMEOUT_MAX_S),
+        Err(_) => DEFAULT_STREAM_IDLE_TIMEOUT_S,
+    }
+}
+
 /// Talk to DeepSeek (or any OpenAI-compatible endpoint) over HTTP.
 #[derive(Debug, Clone)]
 pub struct DeepSeekProvider {
@@ -57,6 +79,7 @@ pub struct DeepSeekProvider {
     api_key: String,
     pub model: String,
     pub max_retries: u32,
+    confirmed_model: RefCell<Option<String>>,
 }
 
 impl DeepSeekProvider {
@@ -85,7 +108,12 @@ impl DeepSeekProvider {
             api_key: api_key.into(),
             model: model.into(),
             max_retries,
+            confirmed_model: RefCell::new(None),
         }
+    }
+
+    pub fn confirmed_model(&self) -> Option<String> {
+        self.confirmed_model.borrow().clone()
     }
 
     fn body(
@@ -115,13 +143,21 @@ impl DeepSeekProvider {
         max_tokens: Option<i64>,
         reasoning_effort: Option<&str>,
     ) -> Result<ModelResponse, ProviderError> {
+        *self.confirmed_model.borrow_mut() = None;
         let kwargs = self.body(messages, tools, temperature, max_tokens, reasoning_effort);
         let payload = to_request_json(&kwargs);
 
         let mut attempt = 0u32;
         loop {
             match self.post(&payload).await {
-                Ok(json) => return Ok(parse_completion(&json)),
+                Ok(json) => {
+                    *self.confirmed_model.borrow_mut() = json
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .filter(|model| !model.trim().is_empty())
+                        .map(str::to_string);
+                    return Ok(parse_completion(&json));
+                }
                 Err(e) if e.transient && attempt < self.max_retries => {
                     attempt += 1;
                     // Exponential backoff: 0.5s, 1s, 2s, … (the SDK honors
@@ -179,6 +215,7 @@ impl DeepSeekProvider {
         C: FnMut(&str),
         R: FnMut(&str),
     {
+        *self.confirmed_model.borrow_mut() = None;
         let mut kwargs = self.body(messages, tools, temperature, max_tokens, reasoning_effort);
         kwargs.insert("stream".into(), json!(true));
         kwargs.insert("stream_options".into(), json!({"include_usage": true}));
@@ -267,30 +304,59 @@ impl DeepSeekProvider {
         let mut agg = StreamAgg::default();
         let mut buf = Vec::new();
         let mut stream = resp.bytes_stream();
+        let idle_timeout = Duration::from_secs(stream_idle_timeout_s());
+        let mut progress_deadline = Instant::now() + idle_timeout;
 
-        while let Some(chunk) = stream.next().await {
+        loop {
+            let chunk = match timeout_at(progress_deadline, stream.next()).await {
+                Ok(Some(chunk)) => chunk,
+                Ok(None) => break,
+                Err(_) => {
+                    *emitted = agg.has_progress();
+                    let message = if *emitted {
+                        format!(
+                            "模型响应流中断：连续 {} 秒没有实际输出进展，当前会话已释放，请重试本轮任务。",
+                            idle_timeout.as_secs()
+                        )
+                    } else {
+                        format!(
+                            "TimeoutError: no streaming data received for {}s",
+                            idle_timeout.as_secs()
+                        )
+                    };
+                    return Err(ProviderError(message));
+                }
+            };
             let bytes = match chunk {
                 Ok(b) => b,
                 Err(e) => {
                     // Tell the caller whether any text already reached the UI, so
                     // it only retries a stream that emitted nothing (otherwise a
                     // retry would duplicate the visible output).
-                    *emitted = !agg.content.is_empty() || !agg.reasoning.is_empty();
+                    *emitted = agg.has_progress();
                     return Err(ProviderError(format!("StreamError: {e}")));
                 }
             };
+            let before = agg.progress_marker();
             match feed_sse_bytes(&mut buf, &bytes, &mut agg, on_content, on_reasoning) {
-                Ok(true) => return Ok(agg.finish()),
-                Ok(false) => {}
+                Ok(true) => return Ok(self.finish_stream(agg)),
+                Ok(false) => {
+                    // Relays often send whitespace, SSE comments, or JSON ping
+                    // frames forever. Only real model progress may extend the
+                    // deadline; transport heartbeats must not pin a Turn.
+                    if agg.progress_marker() != before {
+                        progress_deadline = Instant::now() + idle_timeout;
+                    }
+                }
                 Err(error) => {
-                    *emitted = !agg.content.is_empty() || !agg.reasoning.is_empty();
+                    *emitted = agg.has_progress();
                     return Err(error);
                 }
             }
         }
         if !buf.is_empty() {
             match feed_sse_bytes(&mut buf, b"\n", &mut agg, on_content, on_reasoning) {
-                Ok(true) => return Ok(agg.finish()),
+                Ok(true) => return Ok(self.finish_stream(agg)),
                 Ok(false) => {}
                 Err(error) => {
                     *emitted = !agg.content.is_empty() || !agg.reasoning.is_empty();
@@ -298,7 +364,13 @@ impl DeepSeekProvider {
                 }
             }
         }
-        Ok(agg.finish())
+        Ok(self.finish_stream(agg))
+    }
+
+    fn finish_stream(&self, agg: StreamAgg) -> ModelResponse {
+        *self.confirmed_model.borrow_mut() =
+            (!agg.response_model.trim().is_empty()).then(|| agg.response_model.clone());
+        agg.finish()
     }
 }
 
@@ -361,6 +433,7 @@ struct StreamAgg {
     reasoning: String,
     finish_reason: String,
     usage: std::collections::BTreeMap<String, i64>,
+    response_model: String,
     // tool_calls arrive as indexed fragments; aggregate by index.
     tc: std::collections::BTreeMap<i64, ToolFrag>,
 }
@@ -373,11 +446,38 @@ struct ToolFrag {
 }
 
 impl StreamAgg {
+    fn progress_marker(&self) -> (usize, usize, usize, usize, usize, usize) {
+        let tool_progress = self
+            .tc
+            .values()
+            .map(|item| item.id.len() + item.name.len() + item.arguments.len())
+            .sum();
+        (
+            self.content.len(),
+            self.reasoning.len(),
+            self.finish_reason.len(),
+            self.usage.len(),
+            self.response_model.len(),
+            tool_progress,
+        )
+    }
+
+    fn has_progress(&self) -> bool {
+        self.progress_marker() != (0, 0, 0, 0, 0, 0)
+    }
+
     fn ingest<C, R>(&mut self, chunk: &Value, on_content: &mut C, on_reasoning: &mut R)
     where
         C: FnMut(&str),
         R: FnMut(&str),
     {
+        if let Some(model) = chunk
+            .get("model")
+            .and_then(Value::as_str)
+            .filter(|model| !model.trim().is_empty())
+        {
+            self.response_model = model.to_string();
+        }
         if let Some(u) = chunk.get("usage") {
             if !u.is_null() {
                 self.usage = extract_usage(Some(u));
@@ -502,6 +602,36 @@ mod tests {
     }
 
     #[test]
+    fn stream_idle_timeout_is_bounded_and_tolerates_garbage() {
+        assert_eq!(stream_idle_timeout_from(None), 30);
+        assert_eq!(stream_idle_timeout_from(Some("45")), 45);
+        assert_eq!(stream_idle_timeout_from(Some("0")), 5);
+        assert_eq!(stream_idle_timeout_from(Some("999")), 120);
+        assert_eq!(stream_idle_timeout_from(Some("bad")), 30);
+    }
+
+    #[test]
+    fn stream_progress_ignores_heartbeats_but_tracks_model_and_tool_deltas() {
+        let mut agg = StreamAgg::default();
+        let initial = agg.progress_marker();
+        let mut on_content = |_: &str| {};
+        let mut on_reasoning = |_: &str| {};
+        agg.ingest(&json!({"type": "ping"}), &mut on_content, &mut on_reasoning);
+        assert_eq!(agg.progress_marker(), initial);
+        assert!(!agg.has_progress());
+
+        agg.ingest(
+            &json!({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "function": {"name": "apply_patch", "arguments": "{"}
+            }]}}]}),
+            &mut on_content,
+            &mut on_reasoning,
+        );
+        assert_ne!(agg.progress_marker(), initial);
+        assert!(agg.has_progress());
+    }
+
+    #[test]
     fn provider_default_max_retries_is_three() {
         let p = DeepSeekProvider::new("sk-test", "https://example.invalid", "deepseek-v4-pro");
         assert_eq!(p.max_retries, 3);
@@ -534,7 +664,7 @@ mod tests {
         let mut on_r = |s: &str| reasoning.push_str(s);
 
         agg.ingest(
-            &json!({"choices": [{"delta": {"content": "Hel"}}]}),
+            &json!({"model": "server-confirmed-model", "choices": [{"delta": {"content": "Hel"}}]}),
             &mut on_c,
             &mut on_r,
         );
@@ -557,12 +687,17 @@ mod tests {
             &mut on_c,
             &mut on_r,
         );
-        let r = agg.finish();
+        let provider = DeepSeekProvider::new("k", "https://example.test/v1", "requested-model");
+        let r = provider.finish_stream(agg);
         assert_eq!(r.content, "Hello");
         assert_eq!(r.finish_reason, "tool_calls");
         assert_eq!(r.tool_calls.len(), 1);
         assert_eq!(r.tool_calls[0].name, "f");
         assert_eq!(r.tool_calls[0].arguments, json!({"a": 1}));
+        assert_eq!(
+            provider.confirmed_model().as_deref(),
+            Some("server-confirmed-model")
+        );
     }
 
     #[test]

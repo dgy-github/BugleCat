@@ -6,10 +6,16 @@
 //! for the header.
 
 mod bridge;
+mod forge_job;
+mod forge_runtime;
+mod memory_merge_job;
 pub mod model_catalog;
 
-use model_catalog::{catalog, find_preset, parse_openrouter_models, CatalogModel, CatalogProvider};
+use model_catalog::{
+    catalog, find_preset, openrouter_model, yunmo_model, CatalogModel, CatalogProvider,
+};
 
+use base64::Engine as _;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fs;
@@ -20,28 +26,30 @@ use std::sync::{Arc, Mutex};
 
 use ncx_app_server::{AppServer, AppServerAdapter, DispatchOutcome};
 use ncx_config::{
-    load_config, write_nanocodex_config, Config, ConfigPaths, Overrides, VALID_APPROVAL_POLICIES,
-    VALID_SANDBOX_MODES,
+    load_config, write_nanocodex_config, Config, ConfigPaths, Overrides,
+    ProviderRouteInput as CustomProviderInput, ProviderRouteView as CustomProviderView,
+    VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES,
 };
 use ncx_core::{
-    custom_command_prompt, discover_codex_apps, discover_marketplaces,
-    list_custom_commands, resolve_local_marketplace_plugin, CheckpointMeta, CheckpointStore,
-    CodexPluginCatalog, CodexPluginManifest, CodexPluginRecord, ConfiguredHarnessRuntime,
-    ExternalPluginCatalog, ExternalPluginRecord, Marketplace, MarketplacePlugin,
-    MarketplaceSource, MemoryStore, RestoreReport, RuntimeContextSources, RuntimeHostBindings,
-    SessionIndex,
+    custom_command_prompt, discover_codex_apps, discover_marketplaces, list_custom_commands,
+    resolve_local_marketplace_plugin, CheckpointMeta, CheckpointStore, CodexPluginCatalog,
+    CodexPluginManifest, CodexPluginRecord, ConfiguredHarnessRuntime, ExternalPluginCatalog,
+    ExternalPluginRecord, HarnessRuntimeBuilder, Marketplace, MarketplacePlugin, MarketplaceSource,
+    MemoryStore, ProviderCatalogService, ProviderChatProbeService, ProviderDirectoryService,
+    RestoreReport, RuntimeContextSources, RuntimeHostBindings, SessionIndex,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
 };
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
 use bridge::{
     emit_protocol_outcome, request_cancel, safe_session_file_stem, spawn_worker, CancelRegistry,
-    Command, GrantRegistry, PendingMap, PendingQuestionMap, RunningSessions,
+    Command, DeferredPrompt, DeferredPrompts, GrantRegistry, PendingMap, PendingQuestionMap,
+    RunningSessions, SessionRunKind, WorkerLifecycle,
 };
 
 #[derive(Serialize)]
@@ -56,6 +64,11 @@ pub struct Status {
     api_key: String,
     max_iterations: i64,
     max_tool_calls: i64,
+    orchestrator_workers: i64,
+    orchestrator_high_workers: i64,
+    orchestrator_verify_retries: i64,
+    orchestrator_max_depth: i64,
+    orchestrator_max_subtasks: i64,
     context_edit_enabled: bool,
     context_edit_max_chars: i64,
     price_in: f64,
@@ -70,8 +83,129 @@ struct AppState {
     questions: PendingQuestionMap,
     question_counter: AtomicU64,
     cancels: CancelRegistry,
+    running: RunningSessions,
+    deferred_prompts: DeferredPrompts,
+    worker_lifecycle: Arc<WorkerLifecycle>,
     app_server: Arc<AppServer<JsonThreadStore>>,
+    provider_directory: ProviderDirectoryService,
+    provider_catalog: ProviderCatalogService,
+    provider_chat_probe: ProviderChatProbeService,
+    provider_activation: ProviderActivationGate,
     openrouter_models: Mutex<Vec<CatalogModel>>,
+    yunmo_models: Mutex<Vec<CatalogModel>>,
+    memory_merge: Arc<memory_merge_job::MemoryMergeCoordinator>,
+    forge_job: Arc<forge_job::ForgeJobCoordinator>,
+}
+
+struct ProviderActivationGate {
+    state: Mutex<ProviderActivationDiagnostics>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ProviderActivationDiagnostics {
+    generation: u64,
+    status: String,
+    last_error: Option<String>,
+    updated_at_ms: i64,
+}
+
+impl Default for ProviderActivationGate {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(ProviderActivationDiagnostics {
+                generation: 0,
+                status: "idle".into(),
+                last_error: None,
+                updated_at_ms: 0,
+            }),
+        }
+    }
+}
+
+impl ProviderActivationGate {
+    fn begin(&self) -> Result<u64, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "模型切换状态不可用".to_string())?;
+        state.generation = state.generation.saturating_add(1);
+        state.status = "validating".into();
+        state.last_error = None;
+        state.updated_at_ms = now_epoch_millis();
+        Ok(state.generation)
+    }
+
+    fn commit<T>(
+        &self,
+        generation: u64,
+        commit: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "模型切换状态不可用".to_string())?;
+        if state.generation != generation {
+            return Err("模型选择已更新，本次较早切换已取消".to_string());
+        }
+        match commit() {
+            Ok(value) => {
+                state.status = "active".into();
+                state.last_error = None;
+                state.updated_at_ms = now_epoch_millis();
+                Ok(value)
+            }
+            Err(error) => {
+                state.status = "failed".into();
+                state.last_error = Some(safe_activation_error(&error));
+                state.updated_at_ms = now_epoch_millis();
+                Err(error)
+            }
+        }
+    }
+
+    fn fail(&self, generation: u64, error: String) -> String {
+        if let Ok(mut state) = self.state.lock() {
+            if state.generation == generation {
+                state.status = "failed".into();
+                state.last_error = Some(safe_activation_error(&error));
+                state.updated_at_ms = now_epoch_millis();
+            }
+        }
+        error
+    }
+
+    fn diagnostics(&self) -> Result<ProviderActivationDiagnostics, String> {
+        self.state
+            .lock()
+            .map(|state| state.clone())
+            .map_err(|_| "模型切换状态不可用".to_string())
+    }
+}
+
+fn safe_activation_error(error: &str) -> String {
+    let mut redact_next = false;
+    error
+        .split_whitespace()
+        .map(|part| {
+            let lower = part.to_ascii_lowercase();
+            let redacted = if redact_next
+                || lower.starts_with("sk-")
+                || lower.starts_with("api_key=")
+                || lower.starts_with("apikey=")
+                || lower.starts_with("token=")
+            {
+                "[已脱敏]"
+            } else {
+                part
+            };
+            redact_next = lower == "bearer";
+            redacted
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(300)
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -88,6 +222,97 @@ pub struct CheckpointView {
 pub struct ConfigLocation {
     config_path: String,
     config_dir: String,
+}
+
+fn list_custom_providers(state: &AppState) -> Result<Vec<CustomProviderView>, String> {
+    let routes = state.provider_directory.list()?;
+    for route in routes
+        .iter()
+        .filter(|route| route.id.starts_with("preset:"))
+    {
+        let provider_id = route.id.trim_start_matches("preset:");
+        let models = if provider_id == "openrouter" {
+            state
+                .openrouter_models
+                .lock()
+                .map_err(|_| "OpenRouter 模型缓存不可用")?
+                .clone()
+        } else if provider_id == "yunmo" {
+            state
+                .yunmo_models
+                .lock()
+                .map_err(|_| "云末模型缓存不可用")?
+                .clone()
+        } else {
+            provider_models(provider_id, &[], &[])
+        };
+        let model_ids = models
+            .into_iter()
+            .map(|model| model.model_id)
+            .collect::<Vec<_>>();
+        if !model_ids.is_empty() && model_ids != route.models {
+            state
+                .provider_directory
+                .reconcile_models(&route.id, model_ids)?;
+        }
+    }
+    state.provider_directory.list()
+}
+fn save_custom_provider(
+    directory: &ProviderDirectoryService,
+    input: CustomProviderInput,
+) -> Result<CustomProviderView, String> {
+    directory.save(input)
+}
+fn delete_custom_provider(directory: &ProviderDirectoryService, id: String) -> Result<(), String> {
+    directory.delete(&id)
+}
+fn discover_custom_provider_models(
+    directory: &ProviderDirectoryService,
+    catalog: &ProviderCatalogService,
+    id: String,
+) -> Result<Vec<String>, String> {
+    let provider = directory.get(&id)?;
+    catalog
+        .discover_route(&provider)
+        .map(|models| models.into_iter().map(|model| model.id).collect())
+}
+fn probe_custom_provider_chat(
+    directory: &ProviderDirectoryService,
+    probe: &ProviderChatProbeService,
+    id: String,
+    model: String,
+) -> Result<serde_json::Value, String> {
+    let route = directory.get(&id)?;
+    serde_json::to_value(probe.probe_route(&route, &model)?).map_err(|error| error.to_string())
+}
+fn activate_custom_provider_for_state(
+    id: String,
+    model: String,
+    state: &AppState,
+) -> Result<(), String> {
+    let generation = state.provider_activation.begin()?;
+    // Probe the complete candidate before touching either providers.json or
+    // config.toml. A failed endpoint/token/model check leaves the current
+    // conversation route exactly as it was.
+    let candidate = state
+        .provider_directory
+        .get(&id)
+        .map_err(|error| state.provider_activation.fail(generation, error))?;
+    state
+        .provider_catalog
+        .validate_route_model(&candidate, &model)
+        .map_err(|error| state.provider_activation.fail(generation, error))?;
+    let provider = state.provider_activation.commit(generation, || {
+        state.provider_directory.activate(&id, &model)
+    })?;
+    // Prompt workers resolve the committed route for every turn. This command
+    // only refreshes the active UI snapshot; it deliberately does not rebuild
+    // tools, MCP, skills or the current transcript.
+    state
+        .tx
+        .send(Command::SetModel(provider.selected_model))
+        .map_err(|_| "agent thread is not running".to_string())
 }
 
 #[derive(Serialize)]
@@ -117,6 +342,11 @@ fn get_status() -> Result<Status, String> {
         api_key: red.get("api_key").cloned().unwrap_or_default(),
         max_iterations: cfg.max_iterations,
         max_tool_calls: cfg.max_tool_calls,
+        orchestrator_workers: cfg.orchestrator_workers,
+        orchestrator_high_workers: cfg.orchestrator_high_workers,
+        orchestrator_verify_retries: cfg.orchestrator_verify_retries,
+        orchestrator_max_depth: cfg.orchestrator_max_depth,
+        orchestrator_max_subtasks: cfg.orchestrator_max_subtasks,
         context_edit_enabled: cfg.context_edit_enabled,
         context_edit_max_chars: cfg.context_edit_max_chars,
         price_in: cfg.price_in,
@@ -129,12 +359,23 @@ fn get_status() -> Result<Status, String> {
 /// the file picker (attached as base64 vision blocks); non-image files are
 /// passed by the UI as `@path` tokens inside `text`. Replies arrive as
 /// `ncx://event`s.
-fn validate_image_attachment_route(images: &[String], vl_model: &str) -> Result<(), String> {
-    if !images.is_empty() && vl_model.trim().is_empty() {
+fn validate_image_attachment_route(
+    images: &[String],
+    model: &str,
+    parser_enabled: bool,
+    vl_model: &str,
+) -> Result<(), String> {
+    if images.is_empty() || ncx_core::model_supports_native_vision(model) {
+        return Ok(());
+    }
+    if !parser_enabled {
         return Err(
-            "尚未配置图片/文件解析模型。请打开“设置”，填写“图片/文件解析模型”；如果当前模型本身支持图片，可填写与主模型相同的模型名，接口和密钥留空即可沿用主配置。"
+            "当前主模型未声明附件解析能力。请打开“设置 → 插件”，启用“阿里本地附件解析”；该插件默认关闭。"
                 .to_string(),
         );
+    }
+    if vl_model.trim().is_empty() {
+        return Err("阿里本地附件解析插件已启用，但尚未配置解析模型。".to_string());
     }
     Ok(())
 }
@@ -144,6 +385,7 @@ fn queue_prompt(
     session_id: String,
     text: String,
     images: Vec<String>,
+    execution_mode: ncx_protocol::ExecutionMode,
 ) -> Result<(), String> {
     if !images.is_empty() {
         let cfg = load_config(Overrides {
@@ -151,7 +393,26 @@ fn queue_prompt(
             ..Default::default()
         })
         .map_err(|e| e.to_string())?;
-        validate_image_attachment_route(&images, &cfg.vl_model)?;
+        validate_image_attachment_route(
+            &images,
+            &cfg.model,
+            cfg.alibaba_attachment_parser_enabled,
+            &cfg.vl_model,
+        )?;
+    }
+
+    if defer_prompt_for_goal(
+        &state.running,
+        &state.deferred_prompts,
+        &session_id,
+        DeferredPrompt {
+            text: text.clone(),
+            images: images.clone(),
+            execution_mode,
+        },
+    )? {
+        cancel_session(state, &session_id);
+        return Ok(());
     }
 
     state
@@ -160,8 +421,34 @@ fn queue_prompt(
             session_id,
             text,
             images,
+            execution_mode,
         })
         .map_err(|_| "agent thread is not running".to_string())
+}
+
+fn defer_prompt_for_goal(
+    running: &RunningSessions,
+    deferred_prompts: &DeferredPrompts,
+    session_id: &str,
+    prompt: DeferredPrompt,
+) -> Result<bool, String> {
+    // Hold the run-state lock until the deferred prompt is installed. Goal
+    // cleanup takes the same lock before consuming this queue, so a finish race
+    // cannot strand an accepted human instruction.
+    let running = running
+        .lock()
+        .map_err(|_| "会话执行状态不可用".to_string())?;
+    if running.get(session_id).copied() != Some(SessionRunKind::Goal) {
+        return Ok(false);
+    }
+    let mut deferred = deferred_prompts
+        .lock()
+        .map_err(|_| "会话输入队列不可用".to_string())?;
+    if deferred.contains_key(session_id) {
+        return Err("长期目标停止后已有一条用户输入等待执行".to_string());
+    }
+    deferred.insert(session_id.to_string(), prompt);
+    Ok(true)
 }
 
 #[tauri::command]
@@ -185,17 +472,90 @@ fn set_workspace_for_state(path: String, state: &AppState) -> Result<String, Str
 
 /// Switch the active model (persists + rebuilds keeping the current transcript).
 fn set_model_for_state(model: String, state: &AppState) -> Result<(), String> {
-    let cached = state
-        .openrouter_models
-        .lock()
-        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
-    if let Some(preset) = find_preset_by_model_id(&model, &cached) {
-        let quick_switch_models = provider_models(&preset.provider_id, &cached)
+    let generation = state.provider_activation.begin()?;
+    let cfg = load_config(Overrides::default()).map_err(|error| {
+        state
+            .provider_activation
+            .fail(generation, error.to_string())
+    })?;
+    if let Some(provider_id) = cfg.active_provider_id.strip_prefix("preset:") {
+        let cached = state.openrouter_models.lock().map_err(|_| {
+            state
+                .provider_activation
+                .fail(generation, "OpenRouter 模型缓存不可用".to_string())
+        })?;
+        let yunmo = state.yunmo_models.lock().map_err(|_| {
+            state
+                .provider_activation
+                .fail(generation, "云末模型缓存不可用".to_string())
+        })?;
+        let preset = provider_models(provider_id, &cached, &yunmo)
+            .into_iter()
+            .find(|item| item.model_id == model)
+            .ok_or_else(|| {
+                state
+                    .provider_activation
+                    .fail(generation, format!("模型 {model} 不属于当前预设模型商"))
+            })?;
+        let quick_switch_models = provider_models(provider_id, &cached, &yunmo)
             .into_iter()
             .map(|item| item.model_id)
             .collect::<Vec<_>>();
         drop(cached);
-        write_preset(&preset, &quick_switch_models)?;
+        drop(yunmo);
+        state.provider_activation.commit(generation, || {
+            write_preset(&state.provider_directory, &preset, &quick_switch_models)
+        })?;
+        return state
+            .tx
+            .send(Command::SetModel(model))
+            .map_err(|_| "agent thread is not running".to_string());
+    }
+    if cfg.active_provider_id != "legacy" {
+        let candidate = state
+            .provider_directory
+            .get(&cfg.active_provider_id)
+            .map_err(|error| state.provider_activation.fail(generation, error))?;
+        state
+            .provider_catalog
+            .validate_route_model(&candidate, &model)
+            .map_err(|error| state.provider_activation.fail(generation, error))?;
+        state.provider_activation.commit(generation, || {
+            state
+                .provider_directory
+                .activate(&cfg.active_provider_id, &model)
+        })?;
+        return state
+            .tx
+            .send(Command::SetModel(model))
+            .map_err(|_| "agent thread is not running".to_string());
+    }
+    let cached = state.openrouter_models.lock().map_err(|_| {
+        state
+            .provider_activation
+            .fail(generation, "OpenRouter 模型缓存不可用".to_string())
+    })?;
+    let yunmo = state.yunmo_models.lock().map_err(|_| {
+        state
+            .provider_activation
+            .fail(generation, "云末模型缓存不可用".to_string())
+    })?;
+    if let Some(preset) = find_preset_by_model_id(&model, &cfg.base_url, &cached, &yunmo) {
+        let quick_switch_models = provider_models(&preset.provider_id, &cached, &yunmo)
+            .into_iter()
+            .map(|item| item.model_id)
+            .collect::<Vec<_>>();
+        drop(cached);
+        drop(yunmo);
+        state.provider_activation.commit(generation, || {
+            write_preset(&state.provider_directory, &preset, &quick_switch_models)
+        })?;
+    } else {
+        let updates = HashMap::from([("model", model.as_str())]);
+        state.provider_activation.commit(generation, || {
+            write_nanocodex_config(&updates, &ConfigPaths::default().nanocodex)
+                .map_err(|error| error.to_string())
+        })?;
     }
     state
         .tx
@@ -228,7 +588,10 @@ fn app_server_request(
     state: tauri::State<'_, AppState>,
     app: AppHandle,
 ) -> Result<DispatchOutcome, String> {
-    let runtime = GuiAppServerAdapter { state: &state };
+    let runtime = GuiAppServerAdapter {
+        state: &state,
+        app: &app,
+    };
     let outcome = state
         .app_server
         .dispatch_with_runtime(request, &runtime)
@@ -239,13 +602,32 @@ fn app_server_request(
 
 struct GuiAppServerAdapter<'a> {
     state: &'a AppState,
+    app: &'a AppHandle,
 }
 
 impl AppServerAdapter for GuiAppServerAdapter<'_> {
+    fn validate_harness_profile(&self, profile: &str) -> Result<(), String> {
+        let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+        HarnessRuntimeBuilder::configured_for_profile(&workspace, Some(profile)).map(|_| ())
+    }
+
     fn create_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
+        let outcome = self
+            .state
+            .app_server
+            .dispatch(ClientRequest::ThreadRead {
+                thread_id: thread_id.clone(),
+            })
+            .map_err(|error| error.to_string())?;
+        let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload else {
+            return Err("创建会话后未能读取其 Harness Profile".to_string());
+        };
         self.state
             .tx
-            .send(Command::New(thread_id.to_string()))
+            .send(Command::New {
+                id: thread_id.to_string(),
+                harness_profile: thread.metadata.harness_profile,
+            })
             .map_err(|_| "agent thread is not running".to_string())
     }
 
@@ -271,13 +653,27 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         thread_id: &ThreadId,
         text: String,
         images: Vec<String>,
+        execution_mode: ncx_protocol::ExecutionMode,
     ) -> Result<(), String> {
-        queue_prompt(self.state, thread_id.to_string(), text, images)
+        queue_prompt(
+            self.state,
+            thread_id.to_string(),
+            text,
+            images,
+            execution_mode,
+        )
     }
 
     fn interrupt_latest(&self, thread_id: &ThreadId) -> Result<(), String> {
         cancel_session(self.state, thread_id.as_str());
         Ok(())
+    }
+
+    fn continue_goal(&self, thread_id: &ThreadId) -> Result<(), String> {
+        self.state
+            .tx
+            .send(Command::ContinueGoal(thread_id.to_string()))
+            .map_err(|_| "长期目标执行队列不可用".to_string())
     }
 
     fn runtime_status(&self) -> Result<serde_json::Value, String> {
@@ -292,7 +688,12 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         set_workspace_for_state(path, self.state)
     }
 
-    fn approve(&self, thread_id: Option<&ThreadId>, id: u64, decision: String) -> Result<(), String> {
+    fn approve(
+        &self,
+        thread_id: Option<&ThreadId>,
+        id: u64,
+        decision: String,
+    ) -> Result<(), String> {
         approve_for_thread(self.state, thread_id.map(ThreadId::as_str), id, decision)
     }
 
@@ -306,7 +707,8 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
     }
 
     fn read_settings(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(get_settings()?).map_err(|error| error.to_string())
+        serde_json::to_value(get_settings(&self.state.provider_catalog)?)
+            .map_err(|error| error.to_string())
     }
 
     fn update_settings(
@@ -342,8 +744,67 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         .map_err(|error| error.to_string())
     }
 
+    fn list_custom_providers(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(list_custom_providers(self.state)?).map_err(|error| error.to_string())
+    }
+
+    fn save_custom_provider(
+        &self,
+        id: Option<String>,
+        name: String,
+        protocol: String,
+        base_url: String,
+        api_key: Option<String>,
+        models: Vec<String>,
+    ) -> Result<serde_json::Value, String> {
+        serde_json::to_value(save_custom_provider(
+            &self.state.provider_directory,
+            CustomProviderInput {
+                id,
+                name,
+                protocol,
+                base_url,
+                api_key,
+                models,
+            },
+        )?)
+        .map_err(|error| error.to_string())
+    }
+
+    fn delete_custom_provider(&self, id: String) -> Result<(), String> {
+        delete_custom_provider(&self.state.provider_directory, id)
+    }
+
+    fn discover_custom_provider_models(&self, id: String) -> Result<Vec<String>, String> {
+        discover_custom_provider_models(
+            &self.state.provider_directory,
+            &self.state.provider_catalog,
+            id,
+        )
+    }
+
+    fn activate_custom_provider(&self, id: String, model: String) -> Result<(), String> {
+        activate_custom_provider_for_state(id, model, self.state)
+    }
+
+    fn probe_custom_provider_chat(
+        &self,
+        id: String,
+        model: String,
+    ) -> Result<serde_json::Value, String> {
+        probe_custom_provider_chat(
+            &self.state.provider_directory,
+            &self.state.provider_chat_probe,
+            id,
+            model,
+        )
+    }
+
     fn harness_diagnostics(&self) -> Result<serde_json::Value, String> {
-        get_harness_diagnostics()
+        get_harness_diagnostics(
+            &self.state.provider_directory,
+            &self.state.provider_activation,
+        )
     }
 
     fn list_external_plugins(&self) -> Result<serde_json::Value, String> {
@@ -373,6 +834,79 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
 
     fn consolidate_memory(&self) -> Result<u64, String> {
         memory_consolidate().map(|count| count as u64)
+    }
+
+    fn start_memory_merge(&self) -> Result<serde_json::Value, String> {
+        let cfg = load_config(Overrides {
+            workspace: std::env::current_dir().ok(),
+            ..Default::default()
+        })
+        .map_err(|error| error.to_string())?;
+        let workspace = cfg.workspace.clone();
+        serde_json::to_value(self.state.memory_merge.start(cfg, workspace)?)
+            .map_err(|error| error.to_string())
+    }
+
+    fn memory_merge_status(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(self.state.memory_merge.status()?).map_err(|error| error.to_string())
+    }
+
+    fn cancel_memory_merge(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(self.state.memory_merge.cancel()?).map_err(|error| error.to_string())
+    }
+
+    fn forge_runtime_status(&self) -> Result<serde_json::Value, String> {
+        let resource_dir = self
+            .app
+            .path()
+            .resource_dir()
+            .map_err(|_| "无法定位应用资源目录".to_string())?;
+        Ok(match forge_runtime::discover(&resource_dir) {
+            Ok(paths) => serde_json::json!({
+                "available": paths.root.is_dir()
+                    && paths.python.is_file()
+                    && paths.script.is_file()
+                    && paths.agent.is_file(),
+                "schema": "buglecat-forge-runtime/v1"
+            }),
+            Err(reason) => serde_json::json!({ "available": false, "reason": reason }),
+        })
+    }
+
+    fn start_forge_job(
+        &self,
+        rounds: u8,
+        repeats: u8,
+        timeout_s: u64,
+        budget_s: u64,
+        teacher: String,
+        accept_margin: u8,
+    ) -> Result<serde_json::Value, String> {
+        let resource_dir = self
+            .app
+            .path()
+            .resource_dir()
+            .map_err(|_| "无法定位应用资源目录".to_string())?;
+        let runtime = forge_runtime::discover(&resource_dir)?;
+        let (_, workspace) = configured_workspace()?;
+        let input = forge_job::ForgeJobInput {
+            rounds,
+            repeats,
+            timeout_s,
+            budget_s,
+            teacher,
+            accept_margin,
+        };
+        serde_json::to_value(self.state.forge_job.start(input, runtime, workspace)?)
+            .map_err(|error| error.to_string())
+    }
+
+    fn forge_job_status(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(self.state.forge_job.status()?).map_err(|error| error.to_string())
+    }
+
+    fn cancel_forge_job(&self) -> Result<serde_json::Value, String> {
+        serde_json::to_value(self.state.forge_job.cancel()?).map_err(|error| error.to_string())
     }
 
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
@@ -412,6 +946,31 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
             upgrade,
         )?)
         .map_err(|error| error.to_string())
+    }
+
+    fn search_dsh_marketplace(
+        &self,
+        source: String,
+        manifest_url: Option<String>,
+        query: String,
+    ) -> Result<serde_json::Value, String> {
+        dsh_marketplace_search(&source, manifest_url.as_deref(), &query)
+    }
+
+    fn preview_dsh_marketplace_plugin(
+        &self,
+        item: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        dsh_marketplace_preview(&item)
+    }
+
+    fn install_dsh_marketplace_plugin(
+        &self,
+        item: serde_json::Value,
+        upgrade: bool,
+    ) -> Result<serde_json::Value, String> {
+        serde_json::to_value(install_dsh_marketplace_plugin(&item, upgrade)?)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -459,17 +1018,31 @@ pub struct Settings {
     reasoning_effort: String,
     max_iterations: i64,
     max_tool_calls: i64,
+    orchestrator_workers: i64,
+    orchestrator_high_workers: i64,
+    orchestrator_verify_retries: i64,
+    orchestrator_max_depth: i64,
+    orchestrator_max_subtasks: i64,
     context_edit_enabled: bool,
     context_edit_max_chars: i64,
     context_edit_keep_recent_messages: i64,
     context_edit_max_tool_result_chars: i64,
+    alibaba_attachment_parser_enabled: bool,
     price_in: f64,
     price_out: f64,
     price_currency: String,
     api_key_masked: String,
     has_api_key: bool,
+    deepseek_api_key_masked: String,
+    has_deepseek_api_key: bool,
+    yunmo_api_key_masked: String,
+    has_yunmo_api_key: bool,
     vl_api_key_masked: String,
     has_vl_api_key: bool,
+    dashscope_token_plan_key_masked: String,
+    has_dashscope_token_plan_key: bool,
+    dashscope_workspace_key_masked: String,
+    has_dashscope_workspace_key: bool,
     available_models: Vec<String>,
     sandbox_modes: Vec<String>,
     approval_policies: Vec<String>,
@@ -487,17 +1060,40 @@ fn settings_from_config(cfg: &Config) -> Settings {
         reasoning_effort: cfg.reasoning_effort.clone(),
         max_iterations: cfg.max_iterations,
         max_tool_calls: cfg.max_tool_calls,
+        orchestrator_workers: cfg.orchestrator_workers,
+        orchestrator_high_workers: cfg.orchestrator_high_workers,
+        orchestrator_verify_retries: cfg.orchestrator_verify_retries,
+        orchestrator_max_depth: cfg.orchestrator_max_depth,
+        orchestrator_max_subtasks: cfg.orchestrator_max_subtasks,
         context_edit_enabled: cfg.context_edit_enabled,
         context_edit_max_chars: cfg.context_edit_max_chars,
         context_edit_keep_recent_messages: cfg.context_edit_keep_recent_messages,
         context_edit_max_tool_result_chars: cfg.context_edit_max_tool_result_chars,
+        alibaba_attachment_parser_enabled: cfg.alibaba_attachment_parser_enabled,
         price_in: cfg.price_in,
         price_out: cfg.price_out,
         price_currency: cfg.price_currency.clone(),
         api_key_masked: redacted.get("api_key").cloned().unwrap_or_default(),
         has_api_key: !cfg.api_key.is_empty(),
+        deepseek_api_key_masked: redacted
+            .get("deepseek_api_key")
+            .cloned()
+            .unwrap_or_default(),
+        has_deepseek_api_key: !cfg.deepseek_api_key.is_empty(),
+        yunmo_api_key_masked: redacted.get("yunmo_api_key").cloned().unwrap_or_default(),
+        has_yunmo_api_key: !cfg.yunmo_api_key.is_empty(),
         vl_api_key_masked: redacted.get("vl_api_key").cloned().unwrap_or_default(),
         has_vl_api_key: !cfg.vl_api_key.is_empty(),
+        dashscope_token_plan_key_masked: redacted
+            .get("dashscope_token_plan_key")
+            .cloned()
+            .unwrap_or_default(),
+        has_dashscope_token_plan_key: !cfg.dashscope_token_plan_key.is_empty(),
+        dashscope_workspace_key_masked: redacted
+            .get("dashscope_workspace_key")
+            .cloned()
+            .unwrap_or_default(),
+        has_dashscope_workspace_key: !cfg.dashscope_workspace_key.is_empty(),
         available_models: cfg.available_models.clone(),
         sandbox_modes: VALID_SANDBOX_MODES.iter().map(|s| s.to_string()).collect(),
         approval_policies: VALID_APPROVAL_POLICIES
@@ -508,14 +1104,44 @@ fn settings_from_config(cfg: &Config) -> Settings {
 }
 
 /// Read the current settings for the panel (with dropdown option lists).
-fn get_settings() -> Result<Settings, String> {
+fn get_settings(provider_catalog: &ProviderCatalogService) -> Result<Settings, String> {
     let workspace = std::env::current_dir().ok();
     let cfg = load_config(Overrides {
         workspace,
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
-    Ok(settings_from_config(&cfg))
+    let mut settings = settings_from_config(&cfg);
+    settings.available_models = merged_available_models(&cfg, provider_catalog);
+    Ok(settings)
+}
+
+fn valid_provider_model_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 160
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/' | b':')
+        })
+}
+
+fn merged_available_models(cfg: &Config, provider_catalog: &ProviderCatalogService) -> Vec<String> {
+    let discovered = provider_catalog
+        .discover_config(cfg)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|model| model.id)
+        .collect::<Vec<_>>();
+    let mut models = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for model in std::iter::once(cfg.model.as_str())
+        .chain(cfg.available_models.iter().map(String::as_str))
+        .chain(discovered.iter().map(String::as_str))
+    {
+        if valid_provider_model_id(model) && seen.insert(model.to_string()) {
+            models.push(model.to_string());
+        }
+    }
+    models
 }
 
 /// Persist settings to `~/.nanocodex/config.toml`, then rebuild the agent so the
@@ -525,12 +1151,8 @@ fn save_settings_for_state(
     updates: std::collections::HashMap<String, String>,
     state: &AppState,
 ) -> Result<(), String> {
-    let borrowed: HashMap<&str, &str> = updates
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
     let path = ConfigPaths::default().nanocodex;
-    write_nanocodex_config(&borrowed, &path).map_err(|e| e.to_string())?;
+    persist_validated_settings(&updates, &path)?;
     // Apply live while preserving the active conversation/session id. A config
     // save must not silently turn into an unrelated new chat.
     let cfg = load_config(Overrides {
@@ -542,6 +1164,40 @@ fn save_settings_for_state(
     Ok(())
 }
 
+fn persist_validated_settings(
+    updates: &HashMap<String, String>,
+    path: &Path,
+) -> Result<(), String> {
+    validate_orchestrator_setting_updates(updates)?;
+    let borrowed: HashMap<&str, &str> = updates
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    write_nanocodex_config(&borrowed, path).map_err(|e| e.to_string())
+}
+
+fn validate_orchestrator_setting_updates(updates: &HashMap<String, String>) -> Result<(), String> {
+    for (key, label, min, max) in [
+        ("orchestrator_workers", "普通任务 Worker", 1, 4),
+        ("orchestrator_high_workers", "高风险任务 Worker", 1, 6),
+        ("orchestrator_verify_retries", "验证重试", 0, 3),
+        ("orchestrator_max_depth", "递归深度", 0, 2),
+        ("orchestrator_max_subtasks", "子任务上限", 1, 12),
+    ] {
+        let Some(raw) = updates.get(key) else {
+            continue;
+        };
+        let value = raw
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| format!("{label}必须是 {min}–{max} 的整数"))?;
+        if !(min..=max).contains(&value) {
+            return Err(format!("{label}必须是 {min}–{max} 的整数，当前为 {value}"));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct ModelCatalogResponse {
     providers: Vec<CatalogProvider>,
@@ -549,7 +1205,11 @@ struct ModelCatalogResponse {
     stale: bool,
 }
 
-fn catalog_response(openrouter_models: &[CatalogModel], stale: bool) -> ModelCatalogResponse {
+fn catalog_response(
+    openrouter_models: &[CatalogModel],
+    yunmo_models: &[CatalogModel],
+    stale: bool,
+) -> ModelCatalogResponse {
     let mut providers = catalog();
     if !openrouter_models.is_empty() {
         if let Some(provider) = providers
@@ -559,41 +1219,106 @@ fn catalog_response(openrouter_models: &[CatalogModel], stale: bool) -> ModelCat
             provider.models = openrouter_models.to_vec();
         }
     }
+    if !yunmo_models.is_empty() {
+        if let Some(provider) = providers.iter_mut().find(|provider| provider.id == "yunmo") {
+            provider.models = yunmo_models.to_vec();
+        }
+    }
     ModelCatalogResponse { providers, stale }
 }
 
-fn preset_updates<T: AsRef<str>>(
+fn write_preset(
+    directory: &ProviderDirectoryService,
     preset: &CatalogModel,
-    quick_switch_models: &[T],
-) -> HashMap<&'static str, String> {
-    let available_models = quick_switch_models
-        .iter()
-        .map(|model| model.as_ref())
-        .collect::<Vec<_>>()
-        .join(",");
-    HashMap::from([
-        ("model", preset.model_id.clone()),
-        ("base_url", preset.base_url.clone()),
-        ("price_in", preset.price_in.to_string()),
-        ("price_out", preset.price_out.to_string()),
-        ("price_currency", preset.price_currency.clone()),
-        ("available_models", available_models),
-    ])
+    quick_switch_models: &[String],
+) -> Result<(), String> {
+    let cfg = load_config(Overrides::default()).map_err(|error| error.to_string())?;
+    write_preset_with_config(directory, preset, quick_switch_models, &cfg)
 }
 
-fn write_preset(preset: &CatalogModel, quick_switch_models: &[String]) -> Result<(), String> {
-    let updates = preset_updates(preset, quick_switch_models);
-    let borrowed: HashMap<&str, &str> = updates
-        .iter()
-        .map(|(key, value)| (*key, value.as_str()))
-        .collect();
+fn write_preset_with_config(
+    directory: &ProviderDirectoryService,
+    preset: &CatalogModel,
+    quick_switch_models: &[String],
+    cfg: &Config,
+) -> Result<(), String> {
+    let route_id = format!("preset:{}", preset.provider_id);
+    let provider_key = resolve_preset_key(directory, &cfg, preset)?;
+    let provider_name = catalog()
+        .into_iter()
+        .find(|provider| provider.id == preset.provider_id)
+        .map(|provider| provider.name)
+        .unwrap_or_else(|| preset.provider_id.clone());
+    directory.save_and_activate_preset(
+        CustomProviderInput {
+            id: Some(route_id),
+            name: provider_name,
+            protocol: "openai".to_string(),
+            base_url: preset.base_url.clone(),
+            api_key: Some(provider_key),
+            models: quick_switch_models.to_vec(),
+        },
+        &preset.model_id,
+        &preset.price_in.to_string(),
+        &preset.price_out.to_string(),
+        &preset.price_currency,
+    )?;
+    Ok(())
+}
+
+fn resolve_preset_key(
+    directory: &ProviderDirectoryService,
+    cfg: &Config,
+    preset: &CatalogModel,
+) -> Result<String, String> {
+    let route_id = format!("preset:{}", preset.provider_id);
+    let saved_key = directory
+        .get(&route_id)
+        .ok()
+        .map(|route| route.api_key)
+        .filter(|key| !key.trim().is_empty());
+    let compatibility_key = match preset.provider_id.as_str() {
+        "deepseek" => (!cfg.deepseek_api_key.trim().is_empty())
+            .then(|| cfg.deepseek_api_key.clone())
+            .or_else(|| {
+                cfg.base_url
+                    .contains("api.deepseek.com")
+                    .then(|| cfg.api_key.clone())
+            }),
+        "yunmo" => (!cfg.yunmo_api_key.trim().is_empty())
+            .then(|| cfg.yunmo_api_key.clone())
+            .or_else(|| {
+                cfg.base_url
+                    .contains("api.yunmo-ai.com")
+                    .then(|| cfg.api_key.clone())
+            }),
+        _ => (cfg.base_url.trim_end_matches('/') == preset.base_url.trim_end_matches('/'))
+            .then(|| cfg.api_key.clone()),
+    };
+    let provider_key = saved_key
+        .or(compatibility_key)
+        .filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| format!("请先为 {} 配置独立 Token", preset.provider_id))?;
+    Ok(provider_key)
+}
+
+fn write_available_models(models: &[String]) -> Result<(), String> {
+    let available_models = models.join(",");
+    let updates = HashMap::from([("available_models", available_models.as_str())]);
     let path = ConfigPaths::default().nanocodex;
-    write_nanocodex_config(&borrowed, &path).map_err(|error| error.to_string())
+    write_nanocodex_config(&updates, &path).map_err(|error| error.to_string())
 }
 
-fn provider_models(provider_id: &str, openrouter_models: &[CatalogModel]) -> Vec<CatalogModel> {
+fn provider_models(
+    provider_id: &str,
+    openrouter_models: &[CatalogModel],
+    yunmo_models: &[CatalogModel],
+) -> Vec<CatalogModel> {
     if provider_id == "openrouter" && !openrouter_models.is_empty() {
         return openrouter_models.to_vec();
+    }
+    if provider_id == "yunmo" && !yunmo_models.is_empty() {
+        return yunmo_models.to_vec();
     }
     catalog()
         .into_iter()
@@ -604,18 +1329,19 @@ fn provider_models(provider_id: &str, openrouter_models: &[CatalogModel]) -> Vec
 
 fn find_preset_by_model_id(
     model_id: &str,
+    active_base_url: &str,
     openrouter_models: &[CatalogModel],
+    yunmo_models: &[CatalogModel],
 ) -> Option<CatalogModel> {
-    openrouter_models
+    let candidates = openrouter_models
         .iter()
-        .find(|model| model.model_id == model_id)
         .cloned()
-        .or_else(|| {
-            catalog()
-                .into_iter()
-                .flat_map(|provider| provider.models)
-                .find(|model| model.model_id == model_id)
-        })
+        .chain(yunmo_models.iter().cloned())
+        .chain(catalog().into_iter().flat_map(|provider| provider.models));
+    let active_base_url = active_base_url.trim_end_matches('/');
+    candidates
+        .filter(|model| model.model_id == model_id)
+        .find(|model| model.base_url.trim_end_matches('/') == active_base_url)
 }
 
 /// 返回内置目录，并在有缓存时带上 OpenRouter 的实时模型清单。
@@ -624,7 +1350,11 @@ fn get_model_catalog_for_state(state: &AppState) -> ModelCatalogResponse {
         .openrouter_models
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    catalog_response(&cached, false)
+    let yunmo = state
+        .yunmo_models
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    catalog_response(&cached, &yunmo, false)
 }
 
 /// 通过 OpenRouter 公共接口拉取模型和每 Token 费用；接口无需 API 密钥。
@@ -632,25 +1362,75 @@ fn get_model_catalog_for_state(state: &AppState) -> ModelCatalogResponse {
 async fn refresh_openrouter_models(
     state: tauri::State<'_, AppState>,
 ) -> Result<ModelCatalogResponse, String> {
-    let response = reqwest::Client::new()
-        .get("https://openrouter.ai/api/v1/models")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|error| format!("OpenRouter 模型目录请求失败：{error}"))?
-        .error_for_status()
-        .map_err(|error| format!("OpenRouter 模型目录请求失败：{error}"))?;
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("OpenRouter 模型目录读取失败：{error}"))?;
-    let models = parse_openrouter_models(&body)?;
+    let catalog = state.provider_catalog.clone();
+    let models = tokio::task::spawn_blocking(move || {
+        catalog
+            .discover_public("https://openrouter.ai/api/v1")
+            .map(|models| models.into_iter().map(openrouter_model).collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|error| format!("OpenRouter 模型目录任务失败：{error}"))??;
     let mut cached = state
         .openrouter_models
         .lock()
         .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
     *cached = models;
-    Ok(catalog_response(&cached, false))
+    let yunmo = state
+        .yunmo_models
+        .lock()
+        .map_err(|_| "云末模型缓存不可用".to_string())?;
+    Ok(catalog_response(&cached, &yunmo, false))
+}
+
+#[tauri::command]
+async fn refresh_yunmo_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<ModelCatalogResponse, String> {
+    let cfg = load_config(Overrides::default()).map_err(|error| error.to_string())?;
+    let key = state
+        .provider_directory
+        .get("preset:yunmo")
+        .ok()
+        .map(|route| route.api_key)
+        .filter(|key| !key.trim().is_empty())
+        .or_else(|| (!cfg.yunmo_api_key.trim().is_empty()).then(|| cfg.yunmo_api_key.clone()))
+        .ok_or_else(|| "请先配置云末 AI 独立 Token".to_string())?;
+    let catalog = state.provider_catalog.clone();
+    let discovered = tokio::task::spawn_blocking(move || {
+        let request_cfg = Config {
+            base_url: "https://api.yunmo-ai.com/v1".into(),
+            provider_protocol: "openai".into(),
+            api_key: key,
+            ..Config::default()
+        };
+        catalog.discover_config(&request_cfg)
+    })
+    .await
+    .map_err(|error| format!("云末模型目录任务失败：{error}"))??;
+    let model_ids = discovered
+        .into_iter()
+        .map(|model| model.id)
+        .collect::<Vec<_>>();
+    let models = model_ids
+        .iter()
+        .map(|id| yunmo_model(id))
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        return Err("云末模型目录没有返回可用模型".to_string());
+    }
+    if cfg.base_url.contains("api.yunmo-ai.com") {
+        write_available_models(&model_ids)?;
+    }
+    let mut yunmo = state
+        .yunmo_models
+        .lock()
+        .map_err(|_| "云末模型缓存不可用".to_string())?;
+    *yunmo = models;
+    let openrouter = state
+        .openrouter_models
+        .lock()
+        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    Ok(catalog_response(&openrouter, &yunmo, false))
 }
 
 /// 选择一个模型预设时，统一保存模型、接口、费用币种和当前厂商的快捷模型。
@@ -659,12 +1439,25 @@ fn apply_model_preset_for_state(
     model_id: String,
     state: &AppState,
 ) -> Result<CatalogModel, String> {
-    let cached = state
-        .openrouter_models
-        .lock()
-        .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
+    let generation = state.provider_activation.begin()?;
+    let cached = state.openrouter_models.lock().map_err(|_| {
+        state
+            .provider_activation
+            .fail(generation, "OpenRouter 模型缓存不可用".to_string())
+    })?;
+    let yunmo = state.yunmo_models.lock().map_err(|_| {
+        state
+            .provider_activation
+            .fail(generation, "云末模型缓存不可用".to_string())
+    })?;
     let preset = if provider_id == "openrouter" {
         cached
+            .iter()
+            .find(|model| model.model_id == model_id)
+            .cloned()
+            .or_else(|| find_preset(&provider_id, &model_id))
+    } else if provider_id == "yunmo" {
+        yunmo
             .iter()
             .find(|model| model.model_id == model_id)
             .cloned()
@@ -672,14 +1465,22 @@ fn apply_model_preset_for_state(
     } else {
         find_preset(&provider_id, &model_id)
     }
-    .ok_or_else(|| "未找到所选模型预设，请先刷新 OpenRouter 模型目录".to_string())?;
-    let quick_switch_models = provider_models(&provider_id, &cached)
+    .ok_or_else(|| {
+        state.provider_activation.fail(
+            generation,
+            "未找到所选模型预设，请先刷新 OpenRouter 模型目录".to_string(),
+        )
+    })?;
+    let quick_switch_models = provider_models(&provider_id, &cached, &yunmo)
         .into_iter()
         .map(|model| model.model_id)
         .collect::<Vec<_>>();
     drop(cached);
+    drop(yunmo);
 
-    write_preset(&preset, &quick_switch_models)?;
+    state.provider_activation.commit(generation, || {
+        write_preset(&state.provider_directory, &preset, &quick_switch_models)
+    })?;
     // 写入已经成功；重建会话的消息若暂时无法发送，也不能误报为保存失败。
     let _ = state.tx.send(Command::SetModel(preset.model_id.clone()));
     Ok(preset)
@@ -779,7 +1580,9 @@ fn approve_for_thread(
     let mut pending = state.pending.lock().unwrap();
     let expected = thread_id.unwrap_or_default();
     if pending.get(&id).map(|(owner, _)| owner.as_str()) != Some(expected) {
-        return Err(format!("approval {id} does not belong to thread {expected}"));
+        return Err(format!(
+            "approval {id} does not belong to thread {expected}"
+        ));
     }
     let sender = pending.remove(&id);
     match sender {
@@ -804,7 +1607,9 @@ fn answer_for_thread(
     let mut questions = state.questions.lock().unwrap();
     let expected = thread_id.unwrap_or_default();
     if questions.get(&id).map(|(owner, _)| owner.as_str()) != Some(expected) {
-        return Err(format!("question {id} does not belong to thread {expected}"));
+        return Err(format!(
+            "question {id} does not belong to thread {expected}"
+        ));
     }
     let sender = questions.remove(&id);
     match sender {
@@ -1209,6 +2014,77 @@ fn open_url(url: String) -> Result<(), String> {
     }
 }
 
+fn validated_local_artifact(path: &str) -> Result<PathBuf, String> {
+    let target = PathBuf::from(path.trim());
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(
+        extension.as_str(),
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "svg" | "mp4" | "webm" | "mov" | "pdf"
+    ) {
+        return Err("只允许打开图片、视频或 PDF 产物".to_string());
+    }
+    let canonical = target
+        .canonicalize()
+        .map_err(|_| "产物文件不存在或已经移动".to_string())?;
+    if !canonical.is_file() {
+        return Err("产物路径不是文件".to_string());
+    }
+    Ok(canonical)
+}
+
+fn local_image_preview_data(path: &str) -> Result<String, String> {
+    let target = validated_local_artifact(path)?;
+    let extension = target
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => return Err("该产物不支持会话内图片预览".to_string()),
+    };
+    let metadata = fs::metadata(&target).map_err(|error| error.to_string())?;
+    if metadata.len() > 12 * 1024 * 1024 {
+        return Err("图片超过 12 MiB，仅允许点击外部查看".to_string());
+    }
+    let bytes = fs::read(target).map_err(|error| error.to_string())?;
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+#[tauri::command]
+fn local_artifact_preview(path: String) -> Result<String, String> {
+    local_image_preview_data(&path)
+}
+
+#[tauri::command]
+fn open_local_artifact(path: String) -> Result<(), String> {
+    let target = validated_local_artifact(&path)?;
+    #[cfg(target_os = "windows")]
+    {
+        return ProcessCommand::new("rundll32.exe")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(&target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("无法打开产物文件: {error}"));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        open_file(&target)
+    }
+}
+
 #[derive(Serialize)]
 pub struct McpRow {
     name: String,
@@ -1469,19 +2345,27 @@ fn now_epoch_millis() -> i64 {
         .unwrap_or(0)
 }
 
-fn get_harness_diagnostics() -> Result<serde_json::Value, String> {
+fn get_harness_diagnostics(
+    provider_directory: &ProviderDirectoryService,
+    provider_activation: &ProviderActivationGate,
+) -> Result<serde_json::Value, String> {
     let (cfg, workspace) = configured_workspace()?;
+    let alibaba_attachment_parser_enabled = cfg.alibaba_attachment_parser_enabled;
     let runtime = ConfiguredHarnessRuntime::from_config(cfg);
     let tools = runtime.build_tools(
         workspace.clone(),
         RuntimeContextSources::new(String::new(), Vec::new(), String::new()),
         RuntimeHostBindings::default(),
     )?;
-    let mut diagnostics = serde_json::to_value(tools.harness_diagnostics())
-        .map_err(|error| error.to_string())?;
+    let mut diagnostics =
+        serde_json::to_value(tools.harness_diagnostics()).map_err(|error| error.to_string())?;
     let object = diagnostics
         .as_object_mut()
         .ok_or_else(|| "Harness 诊断格式无效".to_string())?;
+    object.insert(
+        "alibaba_attachment_parser".into(),
+        serde_json::Value::Bool(alibaba_attachment_parser_enabled),
+    );
     object.insert(
         "image_generation_ready".into(),
         serde_json::Value::Bool(tools.get("generate_image").is_some()),
@@ -1492,12 +2376,21 @@ fn get_harness_diagnostics() -> Result<serde_json::Value, String> {
     );
     object.insert(
         "external_tools_ready".into(),
-        serde_json::Value::Bool(
-            tools
-                .schemas()
-                .iter()
-                .any(|schema| schema["function"]["name"].as_str().is_some_and(|name| name.contains("__"))),
-        ),
+        serde_json::Value::Bool(tools.schemas().iter().any(|schema| {
+            schema["function"]["name"]
+                .as_str()
+                .is_some_and(|name| name.contains("__"))
+        })),
+    );
+    object.insert(
+        "provider_route".into(),
+        serde_json::to_value(provider_directory.diagnostics()?)
+            .map_err(|error| error.to_string())?,
+    );
+    object.insert(
+        "provider_activation".into(),
+        serde_json::to_value(provider_activation.diagnostics()?)
+            .map_err(|error| error.to_string())?,
     );
     Ok(diagnostics)
 }
@@ -1559,16 +2452,40 @@ struct CodexPluginView {
     has_apps: bool,
     app_count: usize,
     has_hooks: bool,
+    ui_slots: Vec<DshUiSlotContribution>,
+    ui_slot_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct DshUiSlotContribution {
+    #[serde(default)]
+    plugin: String,
+    slot: String,
+    id: String,
+    label: String,
+    #[serde(default)]
+    order: i32,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    url: Option<String>,
 }
 
 impl CodexPluginView {
     fn new(plugin: CodexPluginRecord, app_count: usize) -> Self {
+        let (ui_slots, ui_slot_error) = match load_dsh_ui_slots(&plugin) {
+            Ok(slots) => (slots, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
         Self {
             skill_roots: plugin.skill_paths().len(),
             has_mcp: plugin.manifest.mcp_servers.is_some() || plugin.mcp_path().is_some(),
             has_apps: plugin.manifest.apps.is_some() || plugin.apps_path().is_some(),
             app_count,
             has_hooks: plugin.manifest.hooks.is_some() || plugin.hooks_path().is_some(),
+            ui_slots,
+            ui_slot_error,
             manifest: plugin.manifest,
             root: plugin.root,
             enabled: plugin.enabled,
@@ -1576,12 +2493,66 @@ impl CodexPluginView {
     }
 }
 
+fn load_dsh_ui_slots(plugin: &CodexPluginRecord) -> Result<Vec<DshUiSlotContribution>, String> {
+    let path = plugin.root.join(".ncx/ui-slots.json");
+    if !plugin.enabled || !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    if bytes.len() > 64 * 1024 {
+        return Err("UI Slots 声明超过 64 KiB".to_string());
+    }
+    let mut slots: Vec<DshUiSlotContribution> =
+        serde_json::from_slice(&bytes).map_err(|error| format!("UI Slots 声明无效: {error}"))?;
+    if slots.len() > 24 {
+        return Err("UI Slots 声明超过 24 项".to_string());
+    }
+    let mut identities = std::collections::HashSet::new();
+    for item in &mut slots {
+        if !matches!(
+            item.slot.as_str(),
+            "settings.plugins.tab" | "sidebar.footer.action" | "shell.overlay"
+        ) || item.id.is_empty()
+            || item.id.len() > 80
+            || item.label.is_empty()
+            || item.label.len() > 80
+            || item
+                .url
+                .as_deref()
+                .is_some_and(|url| !url.starts_with("https://"))
+        {
+            return Err("UI Slots 声明包含不安全或未支持的字段".to_string());
+        }
+        if !identities.insert((item.slot.clone(), item.id.clone())) {
+            return Err("UI Slots 声明包含重复的 slot/id".to_string());
+        }
+        item.plugin = plugin.manifest.name.clone();
+    }
+    slots.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(slots)
+}
+
 fn install_codex_plugin(source: String, upgrade: bool) -> Result<CodexPluginRecord, String> {
-    codex_plugin_catalog()?.install_or_upgrade(Path::new(&source), upgrade)
+    let source = Path::new(&source);
+    ensure_no_codex_plugin_capability_conflict(source, upgrade)?;
+    codex_plugin_catalog()?.install_or_upgrade(source, upgrade)
 }
 
 fn set_codex_plugin_enabled(name: String, enabled: bool) -> Result<(), String> {
-    codex_plugin_catalog()?.set_enabled(&name, enabled)
+    let catalog = codex_plugin_catalog()?;
+    if enabled {
+        let plugin = catalog
+            .discover()?
+            .into_iter()
+            .find(|plugin| plugin.manifest.name == name)
+            .ok_or_else(|| format!("插件 '{name}' 尚未安装"))?;
+        ensure_no_codex_plugin_capability_conflict_in(&catalog, &plugin.root, true)?;
+    }
+    catalog.set_enabled(&name, enabled)
 }
 
 fn uninstall_codex_plugin(name: String) -> Result<(), String> {
@@ -1592,6 +2563,688 @@ fn uninstall_codex_plugin(name: String) -> Result<(), String> {
 struct MarketplaceView {
     path: String,
     marketplace: Marketplace,
+}
+
+const DSHFIND_ENDPOINT: &str = "https://api.dshfind.com/v1/plugins";
+const DSH_1024_ENDPOINT: &str = "https://deepseek1024.com/api/v1/plugins";
+const DSH_MARKET_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+fn restricted_market_get(
+    url: reqwest::Url,
+    expected_origin: &str,
+) -> Result<serde_json::Value, String> {
+    if url.scheme() != "https" || url.origin().ascii_serialization() != expected_origin {
+        return Err("DSH 市场只允许已登记的 HTTPS Origin".to_string());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .map_err(|error| format!("DSH 市场请求失败: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("DSH 市场返回 HTTP {}", response.status()));
+    }
+    if response
+        .content_length()
+        .is_some_and(|size| size > DSH_MARKET_MAX_BYTES as u64)
+    {
+        return Err("DSH 市场响应超过 5 MiB 限制".to_string());
+    }
+    let bytes = response.bytes().map_err(|error| error.to_string())?;
+    if bytes.len() > DSH_MARKET_MAX_BYTES {
+        return Err("DSH 市场响应超过 5 MiB 限制".to_string());
+    }
+    serde_json::from_slice(&bytes).map_err(|error| format!("DSH 市场响应不是有效 JSON: {error}"))
+}
+
+fn dsh_marketplace_search(
+    source: &str,
+    manifest_url: Option<&str>,
+    query: &str,
+) -> Result<serde_json::Value, String> {
+    let (provider, payload) = match source {
+        "dshfind" => {
+            let mut url =
+                reqwest::Url::parse(DSHFIND_ENDPOINT).map_err(|error| error.to_string())?;
+            url.query_pairs_mut()
+                .append_pair("page", "1")
+                .append_pair("per_page", "100");
+            if !query.trim().is_empty() {
+                url.query_pairs_mut().append_pair("q", query.trim());
+            }
+            (
+                "dshfind",
+                restricted_market_get(url, "https://api.dshfind.com")?,
+            )
+        }
+        "dsh-1024store" => (
+            "dsh-1024store",
+            restricted_market_get(
+                reqwest::Url::parse(DSH_1024_ENDPOINT).map_err(|error| error.to_string())?,
+                "https://deepseek1024.com",
+            )?,
+        ),
+        "standard-http" => {
+            let manifest_url = manifest_url.ok_or_else(|| "标准市场源缺少清单 URL".to_string())?;
+            let manifest_url = reqwest::Url::parse(manifest_url)
+                .map_err(|_| "标准市场清单 URL 无效".to_string())?;
+            let origin = manifest_url.origin().ascii_serialization();
+            let manifest = restricted_market_get(manifest_url, &origin)?;
+            let endpoint = manifest
+                .pointer("/transport/endpoint")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| "标准市场清单缺少 transport.endpoint".to_string())?;
+            let mut endpoint =
+                reqwest::Url::parse(endpoint).map_err(|_| "标准市场 endpoint 无效".to_string())?;
+            if endpoint.origin().ascii_serialization() != origin {
+                return Err("标准市场 endpoint 必须与清单同源".to_string());
+            }
+            if !query.trim().is_empty() {
+                endpoint.query_pairs_mut().append_pair("q", query.trim());
+            }
+            ("standard-http", restricted_market_get(endpoint, &origin)?)
+        }
+        _ => return Err("未知 DSH 市场源".to_string()),
+    };
+    let raw_items = payload
+        .get("data")
+        .or_else(|| payload.get("packages"))
+        .or_else(|| payload.get("items"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "DSH 市场响应缺少插件列表".to_string())?;
+    let needle = query.trim().to_lowercase();
+    let items = raw_items
+        .iter()
+        .filter_map(|item| normalize_dsh_market_item(provider, item))
+        .filter(|item| {
+            needle.is_empty()
+                || item["name"]
+                    .as_str()
+                    .is_some_and(|value| value.to_lowercase().contains(&needle))
+                || item["summary"]
+                    .as_str()
+                    .is_some_and(|value| value.to_lowercase().contains(&needle))
+        })
+        .take(100)
+        .collect::<Vec<_>>();
+    let categories = normalize_dsh_categories(payload.get("categories"), &items);
+    let meta = payload.get("meta").cloned().unwrap_or_else(|| {
+        serde_json::json!({
+            "total": items.len(),
+            "catalogTotal": raw_items.len()
+        })
+    });
+    Ok(serde_json::json!({
+        "source": provider,
+        "items": items,
+        "categories": categories,
+        "meta": meta,
+        "total": items.len()
+    }))
+}
+
+fn valid_dsh_category_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 48
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn dsh_category_id(raw: &serde_json::Value) -> Option<&str> {
+    raw.get("category")
+        .and_then(|value| {
+            value
+                .as_str()
+                .or_else(|| value.get("id").and_then(serde_json::Value::as_str))
+        })
+        .map(str::trim)
+        .filter(|value| valid_dsh_category_id(value))
+}
+
+fn normalize_dsh_categories(
+    raw: Option<&serde_json::Value>,
+    items: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let mut categories = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    if let Some(raw) = raw.and_then(serde_json::Value::as_array) {
+        for category in raw.iter().take(100) {
+            let Some(id) = category
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|id| valid_dsh_category_id(id))
+            else {
+                continue;
+            };
+            if !seen.insert(id.to_string()) {
+                continue;
+            }
+            let en = category
+                .get("en")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(id)
+                .chars()
+                .take(80)
+                .collect::<String>();
+            let zh = category
+                .get("zh")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&en)
+                .chars()
+                .take(80)
+                .collect::<String>();
+            let count = category
+                .get("count")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            categories.push(serde_json::json!({ "id": id, "en": en, "zh": zh, "count": count }));
+        }
+    }
+    if categories.is_empty() {
+        let mut counts = std::collections::BTreeMap::<String, u64>::new();
+        for item in items {
+            let id = item
+                .get("category")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| valid_dsh_category_id(id))
+                .unwrap_or("unclassified");
+            *counts.entry(id.to_string()).or_default() += 1;
+        }
+        categories.extend(counts.into_iter().map(|(id, count)| {
+            let label = if id == "unclassified" {
+                "待分类"
+            } else {
+                id.as_str()
+            };
+            serde_json::json!({ "id": id, "en": label, "zh": label, "count": count })
+        }));
+    }
+    categories
+}
+
+fn normalize_dsh_market_item(provider: &str, raw: &serde_json::Value) -> Option<serde_json::Value> {
+    if raw.get("is_risky").and_then(serde_json::Value::as_bool) == Some(true) {
+        return None;
+    }
+    let id = raw
+        .get("full_name")
+        .or_else(|| raw.get("id"))?
+        .as_str()?
+        .trim();
+    let name = raw
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(id)
+        .trim();
+    if id.is_empty() || name.is_empty() || id.len() > 160 || name.len() > 120 {
+        return None;
+    }
+    let summary = raw
+        .get("description")
+        .and_then(|value| {
+            value
+                .as_str()
+                .or_else(|| value.get("zh").and_then(serde_json::Value::as_str))
+                .or_else(|| value.get("en").and_then(serde_json::Value::as_str))
+        })
+        .unwrap_or(name)
+        .chars()
+        .take(1000)
+        .collect::<String>();
+    let repository = raw
+        .get("repository_url")
+        .or_else(|| raw.get("url"))
+        .and_then(serde_json::Value::as_str);
+    let methods = raw
+        .pointer("/install/methods")
+        .or_else(|| raw.get("installMethods"))
+        .and_then(serde_json::Value::as_array);
+    let npm = methods.and_then(|methods| {
+        methods.iter().find_map(|method| {
+            let kind = method.get("kind")?.as_str()?;
+            let verified = method
+                .get("verification")
+                .and_then(serde_json::Value::as_str)
+                == Some("verified");
+            let safe_build = method
+                .get("requiresBuildAllowance")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true);
+            if kind == "npm" && verified && safe_build {
+                Some((
+                    method.get("spec")?.as_str()?,
+                    method.get("revision")?.as_str()?,
+                ))
+            } else {
+                None
+            }
+        })
+    });
+    let (package, version, compatibility, reason) = npm
+        .map(|(package, version)| {
+            (
+                Some(package),
+                Some(version),
+                "review",
+                "需要 Host 核验 NPM 包和运行时依赖",
+            )
+        })
+        .unwrap_or((
+            None,
+            None,
+            "incompatible",
+            "市场未提供可验证的精确 NPM 安装目标",
+        ));
+    let category = dsh_category_id(raw).unwrap_or("unclassified");
+    Some(serde_json::json!({
+        "source": provider, "id": id, "name": name, "summary": summary,
+        "repository": repository, "package": package, "version": version,
+        "category": category, "compatibility": compatibility, "compatibilityReason": reason
+    }))
+}
+
+fn dsh_marketplace_preview(item: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let package = item
+        .get("package")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "该插件没有可验证的 NPM 包".to_string())?;
+    let version = item
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "该插件没有固定版本".to_string())?;
+    if !valid_npm_package(package) || version.is_empty() || version.len() > 64 {
+        return Err("插件 NPM 身份无效".to_string());
+    }
+    let registry_url = format!(
+        "https://registry.npmjs.org/{}/{version}",
+        package.replace('/', "%2F")
+    );
+    let manifest = restricted_market_get(
+        reqwest::Url::parse(&registry_url).map_err(|error| error.to_string())?,
+        "https://registry.npmjs.org",
+    )?;
+    if manifest.get("name").and_then(serde_json::Value::as_str) != Some(package)
+        || manifest.get("version").and_then(serde_json::Value::as_str) != Some(version)
+    {
+        return Err("NPM 返回身份与市场目录不一致".to_string());
+    }
+    let scripts = manifest
+        .get("scripts")
+        .and_then(serde_json::Value::as_object);
+    let lifecycle = scripts.is_some_and(|scripts| {
+        ["preinstall", "install", "postinstall"]
+            .iter()
+            .any(|name| scripts.contains_key(*name))
+    });
+    let dependencies = manifest
+        .get("dependencies")
+        .and_then(serde_json::Value::as_object);
+    let dependency_names = dependencies
+        .map(|deps| deps.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let uses_slots = dependency_names
+        .iter()
+        .any(|name| name == "@deepseek-ai/dsh-client-ui-slots");
+    let uses_private_runtime = dependency_names.iter().any(|name| {
+        name.starts_with("@deepseek-ai/dsh-") && name != "@deepseek-ai/dsh-client-ui-slots"
+    });
+    let (compatibility, reason) = if lifecycle {
+        ("incompatible", "包含 NPM 安装生命周期脚本，禁止自动安装")
+    } else if uses_private_runtime {
+        ("incompatible", "依赖尚未映射的 DSH 私有运行时")
+    } else if uses_slots {
+        (
+            "ui-adapter",
+            "将静态核验并映射设置页、侧栏动作和 Shell Overlay；不会执行第三方 React",
+        )
+    } else {
+        (
+            "convertible",
+            "未发现动态安装脚本或 DSH 私有运行时，可进入资源转换检查",
+        )
+    };
+    Ok(serde_json::json!({
+        "package": package, "version": version, "compatibility": compatibility,
+        "compatible": compatibility != "incompatible", "reason": reason,
+        "risks": [
+            format!("依赖数量：{}", dependency_names.len()),
+            if lifecycle { "包含 lifecycle scripts" } else { "未发现 lifecycle scripts" }
+        ]
+    }))
+}
+
+fn install_dsh_marketplace_plugin(
+    item: &serde_json::Value,
+    upgrade: bool,
+) -> Result<CodexPluginRecord, String> {
+    let preview = dsh_marketplace_preview(item)?;
+    if !matches!(
+        preview
+            .get("compatibility")
+            .and_then(serde_json::Value::as_str),
+        Some("convertible" | "ui-adapter")
+    ) {
+        return Err(preview
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("该 DSH 插件不能转换为 nanocodex 资源插件")
+            .to_string());
+    }
+    let package = item
+        .get("package")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "缺少 NPM 包名".to_string())?;
+    let version = item
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "缺少 NPM 版本".to_string())?;
+    let plugin_name = item
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(package);
+    let marketplace_plugin = MarketplacePlugin {
+        name: plugin_name.to_string(),
+        source: MarketplaceSource::Npm {
+            package: package.to_string(),
+            version: Some(version.to_string()),
+            registry: Some("https://registry.npmjs.org".to_string()),
+        },
+    };
+    let (_, workspace) = configured_workspace()?;
+    let (source, cleanup) = materialize_marketplace_plugin(
+        &workspace,
+        Path::new("marketplace.json"),
+        &marketplace_plugin,
+    )?;
+    let result = prepare_dsh_portable_plugin(&source, package, version)
+        .and_then(|_| ensure_no_codex_plugin_capability_conflict(&source, upgrade))
+        .and_then(|_| codex_plugin_catalog()?.install_or_upgrade(&source, upgrade));
+    if let Some(cleanup) = cleanup {
+        let _ = remove_plugin_staging(&workspace, &cleanup);
+    }
+    result
+}
+
+fn codex_plugin_resource_ids(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+    let mut ids = std::collections::BTreeSet::new();
+    let manifest_path = root.join(".codex-plugin/plugin.json");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&manifest_path)
+            .map_err(|_| "插件缺少 .codex-plugin/plugin.json".to_string())?,
+    )
+    .map_err(|error| format!("插件清单无效: {error}"))?;
+    if let Some(name) = manifest.get("name").and_then(serde_json::Value::as_str) {
+        ids.insert(format!("plugin:{name}"));
+    }
+    let skills = root.join("skills");
+    if skills.is_dir() {
+        for entry in fs::read_dir(skills).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if entry.path().join("SKILL.md").is_file() {
+                ids.insert(format!(
+                    "skill:{}",
+                    entry.file_name().to_string_lossy().to_lowercase()
+                ));
+            }
+        }
+    }
+    let mcp_path = root.join(".mcp.json");
+    if mcp_path.is_file() {
+        let mcp: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(mcp_path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("MCP 配置无效: {error}"))?;
+        if let Some(servers) = mcp.get("mcpServers").and_then(serde_json::Value::as_object) {
+            ids.extend(
+                servers
+                    .keys()
+                    .map(|name| format!("mcp:{}", name.to_lowercase())),
+            );
+        }
+    }
+    Ok(ids)
+}
+
+fn ensure_no_codex_plugin_capability_conflict(source: &Path, upgrade: bool) -> Result<(), String> {
+    ensure_no_codex_plugin_capability_conflict_in(&codex_plugin_catalog()?, source, upgrade)
+}
+
+fn ensure_no_codex_plugin_capability_conflict_in(
+    catalog: &CodexPluginCatalog,
+    source: &Path,
+    upgrade: bool,
+) -> Result<(), String> {
+    let incoming = codex_plugin_resource_ids(source)?;
+    let incoming_name = incoming
+        .iter()
+        .find(|id| id.starts_with("plugin:"))
+        .cloned();
+    for installed in catalog
+        .discover()?
+        .into_iter()
+        .filter(|plugin| plugin.enabled)
+    {
+        let installed_ids = codex_plugin_resource_ids(&installed.root)?;
+        if upgrade
+            && incoming_name
+                .as_ref()
+                .is_some_and(|name| installed_ids.contains(name))
+        {
+            continue;
+        }
+        let conflicts = incoming
+            .intersection(&installed_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !conflicts.is_empty() {
+            return Err(format!(
+                "安装已阻断：插件 {} 与已启用插件 {} 存在重复能力：{}。请先停用或卸载冲突插件。",
+                incoming_name
+                    .as_deref()
+                    .unwrap_or("未知插件")
+                    .trim_start_matches("plugin:"),
+                installed.manifest.name,
+                conflicts.join("、")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn prepare_dsh_portable_plugin(source: &Path, package: &str, version: &str) -> Result<(), String> {
+    let package_json: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(source.join("package.json"))
+            .map_err(|_| "NPM 包缺少 package.json".to_string())?,
+    )
+    .map_err(|error| format!("NPM package.json 无效: {error}"))?;
+    if package_json.get("name").and_then(serde_json::Value::as_str) != Some(package)
+        || package_json
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            != Some(version)
+    {
+        return Err("解包后的 NPM 身份与风险预览不一致".to_string());
+    }
+    if source.join(".codex-plugin/plugin.json").is_file() {
+        return Ok(());
+    }
+    let has_skills = source.join("skills").is_dir();
+    let has_mcp = source.join(".mcp.json").is_file();
+    let command_dirs = [source.join("commands"), source.join(".cursor/commands")];
+    let command_files = command_dirs
+        .iter()
+        .filter(|dir| dir.is_dir())
+        .flat_map(|dir| {
+            fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("md"))
+        .collect::<Vec<_>>();
+    let ui_slots = extract_dsh_ui_slots(source, &package_json)?;
+    if !has_skills && !has_mcp && command_files.is_empty() && ui_slots.is_empty() {
+        return Err("该包不包含可转换资源，或使用了尚未支持的 DSH UI Slot".to_string());
+    }
+    if !command_files.is_empty() {
+        let generated = source.join("skills");
+        fs::create_dir_all(&generated).map_err(|error| error.to_string())?;
+        for command in command_files {
+            let stem = command
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("command");
+            let safe = stem
+                .chars()
+                .map(|value| {
+                    if value.is_ascii_alphanumeric() || value == '-' {
+                        value
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>();
+            let skill_dir = generated.join(format!("dsh-command-{safe}"));
+            fs::create_dir_all(&skill_dir).map_err(|error| error.to_string())?;
+            let body = fs::read_to_string(&command).map_err(|error| error.to_string())?;
+            let content = if body.trim_start().starts_with("---") {
+                body
+            } else {
+                format!("---\nname: dsh-command-{safe}\ndescription: Converted DSH command {stem}\n---\n\n{body}")
+            };
+            fs::write(skill_dir.join("SKILL.md"), content).map_err(|error| error.to_string())?;
+        }
+    }
+    let manifest_dir = source.join(".codex-plugin");
+    fs::create_dir_all(&manifest_dir).map_err(|error| error.to_string())?;
+    let mut manifest = serde_json::json!({
+        "name": package.replace(['@', '/'], "-"),
+        "version": version,
+        "description": "Converted from a verified DSH Marketplace package",
+        "keywords": ["dsh-marketplace", "converted"]
+    });
+    let fields = manifest.as_object_mut().expect("manifest object");
+    if source.join("skills").is_dir() {
+        fields.insert("skills".into(), serde_json::json!("./skills"));
+    }
+    if has_mcp {
+        fields.insert("mcpServers".into(), serde_json::json!("./.mcp.json"));
+    }
+    if !ui_slots.is_empty() {
+        let ui_dir = source.join(".ncx");
+        fs::create_dir_all(&ui_dir).map_err(|error| error.to_string())?;
+        fs::write(
+            ui_dir.join("ui-slots.json"),
+            serde_json::to_vec_pretty(&ui_slots).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        fields.insert(
+            "interface".into(),
+            serde_json::json!({ "dshUiSlots": "./.ncx/ui-slots.json" }),
+        );
+    }
+    fs::write(
+        manifest_dir.join("plugin.json"),
+        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn extract_dsh_ui_slots(
+    source: &Path,
+    package_json: &serde_json::Value,
+) -> Result<Vec<DshUiSlotContribution>, String> {
+    const SUPPORTED: [&str; 3] = [
+        "settings.plugins.tab",
+        "sidebar.footer.action",
+        "shell.overlay",
+    ];
+    let mut found = std::collections::BTreeSet::new();
+    let mut pending = vec![source.to_path_buf()];
+    let mut scanned = 0usize;
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).map_err(|error| error.to_string())? {
+            let path = entry.map_err(|error| error.to_string())?.path();
+            if path.is_dir() {
+                if path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| matches!(name, "node_modules" | ".git" | "target"))
+                {
+                    continue;
+                }
+                pending.push(path);
+                continue;
+            }
+            if !path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| matches!(ext, "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"))
+            {
+                continue;
+            }
+            let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+            if metadata.len() > 512 * 1024 {
+                continue;
+            }
+            scanned += metadata.len() as usize;
+            if scanned > 4 * 1024 * 1024 {
+                return Err("DSH UI 静态检查超过 4 MiB 限制".to_string());
+            }
+            let text = fs::read_to_string(&path).unwrap_or_default();
+            for slot in SUPPORTED {
+                if text.contains(slot) {
+                    found.insert(slot);
+                }
+            }
+        }
+    }
+    if found.is_empty() {
+        return Ok(Vec::new());
+    }
+    let label = package_json
+        .get("displayName")
+        .or_else(|| package_json.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("DSH 插件")
+        .to_string();
+    let description = package_json
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("由 DSH UI Slots 安全适配")
+        .to_string();
+    let url = package_json
+        .get("homepage")
+        .and_then(serde_json::Value::as_str)
+        .filter(|url| url.starts_with("https://"))
+        .map(str::to_string);
+    let id = package_json["name"]
+        .as_str()
+        .unwrap_or("dsh-plugin")
+        .replace(['@', '/'], "-");
+    Ok(found
+        .into_iter()
+        .map(|slot| DshUiSlotContribution {
+            plugin: String::new(),
+            slot: slot.to_string(),
+            id: id.clone(),
+            label: label.clone(),
+            order: if slot == "settings.plugins.tab" {
+                20
+            } else {
+                10
+            },
+            description: description.clone(),
+            url: url.clone(),
+        })
+        .collect())
 }
 
 fn list_plugin_marketplaces() -> Result<Vec<MarketplaceView>, String> {
@@ -1629,7 +3282,8 @@ fn install_marketplace_plugin(
         .find(|candidate| candidate.name == plugin_name)
         .ok_or_else(|| format!("Marketplace 中不存在插件 '{plugin_name}'"))?;
     let (source, cleanup) = materialize_marketplace_plugin(&workspace, &canonical_path, plugin)?;
-    let result = codex_plugin_catalog()?.install_or_upgrade(&source, upgrade);
+    let result = ensure_no_codex_plugin_capability_conflict(&source, upgrade)
+        .and_then(|_| codex_plugin_catalog()?.install_or_upgrade(&source, upgrade));
     if let Some(cleanup) = cleanup {
         let _ = remove_plugin_staging(&workspace, &cleanup);
     }
@@ -1856,6 +3510,7 @@ fn migrate_legacy_threads(
                 workspace: summary.workspace,
                 title: summary.title,
                 archived: summary.archived,
+                harness_profile: "full".into(),
                 created_at,
                 updated_at,
             },
@@ -1888,11 +3543,14 @@ fn legacy_conclusion_turns(messages: &[serde_json::Value], timestamp: i64) -> Ve
                 id: ItemId::new(format!("legacy-assistant-{index}"))
                     .expect("non-empty legacy item id"),
                 text: answer,
+                model: None,
+                confirmed_model: None,
             });
         }
         turns.push(Turn {
             id: TurnId::new(format!("legacy-turn-{index}")).expect("non-empty legacy turn id"),
             status: TurnStatus::Completed,
+            execution_mode: ncx_protocol::ExecutionMode::Agent,
             items,
             started_at: timestamp,
             completed_at: Some(timestamp),
@@ -1944,8 +3602,12 @@ pub fn run() {
     let questions_for_worker = questions.clone();
     let cancels: CancelRegistry = Arc::new(Mutex::new(HashMap::new()));
     let cancels_for_worker = cancels.clone();
-    let running: RunningSessions = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let running: RunningSessions = Arc::new(Mutex::new(HashMap::new()));
     let running_for_worker = running.clone();
+    let deferred_prompts: DeferredPrompts = Arc::new(Mutex::new(HashMap::new()));
+    let deferred_prompts_for_worker = deferred_prompts.clone();
+    let worker_lifecycle = Arc::new(WorkerLifecycle::default());
+    let worker_lifecycle_for_setup = worker_lifecycle.clone();
     let session_grants: GrantRegistry = Arc::new(Mutex::new(HashMap::new()));
     let session_index = Arc::new(Mutex::new(SessionIndex::default()));
     let thread_store = Arc::new(
@@ -1953,13 +3615,16 @@ pub fn run() {
             .expect("open the versioned nanocodex thread store"),
     );
     let app_server = Arc::new(AppServer::new(thread_store, now_epoch_millis));
+    let provider_directory = ProviderDirectoryService::default();
+    let provider_catalog = ProviderCatalogService::default();
+    let provider_chat_probe = ProviderChatProbeService::default();
     if let Ok(index) = session_index.lock() {
         if let Err(error) = migrate_legacy_threads(&index, &app_server) {
             eprintln!("thread migration: {error}");
         }
     }
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             tx,
@@ -1967,10 +3632,26 @@ pub fn run() {
             questions,
             question_counter: AtomicU64::new(1_000_000),
             cancels,
+            running,
+            deferred_prompts,
+            worker_lifecycle,
             app_server: app_server.clone(),
+            provider_directory,
+            provider_catalog,
+            provider_chat_probe,
+            provider_activation: ProviderActivationGate::default(),
             openrouter_models: Mutex::new(Vec::new()),
+            yunmo_models: Mutex::new(Vec::new()),
+            memory_merge: Arc::new(memory_merge_job::MemoryMergeCoordinator::default()),
+            forge_job: Arc::new(forge_job::ForgeJobCoordinator::default()),
         })
         .setup(move |app| {
+            if let (Some(window), Some(icon)) = (
+                app.get_webview_window("main"),
+                app.default_window_icon().cloned(),
+            ) {
+                window.set_icon(icon)?;
+            }
             // Hand the agent thread an AppHandle (to emit events), the receiver
             // (to take prompts), and the shared pending-approvals map.
             spawn_worker(
@@ -1981,6 +3662,8 @@ pub fn run() {
                 questions_for_worker,
                 cancels_for_worker,
                 running_for_worker,
+                deferred_prompts_for_worker,
+                worker_lifecycle_for_setup,
                 session_grants,
             );
             Ok(())
@@ -1989,6 +3672,7 @@ pub fn run() {
             app_server_request,
             e2e_ask_question,
             refresh_openrouter_models,
+            refresh_yunmo_models,
             get_config_location,
             open_config_file,
             open_config_dir,
@@ -2006,6 +3690,8 @@ pub fn run() {
             list_dir,
             read_workspace_file,
             open_url,
+            open_local_artifact,
+            local_artifact_preview,
             list_mcp,
             save_temp_image,
             open_session_log,
@@ -2015,14 +3701,111 @@ pub fn run() {
             open_memory_file,
             get_workspace,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the nanocodex GUI");
+        .build(tauri::generate_context!())
+        .expect("error while building the nanocodex GUI");
+    app.run(|handle, event| {
+        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+            let state = handle.state::<AppState>();
+            state
+                .worker_lifecycle
+                .shutdown_and_join(&state.tx, &state.cancels);
+        }
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_catalog::CatalogModel;
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "ncx-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn invalid_orchestrator_budget_never_changes_the_config_file() {
+        let root = unique_test_dir("orchestrator-budget-invalid");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.toml");
+        let original = b"model = \"known-model\"\norchestrator_workers = 2\n";
+        fs::write(&path, original).unwrap();
+
+        for invalid in ["9", "NaN"] {
+            let updates = HashMap::from([
+                ("model".into(), "must-not-be-written".into()),
+                ("orchestrator_workers".into(), invalid.into()),
+            ]);
+            let error = persist_validated_settings(&updates, &path).unwrap_err();
+            assert!(error.contains("普通任务 Worker"));
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn orchestrator_budget_boundaries_are_persisted_together() {
+        let root = unique_test_dir("orchestrator-budget-boundaries");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.toml");
+        fs::write(&path, b"model = \"known-model\"\n").unwrap();
+        let updates = HashMap::from([
+            ("orchestrator_workers".into(), "4".into()),
+            ("orchestrator_high_workers".into(), "1".into()),
+            ("orchestrator_verify_retries".into(), "0".into()),
+            ("orchestrator_max_depth".into(), "2".into()),
+            ("orchestrator_max_subtasks".into(), "12".into()),
+        ]);
+
+        persist_validated_settings(&updates, &path).unwrap();
+        let persisted = fs::read_to_string(&path).unwrap();
+        for (key, expected) in [
+            ("orchestrator_workers", "4"),
+            ("orchestrator_high_workers", "1"),
+            ("orchestrator_verify_retries", "0"),
+            ("orchestrator_max_depth", "2"),
+            ("orchestrator_max_subtasks", "12"),
+        ] {
+            assert!(
+                persisted.contains(&format!("{key} = \"{expected}\"")),
+                "missing {key}: {persisted}"
+            );
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_artifact_opening_allows_media_and_rejects_executables() {
+        let root = std::env::temp_dir().join(format!("ncx-local-artifact-{}", now_epoch_millis()));
+        fs::create_dir_all(&root).unwrap();
+        let image = root.join("preview.png");
+        let executable = root.join("unsafe.exe");
+        fs::write(&image, b"image").unwrap();
+        fs::write(&executable, b"binary").unwrap();
+        assert_eq!(
+            validated_local_artifact(image.to_str().unwrap()).unwrap(),
+            image.canonicalize().unwrap()
+        );
+        assert!(validated_local_artifact(executable.to_str().unwrap())
+            .unwrap_err()
+            .contains("只允许"));
+        assert!(
+            validated_local_artifact(root.join("missing.png").to_str().unwrap())
+                .unwrap_err()
+                .contains("不存在")
+        );
+        assert!(local_image_preview_data(image.to_str().unwrap())
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+        let _ = fs::remove_dir_all(root);
+    }
     use ncx_config::Config;
 
     #[test]
@@ -2047,6 +3830,7 @@ mod tests {
                 thread_id: Some(thread_id.clone()),
                 workspace: root.display().to_string(),
                 title: "other session".into(),
+                harness_profile: "full".into(),
             })
             .unwrap();
         server
@@ -2073,6 +3857,8 @@ mod tests {
         cfg.vl_model = "qwen3.7-plus".into();
         cfg.vl_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1".into();
         cfg.vl_api_key = "secret-vision-key".into();
+        cfg.dashscope_token_plan_key = "sk-sp-secret-plan".into();
+        cfg.dashscope_workspace_key = "sk-ws-secret-workspace".into();
 
         let settings = settings_from_config(&cfg);
 
@@ -2084,15 +3870,35 @@ mod tests {
         assert!(settings.has_vl_api_key);
         assert_ne!(settings.vl_api_key_masked, cfg.vl_api_key);
         assert!(settings.vl_api_key_masked.starts_with("****"));
+        assert!(settings.has_dashscope_token_plan_key);
+        assert!(settings.has_dashscope_workspace_key);
+        assert_ne!(
+            settings.dashscope_token_plan_key_masked,
+            cfg.dashscope_token_plan_key
+        );
+        assert_ne!(
+            settings.dashscope_workspace_key_masked,
+            cfg.dashscope_workspace_key
+        );
     }
 
     #[test]
     fn image_attachment_requires_an_explicit_parser_model() {
-        assert!(validate_image_attachment_route(&[], "").is_ok());
-        assert!(validate_image_attachment_route(&["test.png".into()], "qwen3.7-plus").is_ok());
+        assert!(validate_image_attachment_route(&[], "text-only", false, "").is_ok());
+        assert!(
+            validate_image_attachment_route(&["test.png".into()], "gpt-5.6-sol", false, "").is_ok()
+        );
+        assert!(validate_image_attachment_route(
+            &["test.png".into()],
+            "text-only",
+            true,
+            "qwen3.7-plus"
+        )
+        .is_ok());
 
-        let error = validate_image_attachment_route(&["test.png".into()], "").unwrap_err();
-        assert!(error.contains("图片/文件解析模型"));
+        let error = validate_image_attachment_route(&["test.png".into()], "text-only", false, "")
+            .unwrap_err();
+        assert!(error.contains("设置 → 插件"));
         assert!(error.contains("设置"));
     }
 
@@ -2101,16 +3907,20 @@ mod tests {
         let composer = include_str!("../../src/components/Composer.svelte");
         let controls = include_str!("../../src/lib/model-controls-controller.svelte.ts");
         assert!(composer.contains("class=\"reasoning-pill\""));
+        assert!(!composer.contains("disabled={busy} title=\"切换 DeepSeek 思考模式\""));
+        assert!(composer.contains("当前运行不变，可选择下次会话使用的思考级别"));
         assert!(controls.contains("思考程度"));
         assert!(controls.contains("selectReasoningEffort"));
-        assert!(controls.contains("智能体自动"));
-        assert!(controls.contains("智能体增强"));
-        assert!(!controls.contains("{ id: \"low\", label:"));
+        assert!(controls.contains("当前运行不变，下次会话生效"));
+        assert!(controls.contains("reasoningEffortsForModel"));
+        assert!(controls.contains("gpt-5\\.6-(sol|terra)"));
+        assert!(controls.contains("DeepSeek max"));
+        assert!(controls.contains("OpenAI ${value} reasoning effort"));
         assert!(!controls.contains("{ id: \"medium\", label:"));
     }
 
     #[test]
-    fn session_controls_live_in_the_composer_with_apple_visual_tokens() {
+    fn compact_session_controls_keep_only_frequent_actions_in_the_composer() {
         let topbar = include_str!("../../src/components/TopBar.svelte")
             .split_once("<header class=\"topbar\">")
             .unwrap()
@@ -2119,24 +3929,84 @@ mod tests {
             .unwrap()
             .0;
         let composer = include_str!("../../src/components/Composer.svelte")
-            .split_once("<div class=\"composer-meta\">")
+            .split_once("<div class=\"composer-shell\">")
             .unwrap()
             .1
-            .split_once("{#if queued.length}")
+            .split_once("</footer>")
             .unwrap()
             .0;
+        assert!(composer.contains("<div class=\"composer-meta\">"));
         assert!(!topbar.contains("model-wrap"));
         assert!(!topbar.contains("reasoning-wrap"));
         assert!(!topbar.contains("ws-pill"));
         assert!(composer.contains("model-wrap"));
         assert!(composer.contains("reasoning-wrap"));
         assert!(composer.contains("ws-pill"));
+        assert!(composer.contains("approval-wrap"));
+        assert!(!composer.contains("execution-wrap"));
+        assert!(!composer.contains("profile-wrap"));
+
+        let settings = include_str!("../../src/components/SettingsModal.svelte");
+        assert!(settings.contains("Agent / 编排模式"));
+        assert!(settings.contains("当前会话 Harness"));
+        assert!(settings.contains("当前会话下一轮生效"));
+        assert!(settings.contains("disabled={harnessProfileLocked}"));
 
         let css = include_str!("../../src/app.css");
+        assert!(css.contains(".composer-meta .approval-wrap { order: 1; }"));
+        assert!(css.contains(".composer-meta .model-wrap { order: 2; }"));
+        assert!(css.contains(".composer-meta .reasoning-wrap { order: 3; }"));
+        assert!(css.contains(".composer-spacer { order: 5; flex: 1 1 auto; }"));
+        assert!(css.contains(".composer-underbar .ws-pill"));
+        assert!(css.contains("position: relative; min-height: 2rem"));
         assert!(css.contains("--accent:       #0a84ff"));
         assert!(css.contains("backdrop-filter: blur(28px)"));
         assert!(css
             .contains(".menu-backdrop:hover, .menu-backdrop:active, .menu-backdrop:focus-visible"));
+    }
+
+    #[test]
+    fn durable_goal_controls_are_visible_explicit_and_cost_gated() {
+        let app = include_str!("../../src/App.svelte");
+        let composer = include_str!("../../src/components/Composer.svelte");
+        let controller = include_str!("../../src/lib/goal-controller.svelte.ts");
+        let protocol = include_str!("../../src/lib/app-server-client.ts");
+        let css = include_str!("../../src/app.css");
+        assert!(app.contains("new GoalController(thread)"));
+        assert!(app.contains("observedGoalBusy && !busy"));
+        assert!(composer.contains("目标：{goalStatusLabel}"));
+        assert!(composer.contains("自动续轮："));
+        assert!(composer.contains("剩余上限：{goalRemainingRounds} 轮"));
+        assert!(composer.contains("暂停自动续轮"));
+        assert!(composer.contains("确认并继续"));
+        assert!(controller.contains("window.confirm("));
+        assert!(controller.contains("可能产生模型费用"));
+        assert!(
+            controller.contains("goal: { id: current.goal.id, revision: current.goal.revision }")
+        );
+        assert!(controller.contains("await this.refresh(threadId)"));
+        assert!(protocol.contains("type ProtocolGoalView"));
+        assert!(css.contains(".goal-pill.armed"));
+        assert!(css.contains(".goal-menu"));
+    }
+
+    #[test]
+    fn human_prompt_is_atomically_deferred_only_for_a_running_goal() {
+        let running: RunningSessions = Arc::new(Mutex::new(HashMap::from([(
+            "goal-thread".to_string(),
+            SessionRunKind::Goal,
+        )])));
+        let deferred: DeferredPrompts = Arc::new(Mutex::new(HashMap::new()));
+        let prompt = DeferredPrompt {
+            text: "新的用户要求".into(),
+            images: Vec::new(),
+            execution_mode: ncx_protocol::ExecutionMode::Agent,
+        };
+
+        assert!(defer_prompt_for_goal(&running, &deferred, "goal-thread", prompt.clone()).unwrap());
+        assert_eq!(deferred.lock().unwrap()["goal-thread"].text, "新的用户要求");
+        assert!(defer_prompt_for_goal(&running, &deferred, "goal-thread", prompt.clone()).is_err());
+        assert!(!defer_prompt_for_goal(&running, &deferred, "human-thread", prompt).unwrap());
     }
 
     #[test]
@@ -2159,6 +4029,13 @@ mod tests {
             .0;
         assert!(cleanup.contains("message.role !== \"tool_group\""));
         assert!(thread.matches("hideCompletedToolActivity(").count() >= 3);
+        assert!(thread.contains("this.captureTrajectory(event.session_id);"));
+        assert!(thread.contains("this.clone(this.messages.slice(start))"));
+        assert!(thread.contains("this.trajectoryBySession.set(sessionId"));
+        let app = include_str!("../../src/App.svelte");
+        assert!(app.contains(
+            "activeView === \"trajectory\" ? thread.trajectoryMessages : thread.messages"
+        ));
         assert!(bridge.contains("only the execution result and a brief recommended next action"));
         assert!(bridge.contains("do not recap tool calls, logs, or intermediate process"));
 
@@ -2201,6 +4078,40 @@ mod tests {
     }
 
     #[test]
+    fn dsh_conversation_details_remain_functional() {
+        let app = include_str!("../../src/App.svelte");
+        let topbar = include_str!("../../src/components/TopBar.svelte");
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
+        let composer = include_str!("../../src/components/Composer.svelte");
+
+        assert!(app.contains("bind:activeView"));
+        assert!(topbar.contains("activeView = \"trajectory\""));
+        assert!(conversation.contains("trajectory-view"));
+        assert!(conversation.contains("copyMessage(message.text, index)"));
+        assert!(conversation.contains("toggleFeedback(index, \"good\")"));
+        assert!(conversation.contains("forkCurrent"));
+        assert!(composer.contains("{turnCount} 轮 · {stepCount} 步"));
+        assert!(composer.contains("累计 ≈"));
+    }
+
+    #[test]
+    fn dsh_session_naming_and_row_actions_remain_functional() {
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let sidebar = include_str!("../../src/components/SessionSidebar.svelte");
+        let protocol = include_str!("../../src/lib/app-server-client.ts");
+
+        assert!(lifecycle.contains("rename = async"));
+        assert!(lifecycle.contains("method: \"threadRename\""));
+        assert!(lifecycle.contains("nextForkTitle"));
+        assert!(lifecycle.contains("`${base} (${index})`"));
+        assert!(sidebar.contains("会话名称"));
+        assert!(sidebar.contains("role=\"menuitem\""));
+        assert!(sidebar.contains("归档会话"));
+        assert!(protocol.contains("historicalFallbackTitle(firstUserMessage)"));
+        assert!(protocol.contains("if (!firstUserMessage) firstUserMessage = item.text"));
+    }
+
+    #[test]
     fn model_reasoning_is_visible_separately_from_tool_activity() {
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
@@ -2216,6 +4127,30 @@ mod tests {
         assert!(thread.contains("role: \"reasoning\""));
         assert!(conversation.contains("思考过程"));
         assert!(css.contains(".reasoning-run"));
+    }
+
+    #[test]
+    fn composer_occupies_layout_space_instead_of_covering_conversation() {
+        let css = include_str!("../../src/app.css");
+        assert!(css.contains("position: relative; z-index: 5; flex: 0 0 auto"));
+        assert!(css.contains("padding: 1.6rem 3rem 2rem"));
+        assert!(!css.contains("padding: 1.6rem 3rem 9.5rem"));
+    }
+
+    #[test]
+    fn settings_center_keeps_features_in_separate_navigable_sections() {
+        let settings = include_str!("../../src/components/SettingsModal.svelte");
+        let css = include_str!("../../src/app.css");
+        for section in ["通用", "模型与费用", "连接与媒体", "上下文", "插件"] {
+            assert!(settings.contains(section));
+        }
+        assert!(settings.contains("activeSection === \"general\""));
+        assert!(settings.contains("activeSection === \"models\""));
+        assert!(settings.contains("activeSection === \"connection\""));
+        assert!(settings.contains("activeSection === \"context\""));
+        assert!(settings.contains("class=\"settings-footer\""));
+        assert!(css.contains("grid-template-columns: 15rem minmax(0, 1fr)"));
+        assert!(css.contains(".settings-content"));
     }
 
     #[test]
@@ -2260,13 +4195,262 @@ mod tests {
     }
 
     #[test]
+    fn dsh_market_normalization_hides_risky_and_unverified_install_targets() {
+        let risky = serde_json::json!({"full_name":"owner/risky","name":"risky","repository_url":"https://github.com/owner/risky","is_risky":true});
+        assert!(normalize_dsh_market_item("dshfind", &risky).is_none());
+
+        let unverified = serde_json::json!({"full_name":"owner/demo","name":"demo","repository_url":"https://github.com/owner/demo"});
+        let item = normalize_dsh_market_item("dshfind", &unverified).unwrap();
+        assert_eq!(item["compatibility"], "incompatible");
+        assert!(item["package"].is_null());
+    }
+
+    #[test]
+    fn dsh_market_normalization_exposes_only_verified_exact_npm_targets() {
+        let raw = serde_json::json!({
+            "full_name":"owner/demo",
+            "name":"demo",
+            "repository_url":"https://github.com/owner/demo",
+            "install": {"methods": [{
+                "kind":"npm", "verification":"verified", "requiresBuildAllowance":false,
+                "spec":"dsh-plugin-demo", "revision":"1.2.3"
+            }]}
+        });
+        let item = normalize_dsh_market_item("dshfind", &raw).unwrap();
+        assert_eq!(item["compatibility"], "review");
+        assert_eq!(item["package"], "dsh-plugin-demo");
+        assert_eq!(item["version"], "1.2.3");
+    }
+
+    #[test]
+    fn dsh_market_categories_are_preserved_deduplicated_and_bounded() {
+        let items = vec![
+            serde_json::json!({"category":"memory"}),
+            serde_json::json!({"category":"memory"}),
+        ];
+        let raw = serde_json::json!([
+            {"id":"memory","en":"Memory","zh":"记忆","count":23},
+            {"id":"memory","en":"Duplicate","zh":"重复","count":99},
+            {"id":"../unsafe","en":"Unsafe","zh":"不安全","count":1}
+        ]);
+        let categories = normalize_dsh_categories(Some(&raw), &items);
+        assert_eq!(categories.len(), 1);
+        assert_eq!(categories[0]["id"], "memory");
+        assert_eq!(categories[0]["zh"], "记忆");
+        assert_eq!(categories[0]["count"], 23);
+    }
+
+    #[test]
+    fn dsh_market_unknown_or_invalid_category_becomes_unclassified() {
+        let raw =
+            serde_json::json!({"full_name":"owner/demo","name":"demo","category":"../unsafe"});
+        let item = normalize_dsh_market_item("dshfind", &raw).unwrap();
+        assert_eq!(item["category"], "unclassified");
+        let categories = normalize_dsh_categories(None, &[item]);
+        assert_eq!(categories[0]["id"], "unclassified");
+        assert_eq!(categories[0]["count"], 1);
+    }
+
+    #[test]
+    fn dsh_install_conflict_ids_cover_plugin_skills_and_mcp_servers() {
+        let root = std::env::temp_dir().join(format!("ncx-dsh-conflict-{}", std::process::id()));
+        fs::create_dir_all(root.join(".codex-plugin")).unwrap();
+        fs::create_dir_all(root.join("skills/pdf-export")).unwrap();
+        fs::write(
+            root.join(".codex-plugin/plugin.json"),
+            r#"{"name":"reports"}"#,
+        )
+        .unwrap();
+        fs::write(root.join("skills/pdf-export/SKILL.md"), "# PDF").unwrap();
+        fs::write(root.join(".mcp.json"), r#"{"mcpServers":{"browser":{}}}"#).unwrap();
+
+        let ids = codex_plugin_resource_ids(&root).unwrap();
+        assert!(ids.contains("plugin:reports"));
+        assert!(ids.contains("skill:pdf-export"));
+        assert!(ids.contains("mcp:browser"));
+        let install_source = include_str!("lib.rs");
+        assert!(
+            install_source.contains("ensure_no_codex_plugin_capability_conflict(&source, upgrade)")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn every_codex_install_boundary_rejects_enabled_duplicate_capabilities() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx-plugin-conflict-boundary-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let installed_source = root.join("installed-source");
+        let incoming_source = root.join("incoming-source");
+        let catalog = CodexPluginCatalog::new(root.join("catalog"));
+        for (source, name) in [
+            (&installed_source, "installed-reports"),
+            (&incoming_source, "incoming-reports"),
+        ] {
+            fs::create_dir_all(source.join(".codex-plugin")).unwrap();
+            fs::create_dir_all(source.join("skills/pdf-export")).unwrap();
+            fs::write(
+                source.join(".codex-plugin/plugin.json"),
+                format!(r#"{{"name":"{name}"}}"#),
+            )
+            .unwrap();
+            fs::write(source.join("skills/pdf-export/SKILL.md"), "# PDF").unwrap();
+        }
+        catalog.install(&installed_source).unwrap();
+
+        let error =
+            ensure_no_codex_plugin_capability_conflict_in(&catalog, &incoming_source, false)
+                .unwrap_err();
+        assert!(error.contains("安装已阻断"));
+        assert!(error.contains("skill:pdf-export"));
+
+        catalog.set_enabled("installed-reports", false).unwrap();
+        ensure_no_codex_plugin_capability_conflict_in(&catalog, &incoming_source, false).unwrap();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn live_yunmo_models_replace_the_static_fallback_catalog() {
+        let live = vec![yunmo_model("gpt-5.6-sol"), yunmo_model("gpt-5.6-terra")];
+        let response = catalog_response(&[], &live, false);
+        let yunmo = response
+            .providers
+            .iter()
+            .find(|provider| provider.id == "yunmo")
+            .unwrap();
+        assert_eq!(
+            yunmo
+                .models
+                .iter()
+                .map(|model| model.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["gpt-5.6-sol", "gpt-5.6-terra"]
+        );
+    }
+
+    #[test]
+    fn dsh_markdown_commands_convert_into_a_valid_codex_resource_plugin() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx-dsh-convert-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("commands")).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"dsh-plugin-demo","version":"1.2.3"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("commands/review.md"),
+            "Review the current changes.",
+        )
+        .unwrap();
+
+        prepare_dsh_portable_plugin(&root, "dsh-plugin-demo", "1.2.3").unwrap();
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".codex-plugin/plugin.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "dsh-plugin-demo");
+        assert!(root.join("skills/dsh-command-review/SKILL.md").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dsh_react_slots_convert_to_bounded_declarative_contributions() {
+        let root = std::env::temp_dir().join(format!("ncx-dsh-slots-{}", now_epoch_millis()));
+        fs::create_dir_all(root.join("src/client")).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"dsh-plugin-ui","version":"1.0.0","description":"安全 UI"}"#,
+        )
+        .unwrap();
+        fs::write(root.join("src/client/index.tsx"), "slots.inject('settings.plugins.tab'); slots.inject('sidebar.footer.action'); slots.inject('shell.overlay');").unwrap();
+        prepare_dsh_portable_plugin(&root, "dsh-plugin-ui", "1.0.0").unwrap();
+        let slots: Vec<DshUiSlotContribution> =
+            serde_json::from_slice(&fs::read(root.join(".ncx/ui-slots.json")).unwrap()).unwrap();
+        assert_eq!(slots.len(), 3);
+        assert!(slots.iter().any(|item| item.slot == "shell.overlay"));
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join(".codex-plugin/plugin.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["interface"]["dshUiSlots"], "./.ncx/ui-slots.json");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dsh_unknown_react_slot_remains_incompatible() {
+        let root =
+            std::env::temp_dir().join(format!("ncx-dsh-unknown-slot-{}", now_epoch_millis()));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"dsh-plugin-ui","version":"1.0.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/index.tsx"),
+            "slots.inject('conversation.secret.dynamic')",
+        )
+        .unwrap();
+        let error = prepare_dsh_portable_plugin(&root, "dsh-plugin-ui", "1.0.0").unwrap_err();
+        assert!(error.contains("尚未支持"), "{error}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn dsh_slot_loader_rejects_duplicate_and_unsafe_declarations() {
+        let root =
+            std::env::temp_dir().join(format!("ncx-dsh-invalid-slot-{}", now_epoch_millis()));
+        fs::create_dir_all(root.join(".ncx")).unwrap();
+        fs::write(
+            root.join(".ncx/ui-slots.json"),
+            r#"[
+          {"slot":"shell.overlay","id":"same","label":"A","url":"http://unsafe.example"},
+          {"slot":"shell.overlay","id":"same","label":"B"}
+        ]"#,
+        )
+        .unwrap();
+        let plugin = CodexPluginRecord {
+            manifest: CodexPluginManifest {
+                name: "invalid-ui".into(),
+                ..Default::default()
+            },
+            root: root.clone(),
+            enabled: true,
+        };
+        assert!(load_dsh_ui_slots(&plugin).unwrap_err().contains("不安全"));
+        fs::write(
+            root.join(".ncx/ui-slots.json"),
+            r#"[
+          {"slot":"shell.overlay","id":"same","label":"A"},
+          {"slot":"shell.overlay","id":"same","label":"B"}
+        ]"#,
+        )
+        .unwrap();
+        assert!(load_dsh_ui_slots(&plugin).unwrap_err().contains("重复"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn reasoning_stays_collapsed_and_bounded_while_streaming() {
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let conversation = include_str!("../../src/components/ConversationView.svelte");
         let model = include_str!("../../src/lib/conversation-model.ts");
         assert!(model.contains("REASONING_DISPLAY_MAX_CHARS"));
         assert!(thread.contains("appendReasoning(message.text, event.text)"));
-        assert!(conversation.contains("<details class=\"reasoning-run\" class:settled={message.settled}>"));
+        assert!(conversation
+            .contains("<details class=\"reasoning-run\" class:settled={message.settled}>"));
         assert!(!conversation.contains(
             "<details class=\"reasoning-run\" class:settled={message.settled} open={!message.settled}>"
         ));
@@ -2281,7 +4465,8 @@ mod tests {
         assert!(thread.contains("this.messages = hideCompletedToolActivity(this.messages);"));
         assert!(thread.contains("case \"done\":"));
         assert!(thread.contains("case \"error\":"));
-        assert!(thread.contains("this.messagesBySession.set(event.session_id, this.clone(this.messages));"));
+        assert!(thread
+            .contains("this.messagesBySession.set(event.session_id, this.clone(this.messages));"));
         assert!(thread.contains("message.role !== \"reasoning\""));
     }
 
@@ -2301,8 +4486,26 @@ mod tests {
         let controller = include_str!("../../src/lib/composer-controller.svelte.ts");
         let composer = include_str!("../../src/components/Composer.svelte");
         assert!(controller.contains("if (!this.thread.busy) return;"));
-        assert!(composer.contains("disabled={!busy} title={stopping ? \"再次停止\" : \"停止生成\"}"));
+        assert!(composer.contains("{#if busy}"));
+        assert!(composer.contains("class=\"stop-btn visible\""));
+        assert!(composer.contains("title={stopping ? \"再次停止\" : \"停止生成\"}"));
+        assert!(!composer.contains("aria-label={busy ? \"排队\" : \"发送\"}"));
         assert!(!controller.contains("if (!this.thread.busy || this.thread.stopping) return;"));
+    }
+
+    #[test]
+    fn model_switch_remains_available_while_a_turn_is_running() {
+        let composer = include_str!("../../src/components/Composer.svelte");
+        assert!(composer.contains("disabled={models.length === 0}"));
+        assert!(!composer.contains("disabled={models.length === 0 || busy}"));
+        assert!(composer.contains("当前任务继续使用原 Route，下一轮使用新 Route"));
+    }
+
+    #[test]
+    fn sidebar_toggle_is_not_duplicated_when_sidebar_is_open() {
+        let topbar = include_str!("../../src/components/TopBar.svelte");
+        assert!(topbar.contains("{#if !sidebarOpen}<button class=\"collapse\""));
+        assert!(!topbar.contains("title={sidebarOpen ? \"收起侧边栏\" : \"展开侧边栏\"}"));
     }
 
     #[test]
@@ -2354,10 +4557,10 @@ mod tests {
     fn new_session_starts_with_empty_chat_and_plan_context() {
         let bridge = include_str!("bridge.rs");
         let backend = include_str!("lib.rs");
-        assert!(bridge.contains("Command::New(id)"));
+        assert!(bridge.contains("Command::New {"));
         assert!(bridge.contains("Some((id, Vec::new()))"));
         let new_branch = bridge
-            .split_once("Command::New(id)")
+            .split_once("Command::New {")
             .unwrap()
             .1
             .split_once("Command::Reload")
@@ -2379,6 +4582,73 @@ mod tests {
         assert!(backend.contains("session_id: String"));
         assert!(composer.contains("method: \"turnSubmit\""));
         assert!(composer.contains("threadId: targetSessionId"));
+    }
+
+    #[test]
+    fn model_switch_keeps_the_current_thread_and_does_not_rebuild_harness() {
+        let bridge = include_str!("bridge.rs");
+        let branch = bridge
+            .split_once("Command::SetModel(model) =>")
+            .unwrap()
+            .1
+            .split_once("Command::SetPermissionMode(mode) =>")
+            .unwrap()
+            .0;
+        assert!(branch.contains("emit_ready(&app, &workspace, &session_id)"));
+        assert!(!branch.contains("build_agent("));
+        assert!(!branch.contains("write_nanocodex_config"));
+        assert!(!branch.contains("UiEvent::Loaded"));
+
+        let backend = include_str!("lib.rs");
+        assert!(backend.contains("validate_route_model(&candidate, &model)?"));
+        assert!(backend.contains(".activate(&cfg.active_provider_id, &model)?"));
+    }
+
+    #[test]
+    fn stale_provider_activation_cannot_commit_after_a_newer_selection() {
+        let gate = ProviderActivationGate::default();
+        let older = gate.begin().unwrap();
+        let newer = gate.begin().unwrap();
+        let older_commit_ran = std::cell::Cell::new(false);
+
+        let error = gate
+            .commit(older, || {
+                older_commit_ran.set(true);
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(error.contains("较早切换已取消"));
+        assert!(!older_commit_ran.get());
+
+        let committed = gate.commit(newer, || Ok("latest")).unwrap();
+        assert_eq!(committed, "latest");
+    }
+
+    #[test]
+    fn provider_activation_diagnostics_track_lifecycle_without_secrets() {
+        let gate = ProviderActivationGate::default();
+        assert_eq!(gate.diagnostics().unwrap().status, "idle");
+
+        let failed = gate.begin().unwrap();
+        assert_eq!(gate.diagnostics().unwrap().status, "validating");
+        gate.fail(
+            failed,
+            "HTTP 401 Bearer relay-secret token=another-secret sk-third-secret".into(),
+        );
+        let diagnostics = gate.diagnostics().unwrap();
+        assert_eq!(diagnostics.status, "failed");
+        let error = diagnostics.last_error.unwrap();
+        assert!(!error.contains("relay-secret"));
+        assert!(!error.contains("another-secret"));
+        assert!(!error.contains("third-secret"));
+        assert!(error.contains("[已脱敏]"));
+
+        let active = gate.begin().unwrap();
+        gate.commit(active, || Ok(())).unwrap();
+        let diagnostics = gate.diagnostics().unwrap();
+        assert_eq!(diagnostics.status, "active");
+        assert!(diagnostics.last_error.is_none());
+        assert!(diagnostics.updated_at_ms > 0);
     }
 
     #[test]
@@ -2419,6 +4689,51 @@ mod tests {
     }
 
     #[test]
+    fn goal_controller_retries_only_the_new_thread_not_found_race() {
+        let controller = include_str!("../../src/lib/goal-controller.svelte.ts");
+        assert!(controller.contains("readWithNewThreadRetry"));
+        assert!(controller.contains("`${threadId} was not found`"));
+        assert!(controller.contains("window.setTimeout(resolve, 120)"));
+        assert!(controller.contains("throw error"));
+    }
+
+    #[test]
+    fn resumed_assistant_messages_keep_requested_and_response_model_metadata() {
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
+        assert!(lifecycle.contains("model: item.model"));
+        assert!(lifecycle.contains("confirmedModel: item.confirmedModel"));
+        assert!(conversation.contains("请求 {message.model} → 响应字段 {message.confirmedModel}"));
+        assert!(conversation.contains("该字段不证明中转站上游的内部模型"));
+    }
+
+    #[test]
+    fn composer_shows_the_complete_active_provider_route() {
+        let bridge = include_str!("bridge.rs");
+        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
+        let controls = include_str!("../../src/lib/model-controls-controller.svelte.ts");
+        let composer = include_str!("../../src/components/Composer.svelte");
+        assert!(bridge.contains("provider_id,"));
+        assert!(bridge.contains("let provider_id = visible_provider_id(&cfg)"));
+        assert!(bridge.contains("provider_protocol: cfg.provider_protocol"));
+        assert!(runtime.contains("this.models.currentProvider = event.provider_id"));
+        assert!(runtime.contains("this.models.currentProtocol = event.provider_protocol"));
+        assert!(controls.contains("get routeLabel(): string"));
+        assert!(controls.contains("method: \"customProviderList\""));
+        assert!(controls.contains("method: \"customProviderActivate\""));
+        assert!(controls.contains("method: \"modelPresetApply\""));
+        assert!(controls.contains("id === \"deepseek\" && settings.has_deepseek_api_key"));
+        assert!(controls.contains("id === \"yunmo\" && settings.has_yunmo_api_key"));
+        assert!(controls.contains("route.id.replace(/^preset:/, \"\") === normalizedCurrent"));
+        assert!(controls.contains("this.routes = visible ? [{ ...visible, active: true }] : []"));
+        assert!(controls.contains("切换 Provider 失败，当前 Route 未改变"));
+        assert!(controls.contains("get currentProviderName(): string"));
+        assert!(composer.contains("{currentProviderName || currentProvider || \"Route\"}"));
+        assert!(composer.contains("{#each routes as route (route.id)}"));
+        assert!(composer.contains("data-provider={route.id} data-model={model}"));
+    }
+
+    #[test]
     fn gui_runtime_no_longer_reads_or_writes_legacy_session_snapshots() {
         let bridge = include_str!("bridge.rs");
         let backend = include_str!("lib.rs");
@@ -2429,7 +4744,7 @@ mod tests {
             .split_once(".invoke_handler(tauri::generate_handler![")
             .unwrap()
             .1
-            .split_once(".run(tauri::generate_context!())")
+            .split_once(".build(tauri::generate_context!())")
             .unwrap()
             .0;
         for legacy_command in [
@@ -2458,10 +4773,36 @@ mod tests {
         let protocol_client = include_str!("../../src/lib/app-server-client.ts");
         assert!(runtime.contains("listen<ProtocolEventEnvelope>(\"ncx://protocol-event\""));
         assert!(runtime.contains("this.sequenceGate.accept(envelope)"));
-        assert!(protocol_client.contains("envelope.protocolVersion !== 2 || !envelope.threadId"));
+        assert!(protocol_client.contains("envelope.protocolVersion !== 3 || !envelope.threadId"));
         assert!(protocol_client.contains("this.sequences.get(envelope.threadId) || 0"));
         assert!(protocol_client.contains("envelope.sequence <= previous"));
-        assert!(protocol_client.contains("this.sequences.set(envelope.threadId, envelope.sequence)"));
+        assert!(
+            protocol_client.contains("this.sequences.set(envelope.threadId, envelope.sequence)")
+        );
+    }
+
+    #[test]
+    fn composer_submits_and_surfaces_orchestrator_execution_mode() {
+        let composer = include_str!("../../src/lib/composer-controller.svelte.ts");
+        let view = include_str!("../../src/components/SettingsModal.svelte");
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        let bridge = include_str!("bridge.rs");
+        let orchestrated_turn = include_str!("bridge/orchestrated_turn.rs");
+        assert!(composer.contains("executionMode = $state<\"agent\" | \"orchestrator\">"));
+        assert!(composer.contains("text, images, executionMode"));
+        assert!(composer.contains("next.executionMode"));
+        assert!(composer.contains("多 Agent 模式暂不支持图片附件"));
+        assert!(view.contains("运行中的任务不变，当前会话下一轮生效"));
+        assert!(view.contains("多 Agent 编排"));
+        assert!(thread.contains("kind: \"orchestrator_stage\""));
+        assert!(thread.contains("kind: \"orchestrator_activity\""));
+        assert!(thread.contains("message.phase = \"finished\""));
+        assert!(conversation.contains("message.role === \"orchestrator_activity\""));
+        assert!(conversation.contains("失败 (${message.failure})"));
+        assert!(bridge.contains("ExecutionMode::Orchestrator"));
+        assert!(bridge.contains("UiEvent::OrchestratorStage"));
+        assert!(orchestrated_turn.contains("UiEvent::OrchestratorActivity"));
     }
 
     #[test]
@@ -2486,7 +4827,10 @@ mod tests {
             "invoke(\"approve\"",
             "invoke(\"answer_question\"",
         ] {
-            assert!(!runtime.contains(legacy), "legacy runtime command remains: {legacy}");
+            assert!(
+                !runtime.contains(legacy),
+                "legacy runtime command remains: {legacy}"
+            );
         }
         assert!(
             runtime.find("method: \"interactionApprove\"").unwrap()
@@ -2524,7 +4868,10 @@ mod tests {
             "invoke<ModelCatalogResponse>(\"get_model_catalog\"",
             "invoke<CatalogModel>(\"apply_model_preset\"",
         ] {
-            assert!(!frontend.contains(legacy), "legacy model command remains: {legacy}");
+            assert!(
+                !frontend.contains(legacy),
+                "legacy model command remains: {legacy}"
+            );
         }
         assert!(settings.contains("sandbox_mode: settings.sandbox_mode"));
         assert!(settings.contains("approval_policy: settings.approval_policy"));
@@ -2556,7 +4903,10 @@ mod tests {
             "invoke(\"install_external_plugin\"",
             "invoke(\"set_external_plugin_enabled\"",
         ] {
-            assert!(!plugins.contains(legacy), "legacy plugin command remains: {legacy}");
+            assert!(
+                !plugins.contains(legacy),
+                "legacy plugin command remains: {legacy}"
+            );
         }
     }
 
@@ -2574,7 +4924,10 @@ mod tests {
             "invoke<number>(\"memory_consolidate\"",
             "invoke<boolean>(\"memory_add\"",
         ] {
-            assert!(!memory.contains(legacy), "legacy memory command remains: {legacy}");
+            assert!(
+                !memory.contains(legacy),
+                "legacy memory command remains: {legacy}"
+            );
         }
         assert!(memory.contains("invoke(\"open_memory_file\""));
     }
@@ -2624,7 +4977,11 @@ mod tests {
     fn history_session_switch_keeps_the_active_turn_running() {
         let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let sidebar = include_str!("../../src/components/SessionSidebar.svelte");
-        assert!(sidebar.contains("disabled={switchingSession || !s.has_snapshot}"));
+        let bridge = include_str!("bridge.rs");
+        assert!(sidebar.contains(
+            "class=\"recent-main\" title={s.snippet || s.title} disabled={switchingSession}"
+        ));
+        assert!(sidebar.contains("disabled={switchingSession || !s.has_snapshot} onclick={() => { menuId = \"\"; forkSession"));
         let resume = lifecycle
             .split_once("resume = async")
             .unwrap()
@@ -2635,6 +4992,16 @@ mod tests {
         assert!(!resume.contains("stop_generation"));
         assert!(resume.contains("this.thread.busy = this.thread.runningSessions.has(id)"));
         assert!(resume.contains("method: \"threadActivate\""));
+        let backend_resume = bridge
+            .split_once("Command::Resume(id) =>")
+            .unwrap()
+            .1
+            .split_once("Command::Fork")
+            .unwrap()
+            .0;
+        assert!(!backend_resume.contains("build_agent("));
+        assert!(backend_resume.contains("UiEvent::Loaded"));
+        assert!(backend_resume.contains("emit_ready(&app, &workspace, &session_id)"));
     }
 
     #[test]
@@ -2651,12 +5018,16 @@ mod tests {
             .split_once("<div class=\"side-foot\">")
             .unwrap()
             .0;
-        let recent = sidebar.find("{#each recentSessions as s}").unwrap();
+        let recent = sidebar.find("{#each projectGroups as group}").unwrap();
         let archive_toggle = sidebar.find("class=\"side-archive-toggle\"").unwrap();
-        let archived = sidebar.find("{#each archivedSessions as s}").unwrap();
+        let archived = sidebar
+            .find("{#each archivedProjectGroups as group}")
+            .unwrap();
         assert!(recent < archive_toggle);
         assert!(archive_toggle < archived);
         assert!(sidebar.contains("aria-expanded={showArchived}"));
+        assert!(sidebar.contains("aria-expanded={archivedProjectOpen[group.path] !== false}"));
+        assert!(sidebar.contains("toggleArchivedProject(group.path)"));
 
         let css = include_str!("../../src/app.css");
         assert!(css.contains(".side-archive-toggle"));
@@ -2664,10 +5035,9 @@ mod tests {
     }
 
     #[test]
-    fn recent_sessions_are_collapsible_and_closed_by_default() {
-        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+    fn sessions_are_grouped_under_collapsible_projects() {
         let sidebar_component = include_str!("../../src/components/SessionSidebar.svelte");
-        assert!(lifecycle.contains("showRecent = $state(false)"));
+        let protocol = include_str!("../../src/lib/app-server-client.ts");
 
         let sidebar = sidebar_component
             .split_once("<div class=\"side-recents\">")
@@ -2676,43 +5046,116 @@ mod tests {
             .split_once("<div class=\"side-foot\">")
             .unwrap()
             .0;
-        assert!(sidebar.contains("class=\"side-recent-toggle\""));
-        assert!(sidebar.contains("aria-expanded={showRecent}"));
-        assert!(sidebar.contains("onclick={() => (showRecent = !showRecent)}"));
-        assert!(sidebar.contains("{#if showRecent}"));
-        assert!(
-            sidebar.find("{#if showRecent}").unwrap()
-                < sidebar.find("{#each recentSessions as s}").unwrap()
-        );
+        assert!(protocol.contains("workspace: normalizeWorkspacePath(thread.metadata.workspace)"));
+        assert!(protocol.contains("normalized.startsWith(\"\\\\\\\\?\\\\\")"));
+        assert!(sidebar_component.contains("const key = path.toLocaleLowerCase()"));
+        assert!(sidebar_component
+            .contains("const projectGroups = $derived(groupByWorkspace(recentSessions))"));
+        assert!(sidebar_component.contains(
+            "const archivedProjectGroups = $derived(groupByWorkspace(archivedSessions))"
+        ));
+        assert!(sidebar.contains("{#each projectGroups as group}"));
+        assert!(sidebar.contains("class=\"project-toggle\""));
+        assert!(sidebar.contains("aria-expanded={projectOpen[group.path] !== false}"));
+        assert!(sidebar.contains("{#each group.sessions as s}"));
 
         let css = include_str!("../../src/app.css");
-        assert!(css.contains(".side-recent-toggle"));
-        assert!(css.contains(".side-recent-caret"));
-        assert!(css.contains(".side-recent-list"));
+        assert!(css.contains(".project-toggle"));
+        assert!(css.contains(".project-sessions"));
+        assert!(css.contains("padding-left: 1.35rem"));
+        assert!(!sidebar_component.contains("class=\"foot-ws\""));
     }
 
     #[test]
-    fn preset_updates_model_endpoint_price_currency_and_quick_switch_list_together() {
-        let preset = CatalogModel {
-            provider_id: "openai".into(),
-            model_id: "gpt-5-mini".into(),
-            display_name: "GPT-5 mini".into(),
-            base_url: "https://api.openai.com/v1".into(),
-            price_in: 0.25,
-            price_out: 2.0,
-            price_currency: "USD".into(),
-            price_source: crate::model_catalog::PriceSource::OfficialDirect,
-            pricing_note: None,
-            source_url: "https://openai.com/api/pricing".into(),
-            updated_at: "2026-08-17".into(),
-            context_length: None,
-            direct_available: true,
-        };
+    fn duplicate_model_id_keeps_the_current_provider_route() {
+        let yunmo = vec![yunmo_model("gpt-5.6-sol")];
+        let selected =
+            find_preset_by_model_id("gpt-5.6-sol", "https://api.yunmo-ai.com/v1/", &[], &yunmo)
+                .expect("yunmo route should match by Base URL");
+        assert_eq!(selected.provider_id, "yunmo");
+        assert_eq!(selected.base_url, "https://api.yunmo-ai.com/v1");
 
-        let updates = preset_updates(&preset, &["gpt-5-mini", "gpt-5"]);
-        assert_eq!(updates["model"], "gpt-5-mini");
-        assert_eq!(updates["base_url"], "https://api.openai.com/v1");
-        assert_eq!(updates["price_currency"], "USD");
-        assert_eq!(updates["available_models"], "gpt-5-mini,gpt-5");
+        assert!(
+            find_preset_by_model_id("gpt-5.6-sol", "https://custom.example/v1", &[], &yunmo,)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn legacy_deepseek_and_yunmo_keys_migrate_to_independent_preset_routes() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx-preset-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let paths = ConfigPaths {
+            deepseek: root.join("deepseek.toml"),
+            codex: root.join("codex.toml"),
+            nanocodex: root.join("config.toml"),
+        };
+        let directory = ProviderDirectoryService::from_paths(&paths);
+        let mut cfg = Config::default();
+        cfg.deepseek_api_key = "legacy-deepseek".into();
+        cfg.yunmo_api_key = "legacy-yunmo".into();
+        let deepseek = find_preset("deepseek", "deepseek-v4-flash").unwrap();
+        let yunmo = yunmo_model("gpt-5.6-sol");
+
+        write_preset_with_config(&directory, &deepseek, &[deepseek.model_id.clone()], &cfg)
+            .unwrap();
+        assert_eq!(
+            directory.get("preset:deepseek").unwrap().api_key,
+            "legacy-deepseek"
+        );
+        write_preset_with_config(&directory, &yunmo, &[yunmo.model_id.clone()], &cfg).unwrap();
+        assert_eq!(
+            directory.get("preset:yunmo").unwrap().api_key,
+            "legacy-yunmo"
+        );
+        assert_eq!(
+            directory.diagnostics().unwrap().active_provider_id,
+            "preset:yunmo"
+        );
+        let snapshot = std::fs::read_to_string(&paths.nanocodex).unwrap();
+        assert!(snapshot.contains("model = \"gpt-5.6-sol\""));
+        assert!(!serde_json::to_string(&directory.list().unwrap())
+            .unwrap()
+            .contains("legacy-yunmo"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn custom_provider_settings_use_only_the_app_server_boundary() {
+        let component = include_str!("../../src/components/CustomProvidersSettings.svelte");
+        for method in [
+            "customProviderList",
+            "customProviderSave",
+            "customProviderDelete",
+            "customProviderModelsDiscover",
+            "customProviderActivate",
+            "customProviderChatProbe",
+        ] {
+            assert!(
+                component.contains(&format!("method: \"{method}\"")),
+                "missing app-server request {method}"
+            );
+        }
+        assert!(component.contains("真实请求 1 个输出 Token"));
+        assert!(component.contains("目录可用不代表对话权限已开通"));
+        assert!(!component.contains("@tauri-apps/api/core"));
+        for legacy in [
+            "list_custom_providers",
+            "save_custom_provider",
+            "delete_custom_provider",
+            "discover_custom_provider_models",
+            "activate_custom_provider",
+        ] {
+            assert!(
+                !component.contains(legacy),
+                "legacy Tauri invoke remains: {legacy}"
+            );
+        }
     }
 }

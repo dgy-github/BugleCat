@@ -10,6 +10,8 @@ export const isImageAttachment = (path: string): boolean => IMAGE_EXTENSIONS.inc
 export class ComposerController {
   input = $state("");
   attached = $state<string[]>([]);
+  executionMode = $state<"agent" | "orchestrator">("agent");
+  executionMenuOpen = $state(false);
   private slash: SlashController | null = null;
 
   constructor(
@@ -50,13 +52,13 @@ export class ComposerController {
     }
   };
 
-  dispatch = async (text: string, images: string[], shown: string): Promise<void> => {
+  dispatch = async (text: string, images: string[], shown: string, executionMode = this.executionMode): Promise<void> => {
     const targetSessionId = this.thread.currentId;
-    this.thread.messages.push({ role: "user", text: shown });
+    this.thread.beginTurn({ role: "user", text: shown, images: [...images] });
     this.thread.setRunning(targetSessionId, true);
     this.thread.busy = true;
     this.scrollDown();
-    try { await appServerRequest({ method: "turnSubmit", params: { threadId: targetSessionId, text, images } }); }
+    try { await appServerRequest({ method: "turnSubmit", params: { threadId: targetSessionId, text, images, executionMode } }); }
     catch (error) {
       this.thread.setRunning(targetSessionId, false);
       this.thread.messages.push({ role: "note", text: `发送失败：${error}` });
@@ -76,7 +78,7 @@ export class ComposerController {
   dequeue = (): void => {
     if (!this.thread.busy && this.thread.queued.length > 0) {
       const next = this.thread.queued.shift();
-      if (next) void this.dispatch(next.text, next.images, next.shown);
+      if (next) void this.dispatch(next.text, next.images, next.shown, next.executionMode);
     }
   };
 
@@ -91,18 +93,30 @@ export class ComposerController {
     const files = this.attached.filter((path) => !isImageAttachment(path));
     const mentions = files.map((path) => `@\"${path}\"`).join(" ");
     const fullText = [text, mentions].filter(Boolean).join("\n");
-    const shown = this.attached.length
-      ? `${text}${text ? "\n" : ""}📎 ${this.attached.map((path) => path.split(/[\\/]/).pop() || path).join(", ")}`
+    const shown = files.length
+      ? `${text}${text ? "\n" : ""}📎 ${files.map((path) => path.split(/[\\/]/).pop() || path).join(", ")}`
       : text;
     const selectedImages = [...images];
-    this.input = "";
-    this.attached = [];
-    if (this.thread.busy) {
-      if (this.thread.queued.length >= 2) { this.thread.messages.push({ role: "note", text: "队列已满（2 条），请先等当前任务完成。" }); return; }
-      this.thread.queued.push({ text: fullText, images: selectedImages, shown });
+    const selectedExecutionMode = this.executionMode;
+    if (selectedExecutionMode === "orchestrator" && selectedImages.length > 0) {
+      this.thread.messages.push({ role: "note", text: "多 Agent 模式暂不支持图片附件；请移除图片，或切换到 Agent 模式。" });
       return;
     }
-    void this.dispatch(fullText, selectedImages, shown);
+    this.input = "";
+    this.attached = [];
+    if (this.thread.busy && this.thread.currentGoalRunning) {
+      // A direct human instruction preempts automatic Goal continuation. The
+      // backend cancels the admitted round, pauses the Goal, then executes this
+      // input in the same transcript.
+      void this.dispatch(fullText, selectedImages, shown, selectedExecutionMode);
+      return;
+    }
+    if (this.thread.busy) {
+      if (this.thread.queued.length >= 2) { this.thread.messages.push({ role: "note", text: "队列已满（2 条），请先等当前任务完成。" }); return; }
+      this.thread.queued.push({ text: fullText, images: selectedImages, shown, executionMode: selectedExecutionMode });
+      return;
+    }
+    void this.dispatch(fullText, selectedImages, shown, selectedExecutionMode);
   };
 
   onKey = (event: KeyboardEvent): void => {

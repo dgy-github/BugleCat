@@ -53,14 +53,18 @@ export class AppRuntimeController {
   };
 
   handleReady = (event: Extract<UiEvent, { kind: "ready" }>): void => {
+    const routeChanged = this.models.currentProvider !== event.provider_id || this.models.currentProtocol !== event.provider_protocol;
     this.header = `${event.model} · ${event.sandbox}`;
     this.workspace = event.workspace;
     this.needsWorkspace = event.needs_workspace;
     this.sandboxMode = event.sandbox;
     this.models.currentModel = event.model;
+    this.models.currentProvider = event.provider_id;
+    this.models.currentProtocol = event.provider_protocol;
     if (event.models?.length) this.models.models = event.models;
     if (event.permission_mode) this.models.permissionMode = event.permission_mode;
     if (event.reasoning_effort) this.models.reasoningEffort = event.reasoning_effort;
+    if (routeChanged || this.models.routes.length === 0) void this.models.refreshRoutes();
   };
 
   chooseWorkspace = async (): Promise<void> => {

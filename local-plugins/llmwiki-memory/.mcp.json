@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "llmwiki": {
+      "command": "python",
+      "args": ["D:\\LLMWIKI\\wiki_mcp.py"]
+    }
+  }
+}

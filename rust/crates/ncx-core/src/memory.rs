@@ -43,7 +43,7 @@ pub struct MemoryEntry {
 /// Append-only-ish markdown fact store under a project's `.ncx/memory/`.
 #[derive(Debug, Clone)]
 pub struct MemoryStore {
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 }
 
 impl MemoryStore {
@@ -171,88 +171,7 @@ impl MemoryStore {
         Ok(removed)
     }
 
-    /// LLM-backed consolidation: cluster near-duplicates (Jaccard ≥ threshold)
-    /// and, for each cluster of >1, ask `summarizer` to fold them into ONE note
-    /// (keeping the newest timestamp + the union of tags). If the summarizer
-    /// returns `None`, fall back to keeping the cluster's newest entry (same as
-    /// the heuristic [`consolidate`]). Returns how many entries were removed.
-    pub async fn summarize_consolidate(
-        &self,
-        summarizer: &dyn Summarizer,
-        threshold: f64,
-    ) -> std::io::Result<usize> {
-        let entries = self.entries();
-        if entries.len() < 2 {
-            return Ok(0);
-        }
-        let before = entries.len();
-        let mut sorted = entries;
-        sorted.sort_by_key(|entry| std::cmp::Reverse(entry.ts)); // newest first
-
-        // Greedy single-link clustering by word-set similarity.
-        let mut clusters: Vec<Vec<MemoryEntry>> = Vec::new();
-        let mut reps: Vec<std::collections::HashSet<String>> = Vec::new();
-        for e in sorted {
-            let ws = word_set(&e.text);
-            let mut placed = false;
-            for (i, rep) in reps.iter().enumerate() {
-                if jaccard(rep, &ws) >= threshold {
-                    clusters[i].push(e.clone());
-                    placed = true;
-                    break;
-                }
-            }
-            if !placed {
-                reps.push(ws);
-                clusters.push(vec![e]);
-            }
-        }
-
-        let mut out: Vec<MemoryEntry> = Vec::new();
-        for cluster in clusters {
-            if cluster.len() == 1 {
-                out.push(cluster.into_iter().next().unwrap());
-                continue;
-            }
-            let ts = cluster.iter().map(|e| e.ts).max().unwrap_or(0);
-            let mut tags: Vec<String> = Vec::new();
-            for e in &cluster {
-                for t in &e.tags {
-                    if !tags.contains(t) {
-                        tags.push(t.clone());
-                    }
-                }
-            }
-            let texts: Vec<String> = cluster.iter().map(|e| e.text.clone()).collect();
-            match summarizer.merge(&texts).await {
-                Some(m) if !m.trim().is_empty() => {
-                    out.push(MemoryEntry {
-                        ts,
-                        tags,
-                        text: m.trim().to_string(),
-                    });
-                }
-                _ => {
-                    // Summarizer unavailable → keep the newest (heuristic behavior).
-                    let newest = cluster.into_iter().max_by_key(|e| e.ts).unwrap();
-                    out.push(newest);
-                }
-            }
-        }
-
-        out.sort_by_key(|e| e.ts);
-        if out.len() > MAX_ENTRIES {
-            let drop = out.len() - MAX_ENTRIES;
-            out.drain(0..drop);
-        }
-        let removed = before.saturating_sub(out.len());
-        if removed > 0 {
-            self.write_all(&out)?;
-        }
-        Ok(removed)
-    }
-
-    fn write_all(&self, entries: &[MemoryEntry]) -> std::io::Result<()> {
+    pub(crate) fn write_all(&self, entries: &[MemoryEntry]) -> std::io::Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -348,7 +267,7 @@ fn normalize(text: &str) -> String {
 }
 
 /// Significant words of an entry (lowercased, length ≥ 3), as a set.
-fn word_set(text: &str) -> std::collections::HashSet<String> {
+pub(crate) fn word_set(text: &str) -> std::collections::HashSet<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() >= 3)
@@ -369,7 +288,10 @@ fn phrases(text: &str) -> Vec<String> {
 }
 
 /// Jaccard similarity of two word sets (|∩| / |∪|); 0 when both empty.
-fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
+pub(crate) fn jaccard(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f64 {
     if a.is_empty() && b.is_empty() {
         return 0.0;
     }
@@ -382,7 +304,7 @@ fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<
     }
 }
 
-fn parse_entries(text: &str) -> Vec<MemoryEntry> {
+pub(crate) fn parse_entries(text: &str) -> Vec<MemoryEntry> {
     let mut out: Vec<MemoryEntry> = Vec::new();
     let mut cur: Option<(u64, Vec<String>)> = None;
     let mut body: Vec<String> = Vec::new();

@@ -1,22 +1,27 @@
 //! In-process app-server boundary shared by desktop, CLI and future SDK clients.
-
 mod adapter;
-
+mod goal_driver;
+mod goal_operations;
+mod outcome;
+mod runtime_operations;
 pub use adapter::AppServerAdapter;
-
+pub use goal_driver::{GoalRoundDriveOutcome, GoalRoundDriver};
 use ncx_protocol::{
     ClientRequest, Event, EventEnvelope, ResponsePayload, ServerResponse, Thread, ThreadMetadata,
     Turn, TurnStatus, PROTOCOL_VERSION,
 };
-use ncx_thread_store::{ThreadStore, ThreadStoreError};
-use std::fmt;
+use ncx_thread_store::ThreadStore;
+pub use outcome::{AppServerError, DispatchOutcome};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
+use std::sync::{Arc, Mutex};
 pub struct AppServer<S: ThreadStore> {
     store: Arc<S>,
     sequence: AtomicU64,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// Thread IDs explicitly armed in this exact process lifecycle. This is
+    /// intentionally absent from Thread Store persistence.
+    goal_activations: Mutex<HashSet<String>>,
 }
 
 impl<S: ThreadStore> AppServer<S> {
@@ -25,6 +30,7 @@ impl<S: ThreadStore> AppServer<S> {
             store,
             sequence: AtomicU64::new(1),
             clock: Arc::new(clock),
+            goal_activations: Mutex::new(HashSet::new()),
         }
     }
 
@@ -43,6 +49,15 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::ThreadModelContextReplace { .. }) => {
                 self.dispatch_model_context(request)
             }
+            request @ (ClientRequest::GoalRead { .. }
+            | ClientRequest::GoalCreate { .. }
+            | ClientRequest::GoalEdit { .. }
+            | ClientRequest::GoalPause { .. }
+            | ClientRequest::GoalResume { .. }
+            | ClientRequest::GoalBlock { .. }
+            | ClientRequest::GoalComplete { .. }
+            | ClientRequest::GoalClear { .. }
+            | ClientRequest::GoalRoundStart { .. }) => goal_operations::dispatch(self, request),
             request @ (ClientRequest::TurnStart { .. }
             | ClientRequest::TurnInterrupt { .. }
             | ClientRequest::TurnComplete { .. }) => self.dispatch_turn(request),
@@ -52,6 +67,7 @@ impl<S: ThreadStore> AppServer<S> {
                 item,
             } => self.dispatch_item(thread_id, turn_id, item),
             ClientRequest::ThreadCreateActivate { .. }
+            | ClientRequest::ThreadHarnessProfileSet { .. }
             | ClientRequest::ThreadForkActivate { .. }
             | ClientRequest::ThreadActivate { .. }
             | ClientRequest::TurnSubmit { .. }
@@ -67,13 +83,26 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::RuntimePermissionModeSet { .. }
             | ClientRequest::ModelCatalogRead
             | ClientRequest::ModelPresetApply { .. }
+            | ClientRequest::CustomProviderList
+            | ClientRequest::CustomProviderSave { .. }
+            | ClientRequest::CustomProviderDelete { .. }
+            | ClientRequest::CustomProviderModelsDiscover { .. }
+            | ClientRequest::CustomProviderActivate { .. }
+            | ClientRequest::CustomProviderChatProbe { .. }
             | ClientRequest::HarnessDiagnosticsRead
             | ClientRequest::ExternalPluginList
             | ClientRequest::ExternalPluginInstall { .. }
             | ClientRequest::ExternalPluginSetEnabled { .. }
             | ClientRequest::MemoryList
             | ClientRequest::MemoryAdd { .. }
-            | ClientRequest::MemoryConsolidate => Err(AppServerError::InvalidRequest(
+            | ClientRequest::MemoryConsolidate
+            | ClientRequest::MemoryMergeStart
+            | ClientRequest::MemoryMergeStatusRead
+            | ClientRequest::MemoryMergeCancel
+            | ClientRequest::ForgeRuntimeStatusRead
+            | ClientRequest::ForgeJobStart { .. }
+            | ClientRequest::ForgeJobStatusRead
+            | ClientRequest::ForgeJobCancel => Err(AppServerError::InvalidRequest(
                 "request requires a runtime adapter".to_string(),
             )),
             ClientRequest::CodexPluginList
@@ -81,11 +110,12 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::CodexPluginSetEnabled { .. }
             | ClientRequest::CodexPluginUninstall { .. }
             | ClientRequest::MarketplaceList
-            | ClientRequest::MarketplacePluginInstall { .. } => {
-                Err(AppServerError::InvalidRequest(
-                    "plugin requests require a host adapter".to_string(),
-                ))
-            }
+            | ClientRequest::MarketplacePluginInstall { .. }
+            | ClientRequest::DshMarketplaceSearch { .. }
+            | ClientRequest::DshMarketplacePreview { .. }
+            | ClientRequest::DshMarketplaceInstall { .. } => Err(AppServerError::InvalidRequest(
+                "plugin requests require a host adapter".to_string(),
+            )),
         }
     }
 
@@ -99,6 +129,7 @@ impl<S: ThreadStore> AppServer<S> {
                 thread_id,
                 workspace,
                 title,
+                harness_profile,
             } => {
                 let now = (self.clock)();
                 let id = thread_id.unwrap_or(ncx_protocol::ThreadId::new(format!(
@@ -110,6 +141,7 @@ impl<S: ThreadStore> AppServer<S> {
                     workspace,
                     title,
                     archived: false,
+                    harness_profile,
                     created_at: now,
                     updated_at: now,
                 };
@@ -122,7 +154,7 @@ impl<S: ThreadStore> AppServer<S> {
                 ResponsePayload::Thread(thread)
             }
             ClientRequest::ThreadImport { thread } => {
-                ensure_import_is_idle(std::slice::from_ref(&thread))?;
+                outcome::ensure_import_is_idle(std::slice::from_ref(&thread))?;
                 self.store.create(thread.clone())?;
                 events.push(self.event(
                     thread.metadata.id.clone(),
@@ -134,7 +166,7 @@ impl<S: ThreadStore> AppServer<S> {
                 ResponsePayload::Thread(thread)
             }
             ClientRequest::ThreadsImport { threads } => {
-                ensure_import_is_idle(&threads)?;
+                outcome::ensure_import_is_idle(&threads)?;
                 self.store.create_many(threads.clone())?;
                 for thread in &threads {
                     events.push(self.event(
@@ -240,12 +272,17 @@ impl<S: ThreadStore> AppServer<S> {
 
     fn dispatch_turn(&self, request: ClientRequest) -> Result<DispatchOutcome, AppServerError> {
         let (payload, event) = match request {
-            ClientRequest::TurnStart { thread_id, turn_id } => {
+            ClientRequest::TurnStart {
+                thread_id,
+                turn_id,
+                execution_mode,
+            } => {
                 self.store.claim_turn(
                     &thread_id,
                     Turn {
                         id: turn_id.clone(),
                         status: TurnStatus::Running,
+                        execution_mode,
                         items: Vec::new(),
                         started_at: (self.clock)(),
                         completed_at: None,
@@ -326,7 +363,7 @@ impl<S: ThreadStore> AppServer<S> {
         Ok(self.outcome(ResponsePayload::Ack, vec![event]))
     }
 
-    fn update_thread_metadata(
+    pub(crate) fn update_thread_metadata(
         &self,
         thread_id: ncx_protocol::ThreadId,
         update: impl FnOnce(&mut ThreadMetadata),
@@ -345,7 +382,10 @@ impl<S: ThreadStore> AppServer<S> {
         Ok(self.outcome(ResponsePayload::Ack, vec![event]))
     }
 
-    fn read_thread(&self, thread_id: &ncx_protocol::ThreadId) -> Result<Thread, AppServerError> {
+    pub(crate) fn read_thread(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+    ) -> Result<Thread, AppServerError> {
         self.store
             .read(thread_id)?
             .ok_or_else(|| AppServerError::NotFound(thread_id.to_string()))
@@ -373,11 +413,16 @@ impl<S: ThreadStore> AppServer<S> {
                 thread_id,
                 workspace,
                 title,
+                harness_profile,
             } => {
+                runtime
+                    .validate_harness_profile(&harness_profile)
+                    .map_err(AppServerError::Runtime)?;
                 let outcome = self.dispatch(ClientRequest::ThreadCreate {
                     thread_id: Some(thread_id.clone()),
                     workspace,
                     title,
+                    harness_profile,
                 })?;
                 runtime
                     .create_thread(&thread_id)
@@ -388,11 +433,16 @@ impl<S: ThreadStore> AppServer<S> {
                 self.dispatch(ClientRequest::ThreadRead {
                     thread_id: thread_id.clone(),
                 })?;
+                self.disarm_goal(&thread_id)?;
                 runtime
                     .activate_thread(&thread_id)
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
+            ClientRequest::ThreadHarnessProfileSet {
+                thread_id,
+                harness_profile,
+            } => runtime_operations::set_harness_profile(self, runtime, thread_id, harness_profile),
             ClientRequest::ThreadForkActivate {
                 thread_id,
                 new_thread_id,
@@ -410,9 +460,10 @@ impl<S: ThreadStore> AppServer<S> {
                 thread_id,
                 text,
                 images,
+                execution_mode,
             } => {
                 runtime
-                    .submit_turn(&thread_id, text, images)
+                    .submit_turn(&thread_id, text, images, execution_mode)
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
@@ -421,6 +472,19 @@ impl<S: ThreadStore> AppServer<S> {
                     .interrupt_latest(&thread_id)
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
+            }
+            ClientRequest::GoalResume { thread_id, goal } => {
+                let outcome = self.dispatch(ClientRequest::GoalResume {
+                    thread_id: thread_id.clone(),
+                    goal,
+                })?;
+                if let Err(error) = runtime.continue_goal(&thread_id) {
+                    // Durable phase may remain active, but process-local authority
+                    // must fail closed when the host did not accept the work.
+                    self.disarm_goal(&thread_id)?;
+                    return Err(AppServerError::Runtime(error));
+                }
+                Ok(outcome)
             }
             ClientRequest::RuntimeStatusRead => runtime
                 .runtime_status()
@@ -490,6 +554,45 @@ impl<S: ThreadStore> AppServer<S> {
                 .map(ResponsePayload::ModelPreset)
                 .map(|payload| self.response(payload))
                 .map_err(AppServerError::Runtime),
+            ClientRequest::CustomProviderList => runtime
+                .list_custom_providers()
+                .map(ResponsePayload::CustomProviders)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::CustomProviderSave {
+                id,
+                name,
+                protocol,
+                base_url,
+                api_key,
+                models,
+            } => runtime
+                .save_custom_provider(id, name, protocol, base_url, api_key, models)
+                .map(ResponsePayload::CustomProvider)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::CustomProviderDelete { id } => {
+                runtime
+                    .delete_custom_provider(id)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::CustomProviderModelsDiscover { id } => runtime
+                .discover_custom_provider_models(id)
+                .map(ResponsePayload::Models)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::CustomProviderActivate { id, model } => {
+                runtime
+                    .activate_custom_provider(id, model)
+                    .map_err(AppServerError::Runtime)?;
+                Ok(self.ack())
+            }
+            ClientRequest::CustomProviderChatProbe { id, model } => runtime
+                .probe_custom_provider_chat(id, model)
+                .map(ResponsePayload::ProviderChatProbe)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
             ClientRequest::HarnessDiagnosticsRead => runtime
                 .harness_diagnostics()
                 .map(ResponsePayload::HarnessDiagnostics)
@@ -511,19 +614,16 @@ impl<S: ThreadStore> AppServer<S> {
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
-            ClientRequest::MemoryList => runtime
-                .list_memory()
-                .map(ResponsePayload::MemoryNotes)
-                .map(|payload| self.response(payload))
-                .map_err(AppServerError::Runtime),
-            ClientRequest::MemoryAdd { note, tags } => runtime
-                .add_memory(note, tags)
-                .map(ResponsePayload::Bool)
-                .map(|payload| self.response(payload))
-                .map_err(AppServerError::Runtime),
-            ClientRequest::MemoryConsolidate => runtime
-                .consolidate_memory()
-                .map(ResponsePayload::Count)
+            request @ (ClientRequest::MemoryList
+            | ClientRequest::MemoryAdd { .. }
+            | ClientRequest::MemoryConsolidate
+            | ClientRequest::MemoryMergeStart
+            | ClientRequest::MemoryMergeStatusRead
+            | ClientRequest::MemoryMergeCancel
+            | ClientRequest::ForgeRuntimeStatusRead
+            | ClientRequest::ForgeJobStart { .. }
+            | ClientRequest::ForgeJobStatusRead
+            | ClientRequest::ForgeJobCancel) => runtime_operations::dispatch(request, runtime)
                 .map(|payload| self.response(payload))
                 .map_err(AppServerError::Runtime),
             ClientRequest::CodexPluginList => runtime
@@ -562,6 +662,25 @@ impl<S: ThreadStore> AppServer<S> {
                 .map(ResponsePayload::CodexPlugin)
                 .map(|payload| self.response(payload))
                 .map_err(AppServerError::Runtime),
+            ClientRequest::DshMarketplaceSearch {
+                source,
+                manifest_url,
+                query,
+            } => runtime
+                .search_dsh_marketplace(source, manifest_url, query)
+                .map(ResponsePayload::DshMarketplace)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::DshMarketplacePreview { item } => runtime
+                .preview_dsh_marketplace_plugin(item)
+                .map(ResponsePayload::DshMarketplacePreview)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
+            ClientRequest::DshMarketplaceInstall { item, upgrade } => runtime
+                .install_dsh_marketplace_plugin(item, upgrade)
+                .map(ResponsePayload::CodexPlugin)
+                .map(|payload| self.response(payload))
+                .map_err(AppServerError::Runtime),
             request => self.dispatch(request),
         }
     }
@@ -587,60 +706,47 @@ impl<S: ThreadStore> AppServer<S> {
             event,
         )
     }
-}
 
-fn ensure_import_is_idle(threads: &[Thread]) -> Result<(), AppServerError> {
-    if threads
-        .iter()
-        .flat_map(|thread| &thread.turns)
-        .any(|turn| matches!(turn.status, TurnStatus::Queued | TurnStatus::Running))
-    {
-        return Err(AppServerError::InvalidRequest(
-            "imported threads cannot contain active turns".to_string(),
-        ));
+    pub(crate) fn goal_view(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+        goal: ncx_protocol::GoalSnapshot,
+    ) -> Result<ncx_protocol::GoalView, AppServerError> {
+        let armed = self
+            .goal_activations
+            .lock()
+            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?
+            .contains(thread_id.as_str());
+        Ok(ncx_protocol::GoalView {
+            goal,
+            activation: if armed {
+                ncx_protocol::GoalActivation::Armed
+            } else {
+                ncx_protocol::GoalActivation::Disarmed
+            },
+        })
     }
-    Ok(())
-}
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DispatchOutcome {
-    pub response: ServerResponse,
-    pub events: Vec<EventEnvelope>,
-}
-
-#[derive(Debug)]
-pub enum AppServerError {
-    Protocol(ncx_protocol::ProtocolError),
-    Store(ThreadStoreError),
-    NotFound(String),
-    InvalidRequest(String),
-    Runtime(String),
-}
-
-impl fmt::Display for AppServerError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Protocol(error) => error.fmt(formatter),
-            Self::Store(error) => error.fmt(formatter),
-            Self::NotFound(id) => write!(formatter, "{id} was not found"),
-            Self::InvalidRequest(message) => message.fmt(formatter),
-            Self::Runtime(message) => message.fmt(formatter),
-        }
+    pub(crate) fn arm_goal(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+    ) -> Result<(), AppServerError> {
+        self.goal_activations
+            .lock()
+            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?
+            .insert(thread_id.as_str().to_string());
+        Ok(())
     }
-}
 
-impl std::error::Error for AppServerError {}
-
-impl From<ncx_protocol::ProtocolError> for AppServerError {
-    fn from(error: ncx_protocol::ProtocolError) -> Self {
-        Self::Protocol(error)
-    }
-}
-
-impl From<ThreadStoreError> for AppServerError {
-    fn from(error: ThreadStoreError) -> Self {
-        Self::Store(error)
+    /// Revoke process-local continuation authority without mutating the
+    /// durable Goal definition. Hosts call this when their accepted worker
+    /// cannot be created or its durability fence fails.
+    pub fn disarm_goal(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), AppServerError> {
+        self.goal_activations
+            .lock()
+            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?
+            .remove(thread_id.as_str());
+        Ok(())
     }
 }
 

@@ -31,6 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from genome import Genome  # noqa: E402
+from process_control import run_owned  # noqa: E402
 
 HOME = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or "")
 
@@ -78,7 +79,7 @@ class CodexBackend(TeacherBackend):
     def _run(self, prompt: str, timeout: int) -> tuple[int, str]:
         out = Path(tempfile.mktemp(suffix=".txt"))
         try:
-            r = subprocess.run(
+            r = run_owned(
                 [_exe("codex"), "exec", "-m", self.model, "-s", "read-only",
                  "--skip-git-repo-check", "-o", str(out)],
                 input=prompt, capture_output=True, text=True,
@@ -111,7 +112,7 @@ class ClaudeBackend(TeacherBackend):
 
     def _run(self, prompt: str, timeout: int) -> dict | None:
         try:
-            r = subprocess.run(
+            r = run_owned(
                 [_exe("claude"), "-p", "--model", self.model, "--output-format", "json"],
                 input=prompt, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=timeout,

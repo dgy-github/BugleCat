@@ -9,18 +9,30 @@
 //!   normalization including DeepSeek's cache-accounting fields.
 //! * [`provider`] — [`DeepSeekProvider`], the async HTTP client over `reqwest`.
 
+pub mod anthropic;
 pub mod api;
+pub mod chat_probe;
 pub mod dashscope_media;
+pub mod model_catalog;
 pub mod provider;
 pub mod request;
 pub mod response;
 pub mod types;
 pub mod web;
 
+pub use anthropic::AnthropicProvider;
 pub use api::{Provider, StreamDelta};
+pub use chat_probe::{
+    chat_probe_endpoint, HttpProviderChatProbeClient, ProviderChatProbeClient,
+    ProviderChatProbeRequest, ProviderChatProbeResult,
+};
 pub use dashscope_media::{
     DashScopeMediaProvider, MediaGenerationRequest, MediaGenerationResult, MediaKind,
     MediaProvider, DASHSCOPE_MEDIA_BASE_URL, DEFAULT_IMAGE_MODEL, DEFAULT_VIDEO_MODEL,
+};
+pub use model_catalog::{
+    catalog_endpoint, parse_catalog_models, DiscoveredProviderModel, HttpProviderCatalogClient,
+    ProviderCatalogClient, ProviderCatalogRequest,
 };
 pub use provider::{stream_open_timeout_s, DeepSeekProvider};
 pub use request::{build_body, is_deepseek_model};

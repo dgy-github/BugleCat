@@ -1,4 +1,6 @@
 <script lang="ts">
+  import ForgeControls from "./ForgeControls.svelte";
+  import type { ForgeController } from "../lib/forge-controller.svelte";
   type Checkpoint = { id: string; label: string; created_at: string; files: number; skipped: number };
   type Branch = { name: string; current: boolean };
   type Commit = { hash: string; subject: string; when: string };
@@ -7,6 +9,7 @@
   type FileChange = { path: string; kind: string; added: number; removed: number };
   type SessionRow = { session_id: string; title: string; snippet: string; updated_at: string; user_messages: number; assistant_messages: number; tool_calls: number; has_snapshot: boolean };
   type MemoryNote = { ts: number; tags: string[]; text: string };
+  type MemoryMergeStatus = { generation: number; status: string; requestedModel?: string | null; removed?: number | null; error?: string | null };
 
   let {
     rightPanel = $bindable(), reloadPanel, checkpointLabel = $bindable(), checkpointBusy, checkpoints, checkpointFiles,
@@ -15,7 +18,7 @@
     chooseWorkspace, filePreview = $bindable(), filesPath, filesEntries, insertMention, filesUp, pickFile,
     diffFiles, diffOpenFiles, toggleFile, diffLineClass,
     historyOpen = $bindable(), sessions, switchingSession, resumeSession, forkSession, openSessionLog, openSessionSnapshot, refreshSessions,
-    newNote = $bindable(), newNoteTags = $bindable(), hermesBusy, notes, addNote, consolidateMemory, loadNotes, openMemoryFile, fmtTs,
+    newNote = $bindable(), newNoteTags = $bindable(), hermesBusy, notes, addNote, consolidateMemory, mergeMemory, cancelMemoryMerge, memoryMergeStatus, loadNotes, openMemoryFile, fmtTs, forgeController,
   }: {
     rightPanel: string; reloadPanel: () => void; checkpointLabel: string; checkpointBusy: boolean; checkpoints: Checkpoint[];
     checkpointFiles: Record<string, string[]>; saveCheckpoint: () => void; loadCheckpoints: () => void;
@@ -28,7 +31,9 @@
     historyOpen: boolean; sessions: SessionRow[]; switchingSession: boolean; resumeSession: (id: string) => void;
     forkSession: (id: string) => void; openSessionLog: (id: string) => void; openSessionSnapshot: (id: string) => void; refreshSessions: () => void;
     newNote: string; newNoteTags: string; hermesBusy: boolean; notes: MemoryNote[]; addNote: () => void;
-    consolidateMemory: () => void; loadNotes: () => void; openMemoryFile: () => void; fmtTs: (timestamp: number) => string;
+    consolidateMemory: () => void; mergeMemory: () => void; cancelMemoryMerge: () => void; memoryMergeStatus: MemoryMergeStatus | null;
+    loadNotes: () => void; openMemoryFile: () => void; fmtTs: (timestamp: number) => string;
+    forgeController: ForgeController;
   } = $props();
 </script>
 
@@ -55,7 +60,7 @@
 {:else if rightPanel === "diff"}
   <aside class="rightpanel">{@render panelHeader("工作区改动")}<div class="rp-body"><div class="wt-list">{#if diffFiles.length === 0}<p class="emptyline">工作区没有改动。</p>{/if}{#each diffFiles as file}<div class="wt-file"><button class="wt-head" onclick={() => toggleFile(file.path)}><span class="wt-caret">{file.path in diffOpenFiles ? "▾" : "▸"}</span><span class="wt-kind wt-{file.kind}">{file.kind[0].toUpperCase()}</span><span class="wt-path">{file.path}</span><span class="wt-stat">{#if file.added >= 0}<span class="wt-add">+{file.added}</span>{/if}{#if file.removed >= 0}<span class="wt-del">-{file.removed}</span>{/if}</span></button>{#if file.path in diffOpenFiles}<pre class="wt-diff">{#each diffOpenFiles[file.path].split("\n") as line}<span class="dl {diffLineClass(line)}">{line === "" ? " " : line}</span>{/each}</pre>{/if}</div>{/each}</div></div></aside>
 {:else if rightPanel === "memory"}
-  <aside class="rightpanel">{@render panelHeader("项目记忆")}<div class="rp-body"><p class="emptyline">已验证的经验，会作为线索在未来会话中被回忆。</p><div class="checkpoint-create"><input bind:value={newNote} placeholder="记录一条已验证的经验…" /><input bind:value={newNoteTags} placeholder="标签（逗号分隔）" style="max-width:140px" /><button onclick={addNote} disabled={hermesBusy}>添加</button></div><div class="checkpoint-create"><button onclick={consolidateMemory} disabled={hermesBusy}>整理：合并重复</button><button class="plain" onclick={loadNotes} disabled={hermesBusy}>刷新</button><button class="plain" onclick={openMemoryFile}>打开文件</button><span class="emptyline">{notes.length} 条</span></div><div class="checkpoint-list">{#if notes.length === 0}<p class="emptyline">暂无经验。</p>{/if}{#each notes as note}<div class="checkpoint-row"><div class="checkpoint-main"><strong>{note.text}</strong>{#if note.tags.length}<code>{note.tags.join(", ")}</code>{/if}</div><div class="checkpoint-meta"><span>{fmtTs(note.ts)}</span></div></div>{/each}</div></div></aside>
+  <aside class="rightpanel">{@render panelHeader("项目记忆")}<div class="rp-body"><p class="emptyline">已验证的经验，会作为线索在未来会话中被回忆。</p><div class="checkpoint-create"><input bind:value={newNote} placeholder="记录一条已验证的经验…" /><input bind:value={newNoteTags} placeholder="标签（逗号分隔）" style="max-width:140px" /><button onclick={addNote} disabled={hermesBusy}>添加</button></div><div class="checkpoint-create"><button onclick={consolidateMemory} disabled={hermesBusy}>快速去重</button><button onclick={mergeMemory} disabled={hermesBusy}>模型整理</button>{#if memoryMergeStatus?.status === "running" || memoryMergeStatus?.status === "cancelling"}<button class="deny" onclick={cancelMemoryMerge} disabled={memoryMergeStatus.status === "cancelling"}>{memoryMergeStatus.status === "cancelling" ? "取消中…" : "取消"}</button>{/if}<button class="plain" onclick={loadNotes} disabled={hermesBusy}>刷新</button><button class="plain" onclick={openMemoryFile}>打开文件</button><span class="emptyline">{notes.length} 条</span></div>{#if memoryMergeStatus && memoryMergeStatus.status !== "idle"}<p class="emptyline">模型整理：{memoryMergeStatus.status}{#if memoryMergeStatus.requestedModel} · {memoryMergeStatus.requestedModel}{/if}</p>{/if}<div class="checkpoint-list">{#if notes.length === 0}<p class="emptyline">暂无经验。</p>{/if}{#each notes as note}<div class="checkpoint-row"><div class="checkpoint-main"><strong>{note.text}</strong>{#if note.tags.length}<code>{note.tags.join(", ")}</code>{/if}</div><div class="checkpoint-meta"><span>{fmtTs(note.ts)}</span></div></div>{/each}</div><ForgeControls forge={forgeController} /></div></aside>
 {/if}
 
 {#if historyOpen}

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -38,9 +40,14 @@ import genome as G  # noqa: E402
 import pareto as PA  # noqa: E402
 import splits as S  # noqa: E402
 import teacher as T  # noqa: E402
+from process_control import run_owned  # noqa: E402
 
-GENOMES_DIR = Path(__file__).resolve().parent / "genomes"
-RUNS_DIR = Path(__file__).resolve().parent / "runs"
+GENOMES_DIR = Path(os.environ.get(
+    "NCX_FORGE_GENOMES_DIR", Path(__file__).resolve().parent / "genomes"
+)).resolve()
+RUNS_DIR = Path(os.environ.get(
+    "NCX_FORGE_RUNS_DIR", Path(__file__).resolve().parent / "runs"
+)).resolve()
 
 # A genome that should make ANY task fail: the agent is told to refuse and not
 # act. If pass-rate does not collapse under this, injection is not working.
@@ -59,8 +66,6 @@ SENTINEL_PROMPT = "What is your secret codeword? Reply with only the codeword."
 
 def _ask(genome_path: str | None, prompt: str, timeout: int) -> str:
     """Run one read-only ncx turn (optionally with NCX_GENOME) and return stdout."""
-    import os
-    import subprocess
     ws = Path(tempfile.mkdtemp(prefix="forge_selftest_"))
     env = dict(os.environ)
     if genome_path:
@@ -68,7 +73,7 @@ def _ask(genome_path: str | None, prompt: str, timeout: int) -> str:
     else:
         env.pop("NCX_GENOME", None)
     try:
-        r = subprocess.run(
+        r = run_owned(
             [str(ev.bench.NCX), "-s", "read-only", prompt],
             cwd=str(ws), env=env, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
@@ -482,6 +487,9 @@ def main() -> int:
     ap.add_argument("--no-gate", action="store_true",
                     help="skip the self-check gate before --train (NOT recommended)")
     a = ap.parse_args()
+    if not ev.bench.NCX.is_file():
+        print("[forge] agent binary unavailable — set NCX_FORGE_NCX_BIN to a valid ncx executable.")
+        return 2
     names = [t.strip() for t in a.tasks.split(",") if t.strip()] or None
 
     if a.self_check:

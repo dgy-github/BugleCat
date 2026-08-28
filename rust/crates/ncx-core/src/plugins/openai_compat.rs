@@ -125,6 +125,39 @@ pub struct CodexPluginCatalog {
     root: PathBuf,
 }
 
+pub(crate) fn discover_enabled_codex_plugins(
+    workspace: &Path,
+) -> Result<Vec<CodexPluginRecord>, String> {
+    discover_enabled_codex_plugins_with_home(workspace, local_home().as_deref())
+}
+
+fn discover_enabled_codex_plugins_with_home(
+    workspace: &Path,
+    home: Option<&Path>,
+) -> Result<Vec<CodexPluginRecord>, String> {
+    let mut plugins = std::collections::BTreeMap::new();
+    let roots = home
+        .into_iter()
+        .map(|home| home.join(".ncx/codex-plugins"))
+        .chain(std::iter::once(workspace.join(".ncx/codex-plugins")));
+    for root in roots {
+        for plugin in CodexPluginCatalog::new(root).discover()? {
+            if plugin.enabled {
+                // Workspace plugins are visited last and intentionally shadow a
+                // user-global plugin with the same stable name.
+                plugins.insert(plugin.manifest.name.clone(), plugin);
+            }
+        }
+    }
+    Ok(plugins.into_values().collect())
+}
+
+fn local_home() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+}
+
 impl CodexPluginCatalog {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -291,13 +324,8 @@ impl CodexPluginCatalog {
 }
 
 pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfig>, String> {
-    let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
     let mut servers = Vec::new();
-    for plugin in catalog
-        .discover()?
-        .into_iter()
-        .filter(|plugin| plugin.enabled)
-    {
+    for plugin in discover_enabled_codex_plugins(workspace)? {
         let value = if let Some(value) = plugin.manifest.mcp_servers.clone() {
             resolve_json_resource(&plugin, "mcpServers", value)?
         } else if let Some(path) = plugin.mcp_path() {
@@ -356,13 +384,8 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
 /// not local executables; callers may expose them for diagnostics and hand
 /// their connector ids to an authenticated Apps gateway when one is present.
 pub fn discover_codex_apps(workspace: &Path) -> Result<Vec<CodexAppResource>, String> {
-    let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
     let mut apps = Vec::new();
-    for plugin in catalog
-        .discover()?
-        .into_iter()
-        .filter(|plugin| plugin.enabled)
-    {
+    for plugin in discover_enabled_codex_plugins(workspace)? {
         let value = match plugin.manifest.apps.clone() {
             Some(Value::String(_)) => {
                 let path = plugin
@@ -410,13 +433,8 @@ pub fn discover_codex_apps(workspace: &Path) -> Result<Vec<CodexAppResource>, St
 }
 
 pub fn discover_codex_hooks(workspace: &Path) -> Result<Vec<HookConfig>, String> {
-    let catalog = CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"));
     let mut hooks = Vec::new();
-    for plugin in catalog
-        .discover()?
-        .into_iter()
-        .filter(|plugin| plugin.enabled)
-    {
+    for plugin in discover_enabled_codex_plugins(workspace)? {
         let value = if let Some(value) = plugin.manifest.hooks.clone() {
             resolve_hook_resources(&plugin, value)?
         } else if let Some(path) = plugin.hooks_path() {

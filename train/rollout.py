@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
+from process_control import run_owned  # noqa: E402
 from finetune import bench_reward  # noqa: E402  (reuse the verifiable reward)
 
 
@@ -109,7 +110,7 @@ def ncx_episode(task_name: str, model: str, base_url: str | None = None,
             env["DEEPSEEK_BASE_URL"] = base_url  # ncx provider is OpenAI-compatible
         prompt = (task / "prompt.txt").read_text(encoding="utf-8")
         try:
-            subprocess.run(ev._agent_cmd(prompt, model), cwd=str(ws), env=env,
+            run_owned(ev._agent_cmd(prompt, model), cwd=str(ws), env=env,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=timeout)
             stopped = "final"

@@ -1,6 +1,6 @@
 //! Model-provider contract consumed by the agent runtime.
 
-use crate::{DeepSeekProvider, ModelResponse};
+use crate::{AnthropicProvider, DeepSeekProvider, ModelResponse};
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -13,6 +13,12 @@ pub enum StreamDelta {
 #[async_trait(?Send)]
 pub trait Provider {
     fn model(&self) -> &str;
+
+    /// Model identifier returned by the provider for the most recent response.
+    /// `None` means the wire response did not include an authoritative model.
+    fn confirmed_model(&self) -> Option<String> {
+        None
+    }
 
     async fn chat(
         &self,
@@ -43,6 +49,10 @@ pub trait Provider {
 impl Provider for DeepSeekProvider {
     fn model(&self) -> &str {
         &self.model
+    }
+
+    fn confirmed_model(&self) -> Option<String> {
+        DeepSeekProvider::confirmed_model(self)
     }
 
     async fn chat(
@@ -82,6 +92,26 @@ impl Provider for DeepSeekProvider {
             Ok(response) => response,
             Err(error) => provider_error(error),
         }
+    }
+}
+
+#[async_trait(?Send)]
+impl Provider for AnthropicProvider {
+    fn model(&self) -> &str {
+        &self.model
+    }
+    fn confirmed_model(&self) -> Option<String> {
+        AnthropicProvider::confirmed_model(self)
+    }
+    async fn chat(
+        &self,
+        messages: &[Value],
+        tools: &[Value],
+        _reasoning_effort: Option<&str>,
+    ) -> ModelResponse {
+        AnthropicProvider::chat(self, messages, tools)
+            .await
+            .unwrap_or_else(|error| provider_error(error))
     }
 }
 

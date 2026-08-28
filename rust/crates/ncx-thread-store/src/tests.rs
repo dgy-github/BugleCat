@@ -18,6 +18,7 @@ fn thread(id: &str) -> Thread {
             workspace: "workspace".into(),
             title: "title".into(),
             archived: false,
+            harness_profile: "full".into(),
             created_at: 1,
             updated_at: 1,
         },
@@ -25,16 +26,181 @@ fn thread(id: &str) -> Thread {
     }
 }
 
+fn goal(id: &str, revision: u64, objective: &str) -> GoalSnapshot {
+    GoalSnapshot {
+        id: ncx_protocol::GoalId::new(id).unwrap(),
+        revision,
+        objective: objective.into(),
+        phase: ncx_protocol::GoalPhase::Active,
+        blocked_reason: None,
+        max_goal_rounds: 8,
+        rounds_started: 0,
+        created_at: 10,
+        updated_at: 10 + revision as i64,
+    }
+}
+
+#[test]
+fn goal_compare_and_set_is_durable_and_rejects_stale_revision_without_writing() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("ncx-goal-cas-{unique}.json"));
+    let id = ThreadId::new("thread").unwrap();
+    let store = JsonThreadStore::open(&path).unwrap();
+    store.create(thread("thread")).unwrap();
+    let first = goal("goal", 1, "first");
+    assert_eq!(
+        store
+            .compare_and_set_goal(&id, GoalExpectation::Absent, Some(first.clone()))
+            .unwrap(),
+        Some(first.clone())
+    );
+
+    let second = goal("goal", 2, "second");
+    store
+        .compare_and_set_goal(
+            &id,
+            GoalExpectation::Exact(GoalRef {
+                id: first.id.clone(),
+                revision: 1,
+            }),
+            Some(second.clone()),
+        )
+        .unwrap();
+    let before_stale = fs::read(&path).unwrap();
+    let stale = store.compare_and_set_goal(
+        &id,
+        GoalExpectation::Exact(GoalRef {
+            id: first.id,
+            revision: 1,
+        }),
+        Some(goal("goal", 3, "must not persist")),
+    );
+    assert!(matches!(stale, Err(ThreadStoreError::StaleGoal { .. })));
+    assert_eq!(fs::read(&path).unwrap(), before_stale);
+
+    let reopened = JsonThreadStore::open(&path).unwrap();
+    assert_eq!(reopened.read_goal(&id).unwrap(), Some(second));
+}
+
+#[test]
+fn fork_copies_durable_goal_snapshot() {
+    let store = temp_store("goal-fork");
+    let source = ThreadId::new("source").unwrap();
+    let target = ThreadId::new("target").unwrap();
+    store.create(thread("source")).unwrap();
+    let snapshot = goal("goal", 3, "continue after fork only when re-armed");
+    store
+        .compare_and_set_goal(&source, GoalExpectation::Absent, Some(snapshot.clone()))
+        .unwrap();
+    store.fork(&source, target.clone()).unwrap();
+    assert_eq!(store.read_goal(&target).unwrap(), Some(snapshot));
+}
+
+#[test]
+fn legacy_store_without_goal_map_opens_with_no_goal() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("ncx-goal-legacy-{unique}.json"));
+    let store = JsonThreadStore::open(&path).unwrap();
+    store.create(thread("legacy")).unwrap();
+    drop(store);
+    let mut json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    json.as_object_mut().unwrap().remove("goals");
+    fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+    let reopened = JsonThreadStore::open(&path).unwrap();
+    assert_eq!(
+        reopened
+            .read_goal(&ThreadId::new("legacy").unwrap())
+            .unwrap(),
+        None
+    );
+}
+
 fn turn(id: &str) -> Turn {
     Turn {
         id: TurnId::new(id).unwrap(),
         status: TurnStatus::Running,
+        execution_mode: ncx_protocol::ExecutionMode::Agent,
         items: Vec::new(),
         started_at: 2,
         completed_at: None,
         error: None,
         usage: TurnUsage::default(),
     }
+}
+
+fn goal_turn(id: &str, snapshot: &GoalSnapshot, round: u32) -> Turn {
+    Turn {
+        items: vec![ThreadItem::GoalMessage {
+            id: ItemId::new(format!("message-{id}")).unwrap(),
+            text: format!("continue round {round}"),
+            goal_id: snapshot.id.clone(),
+            revision: snapshot.revision,
+            round,
+        }],
+        ..turn(id)
+    }
+}
+
+#[test]
+fn goal_round_admission_atomically_claims_turn_and_increments_counter() {
+    let store = temp_store("goal-round");
+    let thread_id = ThreadId::new("thread").unwrap();
+    store.create(thread("thread")).unwrap();
+    let snapshot = goal("goal", 2, "continue");
+    store
+        .compare_and_set_goal(&thread_id, GoalExpectation::Absent, Some(snapshot.clone()))
+        .unwrap();
+    let admitted = store
+        .claim_goal_round(
+            &thread_id,
+            GoalRef {
+                id: snapshot.id.clone(),
+                revision: snapshot.revision,
+            },
+            1,
+            goal_turn("round-1", &snapshot, 1),
+        )
+        .unwrap();
+    assert_eq!(admitted.rounds_started, 1);
+    let stored = store.read(&thread_id).unwrap().unwrap();
+    assert_eq!(stored.turns.len(), 1);
+    assert!(matches!(
+        stored.turns[0].items.as_slice(),
+        [ThreadItem::GoalMessage { round: 1, .. }]
+    ));
+    assert_eq!(
+        store.read_goal(&thread_id).unwrap().unwrap().rounds_started,
+        1
+    );
+}
+
+#[test]
+fn rejected_goal_round_changes_neither_turn_nor_counter() {
+    let store = temp_store("goal-round-reject");
+    let thread_id = ThreadId::new("thread").unwrap();
+    store.create(thread("thread")).unwrap();
+    let snapshot = goal("goal", 2, "continue");
+    store
+        .compare_and_set_goal(&thread_id, GoalExpectation::Absent, Some(snapshot.clone()))
+        .unwrap();
+    let result = store.claim_goal_round(
+        &thread_id,
+        GoalRef {
+            id: snapshot.id.clone(),
+            revision: snapshot.revision,
+        },
+        2,
+        goal_turn("skipped", &snapshot, 2),
+    );
+    assert!(matches!(result, Err(ThreadStoreError::InvalidGoalRound(_))));
+    assert!(store.read(&thread_id).unwrap().unwrap().turns.is_empty());
+    assert_eq!(store.read_goal(&thread_id).unwrap(), Some(snapshot));
 }
 
 #[test]

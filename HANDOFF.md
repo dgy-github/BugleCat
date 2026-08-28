@@ -1,5 +1,134 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## Same-session durable Goal：领域与原子存储（2026-08-27）
+
+- 参考 DeepSeek Harness 固定提交的 `goal`、`tool-goal` 和
+  `goal-round-driver`，已在 `docs/deepseek-harness-adoption.md` 固定持久状态、
+  process-local activation、authority、自动续轮竞争/取消/费用边界和交付顺序。
+- `ncx-protocol` 新增 `GoalId`、`GoalPhase`、`GoalBlockReason`、
+  `GoalSnapshot`、`GoalRef`，以及 read/create/edit/pause/resume/block/complete/
+  clear 请求、Goal 响应和 `GoalChanged` 事件。持久快照不包含 armed 权限。
+- `JsonThreadStore` 增加独立 `goals` 持久域和真正原子的
+  `compare_and_set_goal`：比较、写入发生在同一个进程 Mutex、跨进程文件锁、
+  最新磁盘 reload 与原子 save 事务内。旧 `threads-v2.json` 缺少 `goals` 时
+  默认空；Fork 在同一事务复制 durable snapshot。
+- App Server 已拥有 Goal 领域状态机：目标/轮数校验、单调 revision、合法
+  phase transition、只有 complete 可被新 Goal 替换；clear 作为显式取消入口。
+  stale revision 和非法 transition 都保持零 Goal 写入。
+- 当前验证：Protocol 7/7、Thread Store 15/15、App Server 19/19。覆盖旧文件、
+  reopen、Fork、stale CAS 字节不变、生命周期与替换规则。尚未接模型工具、
+  process-local arm/disarm、三轮 blocked 门禁、自动续轮和 GUI，不能默认启动
+  任何可能产生费用的 continuation。
+
+### 后续：process-local activation 与模型工具（2026-08-27）
+
+- 协议增加 `GoalActivation` / `GoalView`，App Server 用进程内集合持有 armed
+  权限；Create 默认 disarmed，pause/block/complete/clear 自动 disarm，显式
+  resume 才 arm。活动 Goal 在 restart 后恢复为 disarmed，Fork 只复制 durable
+  snapshot 且目标 Thread disarmed；相关 App Server 测试已覆盖。
+- `ncx-core::goal_tools` 新增 `get_goal`、`create_goal`、`update_goal`。工具只在
+  Host 注入 thread-bound `GoalToolService` 时注册；GUI adapter 的所有 mutation
+  都回到 App Server 状态机，不直接操作 Thread Store。
+- `AgentLoop` 为每轮设置 host-attested `GoalTurnAuthority`：普通 `run_turn` 是
+  direct-human；保留给驱动的 `run_goal_round` 携带 goal ID/revision/round；结束后
+  清除。无 authority、旧 turn、Goal round 冒充 human、错误 ID/revision/round
+  均在访问服务前或 mutation 前 fail-closed。
+- edit/pause/resume 只允许 direct-human；complete/blocked 允许 direct-human 或
+  精确当前 admitted Goal round。模型自动上报 blocked 至少需要 3 个 admitted
+  rounds，并必须提供具体原因。
+- Goal 工具加入 always-visible schema；GUI system prompt 写入 exact ref、恢复后
+  disarmed 和 blocked 下限规则。Orchestrator worker 不注入 Goal 服务，因此不会
+  继承顶层人类权限。
+- 新验证：Core 全量 260/260，GUI Tauri 后端 102/102，GUI 独立目标
+  `cargo check` 通过；其中新增 authority、stale identity、blocked 下限及 GUI
+  adapter 测试。下一步是把 admitted round 与 Turn/UserMessage 在 Store 内原子
+  落库，再实现 checkpoint、竞争用户输入、取消和 queue failure 围栏。
+
+### 后续：admitted Goal round 原子事务（2026-08-27）
+
+- 协议新增隐藏的 `ThreadItem::GoalMessage` 与 `GoalRoundStart`。GoalMessage
+  保留 goal ID/revision/round，进入模型恢复上下文但不进入可见历史，避免用户
+  会话里出现伪造的自动“用户消息”。
+- `ThreadStore::claim_goal_round` 在同一个进程 Mutex、跨进程文件锁、最新磁盘
+  reload 和原子 save 内完成：精确 Goal CAS 身份、active phase、连续 round、
+  round limit、Turn 唯一性/占用、Turn lease、匹配 synthetic prompt、Turn 写入和
+  `roundsStarted` 增加。任何校验失败时 Turn 与 round counter 都不变。
+- App Server 在持有 process-local activation lock 时调用该事务，disarmed Goal
+  无法 admission；成功后同时发布 `TurnStarted` 与带最新计数的 `GoalChanged`。
+  普通 Turn 与 Goal round 仍共享同一 Thread lease，无法重叠执行。
+- 验证更新：Protocol 7/7、Thread Store 17/17、App Server 20/20；新增 GUI
+  replay/visible-history 定向测试通过。尚未把 scheduler 接到真实 GUI 自动调用，
+  因此当前不会因为这项改造自行产生模型费用。下一步继续 checkpoint 后重检、
+  ordinary-user-wins 队列、取消/queue failure/round-limit fail-closed 与 driver dispose。
+
+### 后续：GoalRoundDriver checkpoint/race 围栏（2026-08-27）
+
+- `ncx-app-server::GoalRoundDriver` 已抽成不调用模型的 scheduler coordinator。
+  `reserve_next` 先读取 exact armed Goal，再执行 Host checkpoint，之后重新读取
+  完整 `GoalView`；任意 revision/phase/activation/round 变化均放弃旧 reservation。
+- checkpoint 失败会立即 disarm 且不 admission。checkpoint 期间普通用户 Turn
+  若先取得 Thread lease，返回 `CompetingTurn`，Goal counter 保持不变；不会让
+  自动任务抢在用户输入前面。
+- round limit 在 admission 前转为结构化 `round-limit` blocked 并 disarm。
+  已 reservation 的取消会完成 Turn 为 cancelled、pause 并 disarm；queue failure
+  会以固定安全错误完成 Turn，再写结构化 `queue-failed` blocker，原始异常不进入
+  Thread/UI。
+- App Server 验证更新为 26/26，覆盖 checkpoint failure、checkpoint mutation、
+  ordinary-user-wins、cancel、round limit 和 queue failure。该 coordinator 尚未接
+  GUI 的真实模型 worker，因此仍不会触发付费自动调用。下一步把它接到每会话
+  串行 task lifecycle，并增加 driver dispose/进程关闭等待与 GUI 显式控制。
+
+### 后续：GUI Goal 状态与费用确认（2026-08-27）
+
+- 新增 `GoalController` 和前端 `ProtocolGoalView` 类型。当前会话切换、首次绑定、
+  Turn 从 busy 回到 idle 后都会回读 App Server；旧异步响应通过 generation +
+  thread ID 双重检查丢弃，避免串会话状态。
+- Composer 只在当前 Thread 存在 Goal 时显示状态胶囊，展示 phase、
+  `roundsStarted/maxGoalRounds`、armed/disarmed、剩余轮数和 blocker。用户可显式
+  pause；resume 前必须确认“使用当前模型商、可能产生模型费用”和剩余上限。
+- pause/resume 请求携带 exact Goal ID/revision，不做乐观切换；失败后重新读取
+  服务端状态。切换会话、恢复和 Fork 后 process-local activation 的真实 disarmed
+  状态会直接显示。
+- Vite 生产构建通过（147 modules）；GUI Rust 源码门禁验证可见状态、费用确认、
+  exact ref 和失败回读通过。真实自动 Worker 仍未启用，当前 UI 的“继续”只设置
+  App Server activation，不会自行发起模型调用。
+
+## Provider Catalog Harness 服务化（2026-08-27）
+
+- 新增 `ncx-provider::model_catalog`：统一 `/models` 端点构造、OpenAI Bearer 鉴权、Anthropic `x-api-key`/版本头、15 秒默认超时、禁止重定向、1 MiB 响应上限、1000 模型上限和安全 ID 校验。
+- 目录解析统一兼容 OpenAI/Anthropic 常见 `data`、`models` 和根数组格式；OpenRouter 的名称、上下文长度、输入/输出价格也归一为中立模型元数据。
+- `ncx-core::ProviderCatalogService` 是可注入客户端的只读服务；Harness `base` bundle 新增 `ncx.provider-catalog`，依赖 `provider.directory` 并发布 `provider.catalog`。
+- GUI 原有三套重复 HTTP 路径（自定义模型商发现、设置页自动发现、云末刷新）和 OpenRouter 刷新已迁入该服务；异步刷新通过 blocking worker 执行，不阻塞 Tauri async runtime。
+- 发现操作不写 `config.toml`/`providers.json`；服务测试对失败前后两个文件做逐字节比较，确认目录请求失败不会回滚或改变当前 Provider Route。
+- 安全测试验证 OpenAI/Anthropic 请求头、禁止错误正文与 Token 回显；真实接口抽样：OpenRouter 返回 417 个模型，云末返回 13 个模型且包含 `gpt-5.6-sol`（只输出数量/布尔值，未输出 Token）。
+- 验证：Provider 41、Core 239、Config 36、Protocol 5、App Server 12、独立目标目录 GUI Rust 86 项通过；CLI check 与 Vite build 通过。GUI 默认 target 曾因开发服务器与测试并发产生 MSVC 旧增量对象链接错误，独立目标目录从零编译、链接和测试通过，证明不是源码失败。
+- 本地开发版已改用干净的 `rust/target-codex-check/gui-catalog` 目标目录启动，当前 GUI PID `3912`（仅为交接快照）；默认 `src-tauri/target` 未删除，避免破坏用户构建缓存。
+- 后续进展：Provider 激活已改为候选目录验证后提交，Prompt 每轮读取新 Route，不再重建整套 Harness；并发 generation、失败保留旧 Route、最近激活诊断和真实 WebView 会话保留 E2E 已完成，详见文末 2026-08-27 记录。
+
+## Provider Directory Host/Harness 服务化（2026-08-27）
+
+- `ncx-config::ProviderDirectory` 已抽取为 Provider Route 的持久化唯一所有者；协议、Base URL、Token、模型目录和当前模型作为一条 Route 整体保存、校验和激活。
+- `ncx-core::ProviderDirectoryService` 统一封装 list/get/save/delete/activate/select/diagnostics；GUI 不再在各命令中自行构造或读写 `providers.json`。
+- Harness `base` bundle 新增 `ncx.provider-directory`，向所有内置 Profile 发布 `provider.directory` 服务；Harness 诊断增加 `provider_directory` 挂载状态。
+- GUI `AppState` 在进程启动时持有单一 `ProviderDirectoryService`，App Server Adapter 的模型商保存、删除、发现、激活，以及顶部模型切换和目录预设切回均消费该服务。
+- 设置 → 插件 → Harness 运行诊断现在显示当前 Provider ID、协议、请求模型、Base URL、Token 是否已配置和自定义模型商数量；诊断结构不会序列化 Token。
+- 新增服务级测试，真实写入隔离配置、激活 Route，并验证诊断不泄露凭据。当前验证：`ncx-config` 36、`ncx-provider` 37、`ncx-protocol` 5、`ncx-app-server` 12、`ncx-core` 238、GUI Rust 88 项通过；CLI check 与 Vite build 通过。
+- 后续进展：动态发现已迁入可替换 Provider Catalog；Provider 切换采用候选验证、完整 Route 提交和 per-turn runtime 读取，并记录脱敏激活状态。该条早期“仍需继续”已完成。
+
+## Provider Route 原子化（2026-08-26）
+
+- `config.toml` 新增 `active_provider_id`；`legacy` 表示内置/云末等目录预设，自定义模型商使用稳定 Provider ID。
+- `ncx-config` 在激活自定义模型商时从同一条 `providers.json` 记录整体解析协议、Base URL、Token、选中模型和模型列表；记录缺失或不完整时明确失败，不再回退拼接旧配置。
+- 自定义模型商激活会保存完整路由；顶部模型切换同步其 `selected_model`；切回目录预设会写回 `legacy` 并清除旧 `active` 标记。
+- 同名模型不再按目录顺序猜模型商；快捷切换必须匹配当前 Base URL，避免 `gpt-5.6-sol` 从云末误切到其他 Provider。
+- 验证：`ncx-config` 33 项通过，GUI Rust 87 项通过，Tauri `cargo check` 通过，Vite 生产构建通过。本地开发版已重启，当前 GUI PID `36572`（PID 仅为交接时快照）。
+- 自定义模型商的 list/save/delete/discover/activate 已从直接 Tauri invoke 迁入 `ncx-protocol` + `ncx-app-server::AppServerAdapter`；Token 只作为保存请求输入，不进入响应或测试调用记录。
+- 迁移后验证：`ncx-app-server` 12 项、`ncx-protocol` 5 项、GUI Rust 88 项通过，Vite 生产构建通过；热更新后的 GUI PID `32516`（PID 仅为交接时快照）。
+- Agent `AssistantText` 事件现在携带发起该条回答时的 Provider 模型 ID；前端将其保留在回答对象并显示“请求模型 · …”标签。运行中切模型时旧回答仍标旧模型，新回答标新模型，不再用模型正文自报身份判断版本。
+- 模型归属改造后 `ncx-core` 237 项、GUI Rust 88 项及 Vite 构建通过；本地热更新 GUI PID `13004`（PID 仅为交接时快照）。当前标签是“请求模型”而非“服务端响应模型”；若要声称服务端确认，后续需扩展 `ModelResponse` 解析 OpenAI/Anthropic 返回的 `model` 字段并持久化到 ThreadItem。
+- 上述后续已完成：OpenAI Compatible 流式/非流式与 Anthropic Messages 都会捕获响应 JSON 的 `model`；Provider 每次请求前清空旧确认值，避免错误沿用上一轮。`ThreadItem::AssistantMessage` 持久化请求型号和服务端确认型号，历史恢复后标签仍存在，内部元数据不会传回第三方模型 API。
+- UI 展示规则：响应与请求一致显示“响应确认”；服务端未返回 `model` 只显示“请求模型”；两者不一致显示橙色“请求 A → 响应 B”警告。验证：Provider 37、Protocol 5、App Server 12、Core 237、GUI 88 项通过，CLI check 与 Vite 构建通过；完整重启后的 GUI PID `22232`（PID 仅为交接时快照）。
+
 ## 组件化工作树（2026-08-21）
 
 - 独立目录：`D:\github_dgy\nanocodex\.worktrees\deepseek-harness-components`
@@ -670,3 +799,435 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - M5/M6 补充链路：附件、视觉、图片、视频、Cost/Telemetry、外部进程插件协议 v1 和 `full/minimal/headless` 组合均已进入同一 Profile/Bundle 与 app-server 诊断边界。
 - 总体验证证据：`cargo test --workspace --quiet` 全绿，`ncx-core` 236 项；CLI 严格 Clippy 通过；GUI Rust 60 项；Vite build；protocol/question E2E；相对 `origin/main` 的 25 个生产文件结构门禁和 `git diff --check` 均通过。
 - 外部验收限制不改变架构完成度：现有两把阿里 Key 均返回 401，尚不能证明付费 live 生图/视频成功；GitHub HTTPS 当前不可达且本机 SSH Key 无仓库权限，三个本地提交尚未同步远端。
+
+### 2026-08-25 DSH Desktop 对话界面第一批对齐
+
+- 参考仓库已独立克隆到 `D:\github_dgy\dsh-desktop-reference`，只用于视觉与交互对照，未把参考源码复制进 nanocodex，也未改变 Thread/App Server 状态所有权。
+- GUI 已对齐 DSH Desktop 的桌面层级：低对比侧栏、工作区/会话分组、对话/轨迹页签、右对齐用户气泡、无卡片化助手正文、弱化的思考与工具轨迹、底部悬浮 Composer。
+- 模型、DeepSeek 思考程度、权限模式、工作区、附件、停止和发送仍在 Composer 内；每会话累计 Token 与费用移到 Composer 下方独立状态行，功能没有删除。
+- 会话切换不停止旧任务、不同 Thread 并发、历史只恢复用户请求与最终结论、已完成工具明细默认收起等现有协议行为保持不变。
+- 验证：Vite production build 通过；GUI Rust 60 项通过；真实 protocol E2E 通过（并发、所有权、可见历史、刷新恢复、运行设置、Memory、插件）；question E2E 首次遇到已知 WebView2 页面发现竞争，清理残留进程后重跑 choice/free-text/cancel 全通过；浏览器真实页面完成 1280×720 深色视口检查；`git diff --check` 通过。
+
+### 2026-08-25 DSH 单轮对话细节对齐
+
+- 对照本机 `D:\deepseek-harness-master\deepseek-harness-master` 的官方 `ui-conversation`、`ui-tool` 和 Web E2E 快照，补齐消息级交互，不再只有外观参考。
+- 用户消息与助手回答支持复制并短暂显示成功态；完成回答支持本地赞/踩状态；当前末条完成回答支持从该 Thread 分叉，运行中明确禁用，继续复用现有 app-server Fork 协议。
+- 顶部“对话/轨迹”改为真实可切换视图。轨迹按当前前端实际拥有的事件顺序显示用户、回答、思考、工具、压缩与状态摘要；不伪造已被后端可见投影过滤的历史工具日志。
+- Composer 下方统计对齐 DSH，显示本会话轮次、当前可见工具步骤、累计输入/输出 Token 和累计费用；原 UsageController 仍是 Token/Cost 唯一数据源。
+- 未伪造当前协议没有提供的逐消息时间、TTFT、tok/s、缓存命中率和真实反馈上报。后续若需要这些字段，应先扩展 TurnUsage/Event 协议与持久化，再接 UI。
+- 验证：Vite production build、GUI Rust 61 项、真实 protocol E2E、`git diff --check` 全通过；浏览器实际点击“轨迹”后确认切换到独立事件视图。桌面端从组件工作树重新启动。
+
+### 2026-08-25 DSH 会话命名与侧栏操作对齐
+
+- 对照 DeepSeek Harness `ui-workspace` 的 Session row、rename assembly 和 Web E2E：会话行改为整行打开、尾部单一省略号菜单；菜单提供重命名、分叉、打开日志和归档/取消归档，菜单操作不会误打开会话。
+- 重命名使用正式模态框，预填现有名称、自动选中、限制 36 字符、折叠多余空白并在保存失败时保持弹窗和错误提示；写入继续走 `threadRename` 协议，当前顶栏和侧栏同步刷新。
+- 内部占位标题 `(no prompt yet)` 只投影为“新会话”；空白 Thread 不显示时间与操作菜单。自动标题仍由首轮成功完成后的独立 Provider 任务生成，不进入串行会话命令队列。
+- 分叉标题按 DSH 规则生成 `原名称 (1)`、`(2)`，并通过 `threadRename` 持久化；不会复制活动 Turn 所有权。
+- 修复重命名暴露的历史恢复竞态：会话点击先读取 `threadReadVisible` 立即展示用户请求与最终结论，再激活后台 Agent；运行中 Thread 若已有内存消息则不被历史投影覆盖。
+- 验证：Vite build、GUI Rust 62 项、真实 protocol E2E 全通过；E2E 现覆盖历史恢复、侧栏菜单重命名、名称持久化以及重命名后最终结论仍保留。
+
+### 2026-08-25 新会话自动命名兜底
+
+- 修复首轮完成后会话名称完全依赖模型生成的问题：现在先从首条用户请求生成本地短标题，经既有 `threadRename` 协议立即持久化并刷新顶栏/侧栏，再由独立后台 Provider 生成更自然的标题并覆盖。
+- Provider 满载、断网、配置读取失败或返回无效标题时，本地标题继续保留，不再永久显示“新会话”；寒暄会映射为“日常问候”，普通请求会清理常见请求前缀、合并空白并限制长度。
+- 对修复前已经落盘的占位标题增加历史投影兼容：侧栏从首条用户消息生成同规则短标题，因此旧会话刷新后也不再成片显示“新会话”；空白 Thread 仍保留“新会话”。
+- 保持原有边界：仅首轮成功完成后命名，取消和失败轮次不触发；标题任务不进入会话命令队列，不阻塞其他 Thread 并发执行。
+- 验证：新增 3 项本地标题单测；Vite production build、GUI Rust 65 项和真实 protocol E2E 均通过。protocol E2E 首跑出现一次重命名侧栏定位超时，独立复跑通过，未复现协议或持久化错误。
+
+### 2026-08-25 空会话侧栏交互修复
+
+- 修复已持久化但尚无首轮消息的空会话无法点击：侧栏打开操作不再受 `has_snapshot` 限制，空会话也可正常激活、重命名和归档。
+- 分叉仍要求会话已有快照，避免创建没有上下文意义的空分叉；会话切换期间继续统一禁用打开操作。
+
+### 2026-08-25 项目与会话目录层级
+
+- 侧栏由全局“最近会话”平铺改为 `项目目录 → 会话` 两级结构；分组事实源使用 Thread metadata 的 `workspace`，不按标题或前端临时状态猜测项目归属。
+- 每个项目目录可独立折叠，显示目录名和会话数量；当前工作区项目加深显示，会话缩进到对应项目下并保留打开、运行态、重命名、分叉、日志和归档能力。
+- 已归档区域继续位于所有项目会话下方，符合此前确认的侧栏位置要求。
+- Windows 工作区路径在投影时统一去除 `\\?\`/`\\?\UNC\` 扩展路径前缀、统一分隔符和盘符大小写；项目分组键忽略大小写，避免 `D:\github_dgy` 与 `\\?\D:\github_dgy` 被错误显示为两个项目。
+
+### 2026-08-25 Composer 遮挡消息修复
+
+- Composer 从覆盖滚动区的绝对定位改为主栏底部的独立 Flex 区域，保留圆角、阴影和半透明悬浮卡片外观，但其真实高度会参与布局；思考、工具和最终回答不会再落到输入框后面。
+- 删除滚动区写死的 `9.5rem` 补偿，恢复正常底部间距，并关闭连续事件期间会产生追赶延迟的平滑自动滚动。
+
+### 2026-08-25 设置中心整体重做
+
+- 设置页从单列超长弹窗重构为桌面设置中心：固定标题栏、左侧分类导航、独立滚动内容区和固定保存区；配置项按“通用、模型与费用、连接与媒体、上下文、插件”五类呈现。
+- 原有模型选择、官方/聚合目录、单价币种、主接口与密钥、视觉/阿里媒体连接、上下文裁剪、Harness 诊断、外部插件、Codex 插件和 Marketplace 均保留，没有另建配置状态源。
+- 配置文件入口移到左侧底部；权限模式继续只由 Composer 控制。设置表单改为说明/控件双栏卡片，小窗口自动收窄为图标导航和单列表单。
+
+### M7：DSH Community Marketplace 兼容层（已确认范围）
+
+- 市场源：兼容 `dshfind`、DeepSeek 1024 Store 和 DSH standard HTTP v1；网络层必须限制 HTTPS、固定/清单声明 Origin、重定向终点、响应体大小、分页数量和缓存有效期，不能把任意 Provider URL 当可信安装源。
+- 控制协议：新增目录搜索、插件详情、兼容性判定、Host 风险预览、安装/升级/启停/卸载、安装回执、失败回滚和需重启状态；统一进入 `ncx-protocol` → `ncx-app-server`，GUI 不新增 Tauri 市场旁路。
+- 安装安全：Catalog 只提供候选身份；Host 必须再向 NPM Registry 核验精确包名/版本、仓库归属、完整性、Node engine、弃用状态、依赖和 lifecycle scripts。安装目标进入隔离 Profile，不执行市场返回的命令字符串。
+- 兼容性分级：`native`（已有 `.codex-plugin/plugin.json` 或 `plugin.toml`）、`convertible`（可静态转换的 Skill/MCP/命令资源）、`ui-adapter`（依赖 DSH UI Slots，必须映射到 nanocodex 声明式槽位）、`incompatible`（依赖 Cordis/DSH 私有运行时、动态代码或未支持 Slot）。只有前三类可进入预览，`incompatible` 只能查看原因，禁止强装。
+- UI Slots 首批映射范围限定为设置页插件标签、侧栏底部动作和 Shell Overlay；任何 React 组件不能直接注入 Svelte DOM，需通过类型化声明/资源协议投影。未映射 Slot 明确显示不兼容。
+- GUI：设置中心“插件”分类增加 DSH 市场子页，提供源切换、搜索/筛选、详情、风险预览、安装状态、升级/停用/卸载和错误恢复；当前 Codex Marketplace 与外部进程插件继续保留。
+- 审计事实：本机参考实现位于 `D:\github_dgy\dsh-desktop-reference\dsh-community-market`；其市场和安装流程不能直接复用现有 OpenAI Marketplace 安装器，后者缺少 DSH Catalog 快照、NPM 二次核验、安装回执和 UI Slot 运行时。
+
+### 2026-08-25 M7 第一条可用链路
+
+- `ncx-protocol`/`ncx-app-server` 新增 DSH 市场搜索、Host 风险预览和安装请求；GUI 设置中心插件页可切换 dshfind、DeepSeek 1024 Store、standard HTTP v1，输入搜索词并查看兼容性原因。
+- 宿主网络限制为 HTTPS、固定或清单同源 Origin、禁止重定向、15 秒超时和 5 MiB 响应上限；真实访问 dshfind（约 110 KiB）和 1024 Store（约 2.5 MiB）均返回 HTTP 200。
+- dshfind 明确标记 `is_risky` 的条目不会进入 GUI；只有 Provider 提供 verified、精确版本且不要求构建放行的 NPM 目标才进入“待核验”，其余直接标记不兼容。
+- 风险预览会向官方 NPM Registry 二次核验包名/版本，检查 lifecycle scripts 与 `@deepseek-ai/dsh-*` 私有运行时依赖，并给出 `convertible`、`ui-adapter` 或 `incompatible`。
+- `convertible` 安装会使用精确版本 `npm pack` 隔离暂存、再次核验解包身份；原生 Codex 清单直接安装，Skill/MCP/Markdown 命令资源生成受控 `.codex-plugin/plugin.json` 后进入现有 Codex Plugin Catalog，因此复用已有升级、启停和卸载能力。
+- DSH React UI 包不会被执行或注入 Svelte DOM；当前依赖私有 DSH Runtime 的包明确不兼容。`ui-adapter` 仍需完成声明式 Slots 资源格式和三个 GUI 消费槽位，不能宣告 M7 全部完成。
+- 2026-08-25 已完成 DSH React UI Slots 安全适配：隔离解包后只静态扫描 `settings.plugins.tab`、`sidebar.footer.action`、`shell.overlay`，总扫描量限制 4 MiB，生成 `.ncx/ui-slots.json`；GUI 启动时读取启用插件的受限声明，在插件设置页、侧栏底部和类型化 Overlay 中投影，第三方 React/JS 不会执行。未知 Slot、非 HTTPS 外链、超量声明、lifecycle script 和 DSH 私有运行时继续拒绝。
+- UI Slot 插件现在可通过 `ui-adapter` 预览并安装；启停会同步控制声明式贡献。Rust 定向测试覆盖三槽转换和未知槽拒绝，protocol E2E 覆盖真实安装、重载后侧栏入口、打开/关闭 Overlay 及卸载清理。
+- UI Slots 收尾补齐插件归属与稳定排序，设置页 Slot 以独立入口投影；重复 slot/id、HTTP 外链和无效声明会在插件设置中显示诊断，不再静默隐藏。真实 E2E 还覆盖停用后入口立即消失、重新启用后恢复。
+- E2E 同时发现并修复协议 Artifact 被后到达的旧 `loaded` 快照覆盖的竞态：同一会话的协议产物现在会合并进旧桥接快照，不能被删除。
+- 真实 protocol E2E 已通过 dshfind 搜索、选择带精确 NPM 目标的条目并完成 NPM 风险预览，同时继续覆盖 Thread 并发、历史投影、设置、Memory 和现有两类插件控制面。
+
+### 2026-08-25 会话媒体产物链接
+
+- `generate_image`/`generate_video` 成功结果中的 HTTP(S) URL 不再随工具日志一起隐藏：Bridge 将其提升为类型化 `ThreadItem::Artifact`，包含图片/视频类型、名称和 URL。
+- 可见历史投影保留 Artifact，同时继续过滤普通工具调用、工具输出和思考；模型快照恢复路径也会通过 tool call ID 识别媒体工具并恢复产物，刷新和切换会话后链接不会消失。
+- GUI 实时解析同一工具结果并显示独立产物卡片；图片带缩略图，视频显示播放入口，点击统一调用受限的 `open_url` 交给系统浏览器。助手 Markdown 中的 HTTP(S) 链接也拦截后走同一安全打开命令。
+- 最终回答中以 Windows 本地绝对路径返回的图片、视频和 PDF（例如 `C:\Users\...\result.png`）也会被识别为本地产物卡片，点击后调用系统默认查看器；Host 会先确认文件存在并限制扩展名，禁止借回答路径打开 EXE、脚本或其他可执行内容。protocol E2E 覆盖刷新历史后本地产物卡片仍存在。
+- 本地 PNG/JPEG/WebP/GIF/BMP 会由 Host 在 12 MiB 上限内编码为受限 `data:image/*`，直接在会话卡片内展示大图；SVG、视频、PDF 和超大图片仍只显示安全点击入口。Windows 点击使用原生文件关联（本机验证为“照片”应用），不再复用固定打开记事本的配置文件函数。E2E 已断言历史恢复后的 `<img>` 使用 `data:image/png;base64`。
+
+### 2026-08-25 DSH Marketplace 分类目录
+
+- 以本机 DSH Desktop 和 DeepSeek 1024 Store 实际接口为准，市场共 12 类：工具与能力、UI 增强、开发与运行时、会话与消息、模型与账号接入、工作流与自动化、技能包、通知与集成、娱乐、记忆、主题与外观、待分类。
+- Host 现在保留 1024 Store 返回的 `categories`、`meta` 和每个插件的 `category`；dshfind/标准 HTTP 未提供目录时按结果动态聚合，非法或未知分类归入 `unclassified`。分类 ID、名称、数量均经过边界校验，市场任意文本不会直接成为界面标识。
+- GUI 在市场来源和搜索框下增加横向可滚动分类导航，显示分类数量；分类与搜索结果同时生效，切换来源会回到“全部”，小窗口不会撑坏设置页。
+- 真实接口证据：12 个分类、当前返回 500 个插件、`meta.catalogTotal=10619`；前 100 条中有 10 个 `memory` 插件。
+- 验证：分类归一化 Rust 定向测试 4 项通过；Vite 构建通过（141 模块）；protocol E2E 通过，并真实断言 1024 Store 返回 12 类、点击“记忆”后只显示 `memory`、切回“全部”恢复其他插件；`cargo test --workspace --quiet` 全部通过。`cargo fmt --check` 仍会报告本轮之前累计的未格式化 Rust 改动，本次未批量格式化，避免扩大用户未提交差异。
+
+### 2026-08-25 厂商实时模型目录与应用外观
+
+- 修复选择厂商预设后模型下拉框只剩静态精选项的问题：设置读取会请求当前 OpenAI 兼容厂商的 `/models`，把安全、去重后的实时模型与当前模型、静态回退目录合并；5 秒超时、禁止重定向、1 MiB 响应上限，失败时不影响设置页使用。
+- 使用当前 DeepSeek 官方接口和本机已配置密钥实测返回 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4-pro`，视觉实验模型现在会进入下拉框；API Key 不进入日志或前端。
+- 用户提供的 1024×1024 猫图已保存为 `rust/gui/src/assets/nanocodex-cat-icon-source.png`，并通过 Tauri 官方图标生成器生成 Windows ICO、桌面 PNG、macOS ICNS、Appx、Android 和 iOS 尺寸。Windows 安装器和应用窗口继续引用 `src-tauri/icons/icon.ico`。
+- Tauri 2.8 的窗口配置不支持 `app.windows[].icon`；任务栏图标改为在 `setup` 阶段读取编译进应用的 `default_window_icon` 并调用 `window.set_icon`，开发版窗口也显示猫图，不再沿用终端默认图标。
+- 新增 `跟随系统 / 浅色 / 深色` 三种外观：设置页位置为“通用 → 外观主题”，顶部工具栏另有 `◐/☀/☾` 快捷切换；选择写入本地 `nanocodex.theme`，重启保留，不污染项目或会话配置。
+- 验证：GUI Rust 80 项通过，Vite 构建通过（141 模块），`git diff --check` 通过；protocol E2E 已增加实时模型与主题应用/持久化断言。
+- 品牌名已改为 `BugleCat`，对应“妙脆角猫咪”；窗口、安装包、开始菜单和侧栏展示使用新名称，内部 `nanocodex` 配置目录、协议 ID 和仓库地址保持不变，避免丢失现有设置与会话。
+- Agent 系统提示加入 BugleCat 人设：温暖、好奇、可靠，跟随用户语言并先给结果；只在问候或庆祝时允许轻微猫咪风格，错误、风险、代码和技术说明禁止强行卖萌，准确、执行与验证优先于角色扮演。空会话页显示猫咪头像和“妙脆角猫咪准备好了”。
+- 侧栏和顶部栏旧字符图标统一替换为 1.7px 线宽圆角 SVG：收起/展开面板、项目展开箭头和文件夹采用同一视觉语言；项目标题右侧原本不可点击的装饰字符改为“切换或添加工作区”和“折叠全部项目”两个真实按钮，并补齐中文 Tooltip 与无障碍名称。
+
+### 2026-08-27 当前会话 Provider/模型安全切换
+
+- 核实 GUI 的真实执行模型：每条 Prompt 都由 `spawn_turn_worker` 从已提交配置构建会话级 Agent；模型切换不需要重建整套 Harness、MCP、Skills 或 Thread。
+- 自定义模型商激活和同厂商模型切换现在先通过 `ProviderCatalogService::validate_route_model` 校验候选 Route 的 Token、Base URL 及目标模型；失败不会修改 `providers.json` 或 `config.toml`，成功后才由 Provider Directory 一次提交完整 Route。
+- `Command::SetModel` 改为提交后的状态刷新通知，不再二次写 `model`，不再调用 `build_agent`，不发 `Loaded`；当前会话 ID、可见消息、模型上下文和会话授权保持不变，下一条消息读取新 Route。
+- Legacy 模型下拉若没有命中预设，也由调用方显式提交 `model` 后再通知，避免依赖 Worker 的隐式写配置副作用。
+- 验证：Core Provider 定向测试 5 项通过；新增“目录只返回目标模型”测试证明错误模型校验前后 Provider 文件逐字节不变且 config 未生成；GUI 静态调用链测试证明 SetModel 分支不重建、不写配置、不替换会话，均通过。开发版已热重载到 `rust/target-codex-check/gui-catalog/debug/ncx-gui.exe`。
+- 增加 `ProviderActivationGate` 代次门：每次选择先登记 generation，网络校验在锁外并行；提交时持短锁核对最新 generation。旧请求晚返回时闭包不会执行，最新请求失败时也不会让旧请求覆盖原活动 Route。定向并发测试通过。
+- 新增聚焦 WebView E2E `npm run test:e2e:provider-switch`：真实创建并完成 Thread，经 App Server 调用当前活动模型切换，再逐字段比较切换前后可见投影并读取 Provider Directory 诊断。2026-08-27 实测输出 `providerSwitchE2e=true`、`transcriptPreserved=true`、`modelPreserved=true`；当时活动 Route 为 legacy 云末，因此没有把结果冒充为自定义 Provider 验证。
+- 原全量 protocol E2E 已加入同类断言，但本次运行在既有大型 Marketplace 网络调用阶段遇到 `error decoding response body`，未形成全量通过证据；模型切换聚焦 E2E 已与该外部波动隔离。干净 MSVC 目标首次构建超过原脚本 120 秒 CDP 等待窗，缓存完成后聚焦用例通过。
+- 回归：`ncx-core` 240/240、GUI Rust 87/87、Vite 143 modules 均通过。正常开发版恢复在 `rust/target-codex-check/gui-catalog/debug/ncx-gui.exe`（当次 PID 43424）。
+- Provider 激活诊断现包含 generation、`idle/validating/active/failed`、更新时间和最近错误；过期 generation 不得覆盖最新状态。错误限制 300 字符，并二次脱敏 Bearer、`sk-`、`api_key=`、`apikey=`、`token=` 形态，结构中仍不包含 Token 字段。
+- 设置 → 插件 → Harness 运行诊断新增“最近一次模型切换”卡片，失败状态显示脱敏原因。状态机/脱敏测试 2 项、GUI Rust 89/89、Vite 143 modules 通过；聚焦真实 WebView E2E 输出 `providerSwitchE2e=true`、`transcriptPreserved=true`、`modelPreserved=true`、`activationDiagnosticsVisible=true`。正常开发版恢复为 PID 40692。
+
+### 2026-08-27 Provider 对话平面显式探测
+
+- 新增独立 `ProviderChatProbeService` 和 Harness 插件 `ncx.provider-chat-probe`（服务 `provider.chat-probe`），与只读 `/models` Catalog 分离；不会在保存、刷新或切换时自动产生推理费用。
+- 用户在自定义模型商卡片点击“测试对话”才发送真实的一 token 请求：OpenAI Compatible 使用 `/chat/completions`，Anthropic 使用 `/messages`；非流式、20 秒超时、禁止重定向、响应上限 256 KiB。
+- 探测经 `ncx-protocol` 的 `customProviderChatProbe` 和 App Server Adapter 统一路由；成功返回请求模型、服务端确认模型（若存在）和协议，不返回正文。失败只暴露 HTTP 状态或安全连接错误，不读取/回显第三方错误正文和 Token。
+- 设置页明确区分“获取模型（只验证目录）”与“测试对话（真实 1 token，可能有极小费用）”；目录激活成功提示也明确“目录可用不代表对话权限已开通”。
+- Mock HTTP 测试覆盖 OpenAI/Anthropic 端点、鉴权头、1-token 请求、确认模型和 403 正文/Token 不泄漏；Provider 44、Core 240、App Server 12、GUI 89 项及 Vite 143 modules 通过。
+- 真实 AIGoCode Route（未激活）探测：`/models` 包含 `gpt-5.6-sol`，但 Chat Completions 与 Responses 均 HTTP 403，服务端原因为账号仅允许 Codex 官方客户端；添加常见 Codex 请求形态/标识仍为 403。因此未切换当前 legacy 云末 Route，也没有把目录成功误报为聊天可用。聚焦 E2E 输出 `customProviderChatProbe=blocked`、`customProviderConfirmedModel=null`，会话/当前模型保持不变。
+
+### 2026-08-27 Windows NSIS 全量安装包与插件冲突门禁
+
+- 审计确认原 `tauri:build`/`tauri:installer` 固定使用 `x86_64-pc-windows-gnu`，但当前 Windows 工具链只安装 MSVC target；脚本已改为 `x86_64-pc-windows-msvc`，并通过修正后的 `npm run tauri:installer` 真实完成全量构建。
+- 最终产物：`rust/target-codex-check/installer-audit/x86_64-pc-windows-msvc/release/bundle/nsis/BugleCat_0.1.0_x64-setup.exe`，大小 3,747,725 字节，SHA-256 `49F85FE63F3597F4EE2C1BA44CD0664BF6CE20C4DC87B1C80BED79C1123CB161`。
+- 生产前端构建包含 143 个模块；`dist/assets/buglecat` 中 16 状态 × 4 尺寸的 64 张 PNG 全部存在。安装器版本/产品名为 `BugleCat 0.1.0`。
+- 既有“重复能力阻断”是应用内 Codex 插件检查，不是 NSIS 检查，且此前只覆盖 DSH Marketplace。现在本地 Codex 插件、普通 Marketplace、DSH Marketplace和禁用插件重新启用均统一检查已启用插件的插件名、Skill ID、MCP server ID；升级仅跳过自身，仍会阻断与其他插件重复的能力。
+- 新增功能测试证明不同插件包含同名 Skill 时安装被阻断，停用冲突插件后才放行；GUI Rust 90/90 通过，Vite 143 modules 通过，`git diff --check` 通过。
+- 发布剩余风险：安装器尚未数字签名，Windows 会显示未知发布者；正式公开分发需提供代码签名证书并接入签名流程。开发版热重载后运行 PID 为 11928，路径仍是独立 `gui-catalog/debug/ncx-gui.exe`。
+
+### 2026-08-27 GUI 壳层结构门禁
+
+- 运行仓库真实 `scripts/check_code_structure.py` 复现 `App.svelte` 368 行超过 Svelte 300 行硬上限；CLI `ncx-cli/src/main.rs` 当前仅 436 行，低于 Rust 700 行上限，未做无依据拆分。
+- 新增 `AppUtilityPanels.svelte` 作为工作区抽屉与设置中心的组合层，直接消费现有 Controller；状态所有权、App Server 边界和所有 `bind:` 语义保持不变。`App.svelte` 降至 265 行，组合层 94 行，两者均通过真实结构脚本。
+- 验证：Vite 144 modules、GUI Rust 90/90、聚焦真实 WebView E2E 通过；输出仍为 `providerSwitchE2e=true`、会话/模型保留、激活诊断可见、AIGoCode 对话探测 blocked。正常开发版恢复 PID 8172。
+- E2E 启动脚本此前强制 `--target x86_64-pc-windows-msvc`，在自定义 `CARGO_TARGET_DIR` 下另建 target 子目录并造成三轮冷编译；已改为项目正确启动命令 `npm run tauri -- dev`，复用正常开发缓存。
+- 对全部当前改动运行结构门禁仍发现后续存量：`ncx-app-server/src/lib.rs` 714、其 tests 978（另有 103 逻辑行测试）、`ncx-config/src/loader.rs` 1477、`ncx-core/src/agent_loop/tests.rs` 1335、`ncx-core/src/tools.rs` 756、`ncx-protocol/src/lib.rs` 704。下一轮应按职责逐项拆分，不能把本次 App 通过冒充全仓通过。
+
+### 2026-08-27 Rust 协议与工具结构收口（进行中）
+
+- `ncx-protocol/src/lib.rs` 的协议契约与内联测试分离，公共文件 704 → 501 行；测试进入 `src/tests.rs`，序列化字段和公开类型不变。协议 5/5 通过。
+- `ncx-app-server` 的 `DispatchOutcome`/`AppServerError` 进入独立 `outcome.rs` 并从 crate 根原样重导出，`lib.rs` 714 → 673 行；App Server 12/12 通过。
+- `ncx-core/tools.rs` 的执行、保守恢复、Policy/Interaction 服务投影、Middleware 与 Hook 链进入已有 `tools/` 职责目录中的 `execution.rs`；公共 ToolRegistry API 不变，主文件 756 → 591，执行模块 160 行。Core 240/240 通过。
+- 上述 6 个相关文件均通过真实结构脚本和 `git diff --check`。全改动结构门禁剩余：App Server tests 978（其中插件/市场测试 103 逻辑行）、config loader 1477、agent loop tests 1335；下一步按业务域拆测试，并按配置来源拆 loader。
+- 当前开发版仍为 PID 8172；Tauri watcher 只监视 `src-tauri`，不会因依赖 crate 内部等价重构自动重启，完成下一批拆分后需主动重启以确保运行二进制来自最新全树源码。
+
+### 2026-08-27 全改动结构门禁收口
+
+- App Server tests 从单文件 978 行拆为共享 Runtime Fixture 336 行、Thread/Turn 182 行、Runtime Adapter 约 470 行；103 逻辑行的插件/市场用例拆为 Codex 插件与 Marketplace 两条独立测试。App Server 用例由 12 增至 13，13/13 通过。
+- Config loader 从 1477 行拆为来源解析 `loader/sources.rs` 233 行、合并构建 `loader.rs` 585 行、测试 `loader/tests.rs` 659 行；DeepSeek/Codex/nanocodex 层级、环境变量、Provider Route、Hook 和阿里附件配置测试 36/36 通过。
+- Agent loop tests 从 1335 行拆为共享 Fixture 271 行、基础回合行为 536 行、运行时/取消/调度行为 534 行；不扩大 AgentLoop 生产 API，Core 240/240 通过。
+- `python scripts/check_code_structure.py --git-diff HEAD` 现对全部 41 个当前修改生产文件通过，`git diff --check` 通过；不再有此前记录的 7 个超限文件或超长函数。
+- Rust 全 workspace 回归首次发现 CLI 旧测试仍假设只配置 `vl_model` 即启用视觉 Provider；生产实现和 Core 契约均已要求 `alibaba_attachment_parser_enabled=true`。测试已更新为同时断言“仅配置模型仍关闭”和“显式开启后可用”，保持附件解析插件默认关闭。修正后全 workspace 所有 crate 通过。
+- Vite 生产构建 144 modules 通过。已主动重启 Tauri 以纳入依赖 crate 重构，最新开发版 PID 40788，路径 `rust/target-codex-check/gui-catalog/debug/ncx-gui.exe`。
+
+### 2026-08-27 GUI Slash 第一批真实能力对齐
+
+- GUI 命令面板新增 `/history`、`/review`、`/security-review`、`/verify`、`/docx`、`/pdf`、`/pptx`、`/xlsx`。历史命令直接打开现有 App Server 会话面板；审查、验证和文档命令展开为可编辑任务并保留用户在命令后的范围或文件参数，不冒充已经执行。
+- 移除仅提示“规划中”的 `/schedule` 与 `/workflows` 可执行入口；真正的定时任务和多 Agent Orchestrator 仍需后续协议及运行态实现，不能用提示框或 Prompt 模板冒充。
+- 修复带参数的内置命令会从菜单消失的问题：命令筛选现在只匹配 `/命令头`，例如 `/verify provider switch` 可被选择且参数完整进入任务。
+- 新增聚焦 WebView E2E `npm run test:e2e:slash`，真实启动 Tauri 后断言 8 个可用命令存在、两个占位命令不存在、参数保留、PDF 模板展开和历史面板打开。实测输出 `slashParity=true`、`placeholdersHidden=true`、`argumentPreserved=true`、`historyPanelOpened=true`。
+- 验证：Vite 生产构建 144 modules 通过；全量当前改动结构门禁对 42 个生产文件通过；`git diff --check` 通过。
+
+### 2026-08-27 GUI Orchestrator 接入前置审计
+
+- 当前不能只加一个“多 Agent”开关：Core Orchestrator 尚无结构化进度、合作取消或聚合用量，真实 Runner 仍由 CLI 私有；直接在 GUI 复制实现会形成第二套运行状态机，并破坏 App Server 的 Thread/Turn 所有权。
+- `rust/gui/GUI_FEATURES_PLAN.md` 的旧 P4“toggle + shared snapshot”已替换为五道协议门禁：共享 Runner、Core 进度/取消/用量契约、App Server 执行模式、复用 GUI trajectory、Core/App Server/WebView 分层验证。
+- 审计发现 CLI `LiveRunner` 在隔离目录复制失败时退回真实工作区；并行 Worker 因而可能同时修改用户目录，与其隔离承诺相反。现在改为 fail-closed：失败 Worker 返回明确 setup failure，不执行 Agent，也不登记残缺 scratch 目录。
+- 新增定向测试证明源工作区缺失时不会创建或写入真实工作区，且 scratch registry 保持为空。CLI 定向测试 1/1、Core Orchestrator 13/13、`cargo fmt --check -p ncx-cli`、43 文件结构门禁及 `git diff --check` 通过。
+- Core `AgentRunner` 新增向后兼容的结构化结果入口 `AgentCallResult`；旧 Mock 仍只需实现字符串 `run`，生产 Runner 可额外返回各节点 Token、请求模型、服务端确认模型和取消标记。`OrchestratorOutcome.telemetry` 对 classify/plan/worker/verify 全图聚合这些证据并对模型列表去重。
+- CLI `LiveRunner` 已接入结构化入口，普通执行、无工具 reasoning 和隔离 Worker 都返回真实 `TurnResult.usage`、请求模型和 stop reason；未来 GUI 不需要再从最终文本猜测用量或型号。
+- Orchestrator 的公开类型与纯解析/任务拼装分别拆入 `orchestrator/types.rs`、`orchestrator/support.rs`，主文件保持 689 行，新增文件 110/127 行。Core Orchestrator 14/14、CLI check、46 文件结构门禁和 `git diff --check` 通过。
+- 新增 `OrchestratorControl`、`OrchestratorEvent` 与六种强类型阶段：Classify、Plan、Decompose、Workers、Verify、Promote。Host 可复用普通 Turn 的原子取消标记；Core 在每个节点边界和模型调用后检查，取消后不再调度后续 Worker、重试、Verify 或 Promote。
+- `OrchestratorOutcome.cancelled` 与 telemetry 取消证据分开保留；CLI recorder 现在把取消编排写成 `TurnStatus::Cancelled`，不会误记为验证失败。定向测试在 Workers 事件触发取消，证明只发生 classify/plan 两次调用且无 Verify/Promote；正常事件顺序也有显式断言。
+- 原 Orchestrator 内联测试机械迁移到 `orchestrator/tests.rs`，控制契约测试进入 `orchestrator/control_tests.rs`；高风险分解函数提取 `plan_and_decompose`。生产主文件 425 行，Core Orchestrator 16/16、CLI 36/36、GUI Rust check、47 文件结构门禁及 `git diff --check` 通过。
+
+### 2026-08-27 App Server 执行模式协议
+
+- `ncx-protocol` 升至 v3，新增 `ExecutionMode::{Agent, Orchestrator}`；`Turn.execution_mode`、`TurnStart.execution_mode`、`TurnSubmit.execution_mode` 使用 camelCase 且均以 `Agent` 为 serde 默认，旧 v2 JSONL/请求缺字段时可直接读取，不要求破坏性迁移。
+- 模式从 GUI `TurnSubmit` 经 App Server Adapter、Bridge `Command::Prompt` 进入 `ProtocolTurnGuard::start` 并持久化在真实 Turn；不是只存于前端 localStorage。CLI 普通 Turn 写 Agent，`--orchestrate` 写 Orchestrator。
+- TypeScript App Server client 与事件 gate 同步要求协议 v3；历史 `ProtocolThread` 暴露可选 `executionMode`。App Server 测试证明 Orchestrator 模式被路由到 Host 且存储后仍为 Orchestrator，Protocol 测试证明旧 Turn/Submit 自动回退 Agent。
+- 回归：Protocol 6/6、Thread Store 12/12、App Server 13/13、CLI 36/36、GUI Rust check、Vite 144 modules 与 48 文件结构门禁通过。实际 Orchestrator Runner 分支尚未接入 Bridge，当前即使提交 Orchestrator 模式仍只持久化模式；下一步必须实现真实执行链后再开放 GUI 开关。
+
+### 2026-08-27 GUI 真实 Orchestrator 执行链
+
+- Core 新增共享 `HarnessAgentRunner`，CLI 与 GUI 统一复用 Configured Harness、Host bindings、取消检查、用量/请求模型/服务端确认模型聚合、Worker scratch 隔离与 fail-closed 清理；CLI 不再维护第二套私有 LiveRunner。
+- Bridge 在 `ExecutionMode::Orchestrator` 下运行真实 `Orchestrator::handle`，沿用普通 Turn 的 Provider/Token/Base URL、审批/提问/授权、原子取消标志、Protocol Turn、会话上下文和标题生成；最终回答、模型证据、Token/费用与状态写回同一个 Thread/Turn。
+- GUI Composer 增加 `Agent / 多 Agent` 执行方式。当前会话内切换不清空 Transcript；运行中切换仅影响下一轮；每条排队任务固定提交时的模式，避免出队时被新选择悄悄改写。
+- 多 Agent 阶段 `classify/plan/decompose/workers/verify/promote` 投影到现有对话/轨迹状态，不另建平行运行状态机。界面明确提示多 Agent 更慢且调用更多；当前不支持图片附件，发送前和 Host 两层均 fail-closed，普通 Agent 继续承载原生多模态。
+- 验证：Core Orchestrator 17/17、共享 Runner 1/1、App Server 13/13、CLI 35/35、Protocol 6/6、Thread Store 12/12、GUI 91/91、Vite 144 modules、48 文件结构门禁与 `git diff --check` 全部通过。真实 WebView 检查确认菜单文案、Agent→多 Agent 切换及 Transcript 保留；未触发付费模型调用。
+- Windows 默认 Tauri 增量目录出现历史 LLVM 匿名符号链接缓存损坏；源码在 `CARGO_INCREMENTAL=0` 的独立目标目录完整链接并通过 91 项 GUI 测试。本地新版已从 `rust/target-codex-check/gui-orchestrator-test/debug/ncx-gui.exe` 启动；默认坏缓存未删除，避免破坏用户产物。
+
+### 2026-08-27 Worker 三方差异提升
+
+- 修复共享 Runner 的获胜结果提升只做 `copy_tree`、无法同步删除文件的问题。现在每个 Worker 创建后记录 SHA-256 基线，提升时比较“启动基线 / Worker 结果 / 当前真实工作区”，支持新增、修改、删除和空目录清理。
+- 提升先检查全部变更路径；若真实工作区在 Worker 运行期间修改了同一路径，整批 fail-closed，不写入任何新增文件、不覆盖用户内容。失败原因进入 `OrchestratorOutcome.promotion_error`，并强制 `verify_passed=false`，GUI/CLI 不再把“模型验证通过但文件没提升”报告为完成。
+- 全 Core 并行回归发现不同 `HarnessAgentRunner` 实例的 scratch 计数器各自从 1 开始，可能在同进程并行时使用同一路径并互删。现改为进程级原子唯一编号，所有 Runner 共用，不依赖随机碰撞概率。
+- 测试覆盖新增/修改/删除、空目录清理、并发冲突零部分写入、提升失败状态、Runner 删除集成和 scratch 清理。Core 248/248、Orchestrator 18/18、Runner 2/2、CLI 35/35、GUI Rust check、Vite 144 modules、49 文件结构门禁及 `git diff --check` 通过。
+
+### 2026-08-27 Worker 输出路径规范化
+
+- Worker 在隔离目录运行时，模型最终文本可能引用 `%TEMP%\\ncx_worker_*`；scratch 清理后这些文件链接必然失效。共享 Runner 现在在结果进入 verifier 和最终回答前，把完整隔离根前缀映射为真实 workspace 根。
+- 同时覆盖 Windows 反斜杠、模型常输出的正斜杠与 Windows 大小写不一致；只替换完整 scratch 根，不替换普通 `ncx_worker_*` 文本。获胜 Worker 提升后，GUI 的本地文件卡片和回答路径可继续打开真实文件。
+- Runner 聚焦测试增至 4/4；全 Core 250/250、CLI 35/35、GUI Rust check、Vite 144 modules、49 文件结构门禁与 `git diff --check` 通过。
+
+### 2026-08-27 多 Agent Worker 安全活动轨迹
+
+- 共享 Runner 新增结构化 `HarnessRunnerEvent`，只在隔离 Worker 执行工具时报告 Worker 编号、工具名、开始/结束和规范化失败类别；分类、计划、验证节点不伪装成 Worker 工具活动。
+- 原始工具参数、Shell 命令、文件内容、工具结果和第三方错误正文均不进入该事件，从事件契约层避免 Token/敏感信息泄漏。Core 测试用含 `api_key`/`token` 的输入证明观察者事件不包含秘密值。
+- Bridge 将活动映射为 `orchestrator_activity`；GUI 只在“轨迹”视图显示 `W1/W2 + 工具 + 执行中/完成/失败类别`，并把同一工具的开始项原位更新为完成项。探索 Worker 活动不写 Protocol Thread、不进入聊天正文，Turn 完成后由现有结论收口逻辑移除。
+- 回归：Runner 5/5、Core 251/251、CLI 35/35、GUI 91/91、Vite 144 modules、49 文件结构门禁与 `git diff --check` 通过。未用真实 Token 触发付费多 Agent 调用。
+
+### 2026-08-27 Orchestrator WebView 协议恢复证据
+
+- 新增聚焦 E2E `npm run test:e2e:orchestrator`，使用真实 Tauri WebView 和 App Server 创建 `executionMode=orchestrator` 的 Turn，写入用户要求与取消前结论，再持久化 `cancelled` 状态。
+- 页面真实验证已有 Transcript 下 Agent→多 Agent 切换不改变任何会话文本；整页 reload 后从历史重新打开同一会话，回答仍可见；底层 Thread 读取确认 `executionMode=orchestrator` 与 `status=cancelled` 均保留。
+- 实测输出：`orchestratorModeSwitch=true`、`transcriptPreserved=true`、`executionModePersisted=orchestrator`、`cancelledTurnRestored=cancelled`、`historyReloaded=true`。Core 的取消测试另行证明取消后不再调度 Verify/Promote；E2E 不触发真实付费模型。
+- `GUI_FEATURES_PLAN.md` 的 P4 已从过期“current/尚未完成”修正为 DONE，并明确多 Agent 图片仍不支持，避免文档与运行代码冲突。
+
+### 2026-08-27 完成后运行轨迹保留
+
+- 修复“对话”和“轨迹”共用同一个消息数组，Turn 完成收口聊天时同时删除工具/Worker 证据的问题。`ThreadController` 现在为每个会话维护独立的最近一轮 trajectory；聊天继续只保留用户要求、结论和产物。
+- 发送时记录本轮轨迹起点；运行中轨迹实时读取本轮切片；完成或失败时在移除 reasoning/tool activity 前复制轨迹。切换会话会 stash/restore 各自轨迹，不把 A 会话证据显示到 B 会话。
+- 普通工具轨迹现在显示实际工具名（如 `shell · 已完成`），多 Agent 继续显示 `W2 / read_file · 完成`。原始参数与结果只在运行中的工具详情出现，完成后的聊天不泄漏。
+- 聚焦 WebView E2E 通过 Tauri 真实事件总线注入与 Bridge 同形的阶段、Worker、工具和完成事件，实测 `completedTrajectoryRetained=true`、`chatKeptClean=true`；同时保留原有模式切换、协议持久化、取消恢复与历史 reload 断言。GUI 91/91、Vite 144 modules、49 文件结构门禁及 `git diff --check` 通过。
+
+### 2026-08-27 多 Agent 资源预算
+
+- Config 新增普通 Worker（1–4）、高风险 Worker（1–6）、验证重试（0–3）、递归深度（0–2）和子任务上限（1–12）；旧配置缺字段保持原默认 `2/3/1/1/6`，非法文件值在运行前 fail-closed。
+- `OrchestratorConfig::from_runtime_config` 是 CLI 与 GUI Bridge 的唯一预算映射，替换两处固定 `Default`；设置保存后当前会话不重建，下一轮编排读取新预算。环境变量、profile、nanocodex TOML、writer 白名单和安全 redacted 投影均已贯通。
+- 设置 → 通用新增“多 Agent 资源预算”卡片，明确每项范围与费用含义。聚焦 WebView E2E 验证五个控件真实可见且 HTML min/max 与后端校验一致，输出 `resourceBudgetControlsVisible=true`，未修改用户配置或触发模型调用。
+- 验证：Config 38/38、Core Orchestrator 23/23、CLI 35/35、GUI 91/91、Vite 144 modules、49 文件结构门禁与 `git diff --check` 通过。
+
+### 2026-08-27 多 Agent 预算保存前原子校验
+
+- GUI 设置保存现在先在内存中校验五项预算，再调用配置 Writer；普通 Worker 1–4、高风险 Worker 1–6、验证重试 0–3、递归深度 0–2、子任务上限 1–12，非整数与越界值均返回明确中文错误。
+- 新增真实临时文件回归：`orchestrator_workers=9` 和 `NaN` 都使包含其他合法字段的整批更新失败，原配置文件字节逐字节不变，证明不会部分写入或污染现有 Route/模型配置。
+- 合法边界 `4/1/0/2/12` 一次性持久化；Writer 继续遵循现有“统一字符串落盘、Loader 归一为 bool/int”的配置契约，没有引入第二套序列化规则。
+- 验证：Config 38/38、Core Orchestrator 23/23、CLI 35/35、GUI 93/93、Vite 144 modules、真实 WebView Orchestrator E2E 全部通过；E2E 仍确认模式切换、Transcript 保留、执行模式持久化、取消恢复、历史 reload、完成后轨迹保留、聊天干净及预算控件可见。49 个生产文件结构门禁与 `git diff --check` 通过。
+- 验证后已用 `CARGO_INCREMENTAL=0` 和独立 `gui-orchestrator-test` 目标目录重新启动开发版；交接时 GUI PID `40716`，可执行文件为 `rust/target-codex-check/gui-orchestrator-test/debug/ncx-gui.exe`（PID 仅为快照）。
+
+### 2026-08-27 Hermes LLM 记忆合并前置收口
+
+- 扫描确认 GUI 当前 `memoryConsolidate` 只做确定性近重复删除；真实 LLM 合并此前由 CLI 私有 `LiveSummarizer` 实现。训练框架 `train/forge.py` 等已经存在于当前工作树，`GUI_FEATURES_PLAN.md` 中“需先合并 feat/train”的前置条件已过期。
+- 新增 Core 共享 `ProviderMemorySummarizer`，由宿主注入当前 Harness Route 解析出的 `Provider`；提示词、结果清理和错误拒绝只有一套实现。CLI 仅负责选择 fast model 并装配 Provider，不再拥有第二套 LLM 合并逻辑。
+- 注入测试验证两条模型消息、事实编号、输出去空白，以及 Provider 错误时返回 `None`，第三方错误正文不会写进记忆。模型合并器拆入独立 `memory_summarizer.rs`，避免 `memory.rs` 超过 700 行结构门禁。
+- GUI LLM 合并仍未开放：同步 App Server dispatch 内直接等待模型会卡 UI，并且取消时可能留下部分写入。下一步应实现后台操作协议，在临时记忆副本上合并，取消或真实文件并发变化时不提升，成功后再原子替换；训练触发复用同一后台操作生命周期。
+- 验证：Core 253/253、Core memory 聚焦 14/14、CLI 35/35、GUI 93/93、Vite 144 modules、50 个生产文件结构门禁与 `git diff --check` 通过；未调用真实模型或输出任何 Token。验证后已重启开发版，交接时 GUI PID `40556`，路径仍为独立 `gui-orchestrator-test/debug/ncx-gui.exe`。
+
+### 2026-08-27 LLM 记忆合并草稿与冲突安全提升
+
+- Core 将 LLM 合并拆为 `prepare_summarize_consolidate` 与 `commit_summarize_consolidate`：准备阶段从真实文件捕获字节基线并只在内存生成 `MemoryMergeDraft`，不写项目；提交阶段重新读取真实文件，仅在基线逐字节一致时写入结果。
+- 用户或另一进程在模型运行期间新增/修改记忆时，提交返回 `WouldBlock`，整份草稿拒绝且并发内容逐字节不变。取消检查进入每个模型合并边界，返回 `Interrupted`，草稿不会提升。
+- 原 CLI 同步入口复用 prepare/commit 兼容路径，因此也获得并发冲突保护。聚焦测试覆盖“准备零写入、成功提交、并发更改整批拒绝、取消零写入”。
+- 合并算法和草稿生命周期从 `memory.rs` 拆入 `memory_merge.rs`，保持存储、模型 Consumer 和后台操作职责分离。验证：Core memory 17/17、Core 256/256、CLI 35/35、51 个生产文件结构门禁与 `git diff --check` 通过。
+
+### 2026-08-27 GUI 后台模型记忆整理
+
+- Protocol/App Server 新增 `memoryMergeStart`、`memoryMergeStatusRead`、`memoryMergeCancel`；启动立即返回 generation/status，模型调用在独立命名线程和 current-thread Tokio runtime 中执行，不阻塞同步 App Server dispatch 或 WebView。
+- GUI 项目记忆明确拆为“快速去重”和“模型整理”。模型整理显示请求模型与运行状态，运行中提供取消；Controller 每 400ms 读取版本化状态，完成后刷新记忆，取消/冲突/失败均明确提示未写入。
+- Coordinator 禁止并发启动第二个整理任务；取消通过 `tokio::select!` 丢弃正在等待的 Provider future，并由 Core cancellable prepare 返回 `Interrupted`。Provider 返回错误或空结果时 `failure_count>0`，GUI 严格失败，不再把启发式 fallback 误报为模型合并成功。
+- 后台结果只提交 Core `MemoryMergeDraft`；真实文件基线变化进入 `conflict`，第三方错误正文不进入状态或 UI。Coordinator 测试覆盖 running→cancelling 与安全冲突错误映射。
+- 验证：Config 38/38、Protocol 6/6、App Server 13/13、Core 256/256、CLI 35/35、GUI 95/95、Vite 144 modules、53 个生产文件结构门禁与 `git diff --check` 通过。真实 WebView E2E 输出新增 `memoryMergeControlsVisible=true`、`memoryMergeIdleStatus=idle`；未触发付费模型调用或修改用户记忆。
+- 验证后已恢复本地开发版，交接时 GUI PID `2868`，可执行文件为独立 `rust/target-codex-check/gui-orchestrator-test/debug/ncx-gui.exe`。
+
+### 2026-08-27 Forge GUI 接入安全审计与进程所有权
+
+- 扫描真实 `forge.py --help` 和训练链确认可公开的安全参数仅为有界 `rounds/repeats/timeout/budget-s/teacher/accept-margin`；GUI 不应暴露 `--no-gate`、`--no-reeval`、`--from-genome`、任意 task/path 或原始命令行。原始 stdout/stderr 可能包含失败轨迹和第三方内容，也不能进入 UI。
+- 新增 `train/process_control.py`，所有 Forge/Teacher/Evaluator/Genome/Export/Rollout/TaskGen 外部进程统一由 `run_owned` 创建独立进程组。超时时 Windows 使用精确 PID 的 `taskkill /T /F`，POSIX 使用进程组 kill；不再只终止直接子进程而遗留 ncx/教师/grader 孙进程。
+- Forge 支持宿主通过 `NCX_FORGE_GENOMES_DIR` 与 `NCX_FORGE_RUNS_DIR` 指定隔离产物目录；未来 GUI 必须指向当前工作区 `.ncx/forge/`，不能把 lineage/genome 写回安装资源或源码 `train/`。
+- 回归测试真实启动“父进程再生成延迟写文件孙进程”，触发 0.2 秒超时后等待，确认孙进程未存活且没有写 marker；另验证 stdout 捕获和宿主输出目录解析。全 `python -m pytest train -q` 43/43、Python compile、53 个生产文件结构门禁与 `git diff --check` 通过。
+- 尚未开放 GUI 训练按钮：安装包尚未携带 Forge Python 资源，且 App Server 外层任务还需完整树取消、typed 参数校验、安全 lineage 摘要与成本确认。当前继续保持 pending，避免开发机可用但安装版失效的假入口。
+
+### 2026-08-27 Forge 可重复安装资源
+
+- `bench/run.py` 不再只认源码树 `rust/target/release/ncx.exe`；宿主必须通过 `NCX_FORGE_NCX_BIN` 注入 sidecar。二进制缺失时 `forge.py` 以退出码 2 fail-closed，不进入自检、评测或付费调用。
+- 新增 Windows staging 脚本 `rust/gui/scripts/stage-forge-runtime.ps1`：固定 Python 3.13.7 官方 embeddable ZIP 和 SHA-256 `F6CCA216...D86B65`，独立 release 目标构建 `ncx.exe`，复制最小 Forge/Bench 资源并生成 `buglecat-forge-runtime/v1` 哈希清单。staging 目标严格限制在 `src-tauri/forge-runtime`，该生成目录已忽略。
+- 新增 Tauri overlay `tauri.forge.conf.json` 与 `npm run tauri:installer:forge`；普通开发/测试配置不依赖生成资源，完整安装构建才携带约 27.5 MB 的 `python/bin/train/bench` 运行时。
+- 真实 staging 通过：嵌入式 Python 能加载 `forge.py --help`，sidecar `--dump-genome` 返回非空 system prompt 与 37 个工具描述；二次 staging 复用缓存仅约 5 秒，且不产生 `__pycache__`。
+- Tauri overlay 使用独立 `forge-bundle-smoke` 目标执行 `tauri build --debug --no-bundle`，5m39s 冷编译后成功；产物旁真实存在 `forge-runtime`，嵌入式 Python 可从复制后的资源运行。
+- GUI 新增 `ForgeRuntimeStatusRead` App Server 请求。运行时优先读取安装资源目录，debug 才允许源码 staging fallback；逐项校验 Python、Forge 脚本和 ncx sidecar SHA-256，缺失、版本不兼容或篡改时只返回安全的 unavailable 原因。篡改 sidecar 测试确认 fail-closed。
+- 验证：Python 44/44、Protocol 6/6、App Server 13/13、GUI 97/97；尚未开放训练启动，下一步实现有界 typed 参数、外层进程树 Coordinator 和安全 lineage 摘要后再生成完整 NSIS。
+
+### 2026-08-27 Forge GUI 后台训练入口
+
+- Protocol/App Server 新增 `forgeJobStart`、`forgeJobStatusRead`、`forgeJobCancel`，GUI Adapter 已接通安装资源发现、当前工作区与独立 `ForgeJobCoordinator`。后端再次校验 rounds 1–5、repeats 1–3、timeout 30–300 秒、budget 60–3600 秒、teacher 白名单和 accept-margin 1–3；输出固定到当前工作区 `.ncx/forge`。
+- 项目记忆面板新增独立 Harness Forge 卡片：显示运行时状态、有界参数、运行状态、取消和安全结果摘要。开始前调用显式费用确认；按钮不会暴露 `--no-gate`、任意路径或任务参数，stdout/stderr 始终丢弃。
+- lineage 只读取任务启动后生成、低于 2 MiB 的最新 JSON，并仅返回轮次、接受数、冠军/测试分数和报告文件名；trajectory、diff、Token、第三方错误正文不会进入 UI。
+- Windows 真实逃逸测试证明单用 `taskkill /T` 无法约束主动脱离的孙进程，因此 Coordinator 改为每次任务创建 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Job Object；无法取得进程所有权时 fail-closed。测试现在证明取消后延迟写 marker 的孙进程不能存活。
+- 修复 PowerShell 5 staging 生成 UTF-8 BOM 清单导致完整运行时误报“清单无效”：读取端兼容既有 BOM，staging 端以后固定无 BOM；BOM、有效清单和篡改 sidecar 均有测试。
+- 验证：Protocol 6/6、App Server 13/13、GUI 100/100（BOM 测试加入后聚焦模块累计 101 项）、Vite 146 modules。真实 Tauri WebView E2E 输出 `forgeRuntimeAvailable=true`、`forgeJobIdleStatus=idle`、`forgeBoundedControlsVisible=true`、`forgeCostConfirmationVisible=true`，且没有发送 `forgeJobStart` 或产生付费调用。
+
+### 2026-08-27 Forge 全量 Windows NSIS
+
+- `npm run tauri:installer:forge` 已在独立 `forge-installer-release` 目标完成真实 x64 release + NSIS 构建。首次通过 npm/cmd 调用时 Windows PowerShell 偶发且可复现地无法解析 `Get-FileHash`；staging 现改用内置 .NET `SHA256` API，不依赖 PowerShell 模块自动加载，一键命令随后完整热重跑成功。
+- 最终安装包：`rust/target-codex-check/forge-installer-release/x86_64-pc-windows-msvc/release/bundle/nsis/BugleCat_0.1.0_x64-setup.exe`，14,369,781 bytes（13.70 MiB），SHA-256 `A5A97B0A24E386F9B88D0BC43684FB91B34D5A9B2304D9A946579A2A1F64EFC6`。
+- NSIS 生成脚本包含 85/85 个 `forge-runtime` 文件项；release 资源目录同为 85 个文件。Python、ncx sidecar、Forge 脚本三项 SHA-256 与 manifest 全部匹配，manifest 无 BOM；嵌入式 Python smoke 返回 0，sidecar genome 含非空 system prompt 和 37 个工具描述，资源树无 `__pycache__`。
+- 安装包当前 `AuthenticodeStatus=NotSigned`。这是可安装的完整产物，但 Windows SmartScreen 仍可能提示未知发布者；正式分发仍需代码签名证书，不应把未签名状态描述成已签名发布版。
+
+### 2026-08-27 会话级 Harness Profile
+
+- 对齐 DeepSeek Harness 的会话级 Preset：Protocol `ThreadMetadata` 持久化 `harnessProfile`，旧会话缺字段时兼容为 `full`。GUI 提供全功能、编程、只读、轻量、自动化五种组合。
+- Profile 只属于 Thread，不通过进程环境变量热切换。新空会话可修改并立即重建当前 Agent；首个 Turn 创建后，App Server 强制拒绝再次修改。Resume 读取持久化值，Fork 继承源 Thread 的值，普通 Agent 与 Orchestrator Worker 使用同一 Profile。
+- `threadCreateActivate` 在落库前调用宿主验证，未知或无法装配的 Profile fail-closed，不留下半创建 Thread。`threadHarnessProfileSet` 同样先验证，并且只允许无 Turn 的 Thread。
+- 验证：Protocol 7/7、App Server 15/15、Core 256/256、Thread Store 12/12、GUI 101/101、Vite 146 modules。真实 Tauri/WebView E2E 证明 GUI 选择持久化、空 Thread 可切、首轮后锁定、Fork 继承；未触发模型或付费请求。
+
+### 2026-08-27 持久 Goal 真实桌面续轮 Worker
+
+- `goalResume` 不再只显示 armed：App Server 通过新增的 `continue_goal` 宿主边界，把精确 Thread 交给桌面调度器；队列拒绝时立即撤销进程内 activation，durable Goal 保持 active/disarmed，可由用户安全重试。
+- 新增 `bridge/goal_turn.rs`。每轮先执行 `GoalRoundDriver::reserve_next` 的完整 checkpoint/admission，再按当前 Provider Route、Harness Profile 和权限装配 Agent，通过 exact Goal ID/revision/round 调用 `run_goal_round`。模型上下文先持久化，Turn 后完成；Goal 仍 armed 才继续下一轮。
+- Goal 隐藏提示继续只进入 ModelContext，不进入可见 Transcript；助手消息、工具活动、usage 和费用继续写入既有 Protocol Turn，不增加平行会话状态。模型在普通人工 Turn 中显式 resume 后，人工 Turn 提交完成会检测 activation 并启动同一 worker。
+- 用户输入现在优先于自动轮次：Backend 在持有 run-state 锁时原子放入一条 deferred human prompt，取消并暂停已 admitted 的 Goal round；释放会话 lease 后立即在同一会话执行用户输入。GUI 为 Goal run 和接续的人类 Turn 分别维护 running 事件，发送不再只报“会话仍在执行中”。
+- 安全失败路径不把内部错误或 Provider 正文放进 UI；checkpoint、Agent 构建、上下文保存、Turn 完成和线程创建失败均 disarm/block，并使用固定中文错误。轮数上限由 Driver 在模型调用前 block。
+- Worker 生命周期已归宿主管理：协调线程、普通 Turn 和 Goal Worker 的 `JoinHandle` 全部登记；退出时拒绝新任务、广播取消、发送 Shutdown 并 join。`shutdown_cancels_and_joins_every_owned_worker` 已覆盖，不再遗留 detached Goal 线程。
+- 新增真实 `npm run test:e2e:goal-worker`：临时隔离 HOME、localhost OpenAI SSE fixture、placeholder key，全程无外网和真实 Provider。实测 2 个 admitted rounds、2 个 durable completed Turns、4 次固定模型请求、exact `get_goal`/`update_goal complete`，GoalMessage 未进入 visible history，两条助手结论均在侧栏恢复后的 WebView 页面可见。
+- E2E 同时发现并修复真实恢复缺陷：侧栏 Resume 原先会先装载 Protocol Thread，随后被异步 legacy `loaded` snapshot 覆盖，导致较新的持久 Goal 回复从 UI 消失。现在激活时只抑制这一个兼容事件，并以 `threadReadVisible` 作为最终权威；旧 snapshot 不再吞掉新 Turn。
+- 最新验证：App Server 28/28、Config 39/39、GUI Rust 107/107、Core 跨 Profile Goal 工具定向测试、Vite 147 modules、Goal Worker WebView E2E 全部通过；未调用真实 Token/Provider。持久 Goal 桌面 Worker、用户输入抢占、退出 join 和无付费真实 UI 续轮这一批已收口；整体 Harness 对齐 Goal 继续保持 active。
+
+### 2026-08-27 Provider Route 与模型来源真实性
+
+- 审计确认实际请求链每个 Turn 都从当前完整 Provider Route 重建 Agent；运行态切 Provider/Token/Base URL/模型不替换 Transcript，当前运行中的 Turn 保持原 Route，下一轮读取新 Route。
+- `ThreadItem::AssistantMessage` 已持久化请求模型和 API 响应 `model` 字段，实时 UI 也能显示；但侧栏恢复映射此前只恢复正文，丢失 `model/confirmedModel`。现已补齐，因此重启或切回历史会话后仍能看到请求值与响应值。
+- 文案由“响应确认”改为“响应字段”，tooltip 明确：中转站返回或回显的 `model` 字段不等于证明上游内部型号。模型自己的“我是 GPT-5/5.6”回答不作为路由证据。
+- localhost WebView fixture 故意请求 `mock-goal-model`、响应 `mock-confirmed-model`；实测 4 个 HTTP 请求体始终使用请求型号，Protocol durable/visible Turn 保存两值，侧栏 Resume 后页面显示“请求 … → 响应字段 …”。无外网、无真实 Token。
+- 验证：GUI Rust 108/108、Vite 147 modules、扩展后的 Goal Worker WebView E2E 全部通过。
+
+### 2026-08-27 Composer 当前 Provider Route 可见
+
+- `UiEvent::Ready` 现在把 `provider_id/provider_protocol/model` 作为同一运行态快照发送；前端不再另查一套可能滞后的设置状态。Provider Route 原子提交后的 `SetModel` 继续只刷新快照，不重建 Harness、不替换当前 Transcript。
+- Composer 模型按钮直接显示“Provider + 模型”，菜单头显示 Provider ID 和协议；运行中仍允许切换，tooltip 明确当前 Turn 使用旧 Route、下一轮使用新 Route。这样同名 `gpt-5.6-sol` 来自云末、OpenAI 直连或自定义中转时不会再混淆。
+- 无网络 WebView E2E 在隔离 HOME 中真实创建并激活 `goal-e2e-relay` OpenAI Route，`/models` 和 4 次对话只访问 localhost；页面确认 Provider、协议、请求模型三项可见，随后两轮 Goal 继续使用该 Route。
+- E2E 轮询同时收紧为 Goal complete 且两个 Goal Turn 均 durable completed，消除 `update_goal complete` 先于最终 Turn 提交造成的偶发测试竞争。
+- 验证：GUI Rust 109/109、Vite 147 modules、Goal Worker WebView E2E 输出 `composerProviderProtocolModelVisible=true`；无真实 Token/外部 Provider。
+
+### 2026-08-27 Composer 跨 Provider Route 快捷切换
+
+- 模型菜单现在从 App Server `customProviderList` 读取所有已配置 Token 且有模型的 Route，按 Provider 分组，当前 Provider 置顶；按钮优先显示用户配置的友好名称，稳定 ID 仍保留在诊断中。点击其他分组调用既有 `customProviderActivate`，因此切换的是 Provider/Token/Base URL/协议/模型整套 Route，不是只替换同名模型字符串。
+- 切换成功立即更新 Composer，并由后端 `ready` 快照最终校准；当前会话 Transcript 不变，运行中的 Turn 保持旧 Route、下一轮使用新 Route。失败时前端恢复完整旧状态，后端 activation gate 保持旧 Route，并显示“当前 Route 未改变”。
+- 内部兼容字段 `active_provider_id=legacy` 不再泄漏到 UI：预设根据维护目录的 Base URL 显示 `yunmo/openai/openrouter/deepseek/...`，未知手动地址显示 `manual`，自定义 Route 显示稳定 ID。
+- 无网络 E2E 创建 primary/backup/invalid 三个 localhost Provider，primary 与 backup 使用相同 `mock-goal-model`，从 Composer 切换后诊断明确变为 backup，证明不是靠模型 ID 猜 Provider；两条历史回复保持可见。invalid 的模型不在 `/models`，切换被拒绝且 backup Route 保持不变。
+- 验证：GUI Rust 110/110、Vite 147 modules、Goal Worker WebView E2E 输出 `composerCrossProviderSwitchPreservedTranscript=true` 与 `failedProviderSwitchKeptRoute=true`；无外网和真实 Token。
+
+### 2026-08-27 已配置预设 Provider 与安全计价
+
+- Composer Route 候选现在合并三类来源：Provider Directory 中有 Token/模型的自定义 Route、当前已激活 Route，以及拥有独立凭据的预设 Route。DeepSeek 仅在保存 DeepSeek Key 时出现，云末仅在保存云末 Token 时出现；没有可用独立凭据的目录卡不会伪装成可切换项。
+- 预设切换复用 `modelPresetApply`，一次提交 endpoint、model、快捷模型、官方/聚合价格和币种；自定义 Route 继续复用 `customProviderActivate`。两条路径都经过原 activation generation/CAS，失败不改变 Route。
+- 修复费用真实性：自定义中转站没有可信目录单价，`ProviderDirectory::activate` 现把 `price_in/price_out` 与完整 Route 一起原子写为 0，避免继承上一家 Provider 的费用估算；前端切换后立即读取提交值刷新估算器。
+- 无网络 E2E 通过占位 `NANOCODEX_DEEPSEEK_API_KEY` 证明 DeepSeek 分组出现，但没有点击或访问官方端点；实际成功/失败切换仍只访问 localhost，并断言自定义 Route 价格归零。
+- 验证：Config 39/39、GUI Rust 110/110、Vite 147 modules、WebView E2E 输出 `configuredPresetProviderVisible=true` 与 `customProviderPricingResetToUnknown=true`。
+
+### 2026-08-27 预设 Provider 独立凭据收敛
+
+- 预设切换不再回退到 `active_provider_id=legacy`，统一保存为保留命名空间 `preset:<provider-id>`；Route 独立拥有 Token、协议、Base URL、模型目录和选择，避免继承上一家模型商的通用 Key。
+- `ProviderDirectory::upsert_and_activate` 同时提交 Route 与兼容配置快照；配置写入失败会恢复旧 Provider Directory。预设保留目录计价，自定义中转继续归零为未知价格。
+- DeepSeek/云末旧独立 Key 在首次选择相应预设时自动迁移进 Route；已有 Route Token 优先。云末动态 `/models` 同时接受迁移后的 `preset:yunmo` Token。
+- 设置页官方厂商卡新增独立 Token 输入与脱敏状态；内部 `preset:*` Route 不在“拓展模型商”重复展示。Composer 将其识别为预设 Route，显示友好厂商名并用真实 catalog ID 切换。
+- 新增迁移测试覆盖 DeepSeek 与云末旧 Key、脱敏和最终激活 Route；Config Provider Directory 5/5。扩展 Goal Worker WebView E2E 实际填写 Token、检查 `****-key`、提交 DeepSeek、故意拒绝无 Token 云末并确认 Route/Transcript 回滚。
+- 最新验证：`cargo test --workspace` 全量通过，GUI Rust 110/110，Vite 147 modules，Goal Worker E2E 输出 `presetTokenEntryInteractive=true`、`legacyPresetCredentialMigratedToRoute=true`、`presetSwitchFailureRolledBack=true`、`presetSwitchPreservedCurrentTranscript=true`；`git diff --check` 通过，仅有工作树既有 LF/CRLF 提示。
+
+### 2026-08-27 Composer 只显示当前供应商
+
+- 按用户界面反馈，Composer 模型菜单暂时只展示当前已选供应商及其模型；其他已配置但未激活的供应商不再整组占满下拉列表。
+- Provider 的发现、Token 配置和激活仍由设置页负责；过滤只影响紧凑模型菜单，不删除 Route、模型目录或凭据。
+- 同时处理 `provider-id` 与 `preset:provider-id` 的兼容身份，并优先选择精确当前 Route，避免同一供应商重复显示。
+
+### 2026-08-27 归档会话按工作区分组
+
+- 侧栏“已归档”展开后不再平铺全部记录，而是复用普通会话的工作区分组：文件夹名称、会话计数、独立折叠状态及缩进会话列表保持一致。
+- 分组仅改变展示结构；归档、取消归档、恢复、重命名、分叉和日志入口继续复用原会话项，不改变持久数据。
+- 验证：Vite 147 modules，GUI Rust 110/110，`git diff --check` 通过（仅既有 LF/CRLF 提示）。
+
+### 2026-08-27 Windows NSIS 安装包
+
+- 使用 `npm run tauri:installer` 完成 x86_64 Windows release 与 NSIS 打包；正式程序嵌入 `dist`，不依赖 Vite localhost，且 release 构建使用 Windows GUI subsystem、不显示调试控制台。
+- 产物：`rust/gui/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/BugleCat_0.1.0_x64-setup.exe`，3.73 MiB，SHA-256 `2C62D6433F12C4B472D783913A2402BE3AB3C63D5F04592547BE4F20FE43DD4C`。
+
+### 2026-08-27 Composer 控件收敛与会话恢复不卡队列
+
+- `Agent / 多 Agent 编排` 与当前会话 `Harness Profile` 已从 Composer 移到设置 → 通用；思考程度、权限模式继续留在输入区。执行模式仍由下一轮 Turn 读取，Harness 仍按 Thread 持有并在首轮后锁定。
+- 修复恢复历史会话时同步等待 `build_agent` 会阻塞主命令队列的问题。Resume 现在只恢复 Thread、工作区、运行态快照和可见历史；真正的工具、插件与 Provider Route 仍由每轮 Worker 按当前配置构建。
+- 验证：Vite 147 modules、GUI Rust 110/110、`git diff --check` 通过。重新构建并启动无控制台 release EXE 后，实际 WebView 确认原卡住会话恢复为空闲状态，侧栏不再显示“执行中”，Composer 不再出现 Agent/Harness 两个低频控件。
+- 后续按最终界面标注调整 Composer 分组：主工具栏左侧为附件与权限，长期目标（存在时）同属左侧；模型、思考程度和发送/停止固定在右。工作区单独放到 `＋` 下方的辅助栏，不参与主工具栏换行，因此不撑高输入框。发布版实际 WebView 已确认 Agent/Harness 不再出现且分组生效。
+- 最新布局与会话恢复修复已重新打入 NSIS：`BugleCat_0.1.0_x64-setup.exe`，3,915,694 bytes，SHA-256 `C5406375D5F9DE9D90525D8E31EEE835A49186550E19747AB106EE9B860B69DE`。
+
+### 2026-08-27 预设 Route 模型目录自动同步
+
+- Composer 不再直接沿用旧 `preset:*` Route 的模型快照；读取 Route 候选时会用当前维护目录同步模型列表。DeepSeek 从旧两款自动补齐为三款，并保持 Token、当前选择、协议、端点和 Route ID 不变。
+- 仅同步已有预设 Route，不触碰自定义模型商；当前 Route 同步时同时更新兼容配置的 `available_models`。若当前选择已被新目录移除则安全拒绝，不静默换模型。
+- 验证：Config Provider Directory 6/6、GUI Rust 110/110、Vite 147 modules、`git diff --check` 通过（仅既有 LF/CRLF 提示）。
+- 新 release 已实际启动并把本机 `preset:deepseek` 从旧两款同步为三款；NSIS 安装包 3,916,242 bytes，SHA-256 `49E6416BD717081CEC6FB965AB110709E1BE4D870E1B34CF417BF360858E3133`。
+
+### 2026-08-28 工具后模型流停滞保护
+
+- OpenAI Compatible SSE 在工具返回后若已输出部分内容、随后连续 30 秒没有实际模型进展，现在会结束当前 Turn、保留会话并给出可重试提示，不再长期占用会话运行态。中转站的空白、SSE comment 和 JSON ping 心跳不再重置期限；完全未输出时仍保留既有安全重试。
+- 可通过 `NANOCODEX_STREAM_IDLE_TIMEOUT_S` 在 5–120 秒内覆盖，默认 30 秒；响应头等待和整次请求超时保持原有独立边界。
+- 验证：Provider 46/46（新增心跳不计进展、工具参数计进展）；Agent Loop 挂起模型与挂起工具停止路径通过。两项并行 Hook 测试受 Windows 命令调度超时影响，串行复跑均通过。
+
+### 2026-08-28 原生多模态与附件插件即时生效
+
+- 修复图片发送层错误依赖 Harness Profile 的附件服务：`gpt-5.6-sol` 等原生多模态模型现在可直接接收 data URL 图片块，不再报“未启用附件插件”。Harness 附件服务存在时仍可收紧扩展名和大小策略，缺席时使用 20 MiB 图片安全默认值。
+- 阿里附件解析仍只是非原生多模态模型的可选 fallback。GUI 每一轮都重新加载已保存配置并组装 Agent，因此开启并保存后在当前对话的下一轮生效，无需新建或切换对话；设置页文案已明确该行为。
+- 验证：GUI 回归 `native_image_transport_does_not_require_harness_attachment_service` 与 `image_attachment_requires_an_explicit_parser_model` 通过；Vite 147 modules 构建通过；本次文件 `git diff --check` 通过。全仓 `cargo fmt --check` 仍被既有 `ncx-dreamina-gateway` 格式差异拦截。
+
+### 2026-08-28 LLM Wiki 本地 MCP + Skill
+
+- 新增轻量本地插件源 `local-plugins/llmwiki-memory`：MCP 直接运行 `D:\LLMWIKI\wiki_mcp.py`，只暴露单一 `llmwiki(action=...)` 工具；Skill 规定 `D:\LLMWIKI` 是实际记忆库，`D:\llm-wiki-template` 只是协议/初始化模板，并保留用户批准、敏感信息和项目事实源边界。
+- Codex 兼容插件现在统一发现用户全局 `~/.ncx/codex-plugins` 与当前工作区 `.ncx/codex-plugins`，工作区同名插件覆盖全局。MCP、Skills、Hooks 和 Apps 共用这一规则，因此切换 BugleCat 工作区后 LLM Wiki 仍可用。
+- 插件已安装到 `C:\Users\25376\.ncx\codex-plugins\llmwiki-memory`。`wiki_mcp.py --selftest` 的 recall_user/recall_project/project_status/corpus/status 全部通过；Skill 与插件结构校验通过；新增全局发现与工作区覆盖回归通过。
+
+### 2026-08-28 运行态活动收紧与 MCP 隐藏窗口
+
+- 聊天页运行中只显示当前思考或正在执行的工具；本轮已完成的 Skill/工具行不再继续堆在输入框上方。完整思考与工具历史仍保留在“运行轨迹”页；当前活动区限高并内部滚动，不再持续顶走对话。
+- `ncx-mcp` 在 Windows 启动所有 stdio MCP sidecar 时统一使用 `CREATE_NO_WINDOW`，Python/Node MCP 不再弹出黑色控制台窗口。
+- 验证：MCP 4/4（包含真实 mock server 握手、列表与调用）、GUI Rust check、Vite 147 modules 和本次 `git diff --check` 通过。
+
+### 2026-08-28 LLM Wiki 混合工具权限分类
+
+- 修复单一 `llmwiki(action=...)` MCP 入口被工具名启发式整体判为写操作的问题。`recall_user`/`recall_project`/`project_status`/`status`/`corpus` 现在按只读调用处理，在 `approval_policy=never` 下可直接执行。
+- `initialize_project`/`record_project`/`propose`/`approve` 和未知 action 仍按有副作用调用处理，`never` 下继续拒绝，不放宽长期记忆写入边界。
+- 真实 Python mock MCP 回归已覆盖 `never + recall_user` 通过与 `never + record_project` 拒绝；MCP Tool 3/3 通过。

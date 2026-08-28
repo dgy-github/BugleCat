@@ -12,7 +12,7 @@
 use std::path::Path;
 
 /// Dirs never copied into an isolated workspace (huge / generated / irrelevant).
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git",
     "target",
     "node_modules",
@@ -21,6 +21,10 @@ const SKIP_DIRS: &[&str] = &[
     ".venv",
     "__pycache__",
 ];
+
+pub(crate) fn is_skipped_dir(name: &std::ffi::OsStr) -> bool {
+    SKIP_DIRS.contains(&name.to_string_lossy().as_ref())
+}
 
 /// Recursively copy `src` into `dst` (created if absent), skipping [`SKIP_DIRS`].
 /// Returns the number of files copied.
@@ -38,7 +42,7 @@ pub fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<usize> {
             let from = entry.path();
             let to = d.join(&name);
             if ft.is_dir() {
-                if SKIP_DIRS.contains(&name.to_string_lossy().as_ref()) {
+                if is_skipped_dir(&name) {
                     continue;
                 }
                 std::fs::create_dir_all(&to)?;

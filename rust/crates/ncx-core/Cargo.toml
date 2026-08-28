@@ -22,6 +22,7 @@ async-trait = "0.1"
 futures-util = "0.3"
 regex = "1"
 url = "2"
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["time", "rt", "rt-multi-thread", "macros"] }

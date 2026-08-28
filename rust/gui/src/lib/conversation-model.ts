@@ -4,7 +4,12 @@ export type ToolEntry = { name: string; args?: string; result?: string };
 export type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boolean };
 export type ReasoningMessage = { role: "reasoning"; text: string; settled: boolean };
 export type ConversationMessage =
-  | { role: "user" | "assistant" | "note" | "compact"; text: string }
+  | { role: "user"; text: string; images?: string[] }
+  | { role: "assistant"; text: string; model?: string; confirmedModel?: string }
+  | { role: "note" | "compact"; text: string }
+  | { role: "orchestration"; stage: string; text: string }
+  | { role: "orchestrator_activity"; worker: number; tool: string; phase: "started" | "finished"; failure?: string }
+  | { role: "artifact"; kind: "image" | "video" | "file"; name: string; url: string }
   | ReasoningMessage
   | ToolGroup;
 
@@ -41,9 +46,14 @@ export function keepConversationConclusions(messages: ConversationMessage[], fin
       pendingAnswer = null;
     } else if (message.role === "assistant") {
       pendingAnswer = { ...message };
+    } else if (message.role === "artifact") {
+      if (pendingAnswer) { compacted.push(pendingAnswer); pendingAnswer = null; }
+      compacted.push({ ...message });
     }
   }
-  if (finalText.trim() !== "") pendingAnswer = { role: "assistant", text: finalText };
+  if (finalText.trim() !== "") pendingAnswer = pendingAnswer
+    ? { ...pendingAnswer, text: finalText }
+    : { role: "assistant", text: finalText };
   if (pendingAnswer) compacted.push(pendingAnswer);
   return compacted;
 }

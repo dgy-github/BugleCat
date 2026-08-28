@@ -10,4 +10,4 @@ capability: video-generation
 2. 当前默认经济模型为 `wan2.1-t2v-turbo`，时长限制 1–10 秒。
 3. 工具会等待异步任务完成，返回真实视频 URL、task_id、币种、单价来源和预估费用。没有 URL 时不得声称完成。
 4. 当前内置估算为人民币 0.24 元/秒，可用 `NANOCODEX_VIDEO_PRICE_CNY_PER_SECOND` 覆盖；执行前以工具返回的价格元数据为准。
-5. 缺少 `DASHSCOPE_API_KEY`/`vl_api_key` 时，明确提示用户配置，不能输出虚构视频。
+5. 媒体 Provider 优先读取 Skills 设置中的阿里百炼 Workspace Key（`dashscope_workspace_key`）；为兼容旧配置，也接受 `DASHSCOPE_API_KEY`/`vl_api_key`。缺少密钥时明确提示用户配置，不能输出虚构视频。

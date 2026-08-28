@@ -77,11 +77,11 @@ def test_timeout_failure_synthesizes_trajectory():
     import subprocess
     task = Path(tempfile.mkdtemp(prefix="p2_to_"))
     (task / "prompt.txt").write_text("do something", encoding="utf-8")
-    orig = (ev.subprocess.run, ev.bench.grade, ev.extract_trajectory, ev.bench.seed)
+    orig = (ev.run_owned, ev.bench.grade, ev.extract_trajectory, ev.bench.seed)
 
     def boom(*a, **k):
         raise subprocess.TimeoutExpired(cmd="ncx", timeout=1)
-    ev.subprocess.run = boom
+    ev.run_owned = boom
     ev.bench.grade = lambda t, ws: (False, "")
     ev.extract_trajectory = lambda ws: ""
     ev.bench.seed = lambda t, ws: None
@@ -91,7 +91,7 @@ def test_timeout_failure_synthesizes_trajectory():
         assert traj and "timed out" in traj.lower(), repr(traj)
         assert tokens == 0  # no usage line on a timeout
     finally:
-        (ev.subprocess.run, ev.bench.grade, ev.extract_trajectory, ev.bench.seed) = orig
+        (ev.run_owned, ev.bench.grade, ev.extract_trajectory, ev.bench.seed) = orig
 
 
 def test_parse_tokens_from_usage_line():

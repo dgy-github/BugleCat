@@ -18,8 +18,9 @@ pub use api::{HarnessPlugin, PluginHost};
 pub use builtin::{
     AttachmentPlugin, BuiltinToolsPlugin, CompactionPlugin, ContextPlugin, CoreToolsPlugin,
     CostTelemetryPlugin, ExternalHostPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
-    MediaPlugin, MemoryPlugin, PolicyPlugin, ProcessToolsPlugin, SearchToolsPlugin,
-    SessionToolsPlugin, WorkspaceToolsPlugin,
+    MediaPlugin, MemoryPlugin, PolicyPlugin, ProcessToolsPlugin, ProviderCatalogPlugin,
+    ProviderChatProbePlugin, ProviderDirectoryPlugin, SearchToolsPlugin, SessionToolsPlugin,
+    WorkspaceToolsPlugin,
 };
 pub use composition::{
     BundleSpec, HarnessComposition, OverlayEntry, OverlaySpec, PluginEntry, ProfileSpec,
@@ -30,6 +31,7 @@ pub use external::{
     ExternalToolDescriptor,
 };
 pub use manifest::{PluginCapability, PluginManifest};
+pub(crate) use openai_compat::discover_enabled_codex_plugins;
 pub use openai_compat::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
     resolve_local_marketplace_plugin, CodexAppResource, CodexPluginCatalog, CodexPluginManifest,
@@ -42,5 +44,6 @@ pub use services::{
     ContextServiceDescriptor, CostTelemetryService, CostTelemetryServiceDescriptor,
     CostTelemetrySnapshot, HarnessDiagnostics, InteractionService, LlmProviderFactory,
     LlmProviderFactoryHandle, LlmServiceDescriptor, McpServiceDescriptor, MediaServiceDescriptor,
-    MemoryServiceDescriptor, PolicyService,
+    MemoryServiceDescriptor, PolicyService, ProviderCatalogService, ProviderChatProbeService,
+    ProviderDirectoryDiagnostics, ProviderDirectoryService,
 };

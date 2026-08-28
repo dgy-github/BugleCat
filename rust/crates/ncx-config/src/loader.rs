@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use toml::map::Map as TomlMap;
 use toml::Value;
 
@@ -52,7 +53,11 @@ impl Default for ConfigPaths {
 pub struct Overrides {
     pub workspace: Option<PathBuf>,
     pub api_key: Option<String>,
+    pub deepseek_api_key: Option<String>,
+    pub yunmo_api_key: Option<String>,
     pub base_url: Option<String>,
+    pub provider_protocol: Option<String>,
+    pub active_provider_id: Option<String>,
     pub model: Option<String>,
     pub fast_model: Option<String>,
     pub sandbox_mode: Option<String>,
@@ -61,10 +66,18 @@ pub struct Overrides {
     pub vl_base_url: Option<String>,
     pub vl_api_key: Option<String>,
     pub vl_model: Option<String>,
+    pub alibaba_attachment_parser_enabled: Option<bool>,
+    pub dashscope_token_plan_key: Option<String>,
+    pub dashscope_workspace_key: Option<String>,
     pub ark_api_key: Option<String>,
     pub max_iterations: Option<i64>,
     pub max_tool_calls: Option<i64>,
     pub max_parallel_tool_calls: Option<i64>,
+    pub orchestrator_workers: Option<i64>,
+    pub orchestrator_high_workers: Option<i64>,
+    pub orchestrator_verify_retries: Option<i64>,
+    pub orchestrator_max_depth: Option<i64>,
+    pub orchestrator_max_subtasks: Option<i64>,
     pub max_retries: Option<i64>,
     pub context_token_budget: Option<i64>,
     pub context_window: Option<i64>,
@@ -78,167 +91,7 @@ pub struct Overrides {
 
 // ── TOML helpers ──────────────────────────────────────────────────────────────
 
-fn load_toml(path: &Path) -> Table {
-    if !path.is_file() {
-        return Table::new();
-    }
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(_) => return Table::new(),
-    };
-    match text.parse::<Value>() {
-        Ok(Value::Table(t)) => t,
-        _ => Table::new(),
-    }
-}
-
-fn str_val(t: &Table, key: &str) -> Option<String> {
-    t.get(key)
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-}
-
-/// Coerce a TOML value to a non-empty String (strings, bools, ints).
-fn to_string_val(v: &Value) -> Option<String> {
-    match v {
-        Value::String(s) if !s.is_empty() => Some(s.clone()),
-        Value::Boolean(b) => Some(b.to_string()),
-        Value::Integer(i) => Some(i.to_string()),
-        _ => None,
-    }
-}
-
-// ── per-file extractors ───────────────────────────────────────────────────────
-
-/// Extract known fields from `~/.deepseek/config.toml`.
-fn deepseek_values(raw: &Table) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    if raw.is_empty() {
-        return out;
-    }
-    if let Some(v) = str_val(raw, "base_url") {
-        out.insert("base_url".into(), v);
-    }
-    // DeepSeek-CLI uses `default_text_model` for the chat model.
-    if let Some(v) = str_val(raw, "default_text_model") {
-        out.insert("model".into(), v);
-    } else if let Some(v) = str_val(raw, "model") {
-        out.insert("model".into(), v);
-    }
-    for key in &["sandbox_mode", "approval_policy", "reasoning_effort"] {
-        if let Some(v) = str_val(raw, key) {
-            out.insert(key.to_string(), v);
-        }
-    }
-    // API key: top-level or nested under providers.deepseek.api_key.
-    let api_key = str_val(raw, "api_key").or_else(|| {
-        raw.get("providers")
-            .and_then(|v| v.as_table())
-            .and_then(|t| t.get("deepseek"))
-            .and_then(|v| v.as_table())
-            .and_then(|t| str_val(t, "api_key"))
-    });
-    if let Some(k) = api_key {
-        out.insert("api_key".into(), k);
-    }
-    out
-}
-
-/// Extract settings from `~/.nanocodex/config.toml` (flat, keys == Config fields).
-fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    for key in &[
-        "api_key",
-        "base_url",
-        "model",
-        "fast_model",
-        "sandbox_mode",
-        "approval_policy",
-        "permission_mode",
-        "reasoning_effort",
-        "vl_base_url",
-        "vl_api_key",
-        "vl_model",
-        "ark_api_key",
-        "search_provider",
-        "search_api_key",
-        "max_iterations",
-        "max_tool_calls",
-        "max_parallel_tool_calls",
-        "max_retries",
-        "context_token_budget",
-        "context_window",
-        "context_edit_enabled",
-        "context_edit_max_chars",
-        "context_edit_keep_recent_messages",
-        "context_edit_max_tool_result_chars",
-        "price_in",
-        "price_out",
-        "price_currency",
-        "available_models",
-    ] {
-        if let Some(v) = selected_scalar(raw, key) {
-            out.insert(key.to_string(), v);
-        }
-    }
-    out
-}
-
-/// Extract Codex-style settings from `~/.codex/config.toml`.
-fn codex_values(raw: &Table) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    if let Some(v) = str_val(raw, "model") {
-        out.insert("model".into(), v);
-    }
-    if let Some(v) = str_val(raw, "approval_policy") {
-        out.insert("approval_policy".into(), v);
-    }
-    if let Some(v) = str_val(raw, "sandbox_mode") {
-        out.insert("sandbox_mode".into(), v);
-    }
-    if let Some(v) = str_val(raw, "model_reasoning_effort") {
-        out.insert("reasoning_effort".into(), v);
-    }
-    out
-}
-
-/// Pull profile-able keys out of a `[profiles.<name>]` TOML table.
-const PROFILE_KEYS: &[&str] = &[
-    "model",
-    "fast_model",
-    "base_url",
-    "sandbox_mode",
-    "approval_policy",
-    "reasoning_effort",
-    "vl_base_url",
-    "vl_api_key",
-    "vl_model",
-    "ark_api_key",
-    "max_iterations",
-    "max_tool_calls",
-    "max_parallel_tool_calls",
-    "max_retries",
-    "context_token_budget",
-    "context_window",
-    "context_edit_enabled",
-    "context_edit_max_chars",
-    "context_edit_keep_recent_messages",
-    "context_edit_max_tool_result_chars",
-];
-
-fn profile_values(selected: &Table) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    for key in PROFILE_KEYS {
-        if let Some(v) = selected.get(*key).and_then(to_string_val) {
-            out.insert(key.to_string(), v);
-        }
-    }
-    out
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
+include!("loader/sources.rs");
 fn as_int(s: Option<&str>, default: i64) -> i64 {
     s.and_then(|v| v.parse::<i64>().ok()).unwrap_or(default)
 }
@@ -442,6 +295,7 @@ pub(crate) fn load_config_impl(
 ) -> Result<Config, ConfigError> {
     let mut merged: BTreeMap<String, String> = BTreeMap::new();
     merged.insert("base_url".into(), DEFAULT_BASE_URL.into());
+    merged.insert("provider_protocol".into(), "openai".into());
     merged.insert("model".into(), DEFAULT_MODEL.into());
     merged.insert("price_currency".into(), "CNY".into());
 
@@ -478,15 +332,38 @@ pub(crate) fn load_config_impl(
         merged.extend(profile_values(table));
     }
 
+    apply_active_provider_route(&mut merged, &paths.nanocodex)?;
+
     // Environment variable layer.
     let env_map: &[(&str, &[&str])] = &[
         ("api_key", &["DEEPSEEK_API_KEY", "NANOCODEX_API_KEY"]),
+        ("deepseek_api_key", &["NANOCODEX_DEEPSEEK_API_KEY"]),
+        ("yunmo_api_key", &["NANOCODEX_YUNMO_API_KEY"]),
         ("base_url", &["DEEPSEEK_BASE_URL", "NANOCODEX_BASE_URL"]),
+        ("provider_protocol", &["NANOCODEX_PROVIDER_PROTOCOL"]),
         ("model", &["NANOCODEX_MODEL"]),
         ("fast_model", &["NANOCODEX_FAST_MODEL"]),
         ("vl_base_url", &["NANOCODEX_VL_BASE_URL"]),
         ("vl_api_key", &["DASHSCOPE_API_KEY", "NANOCODEX_VL_API_KEY"]),
         ("vl_model", &["NANOCODEX_VL_MODEL"]),
+        (
+            "alibaba_attachment_parser_enabled",
+            &["NANOCODEX_ALIBABA_ATTACHMENT_PARSER_ENABLED"],
+        ),
+        (
+            "dashscope_token_plan_key",
+            &[
+                "DASHSCOPE_TOKEN_PLAN_KEY",
+                "NANOCODEX_DASHSCOPE_TOKEN_PLAN_KEY",
+            ],
+        ),
+        (
+            "dashscope_workspace_key",
+            &[
+                "DASHSCOPE_WORKSPACE_KEY",
+                "NANOCODEX_DASHSCOPE_WORKSPACE_KEY",
+            ],
+        ),
         ("ark_api_key", &["ARK_API_KEY", "NANOCODEX_ARK_API_KEY"]),
         ("search_provider", &["NANOCODEX_SEARCH_PROVIDER"]),
         (
@@ -520,6 +397,23 @@ pub(crate) fn load_config_impl(
             &["NANOCODEX_MAX_PARALLEL_TOOL_CALLS"],
         ),
         ("max_retries", &["NANOCODEX_MAX_RETRIES"]),
+        ("orchestrator_workers", &["NANOCODEX_ORCHESTRATOR_WORKERS"]),
+        (
+            "orchestrator_high_workers",
+            &["NANOCODEX_ORCHESTRATOR_HIGH_WORKERS"],
+        ),
+        (
+            "orchestrator_verify_retries",
+            &["NANOCODEX_ORCHESTRATOR_VERIFY_RETRIES"],
+        ),
+        (
+            "orchestrator_max_depth",
+            &["NANOCODEX_ORCHESTRATOR_MAX_DEPTH"],
+        ),
+        (
+            "orchestrator_max_subtasks",
+            &["NANOCODEX_ORCHESTRATOR_MAX_SUBTASKS"],
+        ),
     ];
     for (field, env_keys) in env_map {
         for env_key in *env_keys {
@@ -553,7 +447,11 @@ pub(crate) fn load_config_impl(
         };
     }
     apply_str!(api_key);
+    apply_str!(deepseek_api_key);
+    apply_str!(yunmo_api_key);
     apply_str!(base_url);
+    apply_str!(provider_protocol);
+    apply_str!(active_provider_id);
     apply_str!(model);
     apply_str!(fast_model);
     apply_str!(sandbox_mode);
@@ -562,11 +460,19 @@ pub(crate) fn load_config_impl(
     apply_str!(vl_base_url);
     apply_str!(vl_api_key);
     apply_str!(vl_model);
+    apply_bool!(alibaba_attachment_parser_enabled);
+    apply_str!(dashscope_token_plan_key);
+    apply_str!(dashscope_workspace_key);
     apply_str!(ark_api_key);
     apply_int!(max_iterations);
     apply_int!(max_tool_calls);
     apply_int!(max_parallel_tool_calls);
     apply_int!(max_retries);
+    apply_int!(orchestrator_workers);
+    apply_int!(orchestrator_high_workers);
+    apply_int!(orchestrator_verify_retries);
+    apply_int!(orchestrator_max_depth);
+    apply_int!(orchestrator_max_subtasks);
     apply_int!(context_token_budget);
     apply_int!(context_window);
     apply_bool!(context_edit_enabled);
@@ -602,10 +508,20 @@ pub(crate) fn load_config_impl(
 
     let cfg = Config {
         api_key: merged.get("api_key").cloned().unwrap_or_default(),
+        deepseek_api_key: merged.get("deepseek_api_key").cloned().unwrap_or_default(),
+        yunmo_api_key: merged.get("yunmo_api_key").cloned().unwrap_or_default(),
         base_url: merged
             .get("base_url")
             .cloned()
             .unwrap_or_else(|| DEFAULT_BASE_URL.into()),
+        provider_protocol: merged
+            .get("provider_protocol")
+            .cloned()
+            .unwrap_or_else(|| "openai".into()),
+        active_provider_id: merged
+            .get("active_provider_id")
+            .cloned()
+            .unwrap_or_else(|| "legacy".into()),
         model: active_model.clone(),
         fast_model: merged.get("fast_model").cloned().unwrap_or_default(),
         sandbox_mode,
@@ -621,6 +537,20 @@ pub(crate) fn load_config_impl(
         vl_base_url: merged.get("vl_base_url").cloned().unwrap_or_default(),
         vl_api_key: merged.get("vl_api_key").cloned().unwrap_or_default(),
         vl_model: merged.get("vl_model").cloned().unwrap_or_default(),
+        alibaba_attachment_parser_enabled: as_bool(
+            merged
+                .get("alibaba_attachment_parser_enabled")
+                .map(String::as_str),
+            false,
+        ),
+        dashscope_token_plan_key: merged
+            .get("dashscope_token_plan_key")
+            .cloned()
+            .unwrap_or_default(),
+        dashscope_workspace_key: merged
+            .get("dashscope_workspace_key")
+            .cloned()
+            .unwrap_or_default(),
         ark_api_key: merged.get("ark_api_key").cloned().unwrap_or_default(),
         search_provider: merged
             .get("search_provider")
@@ -638,6 +568,22 @@ pub(crate) fn load_config_impl(
         ),
         timeout_s: 120,
         max_retries: as_int(merged.get("max_retries").map(|s| s.as_str()), 3),
+        orchestrator_workers: as_int(merged.get("orchestrator_workers").map(|s| s.as_str()), 2),
+        orchestrator_high_workers: as_int(
+            merged.get("orchestrator_high_workers").map(|s| s.as_str()),
+            3,
+        ),
+        orchestrator_verify_retries: as_int(
+            merged
+                .get("orchestrator_verify_retries")
+                .map(|s| s.as_str()),
+            1,
+        ),
+        orchestrator_max_depth: as_int(merged.get("orchestrator_max_depth").map(|s| s.as_str()), 1),
+        orchestrator_max_subtasks: as_int(
+            merged.get("orchestrator_max_subtasks").map(|s| s.as_str()),
+            6,
+        ),
         context_token_budget: as_int(
             merged.get("context_token_budget").map(|s| s.as_str()),
             512_000,
@@ -679,594 +625,5 @@ pub(crate) fn load_config_impl(
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    fn empty_env() -> HashMap<String, String> {
-        HashMap::new()
-    }
-
-    fn env1(k: &str, v: &str) -> HashMap<String, String> {
-        let mut m = HashMap::new();
-        m.insert(k.to_string(), v.to_string());
-        m
-    }
-
-    fn write(path: &Path, text: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, text).unwrap();
-    }
-
-    fn no_paths(tmp: &Path) -> ConfigPaths {
-        ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: tmp.join("nope-nano.toml"),
-        }
-    }
-
-    #[test]
-    fn legacy_price_config_defaults_to_cny_and_explicit_usd_round_trips() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_price_currency");
-        fs::create_dir_all(&tmp).unwrap();
-        let paths = no_paths(&tmp);
-        write(&paths.nanocodex, "api_key = \"k\"\nprice_in = \"1.25\"\n");
-        let legacy = load_config_impl(Overrides::default(), &paths, &empty_env()).unwrap();
-        assert_eq!(legacy.price_currency, "CNY");
-
-        write(&paths.nanocodex, "api_key = \"k\"\nprice_currency = \"USD\"\n");
-        let usd = load_config_impl(Overrides::default(), &paths, &empty_env()).unwrap();
-        assert_eq!(usd.price_currency, "USD");
-    }
-
-    #[test]
-    fn config_redacts_api_key() {
-        let cfg = Config {
-            api_key: "sk-abcdef123456".into(),
-            base_url: "u".into(),
-            model: "m".into(),
-            ..Config::default()
-        };
-        let red = cfg.redacted();
-        assert_eq!(red["api_key"], "****3456");
-        assert!(!red.values().any(|v| v.contains("abcdef")));
-    }
-
-    #[test]
-    fn validate_rejects_bad_sandbox_mode() {
-        let cfg = Config {
-            api_key: "k".into(),
-            sandbox_mode: "banana".into(),
-            ..Config::default()
-        };
-        let err = cfg.validate().unwrap_err();
-        assert!(err.to_string().contains("sandbox_mode"));
-    }
-
-    #[test]
-    fn validate_rejects_missing_key() {
-        let cfg = Config::default();
-        let err = cfg.validate().unwrap_err();
-        assert!(err.to_string().contains("API key"));
-    }
-
-    #[test]
-    fn compaction_defaults_on_with_1m_window() {
-        let cfg = Config::default();
-        assert!(cfg.context_token_budget > 0);
-        assert_eq!(cfg.context_token_budget, 512_000);
-        assert_eq!(cfg.context_window, 1_048_576);
-    }
-
-    #[test]
-    fn load_reads_deepseek_file() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_deepseek");
-        fs::create_dir_all(&tmp).unwrap();
-        let ds = tmp.join("deepseek.toml");
-        write(
-            &ds,
-            r#"
-api_key = "sk-fromfile"
-base_url = "https://api.deepseek.com/beta"
-default_text_model = "deepseek-v4-pro"
-sandbox_mode = "workspace-write"
-approval_policy = "on-request"
-"#,
-        );
-        let paths = ConfigPaths {
-            deepseek: ds,
-            codex: tmp.join("nope.toml"),
-            nanocodex: tmp.join("nope-nano.toml"),
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &empty_env(),
-        )
-        .unwrap();
-        cfg.validate().unwrap();
-        assert_eq!(cfg.api_key, "sk-fromfile");
-        assert_eq!(cfg.base_url, "https://api.deepseek.com/beta");
-        assert_eq!(cfg.model, "deepseek-v4-pro");
-    }
-
-    #[test]
-    fn overrides_win_over_file() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_override");
-        fs::create_dir_all(&tmp).unwrap();
-        let ds = tmp.join("deepseek.toml");
-        write(
-            &ds,
-            "api_key = \"k\"\ndefault_text_model = \"deepseek-v4-pro\"\n",
-        );
-        let paths = ConfigPaths {
-            deepseek: ds,
-            codex: tmp.join("nope.toml"),
-            nanocodex: tmp.join("nope-nano.toml"),
-        };
-        let ovr = Overrides {
-            workspace: Some(tmp.clone()),
-            model: Some("deepseek-chat".into()),
-            sandbox_mode: Some("read-only".into()),
-            ..Default::default()
-        };
-        let cfg = load_config_impl(ovr, &paths, &empty_env()).unwrap();
-        assert_eq!(cfg.model, "deepseek-chat");
-        assert_eq!(cfg.sandbox_mode, "read-only");
-    }
-
-    #[test]
-    fn deepseek_nested_provider_key() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_nested");
-        fs::create_dir_all(&tmp).unwrap();
-        let ds = tmp.join("deepseek.toml");
-        write(
-            &ds,
-            "base_url = \"u\"\n[providers.deepseek]\napi_key = \"sk-nested\"\n",
-        );
-        let paths = ConfigPaths {
-            deepseek: ds,
-            codex: tmp.join("nope.toml"),
-            nanocodex: tmp.join("nope-nano.toml"),
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &empty_env(),
-        )
-        .unwrap();
-        assert_eq!(cfg.api_key, "sk-nested");
-    }
-
-    #[test]
-    fn max_iterations_default_and_override() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_maxiter");
-        fs::create_dir_all(&tmp).unwrap();
-        let paths = no_paths(&tmp);
-
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &empty_env(),
-        )
-        .unwrap();
-        assert_eq!(cfg.max_iterations, 150);
-
-        let cfg2 = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                max_iterations: Some(100),
-                ..Default::default()
-            },
-            &paths,
-            &empty_env(),
-        )
-        .unwrap();
-        assert_eq!(cfg2.max_iterations, 100);
-    }
-
-    #[test]
-    fn max_iterations_from_env() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_maxiter_env");
-        fs::create_dir_all(&tmp).unwrap();
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &no_paths(&tmp),
-            &env1("NANOCODEX_MAX_ITERATIONS", "80"),
-        )
-        .unwrap();
-        assert_eq!(cfg.max_iterations, 80);
-    }
-
-    #[test]
-    fn runtime_budget_and_context_edit_fields_load_from_file_env_and_overrides() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_runtime_control");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            concat!(
-                "api_key = \"sk-base\"\n",
-                "max_tool_calls = 33\n",
-                "max_parallel_tool_calls = 3\n",
-                "context_edit_enabled = false\n",
-                "context_edit_max_chars = 9000\n",
-                "context_edit_keep_recent_messages = 11\n",
-                "context_edit_max_tool_result_chars = 700\n",
-            ),
-        );
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-        let mut env = HashMap::new();
-        env.insert("NANOCODEX_MAX_TOOL_CALLS".into(), "44".into());
-        env.insert("NANOCODEX_MAX_PARALLEL_TOOL_CALLS".into(), "5".into());
-        env.insert("NANOCODEX_CONTEXT_EDIT_ENABLED".into(), "true".into());
-
-        let env_cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &env,
-        )
-        .unwrap();
-        assert_eq!(env_cfg.max_parallel_tool_calls, 5);
-
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                max_parallel_tool_calls: Some(7),
-                context_edit_max_chars: Some(12_345),
-                ..Default::default()
-            },
-            &paths,
-            &env,
-        )
-        .unwrap();
-
-        assert_eq!(cfg.max_tool_calls, 44);
-        assert_eq!(cfg.max_parallel_tool_calls, 7);
-        assert!(cfg.context_edit_enabled);
-        assert_eq!(cfg.context_edit_max_chars, 12_345);
-        assert_eq!(cfg.context_edit_keep_recent_messages, 11);
-        assert_eq!(cfg.context_edit_max_tool_result_chars, 700);
-    }
-
-    #[test]
-    fn hooks_load_from_nanocodex_file() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_hooks");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            r#"
-api_key = "sk-base"
-
-[[hooks]]
-event = "pre_tool"
-matcher = "shell|apply_patch"
-command = "echo hook"
-timeout_s = 3
-
-[[hooks]]
-event = "post_tool"
-command = "echo post"
-"#,
-        );
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp),
-                ..Default::default()
-            },
-            &paths,
-            &HashMap::new(),
-        )
-        .unwrap();
-
-        assert_eq!(cfg.hooks.len(), 2);
-        assert_eq!(cfg.hooks[0].matcher, "shell|apply_patch");
-        assert_eq!(cfg.hooks[0].timeout_s, 3);
-        assert_eq!(cfg.hooks[1].matcher, "*");
-    }
-
-    #[test]
-    fn hook_event_aliases_are_normalized() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_hook_aliases");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            r#"
-api_key = "sk-base"
-
-[[hooks]]
-event = "UserPromptSubmit"
-command = "echo prompt"
-
-[[hooks]]
-event = "Stop"
-command = "echo stop"
-"#,
-        );
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp),
-                ..Default::default()
-            },
-            &paths,
-            &HashMap::new(),
-        )
-        .unwrap();
-
-        assert_eq!(cfg.hooks[0].event, "user_prompt");
-        assert_eq!(cfg.hooks[1].event, "stop");
-        cfg.validate().unwrap();
-    }
-
-    #[test]
-    fn hook_missing_command_fails_validation() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_hook_missing_command");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            r#"
-api_key = "sk-base"
-
-[[hooks]]
-event = "pre_tool"
-matcher = "shell"
-"#,
-        );
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp),
-                ..Default::default()
-            },
-            &paths,
-            &HashMap::new(),
-        )
-        .unwrap();
-
-        assert_eq!(cfg.hooks.len(), 1);
-        let err = cfg.validate().unwrap_err();
-        assert!(err.to_string().contains("command must not be empty"));
-    }
-
-    #[test]
-    fn nanocodex_file_wins_over_deepseek() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_nanowins");
-        fs::create_dir_all(&tmp).unwrap();
-        let ds = tmp.join("deepseek.toml");
-        let nano = tmp.join("nano.toml");
-        write(
-            &ds,
-            "api_key = \"sk-ds\"\ndefault_text_model = \"deepseek-v4-pro\"\n",
-        );
-        write(&nano, "api_key = \"sk-nano\"\nmodel = \"deepseek-chat\"\n");
-        let paths = ConfigPaths {
-            deepseek: ds,
-            codex: tmp.join("nope.toml"),
-            nanocodex: nano,
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &empty_env(),
-        )
-        .unwrap();
-        assert_eq!(cfg.api_key, "sk-nano");
-        assert_eq!(cfg.model, "deepseek-chat");
-    }
-
-    #[test]
-    fn env_wins_over_nanocodex_file() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_envwins");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(&nano, "api_key = \"sk-nano\"\n");
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &env1("DEEPSEEK_API_KEY", "sk-env"),
-        )
-        .unwrap();
-        assert_eq!(cfg.api_key, "sk-env");
-    }
-
-    #[test]
-    fn max_retries_default_and_env() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_retries");
-        fs::create_dir_all(&tmp).unwrap();
-        // Default 3
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &no_paths(&tmp),
-            &env1("DEEPSEEK_API_KEY", "sk-env"),
-        )
-        .unwrap();
-        assert_eq!(cfg.max_retries, 3);
-
-        // Override via env
-        let mut e = env1("DEEPSEEK_API_KEY", "sk-env");
-        e.insert("NANOCODEX_MAX_RETRIES".into(), "5".into());
-        let cfg2 = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &no_paths(&tmp),
-            &e,
-        )
-        .unwrap();
-        assert_eq!(cfg2.max_retries, 5);
-
-        // Garbage falls back to default
-        let mut e3 = env1("DEEPSEEK_API_KEY", "sk-env");
-        e3.insert("NANOCODEX_MAX_RETRIES".into(), "not-a-number".into());
-        let cfg3 = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &no_paths(&tmp),
-            &e3,
-        )
-        .unwrap();
-        assert_eq!(cfg3.max_retries, 3);
-    }
-
-    #[test]
-    fn profile_overrides_base_but_below_env() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_profile");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            concat!(
-                "api_key = \"sk-base\"\n",
-                "model = \"deepseek-chat\"\n",
-                "reasoning_effort = \"auto\"\n",
-                "\n",
-                "[profiles.fast]\n",
-                "model = \"deepseek-v4-pro\"\n",
-                "reasoning_effort = \"high\"\n",
-                "sandbox_mode = \"read-only\"\n",
-            ),
-        );
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-
-        // Profile applied
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                profile: Some("fast".into()),
-                ..Default::default()
-            },
-            &paths,
-            &empty_env(),
-        )
-        .unwrap();
-        assert_eq!(cfg.model, "deepseek-v4-pro");
-        assert_eq!(cfg.reasoning_effort, "high");
-        assert_eq!(cfg.sandbox_mode, "read-only");
-
-        // Env beats profile
-        let cfg2 = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                profile: Some("fast".into()),
-                ..Default::default()
-            },
-            &paths,
-            &env1("NANOCODEX_MODEL", "deepseek-reasoner"),
-        )
-        .unwrap();
-        assert_eq!(cfg2.model, "deepseek-reasoner");
-    }
-
-    #[test]
-    fn profile_name_from_env_and_unknown_raises() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_profile_env");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            "api_key = \"sk-base\"\n[profiles.fast]\nmodel = \"m-fast\"\n",
-        );
-        let paths = ConfigPaths {
-            deepseek: tmp.join("nope-ds.toml"),
-            codex: tmp.join("nope-cx.toml"),
-            nanocodex: nano,
-        };
-
-        // Name from env
-        let cfg = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &env1("NANOCODEX_PROFILE", "fast"),
-        )
-        .unwrap();
-        assert_eq!(cfg.model, "m-fast");
-
-        // Unknown name -> error mentioning the name
-        let err = load_config_impl(
-            Overrides {
-                workspace: Some(tmp.clone()),
-                ..Default::default()
-            },
-            &paths,
-            &env1("NANOCODEX_PROFILE", "ghost"),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("ghost"), "error: {err}");
-    }
-
-    #[test]
-    fn list_profiles_returns_sorted_names() {
-        let tmp = std::env::temp_dir().join("ncx_config_test_listprof");
-        fs::create_dir_all(&tmp).unwrap();
-        let nano = tmp.join("nano.toml");
-        write(
-            &nano,
-            "[profiles.a]\nmodel=\"x\"\n[profiles.b]\nmodel=\"y\"\n",
-        );
-        let names = list_profiles_at(&nano);
-        assert_eq!(names, vec!["a", "b"]);
-    }
-}
+#[path = "loader/tests.rs"]
+mod tests;
