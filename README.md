@@ -186,6 +186,7 @@ only adding more features:
 - [Local Model / OpenAI-Compatible Endpoint](#local-model--openai-compatible-endpoint)
 - [Sandbox & Approval](#sandbox--approval)
 - [MCP](#mcp)
+- [Plugin Ecosystem](#plugin-ecosystem)
 - [Skills](#skills)
 - [Memory & AGENTS.md](#memory--agentsmd)
 - [Sessions, Resume & History](#sessions-resume--history)
@@ -209,6 +210,9 @@ only adding more features:
   from a built-in / remote catalog; tools surface as `mcp__<server>__<tool>`.
   `/mcp reload` prepares and atomically swaps the active external tool set in
   the same process.
+- **Plugin ecosystem** — install Codex-compatible resource plugins that bundle
+  Skills, MCP servers, Apps, Hooks, and UI slots from local, Git, NPM, or
+  community marketplaces, with compatibility checks and conflict blocking.
 - **Pluggable Agent runtime** — model provider, turn context, tool registry,
   scheduler, middleware, and permission profile are explicit runtime seams;
   CLI and GUI share the same assembly contract.
@@ -519,6 +523,48 @@ Each server's tools surface to the model as `mcp__<server>__<tool>`. A
 remote catalog (`NANOCODEX_MARKETPLACE_URL`); every entry funnels through the
 same name-validation and dup-check as a hand-added server, and remote catalogs
 are treated as untrusted data. See `mcp.example.toml` for more.
+
+## Plugin Ecosystem
+
+BugleCat supports two deliberately separated plugin forms:
+
+- **Codex-compatible resource plugins** use `.codex-plugin/plugin.json` and can
+  bundle Skills, MCP servers, Apps, Hooks, and interface contributions.
+- **External process plugins** use `plugin.toml` and communicate across a
+  process boundary. BugleCat does not load third-party DLL, SO, or DYLIB files
+  into the application process.
+
+A resource plugin can use this layout:
+
+```text
+my-plugin/
+├── .codex-plugin/plugin.json
+├── skills/<name>/SKILL.md
+├── .mcp.json
+├── .app.json
+└── hooks/hooks.json
+```
+
+Plugins can be installed globally in `~/.ncx/codex-plugins` or per workspace in
+`.ncx/codex-plugins`. A workspace plugin with the same ID overrides the global
+copy. Marketplace discovery understands OpenAI Codex, Claude, and Cursor style
+directories, plus DSH Community sources such as dshfind, DeepSeek 1024 Store,
+and standard HTTPS catalogs. Install sources may be local paths, Git
+repositories, or NPM packages; each candidate is staged and validated before
+installation.
+
+The settings UI previews requested capabilities and compatibility before
+installing. If an enabled plugin already owns an overlapping capability, the
+new installation is blocked instead of silently replacing it. Interface
+plugins can contribute to the supported UI slots `settings.plugins.tab`,
+`sidebar.footer.action`, and `shell.overlay`, while Harness diagnostics show the
+capabilities mounted at runtime.
+
+MCP and external attachment parsers remain disabled by default because they can
+start subprocesses or send content to another service. Enable only plugins and
+marketplace sources you trust. See
+[`local-plugins/llmwiki-memory`](local-plugins/llmwiki-memory) for a working
+plugin that ships a Skill and an MCP server together.
 
 ## Skills
 

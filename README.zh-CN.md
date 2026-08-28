@@ -126,6 +126,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - [本地模型 / OpenAI 兼容接口](#本地模型--openai-兼容接口)
 - [沙箱与审批](#沙箱与审批)
 - [MCP](#mcp)
+- [插件生态](#插件生态)
 - [Skills](#skills)
 - [记忆与 AGENTS.md](#记忆与-agentsmd)
 - [会话、恢复与历史](#会话恢复与历史)
@@ -147,6 +148,8 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   动作。
 - **MCP 集成 + 市场** —— 从 `mcp.toml` 加载服务，或从内置 / 远程目录一键安装；
   工具以 `mcp__<server>__<tool>` 形式暴露。
+- **插件生态** —— 可从本地、Git、NPM 或社区市场安装兼容 Codex 的资源插件，把
+  Skills、MCP、Apps、Hooks 和 UI 插槽组合发布，并在安装前检查兼容性和能力冲突。
 - **Skills 系统** —— 用户 skill 加三个内置编码 skill；只注入名称 + 描述，正文
   按需加载。
 - **自定义 slash commands** —— 项目/用户级 Markdown prompt 模板放在
@@ -407,6 +410,42 @@ nanocodex --mcp
 目录或远程目录（`NANOCODEX_MARKETPLACE_URL`）一键安装；每个条目都走和手动添加
 服务相同的名称校验与去重，远程目录被当作不可信数据处理。更多见
 `mcp.example.toml`。
+
+## 插件生态
+
+BugleCat 将两类插件明确隔离：
+
+- **Codex 兼容资源插件**使用 `.codex-plugin/plugin.json`，可以组合 Skills、MCP、
+  Apps、Hooks 和界面扩展。
+- **外部进程插件**使用 `plugin.toml`，通过进程边界通信。BugleCat 不会把第三方
+  DLL、SO 或 DYLIB 动态库直接加载进应用进程。
+
+资源插件可以采用以下结构：
+
+```text
+my-plugin/
+├── .codex-plugin/plugin.json
+├── skills/<name>/SKILL.md
+├── .mcp.json
+├── .app.json
+└── hooks/hooks.json
+```
+
+插件可以安装到用户全局目录 `~/.ncx/codex-plugins`，也可以安装到工作区目录
+`.ncx/codex-plugins`；同 ID 的工作区插件会覆盖全局插件。市场发现兼容 OpenAI
+Codex、Claude 和 Cursor 的目录结构，也支持 dshfind、DeepSeek 1024 Store 等 DSH
+Community 来源与标准 HTTPS 目录。安装来源可以是本地路径、Git 仓库或 NPM 包；候选
+插件会先进入隔离暂存区，完成校验后才安装。
+
+设置页会在安装前展示插件请求的能力和兼容性。如果已启用插件占用了重复能力，新安装
+会被阻断，不会静默替换。界面插件可使用 `settings.plugins.tab`、
+`sidebar.footer.action` 和 `shell.overlay` 三个 UI 插槽；Harness 运行诊断会展示当前
+实际挂载的插件能力。
+
+MCP 和外部附件解析插件默认关闭，因为它们可能启动子进程或把内容发送到其他服务。只
+启用可信插件和市场来源。可参考
+[`local-plugins/llmwiki-memory`](local-plugins/llmwiki-memory)，它在同一个插件中同时
+提供 Skill 与 MCP 服务。
 
 ## Skills
 
