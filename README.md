@@ -224,6 +224,9 @@ only adding more features:
   `.nanocodex/commands`, with `.claude/commands` compatibility.
 - **Persistent memory + AGENTS.md / CLAUDE.md** — durable notes plus layered
   project instructions injected each turn.
+- **Cross-agent long-term memory plugin** — the bundled LLM Wiki example pairs
+  an always-applied Skill with a local MCP service to recall user preferences
+  and project snapshots across BugleCat and other Agent clients.
 - **Browsable session history** — JSONL logs, full-transcript snapshots, resume,
   and fork.
 - **Context compaction** — zero-cost deterministic digest or opt-in model
@@ -619,6 +622,39 @@ Two complementary layers of persistent context, both injected each turn:
 
 Memory is "who/what" (preferences, facts); skills are "how to do X";
 AGENTS.md / CLAUDE.md are project-scoped guidance.
+
+### LLM Wiki cross-agent long-term memory
+
+[`local-plugins/llmwiki-memory`](local-plugins/llmwiki-memory) is an optional
+local plugin that adds a more structured memory lifecycle. It combines an
+`always_apply` Skill with one local MCP tool, using `D:\LLMWIKI` as the actual
+memory store. `D:\llm-wiki-template` contains the protocol and initialization
+template; it is not the live data directory.
+
+After the plugin and its MCP server are enabled:
+
+1. A new Agent session automatically recalls the user profile before handling
+   the first business request.
+2. Entering an existing project recalls only its short L1 project snapshot;
+   historical sections load on demand instead of filling the context window.
+3. While the MCP service is running, saved BugleCat sessions are collected
+   incrementally into the L0 corpus, normally within about one minute. No new
+   conversation or manual import is required.
+4. Confirmed project decisions, progress, pending work, and verification
+   evidence can be recorded at task handoff and recalled by later Agents.
+
+The layers have different trust rules: L0 is collected conversation material;
+L1 is a concise project memory with source references; L2 is the stable user
+profile. New conversation text never changes L2 directly. Profile candidates
+must meet the evidence threshold and remain pending until the user explicitly
+approves them. Tokens, cookies, passwords, secrets, database credentials, and
+sensitive business content must not be stored.
+
+Long-term memory is a recovery aid, **not a source of code truth**. Repository
+requirements, contracts, current files, Git diff, tests, and database state
+must be checked again before an Agent modifies a project. If the MCP service is
+unavailable, the current task continues with a visible warning rather than
+blocking or silently writing the Wiki files directly.
 
 ## Sessions, Resume & History
 

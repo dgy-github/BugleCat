@@ -155,6 +155,8 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - **自定义 slash commands** —— 项目/用户级 Markdown prompt 模板放在
   `.nanocodex/commands`，并兼容 `.claude/commands`。
 - **持久记忆 + AGENTS.md / CLAUDE.md** —— 每轮注入的持久笔记和分层项目指令。
+- **跨 Agent 长期记忆插件** —— 随仓库提供的 LLM Wiki 示例用自动触发 Skill 配合
+  本地 MCP，在 BugleCat 与其他 Agent 客户端之间召回用户偏好和项目快照。
 - **可浏览的会话历史** —— JSONL 日志、完整对话快照、恢复（resume）和分叉（fork）。
 - **上下文压缩** —— 零成本的确定性摘要，或可选的模型摘要，按 token 预算触发。
 - **缓存感知的成本统计** —— 用真实的按调用用量，按 DeepSeek 的命中/未命中费率
@@ -493,6 +495,30 @@ Look for behavior regressions first, then missing tests, then maintainability.
   一个超大文件撑爆上下文。Rust CLI、orchestrator worker 和 Tauri GUI 都会在会话启动时注入这一块。
 
 记忆讲「谁/什么」（偏好、事实）；skills 讲「怎么做 X」；AGENTS.md / CLAUDE.md 是项目级指引。
+
+### LLM Wiki 跨 Agent 长期记忆
+
+[`local-plugins/llmwiki-memory`](local-plugins/llmwiki-memory) 是一个可选的本地插件，
+用于提供更结构化的记忆生命周期。它把 `always_apply` Skill 与单一本地 MCP 工具组合
+起来，以 `D:\LLMWIKI` 作为实际记忆库。`D:\llm-wiki-template` 只保存协议和初始化
+模板，不是运行中的数据目录。
+
+安装并启用插件及其 MCP 服务后：
+
+1. 每个新 Agent 会话会在处理第一个业务请求前自动召回用户画像。
+2. 进入已有项目时只召回简短的 L1 项目快照；需要历史细节时才按需读取分片，避免占满
+   上下文窗口。
+3. MCP 存活期间会增量采集 BugleCat 已写盘的新会话到 L0 语料，通常最迟约一分钟，
+   不需要新建对话或手工导入。
+4. 任务交接时可记录已确认的项目决策、进度、待办和验证证据，供后续 Agent 召回。
+
+各层采用不同的信任规则：L0 是采集到的会话语料；L1 是带来源引用的项目短记忆；L2
+是稳定用户画像。新对话内容不会直接修改 L2；画像候选必须满足证据阈值，并在用户明确
+批准前保持待审核。Token、Cookie、密码、Secret、数据库口令和敏感业务正文不得写入。
+
+长期记忆只用于恢复方向，**不是代码事实源**。Agent 修改项目之前仍须重新核对仓库需求、
+契约、当前文件、Git diff、测试和数据库状态。如果 MCP 暂不可用，当前任务会继续并明确
+提示，不会阻塞会话，也不会静默改成直接写 Wiki 文件。
 
 ## 会话、恢复与历史
 
