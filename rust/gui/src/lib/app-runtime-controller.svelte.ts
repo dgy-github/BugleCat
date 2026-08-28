@@ -68,12 +68,18 @@ export class AppRuntimeController {
   };
 
   chooseWorkspace = async (): Promise<void> => {
+    if (this.thread.switching) return;
     const previousId = this.thread.currentId;
     const previousTitle = this.thread.title;
     const previousMessages = [...this.thread.messages];
+    const previousWorkspace = this.workspace;
+    let workspaceChanged = false;
     try {
       const directory = await open({ directory: true, multiple: false });
       if (!directory || Array.isArray(directory)) return;
+      this.thread.stash(previousId);
+      this.thread.switching = true;
+      this.thread.busy = false;
       this.thread.currentId = "";
       this.thread.messages = [];
       this.thread.title = "新会话";
@@ -81,15 +87,38 @@ export class AppRuntimeController {
       this.thread.queued = [];
       this.composer.attached = [];
       const workspace = await appServerRequest<string>({ method: "workspaceSet", params: { path: directory } });
+      workspaceChanged = true;
+      const threadId = `thread-${crypto.randomUUID()}`;
+      const created = await appServerRequest<{ metadata: { harnessProfile: string } }>({
+        method: "threadCreateActivate",
+        params: {
+          threadId,
+          workspace,
+          title: "(no prompt yet)",
+          harnessProfile: this.lifecycle.selectedHarnessProfile,
+        },
+      });
       this.workspace = workspace;
+      this.lifecycle.activeHarnessProfile = created.metadata.harnessProfile || this.lifecycle.selectedHarnessProfile;
+      this.thread.currentId = threadId;
+      this.thread.restore(threadId);
       this.thread.messages.push({ role: "note", text: `已切换工作区到 ${workspace}，已开始新会话。` });
+      this.thread.switching = false;
       void this.lifecycle.refresh();
     } catch (error) {
+      let rollbackError = "";
+      if (workspaceChanged && previousWorkspace) {
+        try { await appServerRequest({ method: "workspaceSet", params: { path: previousWorkspace } }); }
+        catch (rollback) { rollbackError = `；恢复原工作区也失败：${rollback}`; }
+      }
+      this.thread.busy = this.thread.runningSessions.has(previousId);
+      this.thread.switching = false;
       this.thread.currentId = previousId;
       this.thread.title = previousTitle;
+      this.thread.restore(previousId);
       this.thread.messages = previousMessages;
       this.usage.restore(previousId);
-      this.thread.messages.push({ role: "note", text: `切换工作区失败：${error}` });
+      this.thread.messages.push({ role: "note", text: `切换工作区失败：${error}${rollbackError}` });
     }
   };
 

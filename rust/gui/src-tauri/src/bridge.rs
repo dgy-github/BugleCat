@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc::Sender as SyncSender, Arc, Mutex};
 
 use async_trait::async_trait;
 use ncx_app_server::AppServer;
@@ -242,14 +242,12 @@ pub enum Command {
         images: Vec<String>,
         execution_mode: ExecutionMode,
     },
-    /// Rebuild the agent from the (just-saved) config — applies model / sandbox
-    /// / key changes live. Starts a fresh session.
-    Reload,
     /// Start a new empty conversation with an id allocated before it enters the
     /// serial worker queue. Project files remain shared; chat and plans do not.
     New {
         id: String,
         harness_profile: String,
+        completion: SyncSender<Result<(), String>>,
     },
     /// Continue a saved session: reseed the agent from its snapshot, keeping the
     /// same session id (future turns append to it).
@@ -2096,6 +2094,7 @@ pub fn spawn_worker(
                         Command::New {
                             id,
                             harness_profile,
+                            completion,
                         } => {
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(
@@ -2128,49 +2127,18 @@ pub fn spawn_worker(
                                             messages: Vec::new(),
                                         },
                                     );
+                                    let _ = completion.send(Ok(()));
                                 }
-                                Err(e) => emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: String::new(),
-                                        message: e,
-                                    },
-                                ),
-                            }
-                        }
-                        Command::Reload => {
-                            grants = Rc::new(RefCell::new(SessionGrants::default()));
-                            match build_agent(
-                                approver.clone(),
-                                questioner.clone(),
-                                None,
-                                grants.clone(),
-                                None,
-                                None,
-                                app_server.clone(),
-                            )
-                            .await
-                            {
-                                Ok((a, ws, sid, _)) => {
-                                    agent = a;
-                                    workspace = ws;
-                                    session_id = sid;
-                                    set_active_session(&active_session, &session_id);
-                                    agent.set_event_sink(make_sink(
-                                        app.clone(),
-                                        session_id.clone(),
-                                        None,
-                                        None,
-                                    ));
-                                    emit_ready(&app, &workspace, &session_id);
+                                Err(e) => {
+                                    let _ = completion.send(Err(e.clone()));
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: String::new(),
+                                            message: e,
+                                        },
+                                    )
                                 }
-                                Err(e) => emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: session_id.clone(),
-                                        message: e,
-                                    },
-                                ),
                             }
                         }
                         Command::Resume(id) => {

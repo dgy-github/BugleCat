@@ -22,7 +22,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ncx_app_server::{AppServer, AppServerAdapter, DispatchOutcome};
 use ncx_config::{
@@ -456,17 +458,17 @@ fn get_config_location() -> Result<ConfigLocation, String> {
     config_location()
 }
 
-/// Switch the agent's workspace (the directory it operates on). Sets the process
-/// working directory — which every command resolves against — then reloads the
-/// agent so the new root, its project instructions, memory, and git all apply.
-fn set_workspace_for_state(path: String, state: &AppState) -> Result<String, String> {
+/// Switch the process workspace. The frontend follows this with an App Server
+/// `threadCreateActivate`, so the new empty Thread is durable before the GUI
+/// binds to its id. Do not create a legacy-only session here: Goal reads and
+/// the rest of the protocol would have no matching Thread record.
+fn set_workspace_for_state(path: String, _state: &AppState) -> Result<String, String> {
     let p = PathBuf::from(bridge::display_path(Path::new(path.trim())));
     if !p.is_dir() {
         return Err(format!("not a directory: {}", p.display()));
     }
     std::env::set_current_dir(&p).map_err(|e| format!("cannot enter {}: {e}", p.display()))?;
     bridge::save_last_workspace(&p); // remember it across launches
-    let _ = state.tx.send(Command::Reload);
     Ok(bridge::display_path(&p))
 }
 
@@ -622,13 +624,18 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload else {
             return Err("创建会话后未能读取其 Harness Profile".to_string());
         };
+        let (completion_tx, completion_rx) = mpsc::channel();
         self.state
             .tx
             .send(Command::New {
                 id: thread_id.to_string(),
                 harness_profile: thread.metadata.harness_profile,
+                completion: completion_tx,
             })
-            .map_err(|_| "agent thread is not running".to_string())
+            .map_err(|_| "agent thread is not running".to_string())?;
+        completion_rx
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|_| "切换工作区超时：后台 Agent 未在 30 秒内完成初始化".to_string())?
     }
 
     fn activate_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
@@ -4563,7 +4570,7 @@ mod tests {
             .split_once("Command::New {")
             .unwrap()
             .1
-            .split_once("Command::Reload")
+            .split_once("Command::Resume")
             .unwrap()
             .0;
         assert!(!new_branch.contains("record_turn("));
@@ -4840,6 +4847,46 @@ mod tests {
             runtime.find("method: \"interactionAnswer\"").unwrap()
                 < runtime.find("this.thread.removeQuestion").unwrap()
         );
+    }
+
+    #[test]
+    fn workspace_switch_creates_a_durable_protocol_thread_before_binding_it() {
+        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
+        let backend = include_str!("lib.rs");
+        let switch_backend = backend
+            .split_once("fn set_workspace_for_state")
+            .unwrap()
+            .1
+            .split_once("fn set_model_for_state")
+            .unwrap()
+            .0;
+
+        assert!(runtime.contains("method: \"workspaceSet\""));
+        assert!(runtime.contains("method: \"threadCreateActivate\""));
+        assert!(
+            runtime.find("method: \"threadCreateActivate\"").unwrap()
+                < runtime.find("this.thread.currentId = threadId").unwrap()
+        );
+        assert!(!switch_backend.contains("Command::Reload"));
+        assert!(backend.contains("recv_timeout(Duration::from_secs(30))"));
+    }
+
+    #[test]
+    fn ordinary_status_notes_do_not_use_the_error_palette() {
+        let conversation = include_str!("../../src/components/ConversationView.svelte");
+        let css = include_str!("../../src/app.css");
+        assert!(conversation.contains("noteTone(message.text)"));
+        assert!(conversation.contains("已切换"));
+        assert!(css.contains(".note.success"));
+        assert!(css.contains(".note.error"));
+        let base_note = css
+            .split_once(".note {")
+            .unwrap()
+            .1
+            .split_once('}')
+            .unwrap()
+            .0;
+        assert!(!base_note.contains("var(--danger)"));
     }
 
     #[test]

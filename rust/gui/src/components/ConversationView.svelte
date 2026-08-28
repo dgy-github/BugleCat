@@ -80,6 +80,13 @@
     void invoke("open_local_artifact", { path });
   }
 
+  function noteTone(text: string): "neutral" | "success" | "warning" | "error" {
+    if (/(错误|失败|不可用|拒绝|崩溃)/.test(text)) return "error";
+    if (/(警告|注意|超时|阻断|⚠)/.test(text)) return "warning";
+    if (/(已切换|已保存|已创建|已更新|成功|完成)/.test(text)) return "success";
+    return "neutral";
+  }
+
   $effect(() => {
     const paths = messages.flatMap((message) => message.role === "assistant" ? localArtifacts(message.text) : message.role === "user" ? (message.images ?? []) : []);
     for (const path of paths) {
@@ -152,7 +159,7 @@
         {/if}
       </div>
     {:else if message.role === "note"}
-      <div class="msg note">{message.text}</div>
+      <div class="msg note {noteTone(message.text)}">{message.text}</div>
     {:else if message.role === "compact"}
       <div class="msg compact"><span aria-hidden="true">◇</span>{message.text}</div>
     {:else if message.role === "orchestration"}

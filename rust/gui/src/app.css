@@ -311,16 +311,31 @@ header {
 }
 .bubble.md table.md-table th { background: var(--paper-2); font-weight: 650; }
 
-/* note: rendered as <div class="msg note"> — status / error line */
+/* Status notes are neutral by default; severity is expressed without neon color. */
 .note {
   display: block;
   width: 100%;
-  color: var(--danger);
+  color: var(--ink-2);
   font-size: var(--fs-sm);
-  background: rgba(178, 59, 50, 0.06);
-  border: 1px solid rgba(178, 59, 50, 0.18);
+  background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%);
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   padding: 0.4rem 0.66rem;
+}
+.note.success {
+  color: color-mix(in srgb, var(--ink-2) 84%, var(--accent-deep) 16%);
+  background: color-mix(in srgb, var(--surface) 95%, var(--accent) 5%);
+  border-color: color-mix(in srgb, var(--line-strong) 76%, var(--accent) 24%);
+}
+.note.warning {
+  color: color-mix(in srgb, var(--ink-2) 76%, var(--warn) 24%);
+  background: color-mix(in srgb, var(--surface) 96%, var(--warn) 4%);
+  border-color: color-mix(in srgb, var(--line-strong) 82%, var(--warn) 18%);
+}
+.note.error {
+  color: color-mix(in srgb, var(--ink-2) 72%, var(--danger) 28%);
+  background: color-mix(in srgb, var(--surface) 96%, var(--danger) 4%);
+  border-color: color-mix(in srgb, var(--line-strong) 82%, var(--danger) 18%);
 }
 
 .compact {
@@ -1131,7 +1146,7 @@ button:disabled {
   }
   .user .bubble { color: #fff; }
   .abtns .ok, .restore { color: #14110d; }
-  .note { background: rgba(224, 128, 120, 0.12); border-color: rgba(224, 128, 120, 0.3); }
+  .note.error { background: color-mix(in srgb, var(--surface) 92%, var(--danger) 8%); }
 }
 /* ── Synthesis grafts (from the design review) ───────────────────────────── */
 
