@@ -1,31 +1,34 @@
-# nanocodex
+# BugleCat
 
 [English](README.md) | 简体中文
 
 ## 能力说明页
 
-[打开在线能力说明页](https://dgy-github.github.io/nanocodex/nanocodex.html) · [查看仓库内 HTML](nanocodex.html)
+[打开能力说明页](nanocodex.html) · [BugleCat 仓库](https://github.com/dgy-github/BugleCat)
 
 [设计说明 PDF](docs/ai-coding-agent-design-brief.pdf) · [设计说明 HTML](docs/ai-coding-agent-design-brief.html)
 
 📖 **[设计理念手册](docs/design-philosophy.zh-CN.md)** —— 系统讲解分层编排、递归子任务分解、无工具推理节点、渐进披露、视觉分流、记忆自进化与基准方法论“为什么这样设计”。
 
-[![nanocodex GUI 预览：会话、工具调用、MCP、Skills、成本统计与测试状态](assets/nanocodex-ui-preview.svg)](https://dgy-github.github.io/nanocodex/nanocodex.html)
+🛡️ **[上下文压缩安全协议](docs/context-compression-safety-protocol.zh-CN.md)** —— 解释 Coding Agent 为什么会在压缩后发生任务状态漂移，以及如何用任务快照、决策溯源、Git 证据和只读恢复控制风险。
 
-`nanocodex` 是一个小而完整的 Codex 风格编码 agent。一个 chat-completions 模型
+[![BugleCat 桌面端预览：会话、工具调用、MCP、Skills、成本统计与测试状态](assets/nanocodex-ui-preview.svg)](nanocodex.html)
+
+**BugleCat** 是一个面向 Windows、本地运行且可扩展的 Codex 风格编码 Agent。一个 chat-completions 模型
 提出工具调用，agent 在沙箱内执行文件/shell 工具，记录会话，并循环直到任务完成。
 它可以对接 DeepSeek 托管 API，也可以对接任意 OpenAI 兼容的本地模型，并自带
 MCP 集成、skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Windows
 GUI、定时器，以及 git worktree 的 A/B 对比。
 
-项目分为两个清晰阶段。重点不是“把同一套功能换一种语言写”，而是架构边界和发布性能的
-升级。
+项目由最初的 `nanocodex` 原型演进而来。为了兼容已有安装，配置目录、环境变量和
+Python 命令中仍保留旧名称；对外产品和新仓库统一使用 BugleCat。项目分为两个清晰
+阶段，重点不是“把同一套功能换一种语言写”，而是架构边界和发布性能的升级。
 
 ## 项目阶段
 
 ### 第一阶段：Python 基础版
 
-`nanocodex/` 下的 Python 实现是最早的完整功能线，目标是快速验证产品形态：先把
+`nanocodex/` 下的 Python 实现是最早的兼容功能线，目标是快速验证产品形态：先把
 agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪些部分需要更强的工程边界。
 
 **架构层面**
@@ -215,7 +218,7 @@ nanocodex/
 ## 安装
 
 ```powershell
-cd path\to\nanocodex
+cd path\to\BugleCat
 python -m pip install -e ".[dev]"
 ```
 
@@ -239,7 +242,7 @@ Rust REPL 里可以用 `/config` 查看解析后的配置文件路径、当前 m
 provider、model、sandbox 或预算类变更需要重启 REPL 后影响当前会话。`/usage`（或
 `/cost`）会显示上一轮和当前 REPL session 的原始 token 用量。
 
-Python CLI，原始功能线：
+旧版 Python CLI（为兼容已有用户，命令名仍保留 `nanocodex`）：
 
 ```powershell
 # 一次性任务
@@ -255,7 +258,7 @@ nanocodex --mcp
 nanocodex-gui --cd .
 ```
 
-在 Windows 上，安装后也可以直接双击 `nanocodex-gui.cmd`，或用
+旧版 Python GUI 在 Windows 上仍可双击 `nanocodex-gui.cmd`，或用
 `scripts/make-shortcut.ps1` 生成开始菜单快捷方式。
 
 ## 配置
@@ -523,17 +526,18 @@ nanocodex schedule run        # 让它一直跑，任务才会触发
 
 要求工作区是干净的 git 仓库（无未提交改动），否则入口禁用。
 
-## GUI
+## BugleCat 桌面端
 
-一个面向 Windows 的 Tkinter 桌面 GUI（`nanocodex-gui`）：
+BugleCat 当前桌面端使用 Tauri 2 + Svelte 5（`rust/gui`）：
 
 - 流式对话，推理/答案分离，带 Stop 按钮。
-- 项目切换、模型切换，以及多分区的设置页。
+- 工作区切换、运行中模型切换，以及多分区设置中心。
 - 可浏览的会话历史（点击回放完整对话）。
-- 文件面板、prompt 增强（✨）、图片附件、`#` 快速捕获到记忆、MCP 自动连接、
-  定时器控制，以及 A/B 对比流程。
+- 文件、Git diff、分支、项目记忆和 checkpoint 面板。
+- 图片附件、Skills、MCP、插件、权限模式和模型商配置。
+- 可移动侧栏、审批弹窗及真实的 `ask_user_question` 交互。
 
-注意：GUI 不热加载——改代码需要关掉再重开。
+CLI 与桌面端共用 Provider、权限、预算、上下文编辑、并发和 Harness 装配路径。
 
 ## 测试
 

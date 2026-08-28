@@ -16,7 +16,7 @@
     </marker>
   </defs>
   <rect width="1200" height="520" rx="34" fill="url(#bg)"/>
-  <text x="52" y="66" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="32" font-weight="800" fill="#176c4c">nanocodex Agent Loop</text>
+  <text x="52" y="66" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="32" font-weight="800" fill="#176c4c">BugleCat Agent Loop</text>
   <text x="52" y="102" font-family="Segoe UI, Microsoft YaHei, sans-serif" font-size="18" fill="#59675d">模型负责规划，Harness 负责执行、校验、记录和回填观察结果</text>
 
   <g filter="url(#shadow)">

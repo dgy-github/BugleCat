@@ -1,18 +1,20 @@
-# nanocodex
+# BugleCat
 
 English | [简体中文](README.zh-CN.md)
 
 ## Capability Page
 
-[Open the live capability page](https://dgy-github.github.io/nanocodex/nanocodex.html) · [View the HTML in this repo](nanocodex.html)
+[Open the capability page](nanocodex.html) · [BugleCat repository](https://github.com/dgy-github/BugleCat)
 
 [Design brief PDF](docs/ai-coding-agent-design-brief.pdf) · [Design brief HTML](docs/ai-coding-agent-design-brief.html)
 
 📖 **[设计理念手册（中文）](docs/design-philosophy.zh-CN.md)** — why the tiered orchestrator, recursive decomposition, tool-less reasoning nodes, progressive disclosure, vision routing, and the benchmark methodology are built the way they are.
 
-[![nanocodex GUI preview: sessions, tool calls, MCP, skills, cost, and tests](assets/nanocodex-ui-preview.svg)](https://dgy-github.github.io/nanocodex/nanocodex.html)
+🛡️ **[Context Compression Safety Protocol（中文）](docs/context-compression-safety-protocol.zh-CN.md)** — why coding agents can drift after context compaction, and how snapshots, decision provenance, Git evidence, and read-only recovery contain the risk.
 
-`nanocodex` is a compact but full-featured Codex-style coding agent. A
+[![BugleCat desktop preview: sessions, tool calls, MCP, skills, cost, and tests](assets/nanocodex-ui-preview.svg)](nanocodex.html)
+
+**BugleCat** is a local, extensible Codex-style coding agent for Windows. A
 chat-completions model proposes tool calls, the agent runs sandboxed
 file/shell tools, records the session, and loops until the task is done. It
 runs against DeepSeek's hosted API or any OpenAI-compatible local model, and
@@ -20,7 +22,10 @@ ships with MCP integration, a skills system, a sandbox/approval state machine,
 context compaction, token-cost accounting, a Windows GUI, a scheduler, and
 git-worktree A/B comparison.
 
-The project has two clear stages. The important shift is not just "same
+The project evolved from the original `nanocodex` prototype. That legacy name
+still appears in compatibility paths, environment variables, and Python
+commands so existing installations keep working. The project has two clear
+stages. The important shift is not just "same
 features in another language"; it is an architectural split and a release
 performance upgrade.
 
@@ -28,7 +33,7 @@ performance upgrade.
 
 ### Stage 1: Python Baseline
 
-The Python implementation under `nanocodex/` is the original feature-complete
+The Python implementation under `nanocodex/` is the original, legacy feature-complete
 agent line. It was optimized for fast product exploration: prove the agent
 loop, tool UX, approval model, and desktop workflows before locking the system
 into a stricter runtime.
@@ -279,7 +284,7 @@ sending the entire catalog on every model call.
 Current Rust release line:
 
 ```powershell
-cd path\to\nanocodex
+cd path\to\BugleCat
 rustup toolchain install stable-x86_64-pc-windows-gnu
 cargo +stable-x86_64-pc-windows-gnu build --manifest-path rust\Cargo.toml -p ncx-cli --release
 
@@ -321,7 +326,7 @@ setting to `~/.nanocodex/config.toml`; restart the REPL for provider, model,
 sandbox, or budget changes to affect the active session. `/usage` (or `/cost`)
 shows raw token usage for the last turn and current REPL session.
 
-Python CLI, original line:
+Legacy Python CLI (the command name remains `nanocodex` for compatibility):
 
 ```powershell
 # one-shot task
@@ -337,7 +342,7 @@ nanocodex --mcp
 nanocodex-gui --cd .
 ```
 
-On Windows you can also double-click `nanocodex-gui.cmd` after installation, or
+For the legacy Python GUI, Windows users can also double-click `nanocodex-gui.cmd` after installation, or
 generate a Start-menu shortcut with `scripts/make-shortcut.ps1`.
 
 ## Configuration
@@ -653,9 +658,9 @@ so real `shell`/`apply_patch` edits never collide:
 Requires a clean git workspace (no uncommitted changes); the entry is disabled
 otherwise.
 
-## GUI
+## BugleCat Desktop GUI
 
-A Tauri 2 + Svelte 5 desktop GUI for Windows (`rust/gui`):
+The BugleCat desktop uses Tauri 2 + Svelte 5 on Windows (`rust/gui`):
 
 - Streaming chat with reasoning/answer separation and a Stop button.
 - Project switcher, model switcher, and a multi-section Settings page.

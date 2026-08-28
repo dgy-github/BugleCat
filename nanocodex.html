@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>nanocodex · Codex 能力覆盖与 DeepSeek 优化</title>
+<title>BugleCat · 本地 Coding Agent 与可插拔 Harness</title>
 <style>
   :root {
     --bg: #0d1117;
@@ -245,7 +245,7 @@
 <body>
 
 <header class="hero">
-  <h1>nanocodex</h1>
+  <h1>BugleCat</h1>
   <p class="tag">一个面向 DeepSeek 的 Codex-style 本地 coding agent。它不是官方 Codex 的复制品，而是把编码 Agent 最关键的工程机制重建成可读、可测、可替换模型后端的 harness：工具调用、文件修改、命令执行、沙箱审批、会话恢复、MCP、Skills、上下文压缩和成本统计。</p>
   <div class="badges">
     <span class="badge">Codex-style tool loop</span>
@@ -256,15 +256,15 @@
     <span class="badge">JSONL resume</span>
     <span class="badge">420 离线测试</span>
   </div>
-  <a class="cta" href="https://github.com/dgy-github/nanocodex" target="_blank" rel="noopener">
+  <a class="cta" href="https://github.com/dgy-github/BugleCat" target="_blank" rel="noopener">
     <svg width="18" height="18" viewBox="0 0 16 16" fill="#04101f" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    github.com/dgy-github/nanocodex
+    github.com/dgy-github/BugleCat
   </a>
 </header>
 
 <figure class="screenshot">
   <div class="frame">
-    <img src="assets/nanocodex-ui-preview.svg" alt="nanocodex GUI 截图预览：会话列表、模型工具调用、MCP、Skills、成本统计与测试结果">
+    <img src="assets/nanocodex-ui-preview.svg" alt="BugleCat 桌面端预览：会话列表、模型工具调用、MCP、Skills、成本统计与测试结果">
   </div>
   <figcaption>GUI 预览：会话历史、工具调用、MCP / Skills、成本统计与离线测试状态。页面重点不是炫 UI，而是说明这个 agent harness 覆盖了哪些能力。</figcaption>
 </figure>
@@ -273,7 +273,7 @@
 
   <h2><span class="num">01</span>这个项目到底是什么</h2>
   <div class="intro">
-    <p class="lead">nanocodex 是一个 DeepSeek-oriented 的本地 coding agent harness，用来验证“一个模型怎样在受控环境里持续读代码、改文件、跑命令、看结果、再修正”。</p>
+    <p class="lead">BugleCat 是一个本地运行、可切换模型商并采用可插拔 Harness 的 coding agent，用来验证“一个模型怎样在受控环境里持续读代码、改文件、跑命令、看结果、再修正”。</p>
     <p>它对齐的是 Codex 类工具的工程能力，而不是外观：交互式编码循环、工具协议、仓库读写、命令执行、审批/沙箱、会话恢复、AGENTS.md、Skills、MCP、上下文压缩、成本统计和 worktree 隔离实验。</p>
     <p>后端只要求 OpenAI 兼容 <code>/v1/chat/completions</code>，所以可以接 DeepSeek 托管 API，也可以把 <code>base_url</code> 指到本地 vLLM、llama-server、LM Studio 或企业内网模型服务。</p>
   </div>
@@ -301,10 +301,10 @@
   </div>
 
   <h2><span class="num">02</span>Codex-style 能力覆盖</h2>
-  <p class="lead">官方 Codex 的关键体验是：读仓库、解释计划、调用工具改代码、跑命令验证、在权限边界内持续迭代，并能通过 AGENTS.md、Skills、MCP、会话历史等机制长期工作。nanocodex 把这些能力拆成了本地可运行模块。</p>
+  <p class="lead">官方 Codex 的关键体验是：读仓库、解释计划、调用工具改代码、跑命令验证、在权限边界内持续迭代，并能通过 AGENTS.md、Skills、MCP、会话历史等机制长期工作。BugleCat 把这些能力拆成了本地可运行模块。</p>
 
   <table>
-    <thead><tr><th>Codex 类能力</th><th>nanocodex 做到了什么</th><th>实现程度</th></tr></thead>
+    <thead><tr><th>Codex 类能力</th><th>BugleCat 做到了什么</th><th>实现程度</th></tr></thead>
     <tbody>
       <tr><td>交互式编码循环</td><td><code>AgentLoop.run_turn()</code> 执行“模型 → 工具 → 结果 → 再模型”的多轮循环，CLI 和 GUI 都只是渲染层。</td><td>已实现</td></tr>
       <tr><td>读仓库 / 改文件 / 跑命令</td><td><code>read_file</code>、<code>apply_patch</code>、<code>shell</code> 统一经 ToolRegistry 派发，模型只提交结构化工具调用。</td><td>已实现</td></tr>
@@ -360,18 +360,18 @@
   </div>
 
   <h2><span class="num">04</span>针对 DeepSeek 做了哪些优化</h2>
-  <p class="lead">DeepSeek/OpenAI 兼容接口能跑起来只是第一步。真正做 coding agent 时，reasoner、tool call 历史、流式超时、usage 字段和成本统计都会踩坑。nanocodex 把这些处理放在 <code>provider/deepseek.py</code>、<code>auto_reasoning.py</code> 和 <code>pricing.py</code> 里。</p>
+  <p class="lead">DeepSeek/OpenAI 兼容接口能跑起来只是第一步。真正做 coding agent 时，reasoner、tool call 历史、流式超时、usage 字段和成本统计都会踩坑。BugleCat 在 Provider 与 Harness 边界统一处理这些兼容问题。</p>
 
   <table>
     <thead><tr><th>优化点</th><th>为什么需要</th><th>实现位置</th></tr></thead>
     <tbody>
-      <tr><td><code>reasoning_content</code> 回放</td><td>DeepSeek V4/reasoner 在 assistant 历史里有 <code>tool_calls</code> 但缺 reasoning 时可能拒绝后续请求；nanocodex 会为旧会话补 <code>(reasoning omitted)</code> 占位。</td><td><code>_sanitize_reasoning_replay()</code></td></tr>
+      <tr><td><code>reasoning_content</code> 回放</td><td>DeepSeek V4/reasoner 在 assistant 历史里有 <code>tool_calls</code> 但缺 reasoning 时可能拒绝后续请求；BugleCat 会为旧会话补 <code>(reasoning omitted)</code> 占位。</td><td><code>_sanitize_reasoning_replay()</code></td></tr>
       <tr><td>reasoning 字段兼容</td><td>不同兼容网关可能返回 <code>reasoning_content</code> 或 <code>reasoning</code>；统一抽取后 CLI/GUI 可把思考流和正文流分开显示。</td><td><code>_extract_reasoning()</code></td></tr>
       <tr><td>DeepSeek thinking 参数映射</td><td><code>off</code> 映射到 <code>thinking: disabled</code>，<code>max/high</code> 映射到 DeepSeek thinking-mode 的 <code>extra_body</code>，避免配置写了但请求没带。</td><td><code>_apply_reasoning_effort()</code></td></tr>
       <tr><td>自适应推理档</td><td><code>auto</code> 不再只是 no-op；遇到“报错/调试/debug/エラー”走 <code>max</code>，搜索类任务走 <code>low</code>，普通开发默认 <code>high</code>。</td><td><code>agent/auto_reasoning.py</code></td></tr>
       <tr><td>流式首包超时</td><td>Windows / 代理网络下，流式请求可能在首个 chunk 前卡住。默认 45 秒未拿到 response headers 就明确报错，可用环境变量调到 5-300 秒。</td><td><code>NANOCODEX_STREAM_OPEN_TIMEOUT_S</code></td></tr>
-      <tr><td>流式 tool call 聚合</td><td>tool call 在 stream 里按 index 分片到达；nanocodex 聚合 id、name、arguments 后再交给 ToolRegistry，避免半截 JSON 直接执行。</td><td><code>chat_stream()</code></td></tr>
-      <tr><td>DeepSeek cache-aware usage</td><td>DeepSeek 的 <code>prompt_cache_hit_tokens</code> / <code>prompt_cache_miss_tokens</code> 可能在 SDK 的 <code>model_extra</code> 里；nanocodex 会读出来做命中/未命中分开计价。</td><td><code>_extract_usage()</code> + <code>pricing.py</code></td></tr>
+      <tr><td>流式 tool call 聚合</td><td>tool call 在 stream 里按 index 分片到达；BugleCat 聚合 id、name、arguments 后再交给 ToolRegistry，避免半截 JSON 直接执行。</td><td><code>chat_stream()</code></td></tr>
+      <tr><td>DeepSeek cache-aware usage</td><td>DeepSeek 的 <code>prompt_cache_hit_tokens</code> / <code>prompt_cache_miss_tokens</code> 可能在 SDK 的 <code>model_extra</code> 里；BugleCat 会读出来做命中/未命中分开计价。</td><td><code>_extract_usage()</code> + <code>pricing.py</code></td></tr>
       <tr><td>托管 / 本地双模式</td><td>同一套工具协议可以接 DeepSeek 官方 API，也可以接本地 vLLM / llama-server / LM Studio / Qwen endpoint，用于比较模型 coding agent 能力。</td><td><code>base_url</code> + <code>model</code> 配置</td></tr>
     </tbody>
   </table>
@@ -389,7 +389,7 @@
   </ul>
 
   <div class="callout blue">
-    <b>一句话价值：</b>nanocodex 证明的是“DeepSeek 也可以接进一套 Codex-style coding agent 工具链”，而且这套链路有权限边界、会话恢复、上下文管理、成本统计和离线测试。
+    <b>一句话价值：</b>BugleCat 证明的是“多个模型商可以接进同一套 Codex-style coding agent 工具链”，而且这套链路有权限边界、会话恢复、上下文管理、成本统计和离线测试。
   </div>
 
   <h2><span class="num">06</span>模块地图</h2>
@@ -435,8 +435,8 @@ python -m pytest -q</pre>
   </div>
 
   <footer>
-    nanocodex · Codex-style local coding agent for DeepSeek ·
-    <a href="https://github.com/dgy-github/nanocodex" target="_blank" rel="noopener">github.com/dgy-github/nanocodex</a>
+    BugleCat · Local coding agent with a pluggable Harness ·
+    <a href="https://github.com/dgy-github/BugleCat" target="_blank" rel="noopener">github.com/dgy-github/BugleCat</a>
   </footer>
 
 </div>

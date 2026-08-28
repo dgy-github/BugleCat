@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
-  <title id="title">nanocodex UI preview</title>
-  <desc id="desc">A stylized screenshot of the nanocodex desktop coding agent with sessions, chat, tool calls, MCP, skills, and test status.</desc>
+  <title id="title">BugleCat desktop preview</title>
+  <desc id="desc">A stylized screenshot of the BugleCat desktop coding agent with sessions, chat, tool calls, MCP, skills, and test status.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0d1117"/>
@@ -37,7 +37,7 @@
     <circle cx="96" cy="82" r="7" fill="#ff5f57"/>
     <circle cx="120" cy="82" r="7" fill="#febc2e"/>
     <circle cx="144" cy="82" r="7" fill="#28c840"/>
-    <text x="180" y="88" class="mono fg" font-size="15">nanocodex-gui --cd D:\agent_prac\nanocodex</text>
+    <text x="180" y="88" class="mono fg" font-size="15">BugleCat desktop · D:\projects\BugleCat</text>
     <rect x="1066" y="68" width="150" height="28" rx="14" fill="#0f172a" stroke="#30363d"/>
     <text x="1082" y="87" class="mono muted" font-size="12">model: deepseek</text>
 
@@ -75,7 +75,7 @@
       <text x="364" y="252" class="fg" font-size="15" font-weight="700">User</text>
       <text x="364" y="278" class="fg" font-size="15">帮我给 provider 增加本地 Qwen 27B 的 OpenAI-compatible 配置说明。</text>
       <rect x="340" y="342" width="760" height="128" rx="16" fill="#101827" stroke="#30363d"/>
-      <text x="364" y="372" class="blue" font-size="15" font-weight="700">nanocodex</text>
+      <text x="364" y="372" class="blue" font-size="15" font-weight="700">BugleCat</text>
       <text x="364" y="398" class="fg" font-size="15">我会先读 README 和 config.py，然后用 apply_patch 写配置样例，最后跑测试。</text>
       <text x="364" y="428" class="mono muted" font-size="13">tools: update_plan → read_file → apply_patch → shell</text>
       <rect x="364" y="442" width="124" height="24" rx="12" fill="#10223a" stroke="#1f6feb"/>

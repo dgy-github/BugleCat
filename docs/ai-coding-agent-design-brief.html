@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Coding Agent 设计思路 · nanocodex</title>
+<title>AI Coding Agent 设计思路 · BugleCat</title>
 <style>
 :root {
   --bg: #f4f0e7;
@@ -360,10 +360,10 @@ pre {
 <body>
 <main class="page">
   <header class="hero">
-    <div class="eyebrow">nanocodex · AI Coding Agent Design Brief</div>
+    <div class="eyebrow">BugleCat · AI Coding Agent Design Brief</div>
     <h1>把模型接成一个可控的编码代理，而不是一个会写代码的聊天框</h1>
     <p class="lead">
-      nanocodex 的设计目标是复刻 Codex-style coding agent 的核心工程能力：模型负责理解、规划和生成工具调用，harness 负责执行、校验、记录、压缩上下文和控制风险。它针对 DeepSeek / OpenAI 兼容模型做了工具协议、流式响应、reasoning effort、长会话压缩和成本统计等兼容处理，同时补了 Windows 桌面版、VL/多模态输入、MCP 工具接入和 Windows Computer-Use 能力。
+      BugleCat 的设计目标是复刻 Codex-style coding agent 的核心工程能力：模型负责理解、规划和生成工具调用，Harness 负责执行、校验、记录、压缩上下文和控制风险。它支持多模型商与 OpenAI/Claude 兼容协议，并补充 Windows 桌面端、多模态输入、MCP、Skills 和长期记忆能力。
     </p>
     <div class="meta">
       <div class="metric"><b>420</b><span>offline tests</span></div>
@@ -399,7 +399,7 @@ pre {
 
   <section>
     <h2>二、核心运行链路</h2>
-    <img class="arch-img" src="design-assets/nanocodex-agent-loop.svg" alt="nanocodex agent loop architecture diagram">
+    <img class="arch-img" src="design-assets/nanocodex-agent-loop.svg" alt="BugleCat agent loop architecture diagram">
     <div class="diagram">
       <div class="diagram-title">图 1：Coding Agent 闭环</div>
       <div class="pipeline">
@@ -431,7 +431,7 @@ pre {
   <section>
     <h2>三、模块设计</h2>
     <div class="diagram">
-      <div class="diagram-title">图 2：nanocodex 模块分层</div>
+      <div class="diagram-title">图 2：BugleCat 模块分层</div>
       <div class="diagram-grid">
         <div class="lane">
           <h3>Model Layer</h3>
@@ -498,7 +498,7 @@ pre {
 
   <section>
     <h2>五、桌面版、VL 与 Windows Computer-Use</h2>
-    <img class="arch-img" src="design-assets/nanocodex-platform-adapter.svg" alt="nanocodex desktop vl computer-use adapter diagram">
+    <img class="arch-img" src="design-assets/nanocodex-platform-adapter.svg" alt="BugleCat desktop multimodal and computer-use adapter diagram">
     <div class="diagram">
       <div class="diagram-title">图 3：Computer-Use 平台适配</div>
       <div class="pipeline">
@@ -514,7 +514,7 @@ pre {
     <div class="grid">
       <div class="card">
         <h3>Windows 桌面版</h3>
-        <p>除了 CLI，nanocodex 还做了 Tkinter GUI：会话列表、工具调用、MCP、skills、成本统计、测试状态都可以可视化查看。这个设计是为了让 coding agent 不只停留在命令行，而是能作为 Windows 桌面工作台使用。</p>
+        <p>除了 CLI，BugleCat 还提供 Tauri 2 + Svelte 5 桌面端：会话、工具调用、模型商、MCP、Skills、项目记忆和运行状态都可以可视化查看，让 coding agent 成为真正的 Windows 桌面工作台。</p>
         <span class="tag">Tkinter GUI</span><span class="tag">sessions</span><span class="tag">tool trace</span>
       </div>
       <div class="card">
@@ -561,9 +561,9 @@ pre {
     </div>
     <h3>macOS Computer-Use 预留路线</h3>
     <p>
-      macOS 版本不会重写 agent loop，而是复用 nanocodex 的 provider、tool contract、session、approval 和 audit，把操作层替换成 macOS adapter。思路是：优先走 macOS Accessibility Tree / AppleScript / Shortcuts / shell 做确定性控制；遇到复杂 UI 再用视觉模型做元素定位，例如 ShowUI-2B / UI-TARS / OmniParser 这类屏幕解析或 GUI grounding 模型；最后仍然通过 MCP 暴露为 <code>screen.read</code>、<code>app.activate</code>、<code>mouse.click</code>、<code>keyboard.type</code>、<code>verify.result</code> 等工具。
+      macOS 版本不会重写 agent loop，而是复用 BugleCat 的 provider、tool contract、session、approval 和 audit，把操作层替换成 macOS adapter。思路是：优先走 macOS Accessibility Tree / AppleScript / Shortcuts / shell 做确定性控制；遇到复杂 UI 再用视觉模型做元素定位；最后仍然通过 MCP 暴露为标准工具。
     </p>
-    <pre>nanocodex core
+    <pre>BugleCat core
   -> same model/provider/session/approval/audit
   -> platform adapter
       Windows: UI Automation + OCR + keyboard/mouse
@@ -580,12 +580,12 @@ pre {
     <div class="grid">
       <div class="card">
         <h3>ReAct：推理与行动交替</h3>
-        <p>nanocodex 的主循环就是“模型思考/选择动作 -> 工具执行 -> 观察结果 -> 继续推理”。这对应 ReAct 提出的 reasoning + acting 交替范式。</p>
+        <p>BugleCat 的主循环就是“模型思考/选择动作 -> 工具执行 -> 观察结果 -> 继续推理”。这对应 ReAct 提出的 reasoning + acting 交替范式。</p>
         <p class="source">Reference: <a href="https://arxiv.org/abs/2210.03629">ReAct: Synergizing Reasoning and Acting in Language Models</a></p>
       </div>
       <div class="card">
         <h3>Toolformer：模型学会何时用工具</h3>
-        <p>工具不是外挂按钮，而是模型解决问题的一部分。nanocodex 通过 schema 告诉模型可用工具，并用 harness 限制工具的真实边界。</p>
+        <p>工具不是外挂按钮，而是模型解决问题的一部分。BugleCat 通过 schema 告诉模型可用工具，并用 Harness 限制工具的真实边界。</p>
         <p class="source">Reference: <a href="https://arxiv.org/abs/2302.04761">Toolformer: Language Models Can Teach Themselves to Use Tools</a></p>
       </div>
       <div class="card">
@@ -603,8 +603,8 @@ pre {
 
   <section>
     <h2>八、项目地址</h2>
-    <p>GitHub: https://github.com/dgy-github/nanocodex</p>
-    <p>展示页: https://dgy-github.github.io/nanocodex/nanocodex.html</p>
+    <p>GitHub: https://github.com/dgy-github/BugleCat</p>
+    <p>展示页: https://github.com/dgy-github/BugleCat/blob/main/nanocodex.html</p>
     <p class="footer">Generated for DeepSeek / AI Agent / LLM 应用工程师面试材料。</p>
   </section>
 </main>

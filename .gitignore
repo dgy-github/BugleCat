@@ -60,6 +60,7 @@ train/runs/
 train/splits.json
 train/data/
 rust/target-codex-check/
+tmp/
 
 # machine-generated bench tasks (TaskGen) — promote to bench/tasks after review
 bench/tasks/gen_*/
