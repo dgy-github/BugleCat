@@ -44,7 +44,7 @@ pub(super) async fn execute(
             return Some(DispatchStop::BudgetExhausted);
         }
 
-        if starts_parallel_run(agent, calls, index) {
+        if starts_parallel_run(&agent.tools, calls, index) {
             index = execute_read_batch(agent, calls, index, remaining, cancel, &mut output).await;
         } else {
             execute_serial(agent, &calls[index], cancel, &mut output).await;
@@ -60,10 +60,78 @@ pub(super) async fn execute(
     None
 }
 
-fn starts_parallel_run(agent: &AgentLoop, calls: &[ToolCall], index: usize) -> bool {
-    agent.tools.is_read_only(&calls[index].name)
+fn starts_parallel_run(
+    tools: &crate::tools::ToolRegistry,
+    calls: &[ToolCall],
+    index: usize,
+) -> bool {
+    tools.call_is_read_only(&calls[index].name, &calls[index].arguments)
         && index + 1 < calls.len()
-        && agent.tools.is_read_only(&calls[index + 1].name)
+        && tools.call_is_read_only(&calls[index + 1].name, &calls[index + 1].arguments)
+}
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+    use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
+    use serde_json::{json, Value};
+
+    use super::*;
+    use crate::tools::{Tool, ToolContext, ToolRegistry};
+
+    struct MultiplexedTool;
+
+    #[async_trait(?Send)]
+    impl Tool for MultiplexedTool {
+        fn name(&self) -> &str {
+            "multiplexed"
+        }
+
+        fn description(&self) -> &str {
+            "Test-only tool with read and write actions."
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object"})
+        }
+
+        fn call_is_read_only(&self, args: &Value) -> bool {
+            args["action"] == "read"
+        }
+
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            "ok".into()
+        }
+    }
+
+    #[test]
+    fn dynamic_read_only_calls_form_parallel_batches_but_writes_do_not() {
+        let workspace = std::env::temp_dir().join("ncx_dynamic_read_dispatch");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
+        let mut tools = ToolRegistry::empty(ToolContext::new(workspace, policy));
+        tools.register(Box::new(MultiplexedTool));
+        let calls = vec![
+            ToolCall {
+                id: "read-1".into(),
+                name: "multiplexed".into(),
+                arguments: json!({"action": "read"}),
+            },
+            ToolCall {
+                id: "read-2".into(),
+                name: "multiplexed".into(),
+                arguments: json!({"action": "read"}),
+            },
+            ToolCall {
+                id: "write".into(),
+                name: "multiplexed".into(),
+                arguments: json!({"action": "write"}),
+            },
+        ];
+
+        assert!(starts_parallel_run(&tools, &calls, 0));
+        assert!(!starts_parallel_run(&tools, &calls, 1));
+    }
 }
 
 async fn execute_read_batch(
@@ -76,7 +144,9 @@ async fn execute_read_batch(
 ) -> usize {
     let mut batch = Vec::new();
     while index < calls.len()
-        && agent.tools.is_read_only(&calls[index].name)
+        && agent
+            .tools
+            .call_is_read_only(&calls[index].name, &calls[index].arguments)
         && batch.len() < remaining
     {
         batch.push(&calls[index]);

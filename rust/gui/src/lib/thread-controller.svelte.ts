@@ -118,6 +118,7 @@ export class ThreadController {
   }
 
   skipNextLoaded(sessionId: string): void { this.skippedLoadedSessions.add(sessionId); }
+  clearSkippedLoaded(sessionId: string): void { this.skippedLoadedSessions.delete(sessionId); }
 
   removeApproval(sessionId: string): void { this.approvalsBySession.delete(sessionId); this.approval = null; }
   removeQuestion(sessionId: string): void { this.questionsBySession.delete(sessionId); this.question = null; this.questionAnswer = ""; }

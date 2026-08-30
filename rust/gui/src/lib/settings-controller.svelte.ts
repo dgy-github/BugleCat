@@ -62,19 +62,26 @@ export class SettingsController {
 
   open = async (): Promise<void> => {
     try {
-      const [settings, configLocation, catalog] = await Promise.all([
-        appServerRequest<Settings>({ method: "settingsRead" }), invoke<ConfigLocation>("get_config_location"),
-        appServerRequest<ModelCatalogResponse>({ method: "modelCatalogRead" }), this.plugins.load(),
-      ]);
+      const settings = await appServerRequest<Settings>({ method: "settingsRead" });
       this.settings = settings;
-      this.configLocation = configLocation;
-      this.catalog = catalog;
       this.apiKeyInput = "";
       this.deepseekApiKeyInput = "";
       this.yunmoApiKeyInput = "";
       this.vlApiKeyInput = "";
       this.dashscopeTokenPlanKeyInput = "";
       this.dashscopeWorkspaceKeyInput = "";
+      const [locationResult, catalogResult, pluginResult] = await Promise.allSettled([
+        invoke<ConfigLocation>("get_config_location"),
+        appServerRequest<ModelCatalogResponse>({ method: "modelCatalogRead" }),
+        this.plugins.load(),
+      ]);
+      this.configLocation = locationResult.status === "fulfilled" ? locationResult.value : null;
+      this.catalog = catalogResult.status === "fulfilled" ? catalogResult.value : null;
+      const unavailable: string[] = [];
+      if (locationResult.status === "rejected") unavailable.push("配置路径");
+      if (catalogResult.status === "rejected") unavailable.push("模型目录");
+      if (pluginResult.status === "rejected") unavailable.push("插件信息");
+      if (unavailable.length) this.notify(`${unavailable.join("、")}暂时不可用，其他设置仍可正常修改`);
       if (settings.has_yunmo_api_key) await this.refreshYunmo(false);
     } catch (error) { this.notify(`设置加载失败：${error}`); }
   };

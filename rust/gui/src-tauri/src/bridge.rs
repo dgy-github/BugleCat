@@ -143,14 +143,23 @@ impl WorkerLifecycle {
         &self,
         tx: &tokio::sync::mpsc::UnboundedSender<Command>,
         cancels: &CancelRegistry,
+        pending: &PendingMap,
+        questions: &PendingQuestionMap,
     ) {
         if self.shutting_down.swap(true, Ordering::AcqRel) {
             return;
         }
-        if let Ok(registry) = cancels.lock() {
-            for cancel in registry.values() {
-                cancel.store(true, Ordering::Release);
-            }
+        let sessions = cancels
+            .lock()
+            .map(|registry| {
+                registry
+                    .iter()
+                    .map(|(id, cancel)| (id.clone(), cancel.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for (session_id, cancel) in sessions {
+            request_cancel(&session_id, &cancel, pending, questions);
         }
         let _ = tx.send(Command::Shutdown);
         loop {
@@ -1366,6 +1375,13 @@ fn spawn_turn_worker(
     harness_profile: String,
 ) {
     if !lifecycle.accepts_work() {
+        emit(
+            &app,
+            UiEvent::Error {
+                session_id: session_id.clone(),
+                message: "应用正在关闭，无法启动会话执行线程。".into(),
+            },
+        );
         return;
     }
     let inserted = claim_session(&running, &session_id, SessionRunKind::Human);
@@ -2209,7 +2225,7 @@ pub fn spawn_worker(
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
-                                Some((target_id, msgs)),
+                                Some((target_id.clone(), msgs)),
                                 grants.clone(),
                                 None,
                                 Some(harness_profile),
@@ -2240,7 +2256,7 @@ pub fn spawn_worker(
                                 Err(e) => emit(
                                     &app,
                                     UiEvent::Error {
-                                        session_id: source_id,
+                                        session_id: target_id.clone(),
                                         message: e,
                                     },
                                 ),
@@ -3239,11 +3255,30 @@ mod tests {
     fn shutdown_cancels_and_joins_every_owned_worker() {
         let lifecycle = WorkerLifecycle::default();
         let cancels: CancelRegistry = Arc::new(Mutex::new(HashMap::new()));
+        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+        let questions: PendingQuestionMap = Arc::new(Mutex::new(HashMap::new()));
         let cancel = Arc::new(AtomicBool::new(false));
         cancels
             .lock()
             .unwrap()
             .insert("goal-thread".into(), cancel.clone());
+        let (approval_tx, approval_rx) = oneshot::channel();
+        pending
+            .lock()
+            .unwrap()
+            .insert(1, ("goal-thread".into(), approval_tx));
+        let (question_tx, question_rx) = oneshot::channel();
+        questions
+            .lock()
+            .unwrap()
+            .insert(2, ("goal-thread".into(), question_tx));
+        let interactions_finished = Arc::new(AtomicBool::new(false));
+        let interactions_done = interactions_finished.clone();
+        lifecycle.track(std::thread::spawn(move || {
+            assert!(matches!(approval_rx.blocking_recv(), Ok(ApprovalDecision::Deny)));
+            assert!(matches!(question_rx.blocking_recv(), Ok(None)));
+            interactions_done.store(true, Ordering::Release);
+        }));
         let worker_finished = Arc::new(AtomicBool::new(false));
         let finished = worker_finished.clone();
         lifecycle.track(std::thread::spawn(move || {
@@ -3265,12 +3300,13 @@ mod tests {
             coordinator_done.store(true, Ordering::Release);
         }));
 
-        lifecycle.shutdown_and_join(&tx, &cancels);
+        lifecycle.shutdown_and_join(&tx, &cancels, &pending, &questions);
 
         assert!(worker_finished.load(Ordering::Acquire));
+        assert!(interactions_finished.load(Ordering::Acquire));
         assert!(coordinator_finished.load(Ordering::Acquire));
         assert!(!lifecycle.accepts_work());
-        lifecycle.shutdown_and_join(&tx, &cancels);
+        lifecycle.shutdown_and_join(&tx, &cancels, &pending, &questions);
     }
 
     #[test]

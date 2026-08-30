@@ -1,0 +1,19 @@
+{
+  "name": "windows-computer-use",
+  "version": "0.1.0",
+  "description": "Local Windows desktop inspection and input control for BugleCat through MCP.",
+  "author": {
+    "name": "BugleCat Local"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Windows Computer Use",
+    "shortDescription": "Inspect and control local Windows application windows.",
+    "longDescription": "Adds a local MCP sidecar and operating guidance for window discovery, screenshots, activation, maximizing, clicking, typing and scrolling with BugleCat approval gating.",
+    "developerName": "BugleCat Local",
+    "category": "Productivity",
+    "capabilities": ["MCP", "Skills", "Windows desktop control"],
+    "defaultPrompt": "打开一个 Windows 应用，检查窗口后协助我操作。"
+  },
+  "mcpServers": "./.mcp.json"
+}

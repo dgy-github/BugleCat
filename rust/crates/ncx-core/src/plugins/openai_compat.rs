@@ -125,13 +125,7 @@ pub struct CodexPluginCatalog {
     root: PathBuf,
 }
 
-pub(crate) fn discover_enabled_codex_plugins(
-    workspace: &Path,
-) -> Result<Vec<CodexPluginRecord>, String> {
-    discover_enabled_codex_plugins_with_home(workspace, local_home().as_deref())
-}
-
-fn discover_enabled_codex_plugins_with_home(
+pub(crate) fn discover_enabled_codex_plugins_with_home(
     workspace: &Path,
     home: Option<&Path>,
 ) -> Result<Vec<CodexPluginRecord>, String> {
@@ -324,8 +318,15 @@ impl CodexPluginCatalog {
 }
 
 pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfig>, String> {
+    discover_codex_mcp_servers_with_home(workspace, local_home().as_deref())
+}
+
+pub(crate) fn discover_codex_mcp_servers_with_home(
+    workspace: &Path,
+    home: Option<&Path>,
+) -> Result<Vec<McpServerConfig>, String> {
     let mut servers = Vec::new();
-    for plugin in discover_enabled_codex_plugins(workspace)? {
+    for plugin in discover_enabled_codex_plugins_with_home(workspace, home)? {
         let value = if let Some(value) = plugin.manifest.mcp_servers.clone() {
             resolve_json_resource(&plugin, "mcpServers", value)?
         } else if let Some(path) = plugin.mcp_path() {
@@ -346,6 +347,7 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
             if command.is_empty() {
                 continue;
             }
+            let command = resolve_mcp_process_value(&plugin.root, command)?;
             let args = config
                 .get("args")
                 .and_then(Value::as_array)
@@ -353,9 +355,10 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
                     items
                         .iter()
                         .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
+                        .map(|value| resolve_mcp_process_value(&plugin.root, value))
+                        .collect::<Result<Vec<_>, _>>()
                 })
+                .transpose()?
                 .unwrap_or_default();
             let env = config
                 .get("env")
@@ -371,7 +374,7 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
                 .unwrap_or_default();
             servers.push(McpServerConfig {
                 name: format!("{}:{name}", plugin.manifest.name),
-                command: command.to_string(),
+                command,
                 args,
                 env,
             });
@@ -380,12 +383,40 @@ pub fn discover_codex_mcp_servers(workspace: &Path) -> Result<Vec<McpServerConfi
     Ok(servers)
 }
 
+/// Resolve executable/script arguments that are explicitly relative paths
+/// against the installed plugin root. Bare commands ("python", "npx",
+/// "server") remain PATH lookups. This keeps installed resource plugins
+/// independent from the directory they were copied from.
+fn resolve_mcp_process_value(root: &Path, value: &str) -> Result<String, String> {
+    let value = value.trim();
+    let path = Path::new(value);
+    let explicit_relative = value.starts_with("./")
+        || value.starts_with("../")
+        || value.starts_with(".\\")
+        || value.starts_with("..\\");
+    let bundled_resource = !value.contains("://") && root.join(path).exists();
+    let path_like = explicit_relative || bundled_resource;
+    if !path_like || path.is_absolute() {
+        return Ok(value.to_string());
+    }
+    Ok(validate_resource(root, value)?
+        .to_string_lossy()
+        .into_owned())
+}
+
 /// Parse enabled plugin App declarations. Apps are hosted connector resources,
 /// not local executables; callers may expose them for diagnostics and hand
 /// their connector ids to an authenticated Apps gateway when one is present.
 pub fn discover_codex_apps(workspace: &Path) -> Result<Vec<CodexAppResource>, String> {
+    discover_codex_apps_with_home(workspace, local_home().as_deref())
+}
+
+pub(crate) fn discover_codex_apps_with_home(
+    workspace: &Path,
+    home: Option<&Path>,
+) -> Result<Vec<CodexAppResource>, String> {
     let mut apps = Vec::new();
-    for plugin in discover_enabled_codex_plugins(workspace)? {
+    for plugin in discover_enabled_codex_plugins_with_home(workspace, home)? {
         let value = match plugin.manifest.apps.clone() {
             Some(Value::String(_)) => {
                 let path = plugin
@@ -433,8 +464,15 @@ pub fn discover_codex_apps(workspace: &Path) -> Result<Vec<CodexAppResource>, St
 }
 
 pub fn discover_codex_hooks(workspace: &Path) -> Result<Vec<HookConfig>, String> {
+    discover_codex_hooks_with_home(workspace, local_home().as_deref())
+}
+
+pub(crate) fn discover_codex_hooks_with_home(
+    workspace: &Path,
+    home: Option<&Path>,
+) -> Result<Vec<HookConfig>, String> {
     let mut hooks = Vec::new();
-    for plugin in discover_enabled_codex_plugins(workspace)? {
+    for plugin in discover_enabled_codex_plugins_with_home(workspace, home)? {
         let value = if let Some(value) = plugin.manifest.hooks.clone() {
             resolve_hook_resources(&plugin, value)?
         } else if let Some(path) = plugin.hooks_path() {

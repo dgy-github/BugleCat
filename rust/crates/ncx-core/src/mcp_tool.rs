@@ -36,10 +36,6 @@ impl McpTool {
             read_only,
         }
     }
-
-    fn call_is_read_only(&self, args: &Value) -> bool {
-        mcp_call_is_read_only(&self.def.name, self.read_only, args)
-    }
 }
 
 fn mcp_call_is_read_only(name: &str, tool_is_read_only: bool, args: &Value) -> bool {
@@ -80,6 +76,10 @@ impl Tool for McpTool {
 
     fn read_only(&self) -> bool {
         self.read_only
+    }
+
+    fn call_is_read_only(&self, args: &Value) -> bool {
+        mcp_call_is_read_only(&self.def.name, self.read_only, args)
     }
 
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
@@ -290,6 +290,8 @@ for line in sys.stdin:
         assert!(reg.get("echo").is_some());
         assert!(reg.get("write_note").is_some());
         assert!(!reg.is_read_only("write_note"));
+        assert!(reg.call_is_read_only("llmwiki", &serde_json::json!({"action": "recall_user"})));
+        assert!(!reg.call_is_read_only("llmwiki", &serde_json::json!({"action": "record_project"})));
 
         let out = reg
             .execute("echo", &serde_json::json!({"text": "hello mcp"}))
@@ -297,13 +299,15 @@ for line in sys.stdin:
         assert_eq!(out, "echo: hello mcp");
 
         reg.ctx.approval_policy = "never".into();
+        reg.ctx.compaction_read_only_recovery.set(true);
         let recalled = reg
             .execute("llmwiki", &serde_json::json!({"action": "recall_user"}))
             .await;
+        assert!(!recalled.contains("context compaction consistency check"));
         assert!(!recalled.contains("denied by approval policy"));
         let mutation = reg
             .execute("llmwiki", &serde_json::json!({"action": "record_project"}))
             .await;
-        assert!(mutation.contains("denied by approval policy 'never'"));
+        assert!(mutation.contains("context compaction consistency check"));
     }
 }

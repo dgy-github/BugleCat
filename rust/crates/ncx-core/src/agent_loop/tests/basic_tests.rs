@@ -15,6 +15,46 @@ async fn returns_final_text_without_tools() {
 }
 
 #[tokio::test]
+async fn fresh_human_turn_clears_compaction_read_only_recovery() {
+    let p = ScriptedProvider::new(vec![ModelResponse {
+        content: "recovered".into(),
+        ..Default::default()
+    }]);
+    let ws = tmpdir("human_clears_compaction_recovery");
+    let mut loop_ = build(&ws, Box::new(p));
+    loop_.tools.ctx.compaction_read_only_recovery.set(true);
+
+    let result = loop_.run_turn(json!("continue here"), None).await;
+
+    assert_eq!(result.final_text, "recovered");
+    assert!(!loop_.tools.ctx.compaction_read_only_recovery.get());
+}
+
+#[tokio::test]
+async fn automatic_goal_round_cannot_clear_compaction_read_only_recovery() {
+    let p = ScriptedProvider::new(vec![ModelResponse {
+        content: "still guarded".into(),
+        ..Default::default()
+    }]);
+    let ws = tmpdir("goal_keeps_compaction_recovery");
+    let mut loop_ = build(&ws, Box::new(p));
+    loop_.tools.ctx.compaction_read_only_recovery.set(true);
+
+    let result = loop_
+        .run_goal_round(
+            json!("automatic continuation"),
+            None,
+            ncx_protocol::GoalId::new("goal-1").unwrap(),
+            1,
+            1,
+        )
+        .await;
+
+    assert_eq!(result.final_text, "still guarded");
+    assert!(loop_.tools.ctx.compaction_read_only_recovery.get());
+}
+
+#[tokio::test]
 async fn suggests_a_short_task_oriented_session_title() {
     let p = ScriptedProvider::new(vec![ModelResponse {
         content: "标题：**整理大模型架构资料 PDF。**\n不要输出这一行".into(),

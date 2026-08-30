@@ -1231,3 +1231,58 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 - 修复单一 `llmwiki(action=...)` MCP 入口被工具名启发式整体判为写操作的问题。`recall_user`/`recall_project`/`project_status`/`status`/`corpus` 现在按只读调用处理，在 `approval_policy=never` 下可直接执行。
 - `initialize_project`/`record_project`/`propose`/`approve` 和未知 action 仍按有副作用调用处理，`never` 下继续拒绝，不放宽长期记忆写入边界。
 - 真实 Python mock MCP 回归已覆盖 `never + recall_user` 通过与 `never + record_project` 拒绝；MCP Tool 3/3 通过。
+
+
+### 2026-08-30 全仓测试专项扫描：全绿之下的测试缺陷清单
+
+- 扫描基线：`cargo test --workspace` 全绿（ncx-core 270、ncx-provider 46、ncx-video-agent 57、
+  thread-store 17 等），GUI Tauri 后端 114/114，Python `pytest tests/` 601/601 无 skip。
+  当前工作区（feat/deepseek-harness-components 未提交改动）没有现成的失败用例；以下问题
+  都是"能过但测不对 / 会间歇性误报 / 覆盖被悄悄拿走"的类型，重点是前两条。
+- **[P1] MCP 审批拒绝路径的测试覆盖被本次改动拿走**：
+  `ncx-core/src/mcp_tool.rs` 的 `register_and_execute_echo` 把 mutation 断言从
+  `denied by approval policy 'never'` 换成了 compaction 守卫消息
+  （`context compaction consistency check`）。compaction 守卫位于 registry 层
+  `execute_attempt`，先于工具执行返回，因此 `McpTool::execute` 里 `Approver` 的
+  `AutoDeny` 分支（`approval_policy=never` 拒绝有副作用 MCP 调用）现在删掉也会全绿。
+  全仓对该分支唯一剩下的引用只是对只读 `recall_user` 的否定断言，不构成覆盖。
+  建议拆成两个测试：一个只设 `approval_policy=never` 断言拒绝文案，一个只设
+  compaction 守卫断言拦截文案，互不遮蔽。
+- **[P1] 脆弱的 MCP 发现错误传播被测试锁死**：
+  新增的 `resolve_mcp_process_value` 对 command/args 逐个调用 `validate_resource(..)?`，
+  任何一个插件 `mcpServers` 配置里出现一个坏相对参数（如 `../x.py`）都会让
+  `discover_codex_mcp_servers` 整体返回 Err；`gui/src-tauri/src/bridge.rs:1124` 再用 `?`
+  上抛，结果单个插件配置错误会导致整个会话组装失败、所有 MCP server 一起消失。
+  同时 `lib.rs:5005` 的测试 `assert!(bridge.contains("discover_codex_mcp_servers(&cfg.workspace)?"))`
+  把这条脆弱路径当成契约锁死，后续做 per-plugin 容错（跳过坏 server 并记 warning）
+  时必须同步改这条断言。另注意 bundled-resource 启发式会把恰好与插件根下同名文件的
+  裸相对参数（如 `settings.toml`）改写成绝对路径，改变 server 自己的 CWD 解析语义。
+- **[P2] 两个 hook 测试在 Windows 并行跑会间歇性超时误报（HANDOFF 2026-08-28 已记录，未修）**：
+  `agent_loop/tests/runtime_tests.rs` 的 `user_prompt_hook_can_block_model_call` 与
+  `user_prompt_hook_output_is_sent_as_system_note` 起真实 shell 进程且 `timeout_s: 3`，
+  测试二进制并行调度下进程启动延迟可超 3s，把"hook 行为正确"误报成失败。建议测试内
+  超时放到 15–30s（生产默认 10s 不动），或改为注入 fake executor。
+- **[P2] 并行批次回归检测依赖墙钟**：`read_only_calls_run_concurrently` 用
+  `elapsed < 800ms`（4×300ms sleep）判断并发，串行退化时约 1200ms 能抓住回归，
+  但重负载 CI 上有误报空间；可加一个"in-flight 计数器峰值≥2"的确定性断言替代纯计时。
+- **[P2] 固定名临时目录存在跨进程互踩风险**：`agent_loop/tests.rs::tmpdir`、
+  `tool_dispatch.rs` 新测试（`ncx_dynamic_read_dispatch`）、`tool_scheduler.rs`
+  （`ncx_bounded_read_pool`）、`ncx-mcp/src/lib.rs`（`ncx_mcp_mock`）、
+  `ncx-sandbox/src/policy.rs`（`ncx_policy_test`/`ncx_ws`）都是固定路径且开头
+  `remove_dir_all`。同一次 `cargo test` 内名字不冲突，但 IDE 与 CLI 同时各跑一份
+  测试时会互删对方目录。`plugins/openai_compat/tests.rs::temp()`（名字+纳秒时间戳）
+  是现成的正确范式，建议统一。
+- **[P3] GUI 的 include_str! 源码字符串断言继续累积脆性**：
+  `gui/src-tauri/src/lib.rs` 测试大量 `include_str!` + 整段标记逐字符匹配。本次新增的
+  reasoning-run 断言要求 `<details class="reasoning-run" ...>` 整行 Svelte 标记逐字符
+  一致，任何无害排版改动都会红；其负向断言（把同一串再拼上 ` open=` 断言不包含）接近
+  恒真，防不住真正的行为回退。这类测试建议只锚定行为关键标记（如
+  `class:current-run={busy && ...}` 本身），不要锁整段属性串。
+- **[P3] 杂项**：`git status` 里 `rust/gui/src-tauri/Cargo.toml` 显示 modified 但内容
+  diff 为空（CRLF 行尾噪音），建议 `git checkout --` 还原；全仓 `cargo fmt --check`
+  仍被既有 `ncx-dreamina-gateway/src/lib.rs` 格式差异拦截（已知，未修）。
+- 本次扫描确认无误的部分：`basic_tests.rs` 两个新 compaction 恢复测试边界正确
+  （`run_turn` 清守卫、`run_goal_round` 不清，已对照 `run_turn_with_authority` 实现）；
+  `tool_dispatch.rs` 新的单测对 `call_is_read_only` 动态分类的断言方向正确；
+  `openai_compat` 新增安装后解析测试通过且临时目录唯一；thread-store 跨进程 lease
+  测试（唯一路径+轮询上限+子进程 helper）与 Python 侧 `tmp_path` 用法均规范。

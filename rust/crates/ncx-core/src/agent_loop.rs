@@ -372,6 +372,11 @@ impl AgentLoop {
         user_input: Value,
         cancel_check: Option<&dyn Fn() -> bool>,
     ) -> TurnResult {
+        // A compaction conflict fails the rest of that model turn closed. A
+        // fresh human message is a new authority boundary, so it may recover
+        // in the existing conversation instead of forcing a new session.
+        // Automatic Goal rounds deliberately do not clear this guard.
+        self.tools.ctx.compaction_read_only_recovery.set(false);
         self.run_turn_with_authority(
             user_input,
             cancel_check,

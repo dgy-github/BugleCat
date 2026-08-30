@@ -1,9 +1,16 @@
 import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { chromium } from "playwright-core";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const originalHome = process.env.USERPROFILE || process.env.HOME || "";
+const profileHome = mkdtempSync(join(tmpdir(), "ncx-orchestrator-e2e-home-"));
+mkdirSync(join(profileHome, ".nanocodex"), { recursive: true });
+writeFileSync(join(profileHome, ".nanocodex", "config.toml"), 'api_key = "e2e-placeholder"\nbase_url = "http://127.0.0.1:9/v1"\nmodel = "e2e-model"\n');
 const cdpUrl = "http://127.0.0.1:9222";
 const executable = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npm";
 const args = process.platform === "win32"
@@ -12,7 +19,11 @@ const args = process.platform === "win32"
 const child = spawn(executable, args, {
   cwd: root,
   env: {
-    ...process.env,
+      ...process.env,
+      USERPROFILE: profileHome,
+      HOME: profileHome,
+      CARGO_HOME: process.env.CARGO_HOME || join(originalHome, ".cargo"),
+      RUSTUP_HOME: process.env.RUSTUP_HOME || join(originalHome, ".rustup"),
     CARGO_INCREMENTAL: "0",
     CARGO_TARGET_DIR: resolve(root, "../target-codex-check/gui-orchestrator-test"),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9222",
@@ -71,10 +82,15 @@ try {
     const job = await invoke("app_server_request", { request: { method: "forgeJobStatusRead" } });
     return { runtime: runtime.response.payload.data, job: job.response.payload.data };
   });
-  if (!forgeState.runtime.available) throw new Error(`Forge runtime unavailable: ${JSON.stringify(forgeState.runtime)}`);
-  if (forgeState.job.status !== "idle") throw new Error(`Forge job was not idle: ${JSON.stringify(forgeState.job)}`);
-  await page.getByRole("button", { name: "确认后开始 Forge" }).waitFor();
-  if (!(await page.getByText(/会产生多轮模型调用和费用/).isVisible())) throw new Error("Forge cost warning is missing");
+  if (forgeState.runtime.available) {
+    if (forgeState.job.status !== "idle") throw new Error(`Forge job was not idle: ${JSON.stringify(forgeState.job)}`);
+    await page.getByRole("button", { name: "确认后开始 Forge" }).waitFor();
+    if (!(await page.getByText(/会产生多轮模型调用和费用/).isVisible())) throw new Error("Forge cost warning is missing");
+  } else {
+    const message = page.locator(".forge-error");
+    await message.waitFor();
+    if (!(await message.textContent())?.includes("Forge")) throw new Error("Forge unavailable state is not explained");
+  }
   await page.locator(".rightpanel .rp-close").click();
   const fixture = await page.evaluate(async () => {
     const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -97,11 +113,11 @@ try {
   await page.getByText("取消前已形成的可恢复结论", { exact: true }).waitFor({ timeout: 30_000 });
   const transcriptBefore = await page.locator(".scroll").innerText();
 
-  await page.locator(".execution-pill").click();
-  await page.getByRole("menuitemradio", { name: /多 Agent 分类/ }).click();
-  if ((await page.locator(".execution-pill").innerText()).trim() !== "多 Agent ▾") {
-    throw new Error("GUI did not switch to orchestrator mode");
-  }
+  await page.getByRole("button", { name: "设置" }).click({ force: true });
+  const executionSelect = page.locator("label").filter({ hasText: "Agent / 编排模式" }).locator("select");
+  await executionSelect.selectOption("orchestrator");
+  if (await executionSelect.inputValue() !== "orchestrator") throw new Error("GUI did not switch to orchestrator mode");
+  await page.getByRole("button", { name: "取消", exact: true }).click();
   const transcriptAfter = await page.locator(".scroll").innerText();
   if (transcriptAfter !== transcriptBefore) throw new Error("mode switch changed the current transcript");
 

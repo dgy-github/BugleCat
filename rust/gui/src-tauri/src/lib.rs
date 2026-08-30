@@ -30,7 +30,7 @@ use ncx_app_server::{AppServer, AppServerAdapter, DispatchOutcome};
 use ncx_config::{
     load_config, write_nanocodex_config, Config, ConfigPaths, Overrides,
     ProviderRouteInput as CustomProviderInput, ProviderRouteView as CustomProviderView,
-    VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES,
+    VALID_APPROVAL_POLICIES, VALID_PRICE_CURRENCIES, VALID_SANDBOX_MODES,
 };
 use ncx_core::{
     custom_command_prompt, discover_codex_apps, discover_marketplaces, list_custom_commands,
@@ -1200,6 +1200,51 @@ fn validate_orchestrator_setting_updates(updates: &HashMap<String, String>) -> R
             .map_err(|_| format!("{label}必须是 {min}–{max} 的整数"))?;
         if !(min..=max).contains(&value) {
             return Err(format!("{label}必须是 {min}–{max} 的整数，当前为 {value}"));
+        }
+    }
+    for (key, label, min, max) in [
+        ("max_iterations", "最大迭代次数", 1, 10_000),
+        ("max_tool_calls", "最大工具调用数", 1, 100_000),
+        ("context_edit_max_chars", "上下文最大字符数", 1_000, 1_000_000),
+        ("context_edit_keep_recent_messages", "保留消息数", 1, 1_000),
+        ("context_edit_max_tool_result_chars", "工具结果最大字符数", 100, 100_000),
+    ] {
+        if let Some(raw) = updates.get(key) {
+            let value = raw.trim().parse::<i64>().map_err(|_| format!("{label}必须是 {min}–{max} 的整数"))?;
+            if !(min..=max).contains(&value) {
+                return Err(format!("{label}必须是 {min}–{max} 的整数，当前为 {value}"));
+            }
+        }
+    }
+    for key in ["context_edit_enabled", "alibaba_attachment_parser_enabled"] {
+        if let Some(raw) = updates.get(key) {
+            if !matches!(raw.trim(), "true" | "false") { return Err(format!("{key}必须是 true 或 false")); }
+        }
+    }
+    for key in ["sandbox_mode", "approval_policy"] {
+        if let Some(raw) = updates.get(key) {
+            let valid = if key == "sandbox_mode" { VALID_SANDBOX_MODES.contains(&raw.trim()) } else { VALID_APPROVAL_POLICIES.contains(&raw.trim()) };
+            if !valid { return Err(format!("{key}不是受支持的值")); }
+        }
+    }
+    if let Some(raw) = updates.get("price_currency") {
+        if !VALID_PRICE_CURRENCIES.contains(&raw.trim()) { return Err("price_currency 不是受支持的币种".into()); }
+    }
+    for key in ["price_in", "price_out"] {
+        if let Some(raw) = updates.get(key) {
+            let value = raw.trim().parse::<f64>().map_err(|_| format!("{key}必须是非负数字"))?;
+            if !value.is_finite() || !(0.0..=1_000_000.0).contains(&value) { return Err(format!("{key}必须在 0 到 1000000 之间")); }
+        }
+    }
+    for key in ["model", "vl_model"] {
+        if let Some(raw) = updates.get(key) {
+            if !valid_provider_model_id(raw.trim()) { return Err(format!("{key}格式无效")); }
+        }
+    }
+    for key in ["base_url", "vl_base_url"] {
+        if let Some(raw) = updates.get(key) {
+            let value = raw.trim();
+            if !value.is_empty() && !(value.starts_with("https://") || value.starts_with("http://")) { return Err(format!("{key}必须是 http(s) URL")); }
         }
     }
     Ok(())
@@ -3715,7 +3760,12 @@ pub fn run() {
             let state = handle.state::<AppState>();
             state
                 .worker_lifecycle
-                .shutdown_and_join(&state.tx, &state.cancels);
+                .shutdown_and_join(
+                    &state.tx,
+                    &state.cancels,
+                    &state.pending,
+                    &state.questions,
+                );
         }
     });
 }
@@ -3750,6 +3800,34 @@ mod tests {
             ]);
             let error = persist_validated_settings(&updates, &path).unwrap_err();
             assert!(error.contains("普通任务 Worker"));
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_general_settings_never_change_the_config_file() {
+        let root = unique_test_dir("general-settings-invalid");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.toml");
+        let original = b"model = \"known-model\"\nprice_in = 1.0\n";
+        fs::write(&path, original).unwrap();
+
+        for (key, value) in [
+            ("max_iterations", "0"),
+            ("context_edit_enabled", "yes"),
+            ("sandbox_mode", "unrestricted"),
+            ("price_in", "NaN"),
+            ("price_currency", "EUR"),
+            ("model", "bad model"),
+            ("base_url", "file:///tmp/endpoint"),
+        ] {
+            let updates = HashMap::from([
+                ("model".into(), "must-not-be-written".into()),
+                (key.into(), value.into()),
+            ]);
+            assert!(persist_validated_settings(&updates, &path).is_err(), "{key}={value} should fail");
             assert_eq!(fs::read(&path).unwrap(), original);
         }
 
@@ -4456,10 +4534,11 @@ mod tests {
         let model = include_str!("../../src/lib/conversation-model.ts");
         assert!(model.contains("REASONING_DISPLAY_MAX_CHARS"));
         assert!(thread.contains("appendReasoning(message.text, event.text)"));
-        assert!(conversation
-            .contains("<details class=\"reasoning-run\" class:settled={message.settled}>"));
+        assert!(conversation.contains(
+            "<details class=\"reasoning-run\" class:settled={message.settled} class:current-run={busy && index > lastUserIndex}>"
+        ));
         assert!(!conversation.contains(
-            "<details class=\"reasoning-run\" class:settled={message.settled} open={!message.settled}>"
+            "class=\"reasoning-run\" class:settled={message.settled} class:current-run={busy && index > lastUserIndex} open="
         ));
         assert!(conversation.contains("<pre class=\"reasoning-content\">{message.text}</pre>"));
     }
@@ -4522,7 +4601,7 @@ mod tests {
         let bridge = include_str!("bridge.rs");
         let core = include_str!("../../../crates/ncx-core/src/agent_loop/turn.rs");
 
-        assert!(core.contains("agent.session.compact_if_needed"));
+        assert!(core.contains(".compact_safely_if_needed("));
         assert!(bridge.contains("UiEvent::ContextCompacted"));
         assert!(thread.contains("case \"context_compacted\":"));
         assert!(thread.contains("this.accepts(event.session_id)"));
@@ -5018,6 +5097,9 @@ mod tests {
         assert!(composer.contains("this.thread.setRunning(targetSessionId, true)"));
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         assert!(thread.contains("this.setRunning(event.session_id, false)"));
+        assert!(lifecycle.contains("this.thread.switching = false;"));
+        assert!(lifecycle.contains("Promise.allSettled"));
+        assert!(thread.contains("clearSkippedLoaded"));
     }
 
     #[test]

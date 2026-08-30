@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "windows": {
+      "command": "python",
+      "args": ["./scripts/server.py"]
+    }
+  }
+}

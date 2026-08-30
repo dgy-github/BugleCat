@@ -10,7 +10,7 @@ impl ToolRegistry {
         let Some(mut failure) = classify_tool_result(&first) else {
             return first;
         };
-        if !self.is_read_only(name) {
+        if !self.call_is_read_only(name, args) {
             return first;
         }
         if name == "read_file" && failure == crate::tool_recovery::ToolFailureClass::NotFound {
@@ -34,7 +34,7 @@ impl ToolRegistry {
             failure = retry_failure;
         }
         if let Some((fallback_name, fallback_args)) = fallback_call(name, args, failure) {
-            if self.is_read_only(fallback_name) {
+            if self.call_is_read_only(fallback_name, &fallback_args) {
                 let fallback = self.execute_attempt(fallback_name, &fallback_args).await;
                 if classify_tool_result(&fallback).is_none() {
                     return format!(
@@ -48,7 +48,7 @@ impl ToolRegistry {
     }
 
     async fn execute_attempt(&self, name: &str, args: &Value) -> String {
-        if self.ctx.compaction_read_only_recovery.get() && !self.is_read_only(name) {
+        if self.ctx.compaction_read_only_recovery.get() && !self.call_is_read_only(name, args) {
             return format!("Error: {name} blocked: context compaction consistency check entered read-only recovery. Re-read the workspace, git diff, tests, and latest valid decision before any write.");
         }
         match self.get(name) {

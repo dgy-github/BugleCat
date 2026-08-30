@@ -31,7 +31,7 @@ pub use external::{
     ExternalToolDescriptor,
 };
 pub use manifest::{PluginCapability, PluginManifest};
-pub(crate) use openai_compat::discover_enabled_codex_plugins;
+pub(crate) use openai_compat::discover_enabled_codex_plugins_with_home;
 pub use openai_compat::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
     resolve_local_marketplace_plugin, CodexAppResource, CodexPluginCatalog, CodexPluginManifest,

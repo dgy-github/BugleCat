@@ -114,7 +114,8 @@ pub struct ToolContext {
     /// and propose a plan, change nothing.
     pub plan_mode: bool,
     /// Set when compaction safety validation detects lost or conflicting state.
-    /// All mutating tools remain blocked until a fresh agent runtime is built.
+    /// Mutating tools remain blocked for the rest of that turn. A fresh direct
+    /// human turn clears it; automatic Goal rounds cannot clear the guard.
     pub compaction_read_only_recovery: Rc<Cell<bool>>,
     /// Session-scoped "always allow" grants (shell commands / all edits).
     pub session_grants: Rc<RefCell<SessionGrants>>,
@@ -299,6 +300,13 @@ pub trait Tool {
     /// consecutive read-only calls concurrently. Default false.
     fn read_only(&self) -> bool {
         false
+    }
+
+    /// Classify one concrete invocation. Most tools have a fixed classification,
+    /// while multiplexed tools may expose both read and write operations through
+    /// one schema and must inspect their arguments.
+    fn call_is_read_only(&self, _args: &Value) -> bool {
+        self.read_only()
     }
 
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String;
@@ -540,6 +548,12 @@ impl ToolRegistry {
 
     pub fn is_read_only(&self, name: &str) -> bool {
         self.get(name).map(|t| t.read_only()).unwrap_or(false)
+    }
+
+    pub fn call_is_read_only(&self, name: &str, args: &Value) -> bool {
+        self.get(name)
+            .map(|tool| tool.call_is_read_only(args))
+            .unwrap_or(false)
     }
 
     /// JSON schemas for every registered tool (the `tools` request field).

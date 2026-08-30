@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import PluginSettings from "./PluginSettings.svelte";
   import ModelCatalogSettings from "./ModelCatalogSettings.svelte";
   import CustomProvidersSettings from "./CustomProvidersSettings.svelte";
@@ -183,6 +184,9 @@
 
   type SettingsSection = "general" | "models" | "connection" | "skills" | "context" | "plugins";
   let activeSection = $state<SettingsSection>("general");
+  let settingsShell = $state<HTMLElement>();
+  let dialogTitle = $state<HTMLHeadingElement>();
+  let restoreFocus: HTMLElement | null = null;
   const sections: { id: SettingsSection; icon: string; label: string; detail: string }[] = [
     { id: "general", icon: "⌘", label: "通用", detail: "模型与运行限制" },
     { id: "models", icon: "◇", label: "模型与费用", detail: "厂商目录和计价" },
@@ -191,19 +195,61 @@
     { id: "context", icon: "☷", label: "上下文", detail: "压缩和保留策略" },
     { id: "plugins", icon: "▦", label: "插件", detail: "能力与运行诊断" },
   ];
+
+  const closeSettings = () => {
+    if (!saving) settings = null;
+  };
+
+  const handleDialogKeydown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSettings();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(settingsShell?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    ) ?? []).filter((element) => element.offsetParent !== null);
+    if (!focusable.length) {
+      event.preventDefault();
+      dialogTitle.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  $effect(() => {
+    if (!settings) return;
+    activeSection = "general";
+    restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void tick().then(() => dialogTitle?.focus());
+    return () => {
+      const target = restoreFocus;
+      restoreFocus = null;
+      void tick().then(() => target?.focus());
+    };
+  });
 </script>
 
 {#if settings}
   <div class="overlay settings-overlay">
-    <div class="settings-shell" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div bind:this={settingsShell} class="settings-shell" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1" onkeydown={handleDialogKeydown}>
       <header class="settings-header">
-        <div><h2 id="settings-title">设置</h2><p>配置 nanocodex 的模型、连接与扩展能力</p></div>
-        <button class="settings-close" onclick={() => (settings = null)} aria-label="关闭设置">×</button>
+        <div><h2 bind:this={dialogTitle} id="settings-title" tabindex="-1">设置</h2><p>配置 BugleCat 的模型、连接与扩展能力</p></div>
+        <button class="settings-close" onclick={closeSettings} disabled={saving} aria-label="关闭设置">×</button>
       </header>
       <div class="settings-layout">
         <nav class="settings-nav" aria-label="设置分类">
           {#each sections as section}
-            <button class:active={activeSection === section.id} onclick={() => (activeSection = section.id)}>
+            <button class:active={activeSection === section.id} aria-current={activeSection === section.id ? "page" : undefined} onclick={() => (activeSection = section.id)}>
               <span class="settings-nav-icon">{section.icon}</span>
               <span><strong>{section.label}</strong><small>{section.detail}</small></span>
             </button>
@@ -289,7 +335,7 @@
           {/if}
         </div>
       </div>
-      <footer class="settings-footer"><span>{saving ? "正在写入配置…" : "修改将在保存后应用到新一轮执行"}</span><div><button class="deny" onclick={() => (settings = null)}>取消</button><button class="ok" onclick={saveSettings} disabled={saving}>{saving ? "保存中…" : "保存设置"}</button></div></footer>
+      <footer class="settings-footer"><span>{saving ? "正在写入配置…" : "此按钮只保存表单字段；标注“立即生效”的操作会单独应用"}</span><div><button class="deny" onclick={closeSettings} disabled={saving}>取消</button><button class="ok" onclick={saveSettings} disabled={saving}>{saving ? "保存中…" : "保存设置"}</button></div></footer>
     </div>
   </div>
 {/if}

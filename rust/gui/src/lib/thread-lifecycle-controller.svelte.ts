@@ -62,8 +62,9 @@ export class ThreadLifecycleController {
   refresh = async (): Promise<void> => {
     try {
       const metadata = await appServerRequest<{ id: string }[]>({ method: "threadList", params: { includeArchived: true } });
-      const threads = await Promise.all(metadata.slice(0, 50).map((item) =>
+      const results = await Promise.allSettled(metadata.slice(0, 50).map((item) =>
         appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: item.id } })));
+      const threads = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
       this.usage.replaceProtocolUsage(threads.map((item) => [item.metadata.id, item.turns.reduce(
         (sum, turn) => ({
           prompt_tokens: sum.prompt_tokens + (turn.usage?.tokens?.prompt_tokens || 0),
@@ -118,6 +119,7 @@ export class ThreadLifecycleController {
       const created = await appServerRequest<ProtocolThread>({ method: "threadCreateActivate", params: { threadId: id, workspace: this.workspace(), title: "(no prompt yet)", harnessProfile: this.selectedHarnessProfile } });
       this.activeHarnessProfile = created.metadata.harnessProfile || this.selectedHarnessProfile;
       if (this.thread.currentId === "") { this.thread.currentId = id; this.thread.restore(id); }
+      this.thread.switching = false;
     } catch (error) {
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.thread.restore(previousId);
@@ -162,6 +164,7 @@ export class ThreadLifecycleController {
       }
       this.thread.switching = false;
     } catch (error) {
+      this.thread.clearSkippedLoaded(id);
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.usage.restore(previousId);
       this.thread.restore(previousId);
@@ -184,6 +187,7 @@ export class ThreadLifecycleController {
       this.selectedHarnessProfile = this.activeHarnessProfile;
       await appServerRequest({ method: "threadRename", params: { threadId: newThreadId, title: forkTitle } });
       this.thread.currentId = newThreadId; this.thread.title = forkTitle;
+      this.thread.switching = false;
       await this.refresh();
     } catch (error) {
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;

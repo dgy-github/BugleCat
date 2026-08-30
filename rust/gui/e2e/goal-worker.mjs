@@ -8,7 +8,7 @@ import { chromium } from "playwright-core";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const profileHome = mkdtempSync(join(tmpdir(), "ncx-goal-e2e-home-"));
-const targetDir = fileURLToPath(new URL("../../target-codex-check/goal-webview-e2e/", import.meta.url));
+const targetDir = fileURLToPath(new URL("../src-tauri/target/", import.meta.url));
 const e2eExecutable = join(targetDir, "x86_64-pc-windows-msvc", "debug", "ncx-gui.exe");
 const cdpPort = 9334;
 const cdpUrl = `http://127.0.0.1:${cdpPort}`;
@@ -164,15 +164,17 @@ try {
   const routeButton = page.locator(".model-pill").filter({ hasText: "Goal E2E Relay" });
   await routeButton.waitFor({ timeout: 10_000 });
   if (!(await routeButton.textContent())?.includes(requestedModel)) throw new Error("Composer route label omitted the active model");
-  await routeButton.click();
+  const openBackdrop = page.locator(".menu-backdrop:visible");
+  if (await openBackdrop.count()) await openBackdrop.first().click({ force: true });
+  await routeButton.click({ force: true });
   await page.locator(".model-route-head.active").getByText("openai", { exact: true }).waitFor({ timeout: 10_000 });
   await page.locator(".model-wrap > .menu-backdrop").click({ force: true });
   await page.getByText("第一轮已完成一项确定性进展。", { exact: true }).waitFor({ timeout: 10_000 });
   await page.getByText("E2E 长期目标已完整结束。", { exact: true }).waitFor({ timeout: 10_000 });
   await page.getByText(`请求 ${requestedModel} → 响应字段 ${confirmedModel}`, { exact: true }).last().waitFor({ timeout: 10_000 });
 
-  await routeButton.click();
-  await page.locator(".model-menu").waitFor({ timeout: 10_000 });
+  if (!(await page.locator(".model-menu:visible").count())) await routeButton.click({ force: true });
+  await page.locator(".model-menu:visible").waitFor({ timeout: 10_000 });
   if (await page.locator(".model-route-head").count() !== 1) throw new Error("unselected providers leaked into the Composer model menu");
   console.log(JSON.stringify({
     composerRouteGroups: await page.locator(".model-route-head").allTextContents(),

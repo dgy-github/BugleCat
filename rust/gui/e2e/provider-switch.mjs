@@ -1,8 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const originalHome = process.env.USERPROFILE || process.env.HOME || "";
+const profileHome = mkdtempSync(join(tmpdir(), "ncx-provider-e2e-home-"));
+mkdirSync(join(profileHome, ".nanocodex"), { recursive: true });
+writeFileSync(join(profileHome, ".nanocodex", "config.toml"), 'api_key = "e2e-placeholder"\nbase_url = "http://127.0.0.1:9/v1"\nmodel = "e2e-model"\n');
 const cdpUrl = "http://127.0.0.1:9222";
 const executable = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npm";
 const args = process.platform === "win32"
@@ -10,7 +17,7 @@ const args = process.platform === "win32"
   : ["run", "tauri", "dev"];
 const child = spawn(executable, args, {
   cwd: root,
-  env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9222" },
+  env: { ...process.env, USERPROFILE: profileHome, HOME: profileHome, CARGO_HOME: process.env.CARGO_HOME || join(originalHome, ".cargo"), RUSTUP_HOME: process.env.RUSTUP_HOME || join(originalHome, ".rustup"), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9222" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 child.stdout.on("data", (chunk) => process.stdout.write(chunk));

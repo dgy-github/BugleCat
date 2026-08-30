@@ -195,11 +195,11 @@ fn conventional_codex_mcp_and_hook_resources_feed_existing_runtime_types() {
         )
         .unwrap();
 
-    let servers = discover_codex_mcp_servers(&workspace).unwrap();
+    let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
     assert_eq!(servers[0].name, "demo:files");
     assert_eq!(servers[0].args, vec!["--stdio"]);
     assert_eq!(servers[0].env.get("MODE").map(String::as_str), Some("test"));
-    let hooks = discover_codex_hooks(&workspace).unwrap();
+    let hooks = discover_codex_hooks_with_home(&workspace, None).unwrap();
     let pre_tool = hooks
         .iter()
         .find(|hook| hook.event == "pre_tool")
@@ -220,21 +220,21 @@ fn conventional_codex_mcp_and_hook_resources_feed_existing_runtime_types() {
             r#"{"name":"inline","mcpServers":{"web":{"command":"web-server"}},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"finish"}]}]}}"#,
         )
         .unwrap();
-    assert!(discover_codex_mcp_servers(&workspace)
+    assert!(discover_codex_mcp_servers_with_home(&workspace, None)
         .unwrap()
         .iter()
         .any(|server| server.name == "inline:web"));
-    assert!(discover_codex_hooks(&workspace)
+    assert!(discover_codex_hooks_with_home(&workspace, None)
         .unwrap()
         .iter()
         .any(|hook| hook.event == "stop" && hook.command == "finish"));
 
     fs::write(inline.join(".disabled"), "disabled\n").unwrap();
-    assert!(!discover_codex_mcp_servers(&workspace)
+    assert!(!discover_codex_mcp_servers_with_home(&workspace, None)
         .unwrap()
         .iter()
         .any(|server| server.name == "inline:web"));
-    assert!(!discover_codex_hooks(&workspace)
+    assert!(!discover_codex_hooks_with_home(&workspace, None)
         .unwrap()
         .iter()
         .any(|hook| hook.command == "finish"));
@@ -275,8 +275,13 @@ fn official_path_based_mcp_hooks_and_interface_resources_are_supported() {
     )
     .unwrap();
 
-    assert_eq!(discover_codex_mcp_servers(&workspace).unwrap().len(), 1);
-    let hooks = discover_codex_hooks(&workspace).unwrap();
+    assert_eq!(
+        discover_codex_mcp_servers_with_home(&workspace, None)
+            .unwrap()
+            .len(),
+        1
+    );
+    let hooks = discover_codex_hooks_with_home(&workspace, None).unwrap();
     assert!(hooks.iter().any(|hook| hook.event == "pre_tool"));
     assert!(hooks.iter().any(|hook| hook.event == "post_tool"));
 
@@ -295,6 +300,38 @@ fn official_path_based_mcp_hooks_and_interface_resources_are_supported() {
 }
 
 #[test]
+fn installed_plugin_resolves_relative_mcp_script_from_target_root() {
+    let source = temp("mcp-source");
+    let target = temp("mcp-target");
+    let plugin = source.join(".codex-plugin");
+    fs::create_dir_all(&plugin).unwrap();
+    fs::create_dir_all(source.join("scripts")).unwrap();
+    fs::write(source.join("scripts/server.py"), b"# mock").unwrap();
+    fs::write(
+        source.join(".mcp.json"),
+        r#"{"mcpServers":{"windows":{"command":"python","args":["scripts/server.py","https://example.test/api"]}}}"#,
+    )
+    .unwrap();
+    fs::write(plugin.join("plugin.json"), r#"{"name":"portable"}"#).unwrap();
+
+    let catalog = CodexPluginCatalog::new(target.join(".ncx/codex-plugins"));
+    catalog.install(&source).unwrap();
+    let installed = target.join(".ncx/codex-plugins/portable");
+    fs::remove_dir_all(&source).unwrap();
+
+    let servers = discover_codex_mcp_servers_with_home(&target, None).unwrap();
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0].command, "python");
+    assert_eq!(
+        Path::new(&servers[0].args[0]),
+        installed.join("scripts/server.py").canonicalize().unwrap()
+    );
+    assert_eq!(servers[0].args[1], "https://example.test/api");
+
+    let _ = fs::remove_dir_all(target);
+}
+
+#[test]
 fn codex_apps_are_parsed_as_hosted_connector_resources() {
     let workspace = temp("apps-resources");
     let plugin = workspace.join(".ncx/codex-plugins/demo");
@@ -310,12 +347,14 @@ fn codex_apps_are_parsed_as_hosted_connector_resources() {
         )
         .unwrap();
 
-    let apps = discover_codex_apps(&workspace).unwrap();
+    let apps = discover_codex_apps_with_home(&workspace, None).unwrap();
     assert_eq!(apps.len(), 2);
     assert!(apps.iter().any(|app| {
         app.plugin == "demo" && app.name == "calendar" && app.connector_id == "connector-calendar"
     }));
     fs::write(plugin.join(".disabled"), "disabled\n").unwrap();
-    assert!(discover_codex_apps(&workspace).unwrap().is_empty());
+    assert!(discover_codex_apps_with_home(&workspace, None)
+        .unwrap()
+        .is_empty());
     let _ = fs::remove_dir_all(workspace);
 }

@@ -46,16 +46,20 @@ export class PluginController {
   constructor(private readonly notify: (message: string) => void) {}
 
   load = async (): Promise<void> => {
-    const [diagnostics, externalPlugins, codexPlugins, marketplaces] = await Promise.all([
+    const results = await Promise.allSettled([
       appServerRequest<HarnessDiagnostics>({ method: "harnessDiagnosticsRead" }),
       appServerRequest<ExternalPlugin[]>({ method: "externalPluginList" }),
       appServerRequest<CodexPlugin[]>({ method: "codexPluginList" }),
       appServerRequest<PluginMarketplace[]>({ method: "marketplaceList" }),
     ]);
-    this.diagnostics = diagnostics;
-    this.externalPlugins = externalPlugins;
-    this.codexPlugins = codexPlugins;
-    this.marketplaces = marketplaces;
+    const [diagnostics, externalPlugins, codexPlugins, marketplaces] = results;
+    if (diagnostics.status === "fulfilled") this.diagnostics = diagnostics.value;
+    if (externalPlugins.status === "fulfilled") this.externalPlugins = externalPlugins.value;
+    if (codexPlugins.status === "fulfilled") this.codexPlugins = codexPlugins.value;
+    if (marketplaces.status === "fulfilled") this.marketplaces = marketplaces.value;
+    const failed = results.filter((result) => result.status === "rejected").length;
+    if (failed === results.length) throw new Error("插件服务不可用");
+    if (failed > 0) this.notify(`有 ${failed} 项插件信息暂时不可用，其余内容已加载`);
   };
 
   addExternal = async (): Promise<void> => this.installExternal(false);

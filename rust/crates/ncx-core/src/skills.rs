@@ -154,11 +154,12 @@ fn discover_skills_with_home(workspace: &Path, home: Option<&Path>) -> Vec<Skill
     }
     roots.push(workspace.join(".ncx").join("skills"));
 
-    let codex_skill_paths = crate::plugins::discover_enabled_codex_plugins(workspace)
-        .unwrap_or_default()
-        .into_iter()
-        .flat_map(|plugin| plugin.skill_paths())
-        .collect::<Vec<_>>();
+    let codex_skill_paths =
+        crate::plugins::discover_enabled_codex_plugins_with_home(workspace, home)
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|plugin| plugin.skill_paths())
+            .collect::<Vec<_>>();
 
     // Keyed by name. Builtins seed the map first; a later filesystem root with
     // the same name shadows it (home then workspace), so users can override.
