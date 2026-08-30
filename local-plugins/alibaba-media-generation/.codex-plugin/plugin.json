@@ -1,0 +1,18 @@
+{
+  "name": "alibaba-media-generation",
+  "version": "0.1.0",
+  "description": "BugleCat 阿里云百炼图片与 Wan 视频生成技能。",
+  "author": {
+    "name": "BugleCat Local"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "阿里百炼媒体生成",
+    "shortDescription": "使用阿里百炼生成图片和短视频。",
+    "longDescription": "提供通义万相图片生成与 Wan 文生视频工作流，使用已配置的 DashScope Workspace Key，并返回真实媒体 URL 与费用元数据。",
+    "developerName": "BugleCat Local",
+    "category": "Creative",
+    "capabilities": ["Skills", "Image generation", "Video generation"],
+    "defaultPrompt": "使用阿里百炼生成一张图片或一段短视频。"
+  }
+}
