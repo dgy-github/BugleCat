@@ -543,9 +543,10 @@ fn compare_safety_snapshots(
         ("涉及文件", &before.files, &after.files),
     ] {
         if expected.iter().any(|item| {
-            !actual
-                .iter()
-                .any(|candidate| candidate.contains(item) || item.contains(candidate))
+            !actual.iter().any(|candidate| {
+                let retained: String = item.chars().take(500).collect();
+                candidate.contains(&retained) || retained.contains(candidate)
+            })
         }) {
             conflicts.push(format!("{name}在压缩后不一致"));
         }
@@ -1034,6 +1035,43 @@ mod tests {
         assert!(rendered.contains("不要删除旧实现"));
         assert!(rendered.contains("不要提交代码"));
         assert!(rendered.contains("代码事实须重新核对"));
+        assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn safe_compaction_validates_long_requirements_at_the_marker_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "ncx_safe_compact_long_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut session = Session::new("system");
+        session.add_user_text(&format!(
+            "原始要求：制作一份长篇交付物，但不要删除现有文件。{}",
+            "需要保留的详细背景。".repeat(100)
+        ));
+        for index in 0..20 {
+            session.add_assistant(&format!("普通讨论 {index} {}", "x".repeat(120)), None, "");
+            session.add_user_text(&format!("继续讨论 {index}"));
+        }
+
+        let result = session
+            .compact_safely_if_needed(
+                &ContextEditPolicy {
+                    enabled: true,
+                    max_chars: 900,
+                    keep_recent_messages: 4,
+                    max_tool_result_chars: 40,
+                },
+                &root,
+            )
+            .expect("compaction");
+
         assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
         let _ = std::fs::remove_dir_all(root);
     }
