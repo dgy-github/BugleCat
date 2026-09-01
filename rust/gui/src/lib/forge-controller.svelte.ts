@@ -36,24 +36,68 @@ export class ForgeController {
   budgetS = $state(600);
   teacher = $state("panel");
   acceptMargin = $state(1);
+  private lifecycleGeneration = 0;
+  private pollGeneration = 0;
+  private nextLoadingOperation = 0;
+  private readonly activeLoadingOperations = new Set<number>();
 
-  constructor(private readonly notify: (message: string) => void) {}
+  constructor(
+    private readonly notify: (message: string) => void,
+    private readonly workspace: () => string,
+  ) {}
+
+  // The Forge job is process-owned and intentionally keeps running when this
+  // view goes away. Only its UI observer is disposed, so a remount can read
+  // the durable status without an old poll mutating the new view.
+  dispose = (): void => {
+    this.lifecycleGeneration += 1;
+    this.pollGeneration += 1;
+    this.activeLoadingOperations.clear();
+    this.loading = false;
+  };
+
+  // Forge jobs belong to the process, but their status projection belongs to
+  // the selected workspace. Invalidate every observer from the old workspace
+  // and clear its projection without cancelling the process-owned job.
+  workspaceChanged = (): void => {
+    this.lifecycleGeneration += 1;
+    this.pollGeneration += 1;
+    this.activeLoadingOperations.clear();
+    this.loading = false;
+    this.runtime = null;
+    this.job = null;
+    // The new workspace has already been committed before this callback. Start
+    // a fresh, generation-fenced projection so Forge controls do not remain
+    // disabled until the user manually opens the panel and clicks Refresh.
+    if (this.workspace()) void this.refresh();
+  };
 
   refresh = async (): Promise<void> => {
-    this.loading = true;
+    const workspace = this.workspace();
+    if (!workspace) {
+      this.notify("Forge 状态读取失败：当前工作区不可用，请重新打开项目");
+      return;
+    }
+    const lifecycle = this.lifecycleGeneration;
+    const operation = this.beginLoading();
+    const poll = ++this.pollGeneration;
     try {
       const [runtime, job] = await Promise.all([
         appServerRequest<ForgeRuntimeStatus>({ method: "forgeRuntimeStatusRead" }),
-        appServerRequest<ForgeJobStatus>({ method: "forgeJobStatusRead" }),
+        appServerRequest<ForgeJobStatus>({
+          method: "forgeJobStatusRead",
+          params: { workspace },
+        }),
       ]);
+      if (!this.isActive(lifecycle, operation)) return;
       this.runtime = runtime;
       this.job = job;
-      if (job.status === "running" || job.status === "cancelling") void this.poll(job.generation);
+      if (job.status === "running" || job.status === "cancelling") {
+        void this.poll(job.generation, lifecycle, poll, workspace);
+      }
     } catch (error) {
-      this.notify(`Forge 状态读取失败：${error}`);
-    } finally {
-      this.loading = false;
-    }
+      if (this.isActive(lifecycle, operation)) this.notify(`Forge 状态读取失败：${error}`);
+    } finally { this.endLoading(operation); }
   };
 
   start = async (): Promise<void> => {
@@ -65,11 +109,19 @@ export class ForgeController {
       `Forge 会执行多轮模型调用并可能产生费用。确认开始 ${this.rounds} 轮训练，最长 ${this.budgetS} 秒吗？`,
     );
     if (!confirmed) return;
-    this.loading = true;
+    const workspace = this.workspace();
+    if (!workspace) {
+      this.notify("Forge 启动失败：当前工作区不可用，请重新打开项目");
+      return;
+    }
+    const lifecycle = this.lifecycleGeneration;
+    const operation = this.beginLoading();
+    const poll = ++this.pollGeneration;
     try {
-      this.job = await appServerRequest<ForgeJobStatus>({
+      const job = await appServerRequest<ForgeJobStatus>({
         method: "forgeJobStart",
         params: {
+          workspace,
           rounds: this.rounds,
           repeats: this.repeats,
           timeoutS: this.timeoutS,
@@ -78,27 +130,45 @@ export class ForgeController {
           acceptMargin: this.acceptMargin,
         },
       });
-      void this.poll(this.job.generation);
+      if (!this.isActive(lifecycle, operation)) return;
+      this.job = job;
+      void this.poll(job.generation, lifecycle, poll, workspace);
     } catch (error) {
-      this.notify(`Forge 启动失败：${error}`);
-    } finally {
-      this.loading = false;
-    }
+      if (this.isActive(lifecycle, operation)) this.notify(`Forge 启动失败：${error}`);
+    } finally { this.endLoading(operation); }
   };
 
   cancel = async (): Promise<void> => {
+    const lifecycle = this.lifecycleGeneration;
+    const poll = ++this.pollGeneration;
+    const workspace = this.workspace();
+    const generation = this.job?.generation;
+    if (!workspace || generation === undefined) return;
     try {
-      this.job = await appServerRequest<ForgeJobStatus>({ method: "forgeJobCancel" });
+      const job = await appServerRequest<ForgeJobStatus>({
+        method: "forgeJobCancel",
+        params: { workspace, generation },
+      });
+      if (!this.isCurrentPoll(lifecycle, poll)) return;
+      this.job = job;
+      if (job.status === "running" || job.status === "cancelling") {
+        void this.poll(job.generation, lifecycle, poll, workspace);
+      }
     } catch (error) {
-      this.notify(`Forge 取消失败：${error}`);
+      if (this.isCurrentPoll(lifecycle, poll)) this.notify(`Forge 取消失败：${error}`);
     }
   };
 
-  private poll = async (generation: number): Promise<void> => {
+  private poll = async (generation: number, lifecycle: number, poll: number, workspace: string): Promise<void> => {
     while (true) {
       await new Promise((resolve) => setTimeout(resolve, 700));
+      if (!this.isCurrentPoll(lifecycle, poll)) return;
       try {
-        const status = await appServerRequest<ForgeJobStatus>({ method: "forgeJobStatusRead" });
+        const status = await appServerRequest<ForgeJobStatus>({
+          method: "forgeJobStatusRead",
+          params: { workspace, generation },
+        });
+        if (!this.isCurrentPoll(lifecycle, poll)) return;
         if (status.generation !== generation) return;
         this.job = status;
         if (status.status === "running" || status.status === "cancelling") continue;
@@ -107,9 +177,27 @@ export class ForgeController {
         else this.notify(`Forge 未完成：${status.error || status.status}`);
         return;
       } catch (error) {
-        this.notify(`Forge 状态轮询失败：${error}`);
+        if (this.isCurrentPoll(lifecycle, poll)) this.notify(`Forge 状态轮询失败：${error}`);
         return;
       }
     }
   };
+
+  private beginLoading = (): number => {
+    const operation = ++this.nextLoadingOperation;
+    this.activeLoadingOperations.add(operation);
+    this.loading = true;
+    return operation;
+  };
+
+  private endLoading = (operation: number): void => {
+    if (!this.activeLoadingOperations.delete(operation)) return;
+    this.loading = this.activeLoadingOperations.size > 0;
+  };
+
+  private isActive = (lifecycle: number, operation: number): boolean =>
+    lifecycle === this.lifecycleGeneration && this.activeLoadingOperations.has(operation);
+
+  private isCurrentPoll = (lifecycle: number, poll: number): boolean =>
+    lifecycle === this.lifecycleGeneration && poll === this.pollGeneration;
 }

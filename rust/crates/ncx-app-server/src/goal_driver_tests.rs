@@ -1,5 +1,5 @@
 use super::*;
-use ncx_protocol::{GoalActivation, GoalPhase, GoalRef};
+use ncx_protocol::{GoalActivation, GoalPhase, GoalRef, TurnStatus};
 
 fn armed_goal(
     server: &AppServer<JsonThreadStore>,

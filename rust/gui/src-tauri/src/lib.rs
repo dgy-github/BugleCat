@@ -41,7 +41,8 @@ use ncx_core::{
     RestoreReport, RuntimeContextSources, RuntimeHostBindings, SessionIndex,
 };
 use ncx_protocol::{
-    ClientRequest, ItemId, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn, TurnId, TurnStatus,
+    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn,
+    TurnId, TurnStatus,
 };
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde::Serialize;
@@ -95,6 +96,11 @@ struct AppState {
     provider_activation: ProviderActivationGate,
     openrouter_models: Mutex<Vec<CatalogModel>>,
     yunmo_models: Mutex<Vec<CatalogModel>>,
+    /// Serializes process-CWD transitions with workspace-bound GUI operations.
+    /// Tauri commands can run concurrently, so every snapshot check and its
+    /// filesystem/Git operation must share a linearization point with
+    /// `WorkspaceSet`.
+    workspace_gate: Mutex<()>,
     memory_merge: Arc<memory_merge_job::MemoryMergeCoordinator>,
     forge_job: Arc<forge_job::ForgeJobCoordinator>,
 }
@@ -462,14 +468,121 @@ fn get_config_location() -> Result<ConfigLocation, String> {
 /// `threadCreateActivate`, so the new empty Thread is durable before the GUI
 /// binds to its id. Do not create a legacy-only session here: Goal reads and
 /// the rest of the protocol would have no matching Thread record.
-fn set_workspace_for_state(path: String, _state: &AppState) -> Result<String, String> {
-    let p = PathBuf::from(bridge::display_path(Path::new(path.trim())));
+fn transition_workspace_for_state(path: &Path, state: &AppState) -> Result<String, String> {
+    let p = PathBuf::from(bridge::display_path(path));
     if !p.is_dir() {
         return Err(format!("not a directory: {}", p.display()));
     }
-    std::env::set_current_dir(&p).map_err(|e| format!("cannot enter {}: {e}", p.display()))?;
+    let _workspace_gate = state
+        .workspace_gate
+        .lock()
+        .map_err(|_| "工作区切换状态不可用".to_string())?;
+    let current = std::env::current_dir().map_err(|error| error.to_string())?;
+    if memory_merge_cancellation_required_for_workspace_transition(&p, &current) {
+        // This is deliberately before changing the process CWD. The
+        // coordinator's commit fence shares the same cancellation lock, so a
+        // prior workspace merge cannot write its prepared draft after this
+        // point. Merely navigating between Threads in the same workspace must
+        // not cancel an unrelated merge.
+        state.memory_merge.cancel_for_workspace_switch()?;
+        std::env::set_current_dir(&p).map_err(|e| format!("cannot enter {}: {e}", p.display()))?;
+    }
     bridge::save_last_workspace(&p); // remember it across launches
     Ok(bridge::display_path(&p))
+}
+
+/// Switch the process workspace. The frontend follows this with an App Server
+/// `threadCreateActivate`, so the new empty Thread is durable before the GUI
+/// binds to its id. Do not create a legacy-only session here: Goal reads and the
+/// rest of the protocol would have no matching Thread record.
+fn set_workspace_for_state(path: String, state: &AppState) -> Result<String, String> {
+    transition_workspace_for_state(Path::new(path.trim()), state)
+}
+
+fn thread_metadata_for_state(
+    thread_id: &ThreadId,
+    state: &AppState,
+) -> Result<ThreadMetadata, String> {
+    let outcome = state
+        .app_server
+        .dispatch(ClientRequest::ThreadRead {
+            thread_id: thread_id.clone(),
+        })
+        .map_err(|error| error.to_string())?;
+    match outcome.response.payload {
+        ResponsePayload::Thread(thread) => Ok(thread.metadata),
+        _ => Err(format!("会话 {thread_id} 返回了无效的 Thread 元数据")),
+    }
+}
+
+fn workspace_path_from_metadata(metadata: &ThreadMetadata) -> PathBuf {
+    PathBuf::from(bridge::display_path(Path::new(&metadata.workspace)))
+}
+
+/// Compare a caller's workspace snapshot with the process' current workspace.
+/// Canonicalization removes separator/case/`..` spelling differences while
+/// requiring both paths to resolve to existing directories; an unresolved
+/// caller path is rejected rather than guessed.
+fn workspace_matches(expected: &str, current: &Path) -> bool {
+    let Ok(expected) = std::fs::canonicalize(expected) else {
+        return false;
+    };
+    let Ok(current) = std::fs::canonicalize(current) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        expected
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&current.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        expected == current
+    }
+}
+
+/// A memory merge is bound to the process workspace that started it. Only a
+/// real workspace change crosses that boundary; Thread navigation inside one
+/// project deliberately keeps the merge alive.
+fn memory_merge_cancellation_required_for_workspace_transition(
+    target: &Path,
+    current: &Path,
+) -> bool {
+    !workspace_matches(&bridge::display_path(target), current)
+}
+
+/// Reject an operation when its caller observed a different workspace than the
+/// one currently selected by the process. Keeping this check separate makes
+/// the fail-closed boundary directly testable; callers must still hold
+/// `workspace_gate` while they use the returned current workspace.
+fn require_workspace_match(expected: &str, current: &Path) -> Result<(), String> {
+    if workspace_matches(expected, current) {
+        return Ok(());
+    }
+    Err(format!(
+        "工作区已切换，拒绝执行旧项目请求（请求：{}，当前：{}）",
+        expected,
+        bridge::display_path(current),
+    ))
+}
+
+/// Run a workspace-bound operation against the caller's exact workspace
+/// snapshot. Tauri invokes can overlap, while the process CWD is global: the
+/// gate therefore covers both the snapshot comparison and the operation so a
+/// later `workspaceSet` cannot redirect an already-accepted request.
+fn with_workspace_snapshot<T>(
+    state: &AppState,
+    expected_workspace: &str,
+    operation: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let _workspace_gate = state
+        .workspace_gate
+        .lock()
+        .map_err(|_| "工作区切换状态不可用".to_string())?;
+    let current = std::env::current_dir().map_err(|error| error.to_string())?;
+    require_workspace_match(expected_workspace, &current)?;
+    operation(&current)
 }
 
 /// Switch the active model (persists + rebuilds keeping the current transcript).
@@ -566,11 +679,27 @@ fn set_model_for_state(model: String, state: &AppState) -> Result<(), String> {
 }
 
 /// Switch the CC permission mode (plan / default / accept-edits / bypass).
-fn set_permission_mode_for_state(mode: String, state: &AppState) -> Result<(), String> {
+fn set_permission_mode_for_state(
+    thread_id: &ThreadId,
+    mode: String,
+    state: &AppState,
+) -> Result<(), String> {
+    // Do not snapshot the process CWD here. A workspace transition can run
+    // between this request and the worker command. The worker validates this
+    // durable Thread against its active session and resolves its own stored
+    // workspace before rebuilding.
+    let (completion_tx, completion_rx) = mpsc::channel();
     state
         .tx
-        .send(Command::SetPermissionMode(mode))
-        .map_err(|_| "agent thread is not running".to_string())
+        .send(Command::SetPermissionMode {
+            thread_id: thread_id.to_string(),
+            mode,
+            completion: completion_tx,
+        })
+        .map_err(|_| "agent thread is not running".to_string())?;
+    completion_rx
+        .recv_timeout(Duration::from_secs(30))
+        .map_err(|_| "切换权限模式超时：后台 Agent 未在 30 秒内完成重建".to_string())?
 }
 
 /// Ask the agent thread to re-emit its `ready` snapshot (called by the UI once
@@ -608,28 +737,22 @@ struct GuiAppServerAdapter<'a> {
 }
 
 impl AppServerAdapter for GuiAppServerAdapter<'_> {
-    fn validate_harness_profile(&self, profile: &str) -> Result<(), String> {
-        let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    fn validate_harness_profile(&self, profile: &str, workspace: &str) -> Result<(), String> {
+        let workspace = PathBuf::from(bridge::display_path(Path::new(workspace)));
         HarnessRuntimeBuilder::configured_for_profile(&workspace, Some(profile)).map(|_| ())
     }
 
     fn create_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
-        let outcome = self
-            .state
-            .app_server
-            .dispatch(ClientRequest::ThreadRead {
-                thread_id: thread_id.clone(),
-            })
-            .map_err(|error| error.to_string())?;
-        let ncx_protocol::ResponsePayload::Thread(thread) = outcome.response.payload else {
-            return Err("创建会话后未能读取其 Harness Profile".to_string());
-        };
+        let metadata = thread_metadata_for_state(thread_id, self.state)?;
+        let workspace = workspace_path_from_metadata(&metadata);
+        transition_workspace_for_state(&workspace, self.state)?;
         let (completion_tx, completion_rx) = mpsc::channel();
         self.state
             .tx
             .send(Command::New {
                 id: thread_id.to_string(),
-                harness_profile: thread.metadata.harness_profile,
+                workspace,
+                harness_profile: metadata.harness_profile,
                 completion: completion_tx,
             })
             .map_err(|_| "agent thread is not running".to_string())?;
@@ -639,20 +762,40 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
     }
 
     fn activate_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
+        let metadata = thread_metadata_for_state(thread_id, self.state)?;
+        let workspace = workspace_path_from_metadata(&metadata);
+        transition_workspace_for_state(&workspace, self.state)?;
+        let (completion_tx, completion_rx) = mpsc::channel();
         self.state
             .tx
-            .send(Command::Resume(thread_id.to_string()))
-            .map_err(|_| "agent thread is not running".to_string())
+            .send(Command::Resume {
+                id: thread_id.to_string(),
+                workspace,
+                completion: completion_tx,
+            })
+            .map_err(|_| "agent thread is not running".to_string())?;
+        completion_rx
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|_| "恢复会话超时：后台 Agent 未在 30 秒内完成切换".to_string())?
     }
 
     fn fork_thread(&self, source_id: &ThreadId, target_id: &ThreadId) -> Result<(), String> {
+        let metadata = thread_metadata_for_state(target_id, self.state)?;
+        let workspace = workspace_path_from_metadata(&metadata);
+        transition_workspace_for_state(&workspace, self.state)?;
+        let (completion_tx, completion_rx) = mpsc::channel();
         self.state
             .tx
             .send(Command::Fork {
                 source_id: source_id.to_string(),
                 target_id: target_id.to_string(),
+                workspace,
+                completion: completion_tx,
             })
-            .map_err(|_| "agent thread is not running".to_string())
+            .map_err(|_| "agent thread is not running".to_string())?;
+        completion_rx
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|_| "分叉会话超时：后台 Agent 未在 30 秒内完成切换".to_string())?
     }
 
     fn submit_turn(
@@ -729,8 +872,8 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         set_model_for_state(model, self.state)
     }
 
-    fn set_permission_mode(&self, mode: String) -> Result<(), String> {
-        set_permission_mode_for_state(mode, self.state)
+    fn set_permission_mode(&self, thread_id: &ThreadId, mode: String) -> Result<(), String> {
+        set_permission_mode_for_state(thread_id, mode, self.state)
     }
 
     fn read_model_catalog(&self) -> Result<serde_json::Value, String> {
@@ -831,35 +974,94 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         set_external_plugin_enabled(id, enabled)
     }
 
-    fn list_memory(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(memory_list()?).map_err(|error| error.to_string())
+    fn list_memory(&self, expected_workspace: String) -> Result<serde_json::Value, String> {
+        with_workspace_snapshot(self.state, &expected_workspace, |workspace| {
+            serde_json::to_value(memory_list_at(workspace)?).map_err(|error| error.to_string())
+        })
     }
 
-    fn add_memory(&self, note: String, tags: Vec<String>) -> Result<bool, String> {
+    fn add_memory(
+        &self,
+        note: String,
+        tags: Vec<String>,
+        expected_workspace: String,
+    ) -> Result<bool, String> {
+        let _workspace_gate = self
+            .state
+            .workspace_gate
+            .lock()
+            .map_err(|_| "工作区切换状态不可用".to_string())?;
+        let current = std::env::current_dir().map_err(|error| error.to_string())?;
+        if !workspace_matches(&expected_workspace, &current) {
+            return Err("工作区已切换，拒绝写入当前项目记忆".to_string());
+        }
         memory_add(note, tags)
     }
 
-    fn consolidate_memory(&self) -> Result<u64, String> {
+    fn consolidate_memory(&self, expected_workspace: String) -> Result<u64, String> {
+        let _workspace_gate = self
+            .state
+            .workspace_gate
+            .lock()
+            .map_err(|_| "工作区切换状态不可用".to_string())?;
+        let current = std::env::current_dir().map_err(|error| error.to_string())?;
+        if !workspace_matches(&expected_workspace, &current) {
+            return Err("工作区已切换，拒绝整理当前项目记忆".to_string());
+        }
         memory_consolidate().map(|count| count as u64)
     }
 
-    fn start_memory_merge(&self) -> Result<serde_json::Value, String> {
+    fn start_memory_merge(&self, expected_workspace: String) -> Result<serde_json::Value, String> {
+        let _workspace_gate = self
+            .state
+            .workspace_gate
+            .lock()
+            .map_err(|_| "工作区切换状态不可用".to_string())?;
         let cfg = load_config(Overrides {
             workspace: std::env::current_dir().ok(),
             ..Default::default()
         })
         .map_err(|error| error.to_string())?;
         let workspace = cfg.workspace.clone();
+        if !workspace_matches(&expected_workspace, &workspace) {
+            return Err(format!(
+                "工作区已切换，拒绝在当前项目启动记忆整理（请求：{}，当前：{}）",
+                expected_workspace,
+                bridge::display_path(&workspace),
+            ));
+        }
         serde_json::to_value(self.state.memory_merge.start(cfg, workspace)?)
             .map_err(|error| error.to_string())
     }
 
-    fn memory_merge_status(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(self.state.memory_merge.status()?).map_err(|error| error.to_string())
+    fn memory_merge_status(
+        &self,
+        expected_workspace: String,
+        generation: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
+        with_workspace_snapshot(self.state, &expected_workspace, |workspace| {
+            serde_json::to_value(
+                self.state
+                    .memory_merge
+                    .status_for_workspace(workspace, generation)?,
+            )
+            .map_err(|error| error.to_string())
+        })
     }
 
-    fn cancel_memory_merge(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(self.state.memory_merge.cancel()?).map_err(|error| error.to_string())
+    fn cancel_memory_merge(
+        &self,
+        expected_workspace: String,
+        generation: u64,
+    ) -> Result<serde_json::Value, String> {
+        with_workspace_snapshot(self.state, &expected_workspace, |workspace| {
+            serde_json::to_value(
+                self.state
+                    .memory_merge
+                    .cancel_for_workspace(workspace, generation)?,
+            )
+            .map_err(|error| error.to_string())
+        })
     }
 
     fn forge_runtime_status(&self) -> Result<serde_json::Value, String> {
@@ -882,6 +1084,7 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
 
     fn start_forge_job(
         &self,
+        expected_workspace: String,
         rounds: u8,
         repeats: u8,
         timeout_s: u64,
@@ -895,7 +1098,6 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
             .resource_dir()
             .map_err(|_| "无法定位应用资源目录".to_string())?;
         let runtime = forge_runtime::discover(&resource_dir)?;
-        let (_, workspace) = configured_workspace()?;
         let input = forge_job::ForgeJobInput {
             rounds,
             repeats,
@@ -904,16 +1106,42 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
             teacher,
             accept_margin,
         };
-        serde_json::to_value(self.state.forge_job.start(input, runtime, workspace)?)
+        with_workspace_snapshot(self.state, &expected_workspace, |workspace| {
+            self.state
+                .forge_job
+                .start(input, runtime, workspace.to_path_buf())
+        })
+        .and_then(|status| serde_json::to_value(status).map_err(|error| error.to_string()))
+    }
+
+    fn forge_job_status(
+        &self,
+        expected_workspace: String,
+        generation: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
+        with_workspace_snapshot(self.state, &expected_workspace, |workspace| {
+            serde_json::to_value(
+                self.state
+                    .forge_job
+                    .status_for_workspace(workspace, generation)?,
+            )
             .map_err(|error| error.to_string())
+        })
     }
 
-    fn forge_job_status(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(self.state.forge_job.status()?).map_err(|error| error.to_string())
-    }
-
-    fn cancel_forge_job(&self) -> Result<serde_json::Value, String> {
-        serde_json::to_value(self.state.forge_job.cancel()?).map_err(|error| error.to_string())
+    fn cancel_forge_job(
+        &self,
+        expected_workspace: String,
+        generation: u64,
+    ) -> Result<serde_json::Value, String> {
+        with_workspace_snapshot(self.state, &expected_workspace, |workspace| {
+            serde_json::to_value(
+                self.state
+                    .forge_job
+                    .cancel_for_workspace(workspace, generation)?,
+            )
+            .map_err(|error| error.to_string())
+        })
     }
 
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {
@@ -1205,12 +1433,25 @@ fn validate_orchestrator_setting_updates(updates: &HashMap<String, String>) -> R
     for (key, label, min, max) in [
         ("max_iterations", "最大迭代次数", 1, 10_000),
         ("max_tool_calls", "最大工具调用数", 1, 100_000),
-        ("context_edit_max_chars", "上下文最大字符数", 1_000, 1_000_000),
+        (
+            "context_edit_max_chars",
+            "上下文最大字符数",
+            1_000,
+            1_000_000,
+        ),
         ("context_edit_keep_recent_messages", "保留消息数", 1, 1_000),
-        ("context_edit_max_tool_result_chars", "工具结果最大字符数", 100, 100_000),
+        (
+            "context_edit_max_tool_result_chars",
+            "工具结果最大字符数",
+            100,
+            100_000,
+        ),
     ] {
         if let Some(raw) = updates.get(key) {
-            let value = raw.trim().parse::<i64>().map_err(|_| format!("{label}必须是 {min}–{max} 的整数"))?;
+            let value = raw
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| format!("{label}必须是 {min}–{max} 的整数"))?;
             if !(min..=max).contains(&value) {
                 return Err(format!("{label}必须是 {min}–{max} 的整数，当前为 {value}"));
             }
@@ -1218,33 +1459,53 @@ fn validate_orchestrator_setting_updates(updates: &HashMap<String, String>) -> R
     }
     for key in ["context_edit_enabled", "alibaba_attachment_parser_enabled"] {
         if let Some(raw) = updates.get(key) {
-            if !matches!(raw.trim(), "true" | "false") { return Err(format!("{key}必须是 true 或 false")); }
+            if !matches!(raw.trim(), "true" | "false") {
+                return Err(format!("{key}必须是 true 或 false"));
+            }
         }
     }
     for key in ["sandbox_mode", "approval_policy"] {
         if let Some(raw) = updates.get(key) {
-            let valid = if key == "sandbox_mode" { VALID_SANDBOX_MODES.contains(&raw.trim()) } else { VALID_APPROVAL_POLICIES.contains(&raw.trim()) };
-            if !valid { return Err(format!("{key}不是受支持的值")); }
+            let valid = if key == "sandbox_mode" {
+                VALID_SANDBOX_MODES.contains(&raw.trim())
+            } else {
+                VALID_APPROVAL_POLICIES.contains(&raw.trim())
+            };
+            if !valid {
+                return Err(format!("{key}不是受支持的值"));
+            }
         }
     }
     if let Some(raw) = updates.get("price_currency") {
-        if !VALID_PRICE_CURRENCIES.contains(&raw.trim()) { return Err("price_currency 不是受支持的币种".into()); }
+        if !VALID_PRICE_CURRENCIES.contains(&raw.trim()) {
+            return Err("price_currency 不是受支持的币种".into());
+        }
     }
     for key in ["price_in", "price_out"] {
         if let Some(raw) = updates.get(key) {
-            let value = raw.trim().parse::<f64>().map_err(|_| format!("{key}必须是非负数字"))?;
-            if !value.is_finite() || !(0.0..=1_000_000.0).contains(&value) { return Err(format!("{key}必须在 0 到 1000000 之间")); }
+            let value = raw
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| format!("{key}必须是非负数字"))?;
+            if !value.is_finite() || !(0.0..=1_000_000.0).contains(&value) {
+                return Err(format!("{key}必须在 0 到 1000000 之间"));
+            }
         }
     }
     for key in ["model", "vl_model"] {
         if let Some(raw) = updates.get(key) {
-            if !valid_provider_model_id(raw.trim()) { return Err(format!("{key}格式无效")); }
+            if !valid_provider_model_id(raw.trim()) {
+                return Err(format!("{key}格式无效"));
+            }
         }
     }
     for key in ["base_url", "vl_base_url"] {
         if let Some(raw) = updates.get(key) {
             let value = raw.trim();
-            if !value.is_empty() && !(value.starts_with("https://") || value.starts_with("http://")) { return Err(format!("{key}必须是 http(s) URL")); }
+            if !value.is_empty() && !(value.starts_with("https://") || value.starts_with("http://"))
+            {
+                return Err(format!("{key}必须是 http(s) URL"));
+            }
         }
     }
     Ok(())
@@ -1707,62 +1968,65 @@ async fn e2e_ask_question(
 }
 
 #[tauri::command]
-fn get_checkpoints() -> Result<Vec<CheckpointView>, String> {
-    let cfg = load_config(Overrides {
-        workspace: std::env::current_dir().ok(),
-        ..Default::default()
+fn get_checkpoints(
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<CheckpointView>, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        Ok(CheckpointStore::new(workspace)
+            .list()
+            .into_iter()
+            .map(checkpoint_view)
+            .collect())
     })
-    .map_err(|e| e.to_string())?;
-    Ok(CheckpointStore::new(&cfg.workspace)
-        .list()
-        .into_iter()
-        .map(checkpoint_view)
-        .collect())
 }
 
 /// The files captured by a checkpoint (for the checkpoint detail expander).
 #[tauri::command]
-fn checkpoint_files(id: String) -> Result<Vec<String>, String> {
-    let cfg = load_config(Overrides {
-        workspace: std::env::current_dir().ok(),
-        ..Default::default()
+fn checkpoint_files(
+    id: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        CheckpointStore::new(workspace)
+            .get(&id)
+            .map(|meta| meta.files)
+            .ok_or_else(|| format!("no checkpoint with id {id}"))
     })
-    .map_err(|e| e.to_string())?;
-    CheckpointStore::new(&cfg.workspace)
-        .get(&id)
-        .map(|m| m.files)
-        .ok_or_else(|| format!("no checkpoint with id {id}"))
 }
 
 #[tauri::command]
-fn create_checkpoint(label: String) -> Result<CheckpointView, String> {
-    let cfg = load_config(Overrides {
-        workspace: std::env::current_dir().ok(),
-        ..Default::default()
-    })
-    .map_err(|e| e.to_string())?;
+fn create_checkpoint(
+    label: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CheckpointView, String> {
     let label = if label.trim().is_empty() {
         "manual checkpoint"
     } else {
         label.trim()
     };
-    CheckpointStore::new(&cfg.workspace)
-        .create(label)
-        .map(checkpoint_view)
-        .map_err(|e| e.to_string())
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        CheckpointStore::new(workspace)
+            .create(label)
+            .map(checkpoint_view)
+            .map_err(|error| error.to_string())
+    })
 }
 
 #[tauri::command]
-fn restore_checkpoint(id: String) -> Result<RestoreView, String> {
-    let cfg = load_config(Overrides {
-        workspace: std::env::current_dir().ok(),
-        ..Default::default()
+fn restore_checkpoint(
+    id: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<RestoreView, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        CheckpointStore::new(workspace)
+            .restore(&id)
+            .map(restore_view)
+            .map_err(|error| error.to_string())
     })
-    .map_err(|e| e.to_string())?;
-    CheckpointStore::new(&cfg.workspace)
-        .restore(&id)
-        .map(restore_view)
-        .map_err(|e| e.to_string())
 }
 
 fn checkpoint_view(meta: CheckpointMeta) -> CheckpointView {
@@ -1793,12 +2057,11 @@ pub struct BranchInfo {
     current: bool,
 }
 
-/// Run a git command in the workspace; Ok(stdout) or Err(stderr).
-fn run_git(args: &[&str]) -> Result<String, String> {
-    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
+/// Run a git command in the already-fenced workspace; Ok(stdout) or Err(stderr).
+fn run_git(workspace: &Path, args: &[&str]) -> Result<String, String> {
     let out = ProcessCommand::new("git")
         .args(args)
-        .current_dir(&ws)
+        .current_dir(workspace)
         .output()
         .map_err(|e| format!("failed to run git: {e}"))?;
     if !out.status.success() {
@@ -1813,38 +2076,55 @@ fn run_git(args: &[&str]) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn git_branches() -> Result<Vec<BranchInfo>, String> {
-    let current = run_git(&["rev-parse", "--abbrev-ref", "HEAD"])?
-        .trim()
-        .to_string();
-    let listing = run_git(&["branch", "--format=%(refname:short)"])?;
-    Ok(listing
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .map(|name| BranchInfo {
-            current: name == current,
-            name: name.to_string(),
-        })
-        .collect())
+fn git_branches(
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<BranchInfo>, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        let current = run_git(workspace, &["rev-parse", "--abbrev-ref", "HEAD"])?
+            .trim()
+            .to_string();
+        let listing = run_git(workspace, &["branch", "--format=%(refname:short)"])?;
+        Ok(listing
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .map(|name| BranchInfo {
+                current: name == current,
+                name: name.to_string(),
+            })
+            .collect())
+    })
 }
 
 #[tauri::command]
-fn git_create_branch(name: String) -> Result<(), String> {
+fn git_create_branch(
+    name: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("branch name is required".into());
     }
-    run_git(&["checkout", "-b", name]).map(|_| ())
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        run_git(workspace, &["checkout", "-b", name]).map(|_| ())
+    })
 }
 
 #[tauri::command]
-fn git_switch_branch(name: String) -> Result<(), String> {
+fn git_switch_branch(
+    name: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("branch name is required".into());
     }
-    run_git(&["checkout", name]).map(|_| ())
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        run_git(workspace, &["checkout", name]).map(|_| ())
+    })
 }
 
 #[derive(Serialize)]
@@ -1856,35 +2136,50 @@ pub struct CommitInfo {
 
 /// Recent commits on a branch (for the branch detail expander).
 #[tauri::command]
-fn git_log(name: String, limit: u32) -> Result<Vec<CommitInfo>, String> {
+fn git_log(
+    name: String,
+    limit: u32,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<CommitInfo>, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("branch name is required".into());
     }
     let n = format!("-{}", limit.clamp(1, 50));
-    // %h <US> subject <US> relative-date  (0x1f field separator).
-    let out = run_git(&["log", &n, "--pretty=format:%h\u{1f}%s\u{1f}%cr", name])?;
-    Ok(out
-        .lines()
-        .filter_map(|line| {
-            let p: Vec<&str> = line.split('\u{1f}').collect();
-            (p.len() == 3).then(|| CommitInfo {
-                hash: p[0].to_string(),
-                subject: p[1].to_string(),
-                when: p[2].to_string(),
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        // %h <US> subject <US> relative-date  (0x1f field separator).
+        let out = run_git(
+            workspace,
+            &["log", &n, "--pretty=format:%h\u{1f}%s\u{1f}%cr", name],
+        )?;
+        Ok(out
+            .lines()
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split('\u{1f}').collect();
+                (parts.len() == 3).then(|| CommitInfo {
+                    hash: parts[0].to_string(),
+                    subject: parts[1].to_string(),
+                    when: parts[2].to_string(),
+                })
             })
-        })
-        .collect())
+            .collect())
+    })
 }
 
 /// The working-tree diff vs HEAD (staged + unstaged) for the diff panel.
 #[tauri::command]
-fn git_diff() -> Result<String, String> {
-    let out = run_git(&["diff", "HEAD"])?;
-    Ok(if out.trim().is_empty() {
-        "(no changes in the working tree)".into()
-    } else {
-        out
+fn git_diff(
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        let out = run_git(workspace, &["diff", "HEAD"])?;
+        Ok(if out.trim().is_empty() {
+            "(no changes in the working tree)".into()
+        } else {
+            out
+        })
     })
 }
 
@@ -1899,78 +2194,89 @@ pub struct FileChange {
 /// The working-tree change set vs HEAD: one entry per changed file with +/-
 /// line counts (like the reference's working-tree panel).
 #[tauri::command]
-fn git_changes() -> Result<Vec<FileChange>, String> {
-    use std::collections::BTreeMap;
-    let mut map: BTreeMap<String, FileChange> = BTreeMap::new();
-    // Tracked changes vs HEAD: added \t removed \t path.
-    if let Ok(numstat) = run_git(&["diff", "HEAD", "--numstat"]) {
-        for line in numstat.lines() {
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() == 3 {
-                let path = parts[2].trim().to_string();
-                map.insert(
-                    path.clone(),
-                    FileChange {
-                        added: parts[0].parse().unwrap_or(-1),
-                        removed: parts[1].parse().unwrap_or(-1),
-                        kind: "modified".into(),
+fn git_changes(
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<FileChange>, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        use std::collections::BTreeMap;
+
+        let mut map: BTreeMap<String, FileChange> = BTreeMap::new();
+        // Tracked changes vs HEAD: added \t removed \t path.
+        if let Ok(numstat) = run_git(workspace, &["diff", "HEAD", "--numstat"]) {
+            for line in numstat.lines() {
+                let parts: Vec<&str> = line.split('\t').collect();
+                if parts.len() == 3 {
+                    let path = parts[2].trim().to_string();
+                    map.insert(
+                        path.clone(),
+                        FileChange {
+                            added: parts[0].parse().unwrap_or(-1),
+                            removed: parts[1].parse().unwrap_or(-1),
+                            kind: "modified".into(),
+                            path,
+                        },
+                    );
+                }
+            }
+        }
+        // Status pass: refine kind + add untracked files.
+        if let Ok(status) = run_git(workspace, &["status", "--porcelain"]) {
+            for line in status.lines() {
+                if line.len() < 4 {
+                    continue;
+                }
+                let code = &line[..2];
+                let path = line[3..].trim().trim_matches('"').to_string();
+                let kind = if code.contains('?') {
+                    "untracked"
+                } else if code.contains('A') {
+                    "added"
+                } else if code.contains('D') {
+                    "deleted"
+                } else if code.contains('R') {
+                    "renamed"
+                } else {
+                    "modified"
+                };
+                map.entry(path.clone())
+                    .and_modify(|file| file.kind = kind.to_string())
+                    .or_insert(FileChange {
                         path,
-                    },
-                );
+                        added: -1,
+                        removed: -1,
+                        kind: kind.to_string(),
+                    });
             }
         }
-    }
-    // Status pass: refine kind + add untracked files.
-    if let Ok(st) = run_git(&["status", "--porcelain"]) {
-        for line in st.lines() {
-            if line.len() < 4 {
-                continue;
-            }
-            let code = &line[..2];
-            let path = line[3..].trim().trim_matches('"').to_string();
-            let kind = if code.contains('?') {
-                "untracked"
-            } else if code.contains('A') {
-                "added"
-            } else if code.contains('D') {
-                "deleted"
-            } else if code.contains('R') {
-                "renamed"
-            } else {
-                "modified"
-            };
-            map.entry(path.clone())
-                .and_modify(|f| f.kind = kind.to_string())
-                .or_insert(FileChange {
-                    path,
-                    added: -1,
-                    removed: -1,
-                    kind: kind.to_string(),
-                });
-        }
-    }
-    Ok(map.into_values().collect())
+        Ok(map.into_values().collect())
+    })
 }
 
 /// The diff for a single file (vs HEAD). Untracked files show their content as
 /// added lines.
 #[tauri::command]
-fn git_file_diff(path: String) -> Result<String, String> {
-    let out = run_git(&["diff", "HEAD", "--", &path]).unwrap_or_default();
-    if !out.trim().is_empty() {
-        return Ok(out);
-    }
-    // Untracked / no tracked diff: show the file content as added lines.
-    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
-    match std::fs::read_to_string(ws.join(&path)) {
-        Ok(c) => Ok(c
-            .lines()
-            .take(500)
-            .map(|l| format!("+{l}"))
-            .collect::<Vec<_>>()
-            .join("\n")),
-        Err(_) => Ok("(no textual diff — binary or unreadable)".into()),
-    }
+fn git_file_diff(
+    path: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        let out = run_git(workspace, &["diff", "HEAD", "--", &path]).unwrap_or_default();
+        if !out.trim().is_empty() {
+            return Ok(out);
+        }
+        // Untracked / no tracked diff: show the file content as added lines.
+        match std::fs::read_to_string(workspace.join(&path)) {
+            Ok(content) => Ok(content
+                .lines()
+                .take(500)
+                .map(|line| format!("+{line}"))
+                .collect::<Vec<_>>()
+                .join("\n")),
+            Err(_) => Ok("(no textual diff — binary or unreadable)".into()),
+        }
+    })
 }
 
 #[derive(Serialize)]
@@ -1983,55 +2289,72 @@ pub struct DirEntry {
 /// List a directory under the workspace (`rel` = "" for the root). Skips heavy
 /// noise dirs; dirs first, then files, alphabetical.
 #[tauri::command]
-fn list_dir(rel: String) -> Result<Vec<DirEntry>, String> {
-    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
-    let wsc = ws.canonicalize().unwrap_or(ws.clone());
-    let target = if rel.trim().is_empty() {
-        wsc.clone()
-    } else {
-        wsc.join(&rel)
-    };
-    let target = target.canonicalize().map_err(|e| e.to_string())?;
-    if !target.starts_with(&wsc) {
-        return Err("path is outside the workspace".into());
-    }
-    const SKIP: &[&str] = &[".git", "node_modules", "target", ".nanocodex"];
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(&target).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if SKIP.contains(&name.as_str()) {
-            continue;
+fn list_dir(
+    rel: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<DirEntry>, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        let wsc = workspace
+            .canonicalize()
+            .unwrap_or_else(|_| workspace.to_path_buf());
+        let target = if rel.trim().is_empty() {
+            wsc.clone()
+        } else {
+            wsc.join(&rel)
+        };
+        let target = target.canonicalize().map_err(|error| error.to_string())?;
+        if !target.starts_with(&wsc) {
+            return Err("path is outside the workspace".into());
         }
-        let p = entry.path();
-        let is_dir = p.is_dir();
-        let path = p
-            .strip_prefix(&wsc)
-            .unwrap_or(&p)
-            .to_string_lossy()
-            .replace('\\', "/");
-        out.push(DirEntry { name, path, is_dir });
-    }
-    out.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
-    Ok(out)
+        const SKIP: &[&str] = &[".git", "node_modules", "target", ".nanocodex"];
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(&target).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            let path = entry.path();
+            let is_dir = path.is_dir();
+            let path = path
+                .strip_prefix(&wsc)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push(DirEntry { name, path, is_dir });
+        }
+        out.sort_by_key(|entry| (!entry.is_dir, entry.name.to_lowercase()));
+        Ok(out)
+    })
 }
 
 /// Read a workspace file's text for the file-preview panel. Mirrors `list_dir`'s
 /// containment; capped; refuses non-UTF-8 (binary) files.
 #[tauri::command]
-fn read_workspace_file(rel: String) -> Result<String, String> {
-    let ws = std::env::current_dir().map_err(|e| e.to_string())?;
-    let wsc = ws.canonicalize().unwrap_or(ws);
-    let target = wsc.join(&rel).canonicalize().map_err(|e| e.to_string())?;
-    if !target.starts_with(&wsc) {
-        return Err("path is outside the workspace".into());
-    }
-    let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
-    if meta.len() > 400_000 {
-        return Err(format!("文件太大，无法预览（{} KB）", meta.len() / 1024));
-    }
-    let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
-    String::from_utf8(bytes).map_err(|_| "二进制文件，无法预览".to_string())
+fn read_workspace_file(
+    rel: String,
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        let wsc = workspace
+            .canonicalize()
+            .unwrap_or_else(|_| workspace.to_path_buf());
+        let target = wsc
+            .join(&rel)
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if !target.starts_with(&wsc) {
+            return Err("path is outside the workspace".into());
+        }
+        let meta = std::fs::metadata(&target).map_err(|error| error.to_string())?;
+        if meta.len() > 400_000 {
+            return Err(format!("文件太大，无法预览（{} KB）", meta.len() / 1024));
+        }
+        let bytes = std::fs::read(&target).map_err(|error| error.to_string())?;
+        String::from_utf8(bytes).map_err(|_| "二进制文件，无法预览".to_string())
+    })
 }
 
 /// Open an http(s) URL in the default browser (e.g. the /feedback command).
@@ -2197,9 +2520,9 @@ fn memory_store() -> MemoryStore {
     MemoryStore::new(ws.join(".ncx").join("memory"))
 }
 
-/// List accumulated learnings (newest first).
-fn memory_list() -> Result<Vec<MemoryNote>, String> {
-    let mut entries = memory_store().entries();
+/// List accumulated learnings (newest first) from an explicit workspace.
+fn memory_list_at(workspace: &Path) -> Result<Vec<MemoryNote>, String> {
+    let mut entries = MemoryStore::new(workspace.join(".ncx").join("memory")).entries();
     entries.sort_by_key(|entry| Reverse(entry.ts));
     Ok(entries
         .into_iter()
@@ -2233,25 +2556,27 @@ fn memory_add(note: String, tags: Vec<String>) -> Result<bool, String> {
 }
 
 /// Path to the project memory markdown file (`.ncx/memory/LEARNINGS.md`).
-fn memory_file_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join(".ncx")
-        .join("memory")
-        .join("LEARNINGS.md")
+fn memory_file_path(workspace: &Path) -> PathBuf {
+    workspace.join(".ncx").join("memory").join("LEARNINGS.md")
 }
 
 /// Open the project memory file in the OS editor (creating it if missing).
 #[tauri::command]
-fn open_memory_file() -> Result<(), String> {
-    let path = memory_file_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    if !path.exists() {
-        std::fs::write(&path, "# Project memory (nanocodex)\n\n").map_err(|e| e.to_string())?;
-    }
-    open_file(&path)
+fn open_memory_file(
+    expected_workspace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    with_workspace_snapshot(&state, &expected_workspace, |workspace| {
+        let path = memory_file_path(workspace);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        if !path.exists() {
+            std::fs::write(&path, "# Project memory (nanocodex)\n\n")
+                .map_err(|error| error.to_string())?;
+        }
+        open_file(&path)
+    })
 }
 
 /// Open a saved session's raw JSONL log in the OS editor.
@@ -3694,10 +4019,20 @@ pub fn run() {
             provider_activation: ProviderActivationGate::default(),
             openrouter_models: Mutex::new(Vec::new()),
             yunmo_models: Mutex::new(Vec::new()),
+            workspace_gate: Mutex::new(()),
             memory_merge: Arc::new(memory_merge_job::MemoryMergeCoordinator::default()),
             forge_job: Arc::new(forge_job::ForgeJobCoordinator::default()),
         })
         .setup(move |app| {
+            // Restore the saved workspace only after AppState exists, so startup
+            // uses the same gated transition as every later workspace change.
+            if let Some(saved_workspace) = bridge::load_last_workspace() {
+                let state = app.state::<AppState>();
+                if let Err(error) = transition_workspace_for_state(&saved_workspace, &state) {
+                    eprintln!("restore GUI workspace: {error}");
+                }
+            }
+            let startup_workspace = std::env::current_dir().unwrap_or_default();
             if let (Some(window), Some(icon)) = (
                 app.get_webview_window("main"),
                 app.default_window_icon().cloned(),
@@ -3717,6 +4052,7 @@ pub fn run() {
                 deferred_prompts_for_worker,
                 worker_lifecycle_for_setup,
                 session_grants,
+                startup_workspace,
             );
             Ok(())
         })
@@ -3758,14 +4094,12 @@ pub fn run() {
     app.run(|handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
             let state = handle.state::<AppState>();
-            state
-                .worker_lifecycle
-                .shutdown_and_join(
-                    &state.tx,
-                    &state.cancels,
-                    &state.pending,
-                    &state.questions,
-                );
+            state.worker_lifecycle.shutdown_and_join(
+                &state.tx,
+                &state.cancels,
+                &state.pending,
+                &state.questions,
+            );
         }
     });
 }
@@ -3783,6 +4117,27 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn workspace_snapshot_match_is_fail_closed() {
+        let root = unique_test_dir("memory-merge-workspace");
+        let other = unique_test_dir("memory-merge-other");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let expected = root.to_string_lossy().to_string();
+        assert!(workspace_matches(&expected, &root));
+        assert!(!workspace_matches(&other.to_string_lossy(), &root));
+        assert!(!memory_merge_cancellation_required_for_workspace_transition(&root, &root));
+        assert!(memory_merge_cancellation_required_for_workspace_transition(
+            &other, &root
+        ));
+        assert!(!workspace_matches("", &root));
+        assert!(require_workspace_match(&expected, &root).is_ok());
+        let error = require_workspace_match(&other.to_string_lossy(), &root).unwrap_err();
+        assert!(error.contains("工作区已切换"));
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(other);
     }
 
     #[test]
@@ -3827,7 +4182,10 @@ mod tests {
                 ("model".into(), "must-not-be-written".into()),
                 (key.into(), value.into()),
             ]);
-            assert!(persist_validated_settings(&updates, &path).is_err(), "{key}={value} should fail");
+            assert!(
+                persist_validated_settings(&updates, &path).is_err(),
+                "{key}={value} should fail"
+            );
             assert_eq!(fs::read(&path).unwrap(), original);
         }
 
@@ -4625,10 +4983,44 @@ mod tests {
     }
 
     #[test]
+    fn workspace_switch_invalidates_sidebar_and_profile_requests() {
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let app = include_str!("../../src/App.svelte");
+        assert!(lifecycle.contains("workspaceChanged = (): void"));
+        assert!(lifecycle.contains("this.invalidateRefresh();"));
+        assert!(lifecycle.contains("this.sessions = []"));
+        assert!(lifecycle.contains("this.usage.replaceProtocolUsage([])"));
+        assert!(lifecycle.contains("reset = this.workspaceChanged"));
+        assert!(lifecycle.contains("const threadId = this.thread.currentId"));
+        assert!(lifecycle.contains("const selection = ++this.profileSelectionGeneration"));
+        assert!(
+            lifecycle.contains("private profileSelectionQueue: Promise<void> = Promise.resolve()")
+        );
+        assert!(lifecycle.contains("await this.enqueueProfileSelection(async () =>"));
+        assert!(lifecycle.contains("this.profileSelectionQueue.then(task, task)"));
+        assert!(lifecycle.contains("params: { threadId, harnessProfile: profile }"));
+        assert!(lifecycle.contains("isCurrentProfileSelection(threadId, selection)"));
+        assert!(
+            lifecycle
+                .matches("if (!this.isCurrentProfileSelection(threadId, selection)) return;")
+                .count()
+                >= 3
+        );
+        assert!(lifecycle.contains("params: { threadId }"));
+        assert!(lifecycle.contains("selection === this.profileSelectionGeneration"));
+        assert!(
+            app.contains("panels.workspaceChanged();\n      threadLifecycle.workspaceChanged();")
+        );
+    }
+
+    #[test]
     fn frontend_rejects_events_from_inactive_sessions() {
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         assert!(thread.contains("accepts(sessionId: string)"));
         assert!(thread.contains("if (!this.accepts(event.session_id)) return"));
+        assert!(thread.contains("pendingReadySession"));
+        assert!(thread.contains("expectReady(sessionId: string)"));
+        assert!(thread.contains("event.session_id !== this.pendingReadySession"));
         assert!(thread.contains("session_id: string; text: string"));
     }
 
@@ -4677,7 +5069,7 @@ mod tests {
             .split_once("Command::SetModel(model) =>")
             .unwrap()
             .1
-            .split_once("Command::SetPermissionMode(mode) =>")
+            .split_once("Command::SetPermissionMode {")
             .unwrap()
             .0;
         assert!(branch.contains("emit_ready(&app, &workspace, &session_id)"));
@@ -4868,6 +5260,178 @@ mod tests {
     }
 
     #[test]
+    fn workspace_panel_operations_fence_stale_completion_and_busy_state() {
+        for source in [
+            include_str!("../../src/lib/git-workspace-controller.svelte.ts"),
+            include_str!("../../src/lib/checkpoint-controller.svelte.ts"),
+            include_str!("../../src/lib/memory-controller.svelte.ts"),
+        ] {
+            // A workspace reset must invalidate pending operations, while
+            // overlapping operations in the same workspace keep the spinner
+            // visible until the last live operation settles.
+            assert!(source.contains("activeBusyOperations = new Set<number>()"));
+            assert!(source.contains("this.activeBusyOperations.clear()"));
+            assert!(source.contains("if (!this.activeBusyOperations.delete(operation)) return;"));
+            assert!(source.contains("this.busy = this.activeBusyOperations.size > 0"));
+        }
+    }
+
+    #[test]
+    fn workspace_panel_requests_carry_and_enforce_a_workspace_snapshot() {
+        let backend = include_str!("lib.rs");
+        assert!(backend.contains("fn with_workspace_snapshot<T>("));
+        assert!(backend.contains("require_workspace_match(expected_workspace, &current)?;"));
+        assert!(backend.contains("fn run_git(workspace: &Path, args: &[&str])"));
+        for command in [
+            "fn get_checkpoints(",
+            "fn checkpoint_files(",
+            "fn create_checkpoint(",
+            "fn restore_checkpoint(",
+            "fn git_branches(",
+            "fn git_create_branch(",
+            "fn git_switch_branch(",
+            "fn git_log(",
+            "fn git_diff(",
+            "fn git_changes(",
+            "fn git_file_diff(",
+            "fn list_dir(",
+            "fn read_workspace_file(",
+            "fn open_memory_file(",
+        ] {
+            let start = backend.find(command).unwrap();
+            let signature = &backend[start..start + 240.min(backend.len() - start)];
+            assert!(
+                signature.contains("expected_workspace: String"),
+                "{command} must reject a stale workspace request"
+            );
+        }
+
+        let git = include_str!("../../src/lib/git-workspace-controller.svelte.ts");
+        for command in [
+            "git_branches",
+            "git_create_branch",
+            "git_switch_branch",
+            "git_log",
+            "git_changes",
+            "git_file_diff",
+        ] {
+            assert!(
+                git.contains(&format!("\"{command}\", {{")) && git.contains("expectedWorkspace"),
+                "Git request {command} must carry the UI workspace snapshot"
+            );
+        }
+        let checkpoints = include_str!("../../src/lib/checkpoint-controller.svelte.ts");
+        for command in [
+            "get_checkpoints",
+            "checkpoint_files",
+            "create_checkpoint",
+            "restore_checkpoint",
+        ] {
+            assert!(
+                checkpoints.contains(&format!("\"{command}\", {{"))
+                    && checkpoints.contains("expectedWorkspace"),
+                "checkpoint request {command} must carry the UI workspace snapshot"
+            );
+        }
+        let files = include_str!("../../src/lib/file-browser-controller.svelte.ts");
+        assert!(files.contains("\"list_dir\", { rel: relativePath, expectedWorkspace }"));
+        assert!(files.contains("\"read_workspace_file\", { rel: entry.path, expectedWorkspace }"));
+        let memory = include_str!("../../src/lib/memory-controller.svelte.ts");
+        assert!(memory.contains("method: \"memoryList\",\n      params: { workspace },"));
+        assert!(memory.contains(
+            "method: \"memoryMergeStatusRead\",\n        params: { workspace, generation },"
+        ));
+        assert!(memory.contains(
+            "method: \"memoryMergeCancel\",\n        params: { workspace, generation },"
+        ));
+        assert!(memory.contains("await this.pollMerge(status.generation, operation, workspace);"));
+        assert!(memory.contains("\"open_memory_file\", { expectedWorkspace }"));
+        let memory_list = backend
+            .split_once("fn list_memory(&self, expected_workspace: String)")
+            .unwrap()
+            .1
+            .split_once("fn add_memory(")
+            .unwrap()
+            .0;
+        assert!(memory_list.contains("with_workspace_snapshot(self.state, &expected_workspace"));
+        assert!(memory_list.contains("memory_list_at(workspace)"));
+        assert!(backend.contains("fn memory_merge_status(\n        &self,\n        expected_workspace: String,\n        generation: Option<u64>,"));
+        assert!(backend.contains(".status_for_workspace(workspace, generation)?"));
+        assert!(backend.contains("fn cancel_memory_merge(\n        &self,\n        expected_workspace: String,\n        generation: u64,"));
+        assert!(backend.contains(".cancel_for_workspace(workspace, generation)?"));
+    }
+
+    #[test]
+    fn workspace_diff_panel_keeps_rows_intact_and_uses_the_panel_scroll() {
+        let css = include_str!("../../src/app.css");
+        let file_row = css
+            .split_once(".wt-file {")
+            .unwrap()
+            .1
+            .split_once('}')
+            .unwrap()
+            .0;
+        assert!(file_row.contains("flex: 0 0 auto;"));
+        assert!(css
+            .contains(".rightpanel .wt-list { max-height: none; overflow: visible; margin: 0; }"));
+        assert!(css.contains(
+            ".rightpanel .wt-diff { max-height: none; overflow-x: auto; overflow-y: hidden; }"
+        ));
+    }
+
+    #[test]
+    fn runtime_start_stop_cannot_cross_dispose_generations() {
+        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
+        let app = include_str!("../../src/App.svelte");
+        assert!(
+            runtime.contains("if (!this.isActive(generation)) return;\n      await this.stop();")
+        );
+        assert!(runtime.contains("if (!this.isActive(generation)) return;"));
+        assert!(
+            runtime.contains("if (this.isActive(generation)) this.thread.handle(event.payload)")
+        );
+        assert!(runtime.contains("Promise.allSettled(listeners.map"));
+        assert!(app.contains("})().catch((error) =>"));
+        assert!(app.contains("if (disposed) return;"));
+    }
+
+    #[test]
+    fn forge_observer_disposes_pollers_when_the_app_unmounts() {
+        let forge = include_str!("../../src/lib/forge-controller.svelte.ts");
+        let app = include_str!("../../src/App.svelte");
+        assert!(forge.contains("dispose = (): void"));
+        assert!(forge.contains("this.pollGeneration += 1"));
+        assert!(forge.contains("isCurrentPoll(lifecycle, poll)"));
+        assert!(forge.contains("const poll = ++this.pollGeneration;"));
+        assert!(forge.contains("void this.poll(job.generation, lifecycle, poll, workspace);"));
+        assert!(forge.contains("if (!this.isActive(lifecycle, operation)) return;"));
+        assert!(forge.contains("private readonly workspace: () => string"));
+        assert!(forge.contains("params: { workspace, generation },"));
+        assert!(forge.contains(
+            "method: \"forgeJobStatusRead\",\n          params: { workspace, generation },"
+        ));
+        assert!(app.contains("new ForgeController("));
+        assert!(app.contains("() => runtime.workspace"));
+        assert!(app.contains("forgeController.dispose();"));
+    }
+
+    #[test]
+    fn forge_workspace_switch_clears_the_old_workspace_projection() {
+        let forge = include_str!("../../src/lib/forge-controller.svelte.ts");
+        let app = include_str!("../../src/App.svelte");
+        assert!(forge.contains("workspaceChanged = (): void"));
+        assert!(forge.contains("this.pollGeneration += 1"));
+        assert!(forge.contains("this.activeLoadingOperations.clear()"));
+        assert!(forge.contains("this.loading = false"));
+        assert!(forge.contains("this.runtime = null"));
+        assert!(forge.contains("this.job = null"));
+        assert!(forge.contains("if (this.workspace()) void this.refresh();"));
+        assert!(forge.contains("const workspace = this.workspace();"));
+        assert!(forge.contains("params: { workspace, generation },"));
+        assert!(app.contains("forgeController.workspaceChanged();"));
+    }
+
+    #[test]
     fn composer_submits_and_surfaces_orchestrator_execution_mode() {
         let composer = include_str!("../../src/lib/composer-controller.svelte.ts");
         let view = include_str!("../../src/components/SettingsModal.svelte");
@@ -4931,6 +5495,10 @@ mod tests {
     #[test]
     fn workspace_switch_creates_a_durable_protocol_thread_before_binding_it() {
         let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
+        let composer = include_str!("../../src/lib/composer-controller.svelte.ts");
+        let composer_view = include_str!("../../src/components/Composer.svelte");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        let app = include_str!("../../src/App.svelte");
         let backend = include_str!("lib.rs");
         let switch_backend = backend
             .split_once("fn set_workspace_for_state")
@@ -4942,12 +5510,176 @@ mod tests {
 
         assert!(runtime.contains("method: \"workspaceSet\""));
         assert!(runtime.contains("method: \"threadCreateActivate\""));
+        assert!(runtime.contains("private workspacePickerOpen = false;"));
+        assert!(runtime.contains("if (this.thread.switching || this.workspacePickerOpen) return;"));
+        assert!(runtime.contains("const pickerSessionId = this.thread.currentId;"));
+        assert!(runtime.contains("this.thread.switching = true;"));
+        assert!(runtime.contains("workspace: string;"));
+        assert!(runtime.contains("this.workspace = status.workspace;"));
+        assert!(runtime.contains("if (this.thread.currentId !== pickerSessionId) return;"));
+        assert!(
+            runtime
+                .find("const pickerSessionId = this.thread.currentId")
+                .unwrap()
+                < runtime.find("const directory = await open").unwrap()
+        );
+        assert!(
+            runtime.find("const directory = await open").unwrap()
+                < runtime
+                    .find("if (this.thread.currentId !== pickerSessionId) return;")
+                    .unwrap()
+        );
+        assert!(runtime.contains("this.workspace = workspace;\n        this.workspaceChanged();"));
+        assert!(runtime.contains("if (workspaceChanged && !workspaceRestored)"));
+        assert!(runtime.contains("let workspaceRestored = false;"));
+        assert!(runtime.contains("if (workspaceRestored) void this.lifecycle.refresh();"));
+        assert!(runtime.contains("const workspaceDidChange = this.workspace !== event.workspace;"));
+        assert!(runtime.contains("if (workspaceDidChange) {\n      this.workspaceChanged();\n      void this.lifecycle.refresh();\n    }"));
         assert!(
             runtime.find("method: \"threadCreateActivate\"").unwrap()
                 < runtime.find("this.thread.currentId = threadId").unwrap()
         );
+        assert_eq!(
+            composer
+                .matches("if (this.thread.switching) return;")
+                .count(),
+            3,
+            "send, queued dispatch, and direct dispatch must all be fenced"
+        );
+        assert!(composer_view.contains("disabled={switching}"));
+        assert!(composer_view.contains("disabled={switching || needsWorkspace"));
+        let permission_picker = composer_view
+            .split_once("<div class=\"approval-wrap\">")
+            .unwrap()
+            .1
+            .split_once("{#if goalView}")
+            .unwrap()
+            .0;
+        let permission_trigger = permission_picker
+            .split_once("<button class=\"approval-pill\"")
+            .unwrap()
+            .1
+            .split_once("title=\"权限模式\"")
+            .unwrap()
+            .0;
+        assert!(
+            permission_trigger.contains("disabled={switching}"),
+            "permission-mode entry must be unavailable while a Thread navigation is in flight"
+        );
+        let permission_option = permission_picker
+            .split_once("<button class=\"approval-opt\"")
+            .unwrap()
+            .1
+            .split_once("<span class=\"opt-check\">")
+            .unwrap()
+            .0;
+        assert!(
+            permission_option.contains("disabled={switching}"),
+            "an already-open permission-mode menu must not submit a stale Thread request"
+        );
+        assert!(app.contains("switching={thread.switching}"));
+        let loaded_handler = thread
+            .split_once("private handleLoaded")
+            .unwrap()
+            .1
+            .split_once("private handleError")
+            .unwrap()
+            .0;
+        let error_handler = thread
+            .split_once("private handleError")
+            .unwrap()
+            .1
+            .split_once("private settleReasoning")
+            .unwrap()
+            .0;
+        assert!(!loaded_handler.contains("this.switching = false;"));
+        assert!(!error_handler.contains("this.switching = false;"));
         assert!(!switch_backend.contains("Command::Reload"));
         assert!(backend.contains("recv_timeout(Duration::from_secs(30))"));
+    }
+
+    #[test]
+    fn failed_workspace_navigation_keeps_ready_fences_and_rolls_back_cwd() {
+        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        let app = include_str!("../../src/App.svelte");
+
+        // A chooser failure seals the new-session fence before it awaits the
+        // CWD rollback. No stale Ready can bind while currentId is empty.
+        let chooser_failure = runtime
+            .split_once("} catch (error) {\n        // Stop every delayed Ready")
+            .unwrap()
+            .1
+            .split_once("    } catch (error) {\n      this.thread.messages.push")
+            .unwrap()
+            .0;
+        assert!(chooser_failure.contains("this.thread.sealReadyFence();"));
+        assert!(chooser_failure.contains("await this.restoreWorkspace(previousWorkspace);"));
+        assert!(chooser_failure.contains("if (previousId) this.thread.expectReady(previousId);"));
+        assert!(
+            chooser_failure
+                .find("this.thread.sealReadyFence();")
+                .unwrap()
+                < chooser_failure
+                    .find("await this.restoreWorkspace(previousWorkspace);")
+                    .unwrap()
+        );
+        assert!(
+            chooser_failure
+                .find("await this.restoreWorkspace(previousWorkspace);")
+                .unwrap()
+                < chooser_failure
+                    .find("if (previousId) this.thread.expectReady(previousId);")
+                    .unwrap()
+        );
+        assert!(!runtime.contains("clearExpectedReady"));
+
+        // Resume/Fork transition process CWD in the adapter. If either later
+        // await fails, both must restore the durable previous workspace before
+        // rebinding its thread; a failed rollback deliberately leaves an empty,
+        // sealed UI instead.
+        for operation in ["resume = async", "fork = async"] {
+            let body = lifecycle
+                .split_once(operation)
+                .unwrap()
+                .1
+                .split_once("  openLog = async")
+                .unwrap()
+                .0;
+            assert!(body.contains("const previousWorkspace = this.workspace();"));
+            assert!(body.contains("const navigation = this.beginNavigation();"));
+            assert!(body.contains("await this.restoreWorkspaceAfterNavigationFailure("));
+            assert!(body.contains("if (previousId) this.thread.expectReady(previousId);"));
+            assert!(body.contains("this.leaveNavigationUnbound("));
+            assert!(
+                body.find("await this.restoreWorkspaceAfterNavigationFailure(")
+                    .unwrap()
+                    < body
+                        .find("if (previousId) this.thread.expectReady(previousId);")
+                        .unwrap()
+            );
+        }
+        assert!(lifecycle.contains("this.thread.sealReadyFence();"));
+        assert!(lifecycle.contains("this.workspaceRecovery.restore(previousWorkspace)"));
+        assert!(lifecycle.contains("this.workspaceRecovery.reconcile()"));
+        assert!(app.contains("restore: (path) => runtime.restoreWorkspace(path)"));
+        assert!(app.contains("reconcile: () => runtime.reconcileWorkspace()"));
+
+        // The pending expected id is only consumed by an accepted matching
+        // Ready; sealing blocks all Ready events in a safe empty state.
+        let ready_handler = thread
+            .split_once("private handleReady")
+            .unwrap()
+            .1
+            .split_once("private handleAssistantDelta")
+            .unwrap()
+            .0;
+        assert!(thread.contains("private readyFenceClosed = false;"));
+        assert!(thread.contains("sealReadyFence(): void"));
+        assert!(ready_handler.contains("if (this.readyFenceClosed) return;"));
+        assert!(ready_handler.contains("this.consumeExpectedReady(event.session_id);"));
+        assert_eq!(thread.matches("consumeExpectedReady(").count(), 2);
     }
 
     #[test]
@@ -5001,6 +5733,8 @@ mod tests {
         }
         assert!(settings.contains("sandbox_mode: settings.sandbox_mode"));
         assert!(settings.contains("approval_policy: settings.approval_policy"));
+        assert!(model.contains("private readonly currentThreadId: () => string"));
+        assert!(model.contains("params: { threadId, mode: id }"));
     }
 
     #[test]
@@ -5045,6 +5779,7 @@ mod tests {
                 "missing app-server memory request for {method}"
             );
         }
+        assert!(memory.contains("params: { workspace },"));
         for legacy in [
             "invoke<MemoryNote[]>(\"memory_list\"",
             "invoke<number>(\"memory_consolidate\"",
@@ -5122,7 +5857,7 @@ mod tests {
         assert!(resume.contains("this.thread.busy = this.thread.runningSessions.has(id)"));
         assert!(resume.contains("method: \"threadActivate\""));
         let backend_resume = bridge
-            .split_once("Command::Resume(id) =>")
+            .split_once("Command::Resume {")
             .unwrap()
             .1
             .split_once("Command::Fork")
@@ -5131,6 +5866,78 @@ mod tests {
         assert!(!backend_resume.contains("build_agent("));
         assert!(backend_resume.contains("UiEvent::Loaded"));
         assert!(backend_resume.contains("emit_ready(&app, &workspace, &session_id)"));
+        assert!(backend_resume.contains("workspace = command_workspace;"));
+        assert!(backend_resume.contains("completion.send(Ok(()))"));
+    }
+
+    #[test]
+    fn worker_navigation_uses_durable_workspaces_and_acknowledges_failures() {
+        let bridge = include_str!("bridge.rs");
+        let backend = include_str!("lib.rs");
+
+        // Only the Tauri-side transition owns global CWD writes. In
+        // particular, a queued Resume/Fork must never reset it after a later
+        // workspaceSet command has completed.
+        assert!(!bridge.contains("restore_session_workspace"));
+        assert!(!bridge.contains("std::env::set_current_dir"));
+        assert!(!bridge.contains("std::env::current_dir"));
+        assert!(backend.contains("fn transition_workspace_for_state"));
+        assert!(backend.contains("transition_workspace_for_state(&workspace, self.state)?"));
+        assert!(backend.contains("transition_workspace_for_state(&saved_workspace, &state)"));
+
+        let new_branch = bridge
+            .split_once("Command::New {")
+            .unwrap()
+            .1
+            .split_once("Command::Resume")
+            .unwrap()
+            .0;
+        assert!(new_branch.contains("workspace: command_workspace"));
+        assert!(new_branch.contains("completion.send(Ok(()))"));
+        assert!(new_branch.contains("completion.send(Err(e.clone()))"));
+
+        let resume_branch = bridge
+            .split_once("Command::Resume {")
+            .unwrap()
+            .1
+            .split_once("Command::Fork")
+            .unwrap()
+            .0;
+        assert!(resume_branch.contains("workspace = command_workspace;"));
+        assert!(resume_branch.contains("completion.send(Err(message.clone()))"));
+        assert!(resume_branch.contains("completion.send(Ok(()))"));
+
+        let fork_branch = bridge
+            .split_once("Command::Fork {")
+            .unwrap()
+            .1
+            .split_once("Command::SetModel")
+            .unwrap()
+            .0;
+        assert!(fork_branch.contains("command_workspace"));
+        assert!(fork_branch.contains("completion.send(Err(message.clone()))"));
+        assert!(fork_branch.contains("completion.send(Err(e.clone()))"));
+        assert!(fork_branch.contains("completion.send(Ok(()))"));
+
+        let permission_branch = bridge
+            .rsplit_once("Command::SetPermissionMode {")
+            .unwrap()
+            .1
+            .split_once("Command::RequestReady")
+            .unwrap()
+            .0;
+        assert!(permission_branch.contains("thread_id: target_id"));
+        assert!(permission_branch.contains("permission_mode_rebuild_input("));
+        let guard = permission_branch
+            .find("permission_mode_rebuild_input(")
+            .unwrap();
+        let persist = permission_branch.find("write_nanocodex_config").unwrap();
+        assert!(
+            guard < persist,
+            "stale target must be rejected before config write"
+        );
+        assert!(permission_branch.contains("completion.send(Err(error.clone()))"));
+        assert!(permission_branch.contains("build_agent("));
     }
 
     #[test]

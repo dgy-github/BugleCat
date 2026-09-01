@@ -163,7 +163,7 @@ fn runtime_requests_are_routed_by_the_app_server() {
 }
 
 #[test]
-fn harness_profile_can_change_only_before_the_first_turn() {
+fn harness_profile_uses_the_last_serialized_selection_before_the_first_turn() {
     let server = server();
     let runtime = RecordingRuntime::default();
     let thread_id = ThreadId::new("profile-thread").unwrap();
@@ -187,13 +187,31 @@ fn harness_profile_can_change_only_before_the_first_turn() {
             &runtime,
         )
         .unwrap();
+    assert_eq!(
+        runtime.validated_profiles.lock().unwrap().as_slice(),
+        &[
+            ("full".into(), "workspace".into()),
+            ("coding".into(), "workspace".into()),
+        ]
+    );
+    // The GUI serializes rapid selections. Verify the durable endpoint is
+    // last-write-wins in that request order, so A -> B persists B.
+    server
+        .dispatch_with_runtime(
+            ClientRequest::ThreadHarnessProfileSet {
+                thread_id: thread_id.clone(),
+                harness_profile: "minimal".into(),
+            },
+            &runtime,
+        )
+        .unwrap();
     let read = server
         .dispatch(ClientRequest::ThreadRead {
             thread_id: thread_id.clone(),
         })
         .unwrap();
     assert!(
-        matches!(read.response.payload, ResponsePayload::Thread(ref thread) if thread.metadata.harness_profile == "coding")
+        matches!(read.response.payload, ResponsePayload::Thread(ref thread) if thread.metadata.harness_profile == "minimal")
     );
 
     server
@@ -207,7 +225,7 @@ fn harness_profile_can_change_only_before_the_first_turn() {
         .dispatch_with_runtime(
             ClientRequest::ThreadHarnessProfileSet {
                 thread_id,
-                harness_profile: "minimal".into(),
+                harness_profile: "readonly".into(),
             },
             &runtime,
         )
@@ -297,6 +315,15 @@ fn interaction_and_desktop_runtime_requests_are_routed_by_the_app_server() {
 fn settings_and_model_requests_are_routed_by_the_app_server() {
     let server = server();
     let runtime = RecordingRuntime::default();
+    let thread_id = ThreadId::new("runtime-thread").unwrap();
+    server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(thread_id.clone()),
+            workspace: "workspace".into(),
+            title: "runtime".into(),
+            harness_profile: "full".into(),
+        })
+        .unwrap();
     assert!(matches!(
         server
             .dispatch_with_runtime(ClientRequest::SettingsRead, &runtime)
@@ -327,6 +354,7 @@ fn settings_and_model_requests_are_routed_by_the_app_server() {
     server
         .dispatch_with_runtime(
             ClientRequest::RuntimePermissionModeSet {
+                thread_id,
                 mode: "plan".into(),
             },
             &runtime,
@@ -359,10 +387,27 @@ fn settings_and_model_requests_are_routed_by_the_app_server() {
         vec![
             "settings:1",
             "model:deepseek-v4",
-            "mode:plan",
+            "mode:runtime-thread:plan",
             "preset:deepseek:deepseek-v4",
         ]
     );
+}
+
+#[test]
+fn permission_mode_requires_a_durable_thread_target() {
+    let server = server();
+    let runtime = RecordingRuntime::default();
+
+    assert!(server
+        .dispatch_with_runtime(
+            ClientRequest::RuntimePermissionModeSet {
+                thread_id: ThreadId::new("missing-permission-target").unwrap(),
+                mode: "plan".into(),
+            },
+            &runtime,
+        )
+        .is_err());
+    assert!(runtime.calls.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -602,45 +647,5 @@ fn harness_diagnostics_and_external_plugins_use_the_same_protocol_boundary() {
             "external-install:external-dir:true",
             "external-enabled:demo.echo:false",
         ]
-    );
-}
-
-#[test]
-fn memory_service_requests_are_routed_by_the_app_server() {
-    let server = server();
-    let runtime = RecordingRuntime::default();
-    assert!(matches!(
-        server
-            .dispatch_with_runtime(ClientRequest::MemoryList, &runtime)
-            .unwrap()
-            .response
-            .payload,
-        ResponsePayload::MemoryNotes(ref value) if value.is_array()
-    ));
-    assert!(matches!(
-        server
-            .dispatch_with_runtime(
-                ClientRequest::MemoryAdd {
-                    note: "remember".into(),
-                    tags: vec!["project".into()],
-                },
-                &runtime,
-            )
-            .unwrap()
-            .response
-            .payload,
-        ResponsePayload::Bool(true)
-    ));
-    assert!(matches!(
-        server
-            .dispatch_with_runtime(ClientRequest::MemoryConsolidate, &runtime)
-            .unwrap()
-            .response
-            .payload,
-        ResponsePayload::Count(2)
-    ));
-    assert_eq!(
-        *runtime.calls.lock().unwrap(),
-        vec!["memory-add:remember:1", "memory-consolidate"]
     );
 }

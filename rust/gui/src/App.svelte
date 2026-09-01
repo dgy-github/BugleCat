@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import ConversationView from "./components/ConversationView.svelte";
   import Composer from "./components/Composer.svelte";
+  import DshSlotOverlay from "./components/DshSlotOverlay.svelte";
   import InteractionDialogs from "./components/InteractionDialogs.svelte";
   import AppUtilityPanels from "./components/AppUtilityPanels.svelte";
   import SessionSidebar from "./components/SessionSidebar.svelte";
@@ -15,7 +16,8 @@
   import { CheckpointController } from "./lib/checkpoint-controller.svelte";
   import { MemoryController } from "./lib/memory-controller.svelte";
   import { ForgeController } from "./lib/forge-controller.svelte";
-  import { PluginController, type DshUiSlotContribution } from "./lib/plugin-controller.svelte";
+  import { PluginController } from "./lib/plugin-controller.svelte";
+  import { DshSlotController } from "./lib/dsh-slot-controller.svelte";
   import { SettingsController } from "./lib/settings-controller.svelte";
   import { SlashController } from "./lib/slash-controller.svelte";
   import { ModelControlsController, PERMISSION_MODES } from "./lib/model-controls-controller.svelte";
@@ -29,7 +31,6 @@
   const sidebar = new SidebarController();
   const usage = new UsageController();
   let activeView = $state<"chat" | "trajectory">("chat");
-  let dshOverlay = $state<DshUiSlotContribution | null>(null);
   type ThemeMode = "system" | "light" | "dark";
   let themeMode = $state<ThemeMode>("system");
 
@@ -52,29 +53,29 @@
     dequeue: () => composer.dequeue(),
     ready: (event) => runtime.handleReady(event),
   });
-  const threadLifecycle = new ThreadLifecycleController(thread, usage, () => runtime.workspace);
+  const note = (text: string) => thread.messages.push({ role: "note", text });
+  const workspace = () => runtime.workspace;
+  const threadLifecycle = new ThreadLifecycleController(
+    thread, usage, workspace,
+    { restore: (path) => runtime.restoreWorkspace(path), reconcile: () => runtime.reconcileWorkspace() },
+  );
   const goalController = new GoalController(thread);
   const composer = new ComposerController(thread, () => runtime.needsWorkspace, () => scrollDown());
-  const fileBrowser = new FileBrowserController(
-    (text) => thread.messages.push({ role: "note", text }),
-    () => composer.input,
-    (value) => (composer.input = value),
-  );
-  const gitWorkspace = new GitWorkspaceController((text) => thread.messages.push({ role: "note", text }));
-  const checkpointController = new CheckpointController(
-    (text) => thread.messages.push({ role: "note", text }),
-    () => thread.busy,
-  );
-  const memoryController = new MemoryController((text) => thread.messages.push({ role: "note", text }));
-  const forgeController = new ForgeController((text) => thread.messages.push({ role: "note", text }));
-  const pluginController = new PluginController((text) => thread.messages.push({ role: "note", text }));
+  const fileBrowser = new FileBrowserController(note, () => composer.input, (value) => (composer.input = value), workspace);
+  const gitWorkspace = new GitWorkspaceController(note, workspace);
+  const checkpointController = new CheckpointController(note, () => thread.busy, workspace);
+  const memoryController = new MemoryController(note, workspace);
+  const forgeController = new ForgeController(note, workspace);
+  const pluginController = new PluginController(note);
+  const dshSlots = new DshSlotController(pluginController);
   const modelControls = new ModelControlsController(
-    (text) => thread.messages.push({ role: "note", text }),
+    note,
     (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
+    () => thread.currentId,
   );
   const settingsController = new SettingsController(
     pluginController,
-    (text) => thread.messages.push({ role: "note", text }),
+    note,
     modelControls.applyModel,
     (priceIn, priceOut, currency) => usage.setPrice(priceIn, priceOut, currency),
   );
@@ -82,7 +83,7 @@
   const slashController = new SlashController(
     () => composer.input,
     (value) => (composer.input = value),
-    (text) => thread.messages.push({ role: "note", text }),
+    note,
     {
       newSession: () => void threadLifecycle.create(),
       forkCurrent: () => thread.currentId ? void threadLifecycle.fork(thread.currentId, thread.title) : thread.messages.push({ role: "note", text: "当前会话还没有快照，无法分叉（先发一条消息）。" }),
@@ -97,7 +98,14 @@
     },
   );
   composer.connectSlash(slashController);
-  const runtime = new AppRuntimeController(sidebar, thread, threadLifecycle, composer, modelControls, usage, slashController);
+  const runtime = new AppRuntimeController(
+    sidebar, thread, threadLifecycle, composer, modelControls, usage, slashController,
+    () => {
+      panels.workspaceChanged();
+      threadLifecycle.workspaceChanged();
+      forgeController.workspaceChanged();
+    },
+  );
   let observedGoalThread = "";
   let observedGoalBusy = false;
   $effect(() => {
@@ -114,30 +122,31 @@
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
   }
 
-  onMount(async () => {
+  onMount(() => {
     const savedTheme = localStorage.getItem("nanocodex.theme");
     setTheme(savedTheme === "light" || savedTheme === "dark" ? savedTheme : "system");
-    await runtime.start();
-    await settingsController.refreshRuntimeModels();
-    void pluginController.load();
-    void forgeController.refresh();
+    let disposed = false;
+    void (async () => {
+      await runtime.start();
+      if (disposed) return;
+      await settingsController.refreshRuntimeModels();
+      if (disposed) return;
+      void pluginController.load().catch((error) => {
+        if (!disposed) console.error("插件加载失败", error);
+      });
+      void forgeController.refresh();
+    })().catch((error) => {
+      if (disposed) return;
+      console.error("应用启动失败", error);
+      runtime.header = "连接错误";
+    });
+    return () => {
+      disposed = true;
+      forgeController.dispose();
+      void runtime.stop();
+    };
   });
-
   const openSettings = settingsController.open;
-  const dshFooterActions = $derived(pluginController.codexPlugins.flatMap((plugin) => plugin.ui_slots || []).filter((slot) => slot.slot === "sidebar.footer.action").sort((a, b) => a.order - b.order));
-  function openDshSlot(slot: DshUiSlotContribution) {
-    const overlay = pluginController.codexPlugins.flatMap((plugin) => plugin.ui_slots || []).find((candidate) => candidate.slot === "shell.overlay" && candidate.plugin === slot.plugin && candidate.id === slot.id);
-    dshOverlay = overlay || slot;
-  }
-  function closeDshOverlay(event: MouseEvent) {
-    if (event.target === event.currentTarget) dshOverlay = null;
-  }
-  $effect(() => {
-    if (!dshOverlay) return;
-    const stillEnabled = pluginController.codexPlugins.flatMap((plugin) => plugin.ui_slots || [])
-      .some((slot) => slot.plugin === dshOverlay?.plugin && slot.slot === dshOverlay?.slot && slot.id === dshOverlay?.id);
-    if (!stillEnabled) dshOverlay = null;
-  });
 </script>
 
 <main class="app" style={`--sidebar-width: ${sidebar.width}px`}>
@@ -165,8 +174,8 @@
     renameSession={threadLifecycle.rename}
     chooseWorkspace={runtime.chooseWorkspace}
     {openSettings}
-    {dshFooterActions}
-    {openDshSlot}
+    dshFooterActions={dshSlots.footerActions}
+    openDshSlot={dshSlots.open}
     fmtWhen={threadLifecycle.formatWhen}
     {baseName}
     beginSidebarResize={sidebar.beginResize}
@@ -235,6 +244,7 @@
       pauseGoal={goalController.pause}
       resumeGoal={goalController.resume}
       busy={thread.busy}
+      switching={thread.switching}
       workspace={runtime.workspace}
       needsWorkspace={runtime.needsWorkspace}
       wsName={runtime.workspaceName}
@@ -276,15 +286,7 @@
     decide={runtime.decide}
     answerUserQuestion={runtime.answerQuestion}
   />
-  {#if dshOverlay}
-    <div class="modal-backdrop dsh-slot-backdrop" role="presentation" onclick={closeDshOverlay}>
-      <div class="dsh-slot-overlay" role="dialog" aria-modal="true" aria-label={dshOverlay.label}>
-        <div><strong>{dshOverlay.label}</strong><button class="plain" aria-label="关闭插件界面" onclick={() => (dshOverlay = null)}>×</button></div>
-        <p>{dshOverlay.description || "该界面由 DSH UI Slots 声明安全映射，未执行第三方 React 代码。"}</p>
-        {#if dshOverlay.url}<a href={dshOverlay.url} target="_blank" rel="noreferrer">打开插件主页 ↗</a>{/if}
-      </div>
-    </div>
-  {/if}
+  <DshSlotOverlay controller={dshSlots} />
   <AppUtilityPanels
     {panels} {checkpointController} {thread} {gitWorkspace} {runtime} {fileBrowser}
     {threadLifecycle} {memoryController} {forgeController} {settingsController} {pluginController} {modelControls} {composer}

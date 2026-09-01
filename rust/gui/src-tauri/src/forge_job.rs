@@ -48,8 +48,34 @@ pub struct ForgeJobStatus {
     pub error: Option<String>,
 }
 
+impl ForgeJobStatus {
+    fn idle() -> Self {
+        Self {
+            generation: 0,
+            status: "idle".into(),
+            started_at_ms: None,
+            rounds: None,
+            repeats: None,
+            timeout_s: None,
+            budget_s: None,
+            teacher: None,
+            accept_margin: None,
+            summary: None,
+            error: None,
+        }
+    }
+}
+
+struct ForgeJobState {
+    status: ForgeJobStatus,
+    /// Workspace that owns the current status projection. The owner remains
+    /// attached after completion so another workspace cannot read old job
+    /// details through this process-global coordinator.
+    owner_workspace: Option<PathBuf>,
+}
+
 pub struct ForgeJobCoordinator {
-    state: Mutex<ForgeJobStatus>,
+    state: Mutex<ForgeJobState>,
     cancelled: Arc<AtomicBool>,
     pid: AtomicU32,
     #[cfg(windows)]
@@ -59,18 +85,9 @@ pub struct ForgeJobCoordinator {
 impl Default for ForgeJobCoordinator {
     fn default() -> Self {
         Self {
-            state: Mutex::new(ForgeJobStatus {
-                generation: 0,
-                status: "idle".into(),
-                started_at_ms: None,
-                rounds: None,
-                repeats: None,
-                timeout_s: None,
-                budget_s: None,
-                teacher: None,
-                accept_margin: None,
-                summary: None,
-                error: None,
+            state: Mutex::new(ForgeJobState {
+                status: ForgeJobStatus::idle(),
+                owner_workspace: None,
             }),
             cancelled: Arc::new(AtomicBool::new(false)),
             pid: AtomicU32::new(0),
@@ -97,7 +114,7 @@ impl ForgeJobCoordinator {
         std::fs::create_dir_all(&runs).map_err(|_| "无法创建 Forge 报告目录".to_string())?;
         std::fs::create_dir_all(&genomes).map_err(|_| "无法创建 Forge 基因组目录".to_string())?;
 
-        let generation = self.begin(&input)?;
+        let generation = self.begin(&input, &workspace)?;
         let mut command = forge_command(&runtime, &input, &workspace, &runs, &genomes);
         let mut child = command.spawn().map_err(|_| {
             self.finish(
@@ -135,43 +152,77 @@ impl ForgeJobCoordinator {
     pub fn status(&self) -> Result<ForgeJobStatus, String> {
         self.state
             .lock()
-            .map(|state| state.clone())
+            .map(|state| state.status.clone())
             .map_err(|_| "Forge 状态不可用".to_string())
     }
 
-    pub fn cancel(&self) -> Result<ForgeJobStatus, String> {
-        let mut state = self
+    /// Return only the status projection owned by `workspace`. A different
+    /// workspace, or a poller carrying an obsolete generation, receives a
+    /// neutral idle snapshot and cannot learn another project's job details.
+    pub fn status_for_workspace(
+        &self,
+        workspace: &Path,
+        expected_generation: Option<u64>,
+    ) -> Result<ForgeJobStatus, String> {
+        let state = self
             .state
             .lock()
             .map_err(|_| "Forge 状态不可用".to_string())?;
-        if state.status == "running" {
-            self.cancelled.store(true, Ordering::SeqCst);
-            state.status = "cancelling".into();
+        if !owns_workspace(&state, workspace)
+            || expected_generation.is_some_and(|generation| generation != state.status.generation)
+        {
+            return Ok(ForgeJobStatus::idle());
         }
-        Ok(state.clone())
+        Ok(state.status.clone())
     }
 
-    fn begin(&self, input: &ForgeJobInput) -> Result<u64, String> {
+    /// Cancel only the exact generation owned by this workspace. Delayed
+    /// requests from an earlier job therefore cannot cancel a replacement,
+    /// even if the user has switched away and back to the same directory.
+    pub fn cancel_for_workspace(
+        &self,
+        workspace: &Path,
+        expected_generation: u64,
+    ) -> Result<ForgeJobStatus, String> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| "Forge 状态不可用".to_string())?;
-        if matches!(state.status.as_str(), "running" | "cancelling") {
+        if !owns_workspace(&state, workspace) {
+            return Err("当前项目没有可取消的 Forge 任务".to_string());
+        }
+        if state.status.generation != expected_generation {
+            return Err("Forge 任务已被更新，拒绝取消旧任务".to_string());
+        }
+        if state.status.status == "running" {
+            self.cancelled.store(true, Ordering::SeqCst);
+            state.status.status = "cancelling".into();
+        }
+        Ok(state.status.clone())
+    }
+
+    fn begin(&self, input: &ForgeJobInput, workspace: &Path) -> Result<u64, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Forge 状态不可用".to_string())?;
+        if matches!(state.status.status.as_str(), "running" | "cancelling") {
             return Err("Forge 训练任务正在运行".into());
         }
-        state.generation = state.generation.saturating_add(1);
-        state.status = "running".into();
-        state.started_at_ms = Some(epoch_millis());
-        state.rounds = Some(input.rounds);
-        state.repeats = Some(input.repeats);
-        state.timeout_s = Some(input.timeout_s);
-        state.budget_s = Some(input.budget_s);
-        state.teacher = Some(input.teacher.clone());
-        state.accept_margin = Some(input.accept_margin);
-        state.summary = None;
-        state.error = None;
+        state.status.generation = state.status.generation.saturating_add(1);
+        state.status.status = "running".into();
+        state.status.started_at_ms = Some(epoch_millis());
+        state.status.rounds = Some(input.rounds);
+        state.status.repeats = Some(input.repeats);
+        state.status.timeout_s = Some(input.timeout_s);
+        state.status.budget_s = Some(input.budget_s);
+        state.status.teacher = Some(input.teacher.clone());
+        state.status.accept_margin = Some(input.accept_margin);
+        state.status.summary = None;
+        state.status.error = None;
+        state.owner_workspace = Some(workspace.to_path_buf());
         self.cancelled.store(false, Ordering::SeqCst);
-        Ok(state.generation)
+        Ok(state.status.generation)
     }
 
     fn finish(
@@ -187,10 +238,10 @@ impl ForgeJobCoordinator {
             owner.take();
         }
         if let Ok(mut state) = self.state.lock() {
-            if state.generation == generation {
-                state.status = status.into();
-                state.summary = summary;
-                state.error = error;
+            if state.status.generation == generation {
+                state.status.status = status.into();
+                state.status.summary = summary;
+                state.status.error = error;
             }
         }
     }
@@ -215,6 +266,28 @@ impl ForgeJobCoordinator {
             }
         }
         terminate_tree(fallback_pid);
+    }
+}
+
+fn owns_workspace(state: &ForgeJobState, workspace: &Path) -> bool {
+    let Some(owner) = &state.owner_workspace else {
+        return false;
+    };
+    let Ok(workspace) = std::fs::canonicalize(workspace) else {
+        return false;
+    };
+    let Ok(owner) = std::fs::canonicalize(owner) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        owner
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&workspace.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        owner == workspace
     }
 }
 
@@ -534,6 +607,19 @@ fn epoch_millis() -> i64 {
 mod tests {
     use super::*;
 
+    fn test_workspace(label: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "ncx-forge-owner-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
     fn input() -> ForgeJobInput {
         ForgeJobInput {
             rounds: 2,
@@ -575,6 +661,45 @@ mod tests {
         assert!(encoded.contains("acceptedRounds"));
         assert!(!encoded.contains("SECRET"));
         assert!(!encoded.contains("TOKEN"));
+    }
+
+    fn running_job(
+        coordinator: &ForgeJobCoordinator,
+        generation: u64,
+        workspace: PathBuf,
+    ) -> Arc<AtomicBool> {
+        let cancelled = coordinator.cancelled.clone();
+        let mut state = coordinator.state.lock().unwrap();
+        state.status.generation = generation;
+        state.status.status = "running".into();
+        state.owner_workspace = Some(workspace);
+        cancelled.store(false, Ordering::SeqCst);
+        cancelled
+    }
+
+    #[test]
+    fn workspace_and_generation_fence_status_and_cancel() {
+        let coordinator = ForgeJobCoordinator::default();
+        let owner = test_workspace("owner");
+        let other = test_workspace("other");
+        let cancelled = running_job(&coordinator, 17, owner.clone());
+
+        let hidden = coordinator.status_for_workspace(&other, None).unwrap();
+        assert_eq!(hidden.status, "idle");
+        assert_eq!(hidden.generation, 0);
+        assert!(coordinator.cancel_for_workspace(&other, 17).is_err());
+        assert!(!cancelled.load(Ordering::SeqCst));
+
+        let stale = coordinator.status_for_workspace(&owner, Some(16)).unwrap();
+        assert_eq!(stale.status, "idle");
+        assert!(coordinator.cancel_for_workspace(&owner, 16).is_err());
+        assert!(!cancelled.load(Ordering::SeqCst));
+
+        let status = coordinator.cancel_for_workspace(&owner, 17).unwrap();
+        assert_eq!(status.status, "cancelling");
+        assert!(cancelled.load(Ordering::SeqCst));
+        let _ = std::fs::remove_dir_all(owner);
+        let _ = std::fs::remove_dir_all(other);
     }
 
     #[cfg(windows)]

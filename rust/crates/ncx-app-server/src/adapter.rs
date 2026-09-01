@@ -4,7 +4,10 @@
 /// matching protocol requests themselves. This keeps request routing owned by
 /// the app-server while allowing each host to choose its agent scheduler.
 pub trait AppServerAdapter {
-    fn validate_harness_profile(&self, profile: &str) -> Result<(), String> {
+    /// Validate a profile against the workspace it will actually run in. Hosts
+    /// must not infer this from a process-global current directory because a
+    /// desktop workspace switch can race an asynchronous runtime rebuild.
+    fn validate_harness_profile(&self, profile: &str, _workspace: &str) -> Result<(), String> {
         if profile == "full" {
             Ok(())
         } else {
@@ -54,7 +57,13 @@ pub trait AppServerAdapter {
         updates: std::collections::BTreeMap<String, String>,
     ) -> Result<(), String>;
     fn set_model(&self, model: String) -> Result<(), String>;
-    fn set_permission_mode(&self, mode: String) -> Result<(), String>;
+    /// Apply a permission-mode rebuild to this durable Thread only. Hosts must
+    /// reject it if a later navigation has already made another Thread active.
+    fn set_permission_mode(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+        mode: String,
+    ) -> Result<(), String>;
     fn read_model_catalog(&self) -> Result<serde_json::Value, String>;
     fn apply_model_preset(
         &self,
@@ -99,23 +108,43 @@ pub trait AppServerAdapter {
         upgrade: bool,
     ) -> Result<serde_json::Value, String>;
     fn set_external_plugin_enabled(&self, id: String, enabled: bool) -> Result<(), String>;
-    fn list_memory(&self) -> Result<serde_json::Value, String>;
-    fn add_memory(&self, note: String, tags: Vec<String>) -> Result<bool, String>;
-    fn consolidate_memory(&self) -> Result<u64, String>;
-    fn start_memory_merge(&self) -> Result<serde_json::Value, String> {
+    fn list_memory(&self, _workspace: String) -> Result<serde_json::Value, String>;
+    fn add_memory(
+        &self,
+        note: String,
+        tags: Vec<String>,
+        _workspace: String,
+    ) -> Result<bool, String>;
+    fn consolidate_memory(&self, _workspace: String) -> Result<u64, String>;
+    fn start_memory_merge(&self, _workspace: String) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供模型记忆整理".to_string())
     }
-    fn memory_merge_status(&self) -> Result<serde_json::Value, String> {
+    fn memory_merge_status(
+        &self,
+        _workspace: String,
+        _generation: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供模型记忆整理状态".to_string())
     }
-    fn cancel_memory_merge(&self) -> Result<serde_json::Value, String> {
+    fn cancel_memory_merge(
+        &self,
+        _workspace: String,
+        _generation: u64,
+    ) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供模型记忆整理取消".to_string())
     }
     fn forge_runtime_status(&self) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供 Forge 运行时".to_string())
     }
+    // Keep Forge's wire fields as separate arguments: this public adapter
+    // boundary mirrors `ClientRequest::ForgeJobStart`, and bundling them into
+    // a new request type would break existing host implementations. The
+    // protocol-level shape is intentional even though Clippy counts it as a
+    // large argument list.
+    #[allow(clippy::too_many_arguments)]
     fn start_forge_job(
         &self,
+        _workspace: String,
         _rounds: u8,
         _repeats: u8,
         _timeout_s: u64,
@@ -125,10 +154,18 @@ pub trait AppServerAdapter {
     ) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供 Forge 训练任务".to_string())
     }
-    fn forge_job_status(&self) -> Result<serde_json::Value, String> {
+    fn forge_job_status(
+        &self,
+        _workspace: String,
+        _generation: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供 Forge 训练状态".to_string())
     }
-    fn cancel_forge_job(&self) -> Result<serde_json::Value, String> {
+    fn cancel_forge_job(
+        &self,
+        _workspace: String,
+        _generation: u64,
+    ) -> Result<serde_json::Value, String> {
         Err("当前宿主未提供 Forge 训练取消".to_string())
     }
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String>;

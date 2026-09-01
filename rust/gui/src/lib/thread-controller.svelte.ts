@@ -55,6 +55,14 @@ export class ThreadController {
   private readonly approvalsBySession = new Map<string, Approval>();
   private readonly questionsBySession = new Map<string, UserQuestion>();
   private readonly skippedLoadedSessions = new Set<string>();
+  // A navigation operation temporarily clears currentId before its durable
+  // target is created. Only that target's ready snapshot may bind the empty
+  // UI; an old session's delayed ready event must be ignored.
+  private pendingReadySession = "";
+  // A failed workspace rollback can leave the UI intentionally unbound. In
+  // that state even a matching-looking Ready event must be rejected until the
+  // next explicit navigation installs a new expected session.
+  private readyFenceClosed = false;
   private trajectoryStart = 0;
 
   constructor(private readonly usage: UsageController, private readonly callbacks: ThreadCallbacks) {}
@@ -119,6 +127,20 @@ export class ThreadController {
 
   skipNextLoaded(sessionId: string): void { this.skippedLoadedSessions.add(sessionId); }
   clearSkippedLoaded(sessionId: string): void { this.skippedLoadedSessions.delete(sessionId); }
+  expectReady(sessionId: string): void {
+    this.pendingReadySession = sessionId;
+    this.readyFenceClosed = false;
+  }
+  sealReadyFence(): void {
+    this.readyFenceClosed = true;
+  }
+  // A ready fence is consumed only by the matching Ready event after it has
+  // passed the active-session checks below. In particular, callers restoring
+  // from a failed workspace transition must not clear it early: while the UI
+  // is empty, that would let a delayed Ready from another workspace rebind it.
+  private consumeExpectedReady(sessionId: string): void {
+    if (this.pendingReadySession === sessionId) this.pendingReadySession = "";
+  }
 
   removeApproval(sessionId: string): void { this.approvalsBySession.delete(sessionId); this.approval = null; }
   removeQuestion(sessionId: string): void { this.questionsBySession.delete(sessionId); this.question = null; this.questionAnswer = ""; }
@@ -157,14 +179,17 @@ export class ThreadController {
   }
 
   private handleReady(event: Extract<UiEvent, { kind: "ready" }>): void {
+    if (this.readyFenceClosed) return;
+    if (this.currentId === "" && this.pendingReadySession && event.session_id !== this.pendingReadySession) return;
     if (this.currentId !== "" && event.session_id !== this.currentId) return;
-    this.callbacks.ready(event);
     if (event.session_id) {
       const unbound = this.currentId === "";
       this.currentId = event.session_id;
+      this.consumeExpectedReady(event.session_id);
       this.usage.restore(this.currentId);
       if (unbound) this.restore(this.currentId);
     }
+    this.callbacks.ready(event);
     this.callbacks.refreshSessions();
   }
 
@@ -329,7 +354,6 @@ export class ThreadController {
     this.reasoningIndex = null;
     this.busy = this.runningSessions.has(event.session_id);
     this.stopping = false;
-    this.switching = false;
     this.callbacks.refreshSessions();
     if (!this.busy) this.callbacks.dequeue();
   }
@@ -349,7 +373,6 @@ export class ThreadController {
     this.trajectoryBySession.set(event.session_id, this.clone(this.trajectory));
     this.busy = false;
     this.stopping = false;
-    this.switching = false;
   }
 
   private settleReasoning(): void {

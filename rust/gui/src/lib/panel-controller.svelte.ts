@@ -6,6 +6,7 @@ import type { ThreadController } from "./thread-controller.svelte";
 
 export class PanelController {
   current = $state("");
+  private requestGeneration = 0;
 
   constructor(
     private readonly files: FileBrowserController,
@@ -21,19 +22,40 @@ export class PanelController {
   openCheckpoints = async (): Promise<void> => this.toggle("checkpoints", this.checkpoints.refresh);
   openMemory = async (): Promise<void> => this.toggle("memory", this.memory.refresh);
 
+  workspaceChanged = (): void => {
+    this.requestGeneration += 1;
+    this.current = "";
+    this.files.reset();
+    this.git.reset();
+    this.checkpoints.reset();
+    this.memory.reset();
+  };
+
   reload = async (): Promise<void> => {
+    const generation = ++this.requestGeneration;
+    const panel = this.current;
     try {
-      if (this.current === "files") await this.files.load(this.files.path);
-      else if (this.current === "branches") await this.git.refreshBranches();
-      else if (this.current === "diff") await this.git.loadDiff();
-      else if (this.current === "memory") await this.memory.refresh();
-      else if (this.current === "checkpoints") await this.checkpoints.refresh();
-    } catch (error) { this.thread.messages.push({ role: "note", text: `刷新失败：${error}` }); }
+      if (panel === "files") await this.files.load(this.files.path);
+      else if (panel === "branches") await this.git.refreshBranches();
+      else if (panel === "diff") await this.git.loadDiff();
+      else if (panel === "memory") await this.memory.refresh();
+      else if (panel === "checkpoints") await this.checkpoints.refresh();
+    } catch (error) {
+      if (generation === this.requestGeneration && this.current === panel) {
+        this.thread.messages.push({ role: "note", text: `刷新失败：${error}` });
+      }
+    }
   };
 
   private toggle = async (name: string, load: () => Promise<void>): Promise<void> => {
+    const generation = ++this.requestGeneration;
     if (this.current === name) { this.current = ""; return; }
     this.current = name;
-    await load();
+    try { await load(); }
+    catch (error) {
+      if (generation === this.requestGeneration && this.current === name) {
+        this.thread.messages.push({ role: "note", text: `加载失败：${error}` });
+      }
+    }
   };
 }

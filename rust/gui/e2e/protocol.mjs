@@ -40,6 +40,12 @@ try {
   await waitForCdp();
   browser = await chromium.connectOverCDP(cdpUrl);
   const page = await waitForPage(browser);
+  const activeWorkspace = await page.evaluate(async () => {
+    const outcome = await window.__TAURI_INTERNALS__.invoke("app_server_request", {
+      request: { method: "runtimeStatusRead" },
+    });
+    return outcome.response.payload.data.workspace;
+  });
   await page.getByRole("button", { name: "设置" }).click({ force: true });
   await page.getByRole("heading", { name: "设置", exact: true }).waitFor();
   await page.getByRole("button", { name: "深色", exact: true }).click();
@@ -50,7 +56,7 @@ try {
   await page.getByText("OpenAI Codex 资源插件", { exact: true }).waitFor();
   await page.getByText("插件 Marketplace", { exact: true }).waitFor();
   await page.getByRole("button", { name: "取消", exact: true }).click();
-  const evidence = await page.evaluate(async (localArtifactPath) => {
+  const evidence = await page.evaluate(async ({ localArtifactPath, workspace }) => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const a = `e2e-thread-a-${nonce}`;
@@ -63,13 +69,13 @@ try {
     const call = (method, params) => invoke("app_server_request", { request: { method, params } });
     const existing = await call("threadList", { includeArchived: true });
     for (const metadata of existing.response.payload.data || []) {
-      if (metadata.workspace === "e2e" && !metadata.archived) {
+      if (metadata.workspace === workspace && !metadata.archived) {
         await call("threadArchive", { threadId: metadata.id, archived: true });
       }
     }
-    await call("threadCreate", { threadId: a, workspace: "e2e", title });
-    await call("threadCreate", { threadId: b, workspace: "e2e", title: "B" });
-    await call("threadCreate", { threadId: profileThread, workspace: "e2e", title: "Profile", harnessProfile: "full" });
+    await call("threadCreate", { threadId: a, workspace, title });
+    await call("threadCreate", { threadId: b, workspace, title: "B" });
+    await call("threadCreate", { threadId: profileThread, workspace, title: "Profile", harnessProfile: "full" });
     await call("threadHarnessProfileSet", { threadId: profileThread, harnessProfile: "coding" });
     const profileBeforeTurn = await call("threadRead", { threadId: profileThread });
     await call("turnStart", { threadId: profileThread, turnId: `profile-turn-${nonce}` });
@@ -102,7 +108,9 @@ try {
     const marketplaces = await call("marketplaceList");
     const diagnostics = await call("harnessDiagnosticsRead");
     const externalPlugins = await call("externalPluginList");
-    const memory = await call("memoryList");
+    const runtimeStatus = await call("runtimeStatusRead");
+    const runtimeWorkspace = runtimeStatus.response.payload.data.workspace;
+    const memory = await call("memoryList", { workspace: runtimeWorkspace });
     const settings = await call("settingsRead");
     const modelCatalog = await call("modelCatalogRead");
     const providers = await call("customProviderList");
@@ -119,7 +127,7 @@ try {
     const dshCandidate = dshMarket.response.payload.data.items.find((item) => item.package && item.version);
     const dshPreview = dshCandidate ? await call("dshMarketplacePreview", { item: dshCandidate }) : null;
     return { sameThreadRejected, profileBeforeTurn, profileLocked, profileForked, visible, visibleAfterModelSwitch, plugins, marketplaces, diagnostics, diagnosticsAfterModelSwitch, externalPlugins, memory, settings, modelCatalog, providers, dshMarket, dsh1024Market, dshPreview, a, b, title };
-  }, localArtifactPath);
+  }, { localArtifactPath, workspace: activeWorkspace });
   const serialized = JSON.stringify(evidence.visible);
   if (!evidence.sameThreadRejected) throw new Error("same-thread overlap was accepted");
   if (evidence.profileBeforeTurn.response.payload.data.metadata.harnessProfile !== "coding") throw new Error("empty thread profile change was not persisted");
@@ -172,10 +180,10 @@ try {
     return listed.response.payload.data.find((plugin) => plugin.manifest.name === name);
   }, { source: slotFixture, name: slotPluginName });
   if (installedSlotPlugin?.ui_slots?.length !== 3) throw new Error(`declarative UI slots were not loaded: ${JSON.stringify(installedSlotPlugin)}`);
-  await page.evaluate(async () => {
+  await page.evaluate(async (workspace) => {
     const threadId = `e2e-full-ui-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    await window.__TAURI_INTERNALS__.invoke("app_server_request", { request: { method: "threadCreateActivate", params: { threadId, workspace: "e2e", title: "E2E full UI", harnessProfile: "full" } } });
-  });
+    await window.__TAURI_INTERNALS__.invoke("app_server_request", { request: { method: "threadCreateActivate", params: { threadId, workspace, title: "E2E full UI", harnessProfile: "full" } } });
+  }, activeWorkspace);
   await page.reload();
   const dshSlotAction = page.getByRole("button", { name: /E2E DSH 界面/ }).first();
   await dshSlotAction.waitFor({ timeout: 30_000 });
@@ -191,7 +199,11 @@ try {
   await installedEntry.getByRole("button", { name: "启用" }).click();
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await page.getByRole("button", { name: /E2E DSH 界面/ }).waitFor();
-  await page.locator('.project-toggle[title="e2e"]').waitFor({ timeout: 15_000 });
+  await page.waitForFunction((workspace) =>
+    [...document.querySelectorAll(".project-toggle")].some((element) => element.getAttribute("title") === workspace),
+    activeWorkspace,
+    { timeout: 15_000 },
+  );
   await page.getByText(evidence.title, { exact: true }).waitFor({ timeout: 15_000 });
   await page.getByText(evidence.title, { exact: true }).click();
   await page.getByText(/最终结论/, { exact: false }).waitFor({ timeout: 15_000 });

@@ -38,6 +38,12 @@ try {
   await waitForCdp();
   browser = await chromium.connectOverCDP(cdpUrl);
   const page = await waitForPage(browser);
+  const activeWorkspace = await page.evaluate(async () => {
+    const outcome = await window.__TAURI_INTERNALS__.invoke("app_server_request", {
+      request: { method: "runtimeStatusRead" },
+    });
+    return outcome.response.payload.data.workspace;
+  });
   await page.getByRole("button", { name: "设置" }).click({ force: true });
   await page.getByText("多 Agent 资源预算", { exact: true }).waitFor();
   const budgetBounds = [
@@ -58,7 +64,12 @@ try {
   await page.getByRole("button", { name: "模型整理", exact: true }).waitFor();
   await page.getByRole("button", { name: "快速去重", exact: true }).waitFor();
   const memoryMergeIdle = await page.evaluate(async () => {
-    const outcome = await window.__TAURI_INTERNALS__.invoke("app_server_request", { request: { method: "memoryMergeStatusRead" } });
+    const invoke = window.__TAURI_INTERNALS__.invoke;
+    const runtime = await invoke("app_server_request", { request: { method: "runtimeStatusRead" } });
+    const workspace = runtime.response.payload.data.workspace;
+    const outcome = await invoke("app_server_request", {
+      request: { method: "memoryMergeStatusRead", params: { workspace } },
+    });
     return outcome.response.payload.data;
   });
   if (memoryMergeIdle.status !== "idle") throw new Error(`memory merge job was not idle: ${JSON.stringify(memoryMergeIdle)}`);
@@ -79,7 +90,11 @@ try {
   const forgeState = await page.evaluate(async () => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const runtime = await invoke("app_server_request", { request: { method: "forgeRuntimeStatusRead" } });
-    const job = await invoke("app_server_request", { request: { method: "forgeJobStatusRead" } });
+    const workspaceStatus = await invoke("app_server_request", { request: { method: "runtimeStatusRead" } });
+    const workspace = workspaceStatus.response.payload.data.workspace;
+    const job = await invoke("app_server_request", {
+      request: { method: "forgeJobStatusRead", params: { workspace } },
+    });
     return { runtime: runtime.response.payload.data, job: job.response.payload.data };
   });
   if (forgeState.runtime.available) {
@@ -92,24 +107,27 @@ try {
     if (!(await message.textContent())?.includes("Forge")) throw new Error("Forge unavailable state is not explained");
   }
   await page.locator(".rightpanel .rp-close").click();
-  const fixture = await page.evaluate(async () => {
+  const fixture = await page.evaluate(async (workspace) => {
     const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const threadId = `e2e-orchestrator-${nonce}`;
     const turnId = `turn-${nonce}`;
     const title = `多 Agent 恢复 ${nonce}`;
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const call = (method, params) => invoke("app_server_request", { request: { method, params } });
-    await call("threadCreate", { threadId, workspace: "e2e", title });
+    await call("threadCreate", { threadId, workspace, title });
     await call("turnStart", { threadId, turnId, executionMode: "orchestrator" });
     await call("itemAppend", { threadId, turnId, item: { type: "userMessage", id: `u-${nonce}`, text: "保留这条原始要求" } });
     await call("itemAppend", { threadId, turnId, item: { type: "assistantMessage", id: `a-${nonce}`, text: "取消前已形成的可恢复结论", model: "e2e-model" } });
     await call("turnComplete", { threadId, turnId, status: "cancelled", error: "cancelled by user", usage: { tokens: { prompt_tokens: 2, completion_tokens: 1 }, estimatedCost: null, currency: null } });
     return { threadId, turnId, title };
-  });
+  }, activeWorkspace);
 
   await page.getByText(fixture.title, { exact: true }).waitFor({ timeout: 15_000 });
   await page.getByText(fixture.title, { exact: true }).click();
-  await page.getByText("保留这条原始要求", { exact: true }).waitFor({ timeout: 15_000 });
+  await page.getByText("保留这条原始要求", { exact: true }).waitFor({ timeout: 15_000 }).catch(async (error) => {
+    const transcript = await page.locator(".scroll").innerText().catch(() => "<unavailable>");
+    throw new Error(`resumed transcript did not render: ${transcript}\n${error.message}`);
+  });
   await page.getByText("取消前已形成的可恢复结论", { exact: true }).waitFor({ timeout: 30_000 });
   const transcriptBefore = await page.locator(".scroll").innerText();
 

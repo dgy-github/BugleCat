@@ -798,6 +798,27 @@ The regression suite also protects the following boundaries:
   fixed wall-clock threshold.
 - Test temporary directories include the process ID so IDE and CLI runs do not
   clean up each other's fixtures.
+- The Workspace Changes panel has one scroll owner and non-shrinking file rows,
+  so large diffs do not overlap or clip their filenames. Switching workspaces
+  clears pending panel/sidebar projections, including the Forge observer (the
+  process-owned Forge job itself keeps running and its new projection refreshes
+  automatically, including after initial startup); an in-flight memory merge is
+  cancelled only before a real
+  process-directory change and cannot commit its old draft afterward.
+- Rapid Harness Profile choices on an empty thread are serialized. The last
+  choice is the one persisted and activated before its first turn; profiles
+  remain locked once a turn exists. The durable write and first-turn claim are
+  atomic, so a profile request already validating loses safely to that turn.
+- Resume, fork, new-session, and permission-mode rebuilds use the persisted
+  Thread workspace explicitly. Permission-mode requests carry the exact
+  `threadId`; a stale worker request is rejected without writing configuration,
+  and the host finishes workspace transition before reporting readiness, so a
+  delayed worker cannot reuse a previous process directory.
+- Memory list/add/consolidate/merge and Forge start/status/cancel requests
+  carry a workspace snapshot. The host compares it while holding the workspace
+  gate and rejects stale requests instead of applying them to the newly
+  selected project; status projections stay with their owning workspace and
+  cancellation also requires the exact observed job generation.
 
 Before submitting, run:
 

@@ -18,6 +18,16 @@
   `cargo test --workspace`（全量通过）以及 `python -m pytest -q`
   （601 passed）。未提交、未推送状态需以当前 Git 状态重新核对。
 
+## 2026-09-02：GUI 工作区改动面板与异步状态隔离
+
+- 修复右侧“工作区改动”面板的条目高度与双重滚动冲突：文件行现在有稳定的最小高度和行高，面板主体是唯一滚动容器；大量变更文件不会再相互遮挡、裁切文字或形成嵌套滚动区。
+- 前端 Runtime 显式保存并释放 Tauri 事件监听器；应用卸载或启动过程被中断后，过期异步任务不再写入 UI 状态。
+- 文件浏览、Git 改动/分支详情、检查点、项目记忆及 Forge 状态观察器在工作区切换后使用 generation 拒绝旧请求结果，并清理旧工作区投影；Forge 后台进程不被切换取消，会自动刷新新项目投影，避免慢请求把前一项目的数据带入当前面板或让控件停在未初始化状态。启动期会先从 `runtimeStatusRead` 写入工作区，且 Ready 把空工作区到真实路径视为投影变更，因此 Forge 首读不会因 Ready 到达较晚而停在未初始化状态。
+- 只有工作区确实改变时，才会在修改进程 CWD 前取消模型记忆整理；取消与草稿提交共用互斥围栏，因此旧工作区的准备结果不能在切换后写入，而同项目内 Resume/Fork 不会中断整理。空 Thread 的连续 Harness Profile 选择按 set/activate 整段串行，最后选择才会持久化；Profile 写入与首个 Turn 在 Thread Store 内原子互斥，已在飞的旧选择也不能越过首轮锁定。
+- Memory Merge 与 Forge 的状态/取消请求现在同样带工作区快照；Coordinator 保存任务 owner，非 owner 工作区只能看到 idle，取消还须匹配精确 generation，因此跨工作区或同一工作区的新任务都不会被延迟旧取消误伤。
+- Resume、Fork、新建和权限模式重建显式使用持久 Thread 的 workspace；App Server 等待宿主切换完成后才返回，worker 不再延迟读写进程级 CWD，因此跨项目恢复不会把前一个工作区带进新会话。
+- 当前验证：`npm.cmd run build`、`cargo check --manifest-path rust\\gui\\src-tauri\\Cargo.toml`、`cargo test --manifest-path rust\\gui\\src-tauri\\Cargo.toml --lib`（129 passed）、`cargo test --manifest-path rust\\Cargo.toml -p ncx-protocol --lib`（12 passed）、`cargo test --manifest-path rust\\Cargo.toml -p ncx-app-server --lib`（31 passed）、`cargo test --manifest-path rust\\Cargo.toml -p ncx-thread-store --lib`（18 passed）和 `cargo fmt --manifest-path rust\\Cargo.toml --all -- --check` 均通过；真实 Tauri 开发窗口已用含 30+ 改动条目的工作区验证列表显示与滚动。
+
 ## Same-session durable Goal：领域与原子存储（2026-08-27）
 
 - 参考 DeepSeek Harness 固定提交的 `goal`、`tool-goal` 和

@@ -2,7 +2,7 @@ use super::*;
 use ncx_protocol::{ClientRequest, ItemId, ResponsePayload, ThreadId, ThreadItem, TurnId};
 use ncx_thread_store::JsonThreadStore;
 use std::sync::atomic::AtomicU64;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -17,16 +17,66 @@ fn server() -> AppServer<JsonThreadStore> {
 }
 
 mod goal_driver_tests;
+mod profile_race_tests;
+#[path = "runtime_memory_tests.rs"]
+mod runtime_memory_tests;
 mod runtime_tests;
 mod thread_tests;
+
+#[derive(Default)]
+struct ProfileValidationGate {
+    state: Mutex<ProfileValidationGateState>,
+    entered: Condvar,
+    released: Condvar,
+}
+
+#[derive(Default)]
+struct ProfileValidationGateState {
+    entered: bool,
+    released: bool,
+}
+
+impl ProfileValidationGate {
+    fn wait_until_entered(&self) {
+        let mut state = self.state.lock().unwrap();
+        while !state.entered {
+            state = self.entered.wait(state).unwrap();
+        }
+    }
+
+    fn release(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.released = true;
+        self.released.notify_all();
+    }
+
+    fn block_validation(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.entered = true;
+        self.entered.notify_all();
+        while !state.released {
+            state = self.released.wait(state).unwrap();
+        }
+    }
+}
+
 #[derive(Default)]
 struct RecordingRuntime {
     calls: Mutex<Vec<String>>,
+    validated_profiles: Mutex<Vec<(String, String)>>,
+    profile_validation_gate: Option<Arc<ProfileValidationGate>>,
     fail_goal_continue: bool,
 }
 
 impl AppServerAdapter for RecordingRuntime {
-    fn validate_harness_profile(&self, profile: &str) -> Result<(), String> {
+    fn validate_harness_profile(&self, profile: &str, workspace: &str) -> Result<(), String> {
+        self.validated_profiles
+            .lock()
+            .unwrap()
+            .push((profile.to_string(), workspace.to_string()));
+        if let Some(gate) = &self.profile_validation_gate {
+            gate.block_validation();
+        }
         matches!(
             profile,
             "full" | "coding" | "readonly" | "minimal" | "headless"
@@ -150,8 +200,11 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(())
     }
 
-    fn set_permission_mode(&self, mode: String) -> Result<(), String> {
-        self.calls.lock().unwrap().push(format!("mode:{mode}"));
+    fn set_permission_mode(&self, thread_id: &ThreadId, mode: String) -> Result<(), String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("mode:{thread_id}:{mode}"));
         Ok(())
     }
 
@@ -256,21 +309,99 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(())
     }
 
-    fn list_memory(&self) -> Result<serde_json::Value, String> {
-        Ok(serde_json::json!([{"note":"remember"}]))
-    }
-
-    fn add_memory(&self, note: String, tags: Vec<String>) -> Result<bool, String> {
+    fn list_memory(&self, workspace: String) -> Result<serde_json::Value, String> {
         self.calls
             .lock()
             .unwrap()
-            .push(format!("memory-add:{note}:{}", tags.len()));
+            .push(format!("memory-list:{workspace}"));
+        Ok(serde_json::json!([{"note":"remember"}]))
+    }
+
+    fn add_memory(
+        &self,
+        note: String,
+        tags: Vec<String>,
+        workspace: String,
+    ) -> Result<bool, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("memory-add:{note}:{}:{workspace}", tags.len()));
         Ok(true)
     }
 
-    fn consolidate_memory(&self) -> Result<u64, String> {
-        self.calls.lock().unwrap().push("memory-consolidate".into());
+    fn consolidate_memory(&self, workspace: String) -> Result<u64, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("memory-consolidate:{workspace}"));
         Ok(2)
+    }
+
+    fn start_memory_merge(&self, workspace: String) -> Result<serde_json::Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("memory-merge-start:{workspace}"));
+        Ok(serde_json::json!({"status":"running"}))
+    }
+
+    fn memory_merge_status(
+        &self,
+        workspace: String,
+        generation: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
+        self.calls.lock().unwrap().push(format!(
+            "memory-merge-status:{workspace}:{}",
+            generation
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        ));
+        Ok(serde_json::json!({
+            "generation": generation.unwrap_or(0),
+            "status": "idle"
+        }))
+    }
+
+    fn cancel_memory_merge(
+        &self,
+        workspace: String,
+        generation: u64,
+    ) -> Result<serde_json::Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("memory-merge-cancel:{workspace}:{generation}"));
+        Ok(serde_json::json!({"generation": generation, "status":"cancelling"}))
+    }
+
+    fn forge_job_status(
+        &self,
+        workspace: String,
+        generation: Option<u64>,
+    ) -> Result<serde_json::Value, String> {
+        self.calls.lock().unwrap().push(format!(
+            "forge-status:{workspace}:{}",
+            generation
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        ));
+        Ok(serde_json::json!({
+            "generation": generation.unwrap_or(0),
+            "status": "idle"
+        }))
+    }
+
+    fn cancel_forge_job(
+        &self,
+        workspace: String,
+        generation: u64,
+    ) -> Result<serde_json::Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("forge-cancel:{workspace}:{generation}"));
+        Ok(serde_json::json!({"generation": generation, "status":"cancelling"}))
     }
 
     fn list_codex_plugins(&self) -> Result<serde_json::Value, String> {

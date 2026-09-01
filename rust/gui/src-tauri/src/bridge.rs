@@ -255,17 +255,24 @@ pub enum Command {
     /// serial worker queue. Project files remain shared; chat and plans do not.
     New {
         id: String,
+        workspace: PathBuf,
         harness_profile: String,
         completion: SyncSender<Result<(), String>>,
     },
     /// Continue a saved session: reseed the agent from its snapshot, keeping the
     /// same session id (future turns append to it).
-    Resume(String),
+    Resume {
+        id: String,
+        workspace: PathBuf,
+        completion: SyncSender<Result<(), String>>,
+    },
     /// Branch a saved session: reseed a NEW session from the snapshot, leaving
     /// the source untouched (explore an alternative continuation).
     Fork {
         source_id: String,
         target_id: String,
+        workspace: PathBuf,
+        completion: SyncSender<Result<(), String>>,
     },
     /// Change the approval policy live (no session reset) + persist it.
     /// Change the sandbox mode live (no session reset) + persist it. Used by the
@@ -280,7 +287,16 @@ pub enum Command {
     /// Switch the CC permission mode (plan / default / accept-edits / bypass):
     /// persist it (+ derived sandbox/approval) and rebuild reseeded so the new
     /// gating + plan nudge take effect without losing the conversation.
-    SetPermissionMode(String),
+    SetPermissionMode {
+        /// Durable Thread selected when the request was made. Never use the
+        /// coordinator's mutable active session as an implicit target: a
+        /// navigation command may be ahead of this queued rebuild.
+        thread_id: String,
+        mode: String,
+        /// The protocol request does not complete until the worker has either
+        /// rebuilt this exact Thread or rejected it as stale.
+        completion: SyncSender<Result<(), String>>,
+    },
     /// Re-emit the `ready` snapshot (model / sandbox / session id / models /
     /// permission mode). The frontend calls this once its listener is up, since
     /// the agent thread's initial emit can fire before that listener exists.
@@ -745,18 +761,6 @@ pub fn load_last_workspace() -> Option<PathBuf> {
     p.is_dir().then_some(p)
 }
 
-/// Switch the process cwd to a resumed session's original workspace (best-effort)
-/// so the conversation reopens against the right project. Strips the Windows
-/// verbatim `\\?\` prefix, which `set_current_dir` rejects.
-fn restore_session_workspace(ws: Option<&str>) {
-    let Some(ws) = ws else { return };
-    let p = PathBuf::from(strip_verbatim_prefix(ws));
-    if p.is_dir() {
-        let _ = std::env::set_current_dir(&p);
-        save_last_workspace(&p);
-    }
-}
-
 /// Return a stable user-facing path without Windows' verbatim namespace prefix.
 pub fn display_path(path: &Path) -> String {
     strip_verbatim_prefix(&path.to_string_lossy())
@@ -1068,7 +1072,7 @@ async fn build_agent(
     questioner: Rc<dyn UserQuestionHandler>,
     seed: Option<(String, Vec<Value>)>,
     grants: Rc<RefCell<SessionGrants>>,
-    workspace_override: Option<PathBuf>,
+    workspace: PathBuf,
     harness_profile: Option<String>,
     app_server: Arc<AppServer<JsonThreadStore>>,
 ) -> Result<(AgentLoop, PathBuf, String, PathBuf), String> {
@@ -1080,9 +1084,8 @@ async fn build_agent(
         Some((id, messages)) => (id, Some(messages)),
         None => (new_session_id(), None),
     };
-    let workspace = workspace_override.or_else(|| std::env::current_dir().ok());
     let overrides = Overrides {
-        workspace,
+        workspace: Some(workspace),
         ..Default::default()
     };
     let cfg = load_config(overrides).map_err(|e| e.to_string())?;
@@ -1217,6 +1220,53 @@ fn protocol_thread_seed(
         })
         .unwrap_or_else(|| protocol_thread_messages(&thread, false));
     Some((messages, Some(thread.metadata.workspace)))
+}
+
+/// Resolve a durable Thread workspace for background workers. Never fall back
+/// to the process CWD: another GUI navigation may legitimately change that
+/// global value while this session is still queued or running.
+fn protocol_thread_workspace(
+    app_server: &AppServer<JsonThreadStore>,
+    session_id: &str,
+) -> Result<PathBuf, String> {
+    let Some((_, Some(stored_workspace))) = protocol_thread_seed(app_server, session_id) else {
+        return Err(format!("会话 {session_id} 缺少持久工作区"));
+    };
+    let workspace = PathBuf::from(strip_verbatim_prefix(&stored_workspace));
+    if !workspace.is_dir() {
+        return Err(format!(
+            "会话 {session_id} 的工作区不存在：{}",
+            workspace.display()
+        ));
+    }
+    Ok(workspace)
+}
+
+/// Resolve the only session a queued permission-mode rebuild may touch.
+///
+/// Navigation commands and configuration commands share the coordinator queue,
+/// but a workspace transition can enqueue a different session before an older
+/// permission request arrives. Requiring both identities to match keeps that
+/// stale request from rebuilding the newly active session. The workspace is
+/// intentionally read from the durable Thread rather than process CWD.
+fn permission_mode_rebuild_input(
+    app_server: &AppServer<JsonThreadStore>,
+    active_session_id: &str,
+    target_session_id: &str,
+) -> Result<(Vec<Value>, PathBuf, String), String> {
+    if active_session_id != target_session_id {
+        return Err(format!(
+            "会话已切换，拒绝将权限模式请求从 {target_session_id} 应用到 {active_session_id}"
+        ));
+    }
+    let Some((messages, _)) = protocol_thread_seed(app_server, target_session_id) else {
+        return Err(format!(
+            "当前会话 {target_session_id} 缺少持久工作区，拒绝重建权限模式。"
+        ));
+    };
+    let workspace = protocol_thread_workspace(app_server, target_session_id)?;
+    let harness_profile = protocol_thread_profile(app_server, target_session_id);
+    Ok((messages, workspace, harness_profile))
 }
 
 fn protocol_thread_profile(app_server: &AppServer<JsonThreadStore>, session_id: &str) -> String {
@@ -1517,7 +1567,7 @@ fn spawn_turn_worker(
                     questioner,
                     Some((session_id.clone(), messages)),
                     grants.clone(),
-                    Some(workspace.clone()),
+                    workspace.clone(),
                     Some(harness_profile),
                     app_server.clone(),
                 )
@@ -1679,25 +1729,25 @@ fn spawn_goal_worker(
         // remains armed and can be resumed explicitly without corrupting it.
         return;
     }
-    let Some((_, stored_workspace)) = protocol_thread_seed(&app_server, &session_id) else {
-        if let Ok(mut sessions) = running.lock() {
-            sessions.remove(&session_id);
+    let workspace = match protocol_thread_workspace(&app_server, &session_id) {
+        Ok(workspace) => workspace,
+        Err(message) => {
+            if let Ok(mut sessions) = running.lock() {
+                sessions.remove(&session_id);
+            }
+            let _ = ThreadId::new(session_id.clone())
+                .ok()
+                .and_then(|thread_id| app_server.disarm_goal(&thread_id).ok());
+            emit(
+                &app,
+                UiEvent::Error {
+                    session_id,
+                    message: format!("长期目标对应的会话不可用，自动续轮已关闭：{message}"),
+                },
+            );
+            return;
         }
-        let _ = ThreadId::new(session_id.clone())
-            .ok()
-            .and_then(|thread_id| app_server.disarm_goal(&thread_id).ok());
-        emit(
-            &app,
-            UiEvent::Error {
-                session_id,
-                message: "长期目标对应的会话不存在，自动续轮已关闭。".into(),
-            },
-        );
-        return;
     };
-    let workspace = stored_workspace
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let cancel: CancelFlag = Arc::new(AtomicBool::new(false));
     if let Ok(mut registry) = cancels.lock() {
         registry.insert(session_id.clone(), cancel.clone());
@@ -1996,6 +2046,7 @@ pub fn spawn_worker(
     deferred_prompts: DeferredPrompts,
     lifecycle: Arc<WorkerLifecycle>,
     session_grants: GrantRegistry,
+    startup_workspace: PathBuf,
 ) {
     let coordinator_lifecycle = lifecycle.clone();
     let spawned = std::thread::Builder::new()
@@ -2018,14 +2069,10 @@ pub fn spawn_worker(
                     active_session: active_session.clone(),
                     pending: questions.clone(),
                 });
-                // Restore the last chosen workspace so we don't fall back to the
-                // launch cwd (often the user's home) on every start.
-                if let Some(ws) = load_last_workspace() {
-                    let _ = std::env::set_current_dir(&ws);
-                }
-                let startup_seed = std::env::current_dir()
-                    .ok()
-                    .and_then(|workspace| latest_protocol_thread_seed(&app_server, &workspace));
+                // Tauri setup selected this before the worker started. Keep it
+                // explicit so later workspace commands cannot affect initial
+                // config/plugin discovery through the process-global CWD.
+                let startup_seed = latest_protocol_thread_seed(&app_server, &startup_workspace);
                 let startup_profile = startup_seed
                     .as_ref()
                     .map(|(id, _)| protocol_thread_profile(&app_server, id));
@@ -2037,7 +2084,7 @@ pub fn spawn_worker(
                     questioner.clone(),
                     startup_seed,
                     grants.clone(),
-                    None,
+                    startup_workspace.clone(),
                     startup_profile,
                     app_server.clone(),
                 )
@@ -2109,6 +2156,7 @@ pub fn spawn_worker(
                         }
                         Command::New {
                             id,
+                            workspace: command_workspace,
                             harness_profile,
                             completion,
                         } => {
@@ -2118,7 +2166,7 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((id, Vec::new())),
                                 grants.clone(),
-                                None,
+                                command_workspace,
                                 Some(harness_profile),
                                 app_server.clone(),
                             )
@@ -2157,30 +2205,31 @@ pub fn spawn_worker(
                                 }
                             }
                         }
-                        Command::Resume(id) => {
+                        Command::Resume {
+                            id,
+                            workspace: command_workspace,
+                            completion,
+                        } => {
                             let loaded = protocol_thread_seed(&app_server, &id);
-                            let Some((msgs, restored_workspace)) = loaded else {
+                            let Some((msgs, _)) = loaded else {
+                                let message = format!("no saved snapshot for session {id}");
+                                let _ = completion.send(Err(message.clone()));
                                 emit(
                                     &app,
                                     UiEvent::Error {
                                         session_id: id.clone(),
-                                        message: format!("no saved snapshot for session {id}"),
+                                        message,
                                     },
                                 );
                                 continue;
                             };
                             let ui = protocol_thread_ui(&app_server, &id)
                                 .unwrap_or_else(|| snapshot_to_ui(&msgs));
-                            // Reopen the conversation in ITS original workspace, not
-                            // whatever dir we're currently in — otherwise a resumed
-                            // session runs against the wrong project.
-                            restore_session_workspace(restored_workspace.as_deref());
-                            workspace = restored_workspace
-                                .as_deref()
-                                .map(strip_verbatim_prefix)
-                                .map(PathBuf::from)
-                                .filter(|path| path.is_dir())
-                                .unwrap_or_else(|| workspace.clone());
+                            // The runtime adapter already transitioned the process CWD
+                            // under its workspace gate. Keep the worker independent from
+                            // that global state: the durable Thread metadata is the sole
+                            // authority for this session's runtime workspace.
+                            workspace = command_workspace;
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             if let Ok(mut registry) = session_grants.lock() {
                                 registry.remove(&id);
@@ -2199,27 +2248,29 @@ pub fn spawn_worker(
                                     messages: ui,
                                 },
                             );
+                            let _ = completion.send(Ok(()));
                         }
                         Command::Fork {
                             source_id,
                             target_id,
+                            workspace: command_workspace,
+                            completion,
                         } => {
                             let loaded = protocol_thread_seed(&app_server, &source_id);
-                            let Some((msgs, restored_workspace)) = loaded else {
+                            let Some((msgs, _)) = loaded else {
+                                let message = format!("no saved snapshot for session {source_id}");
+                                let _ = completion.send(Err(message.clone()));
                                 emit(
                                     &app,
                                     UiEvent::Error {
                                         session_id: source_id.clone(),
-                                        message: format!(
-                                            "no saved snapshot for session {source_id}"
-                                        ),
+                                        message,
                                     },
                                 );
                                 continue;
                             };
                             let ui = protocol_thread_ui(&app_server, &source_id)
                                 .unwrap_or_else(|| snapshot_to_ui(&msgs));
-                            restore_session_workspace(restored_workspace.as_deref());
                             grants = Rc::new(RefCell::new(SessionGrants::default()));
                             let harness_profile = protocol_thread_profile(&app_server, &target_id);
                             match build_agent(
@@ -2227,7 +2278,7 @@ pub fn spawn_worker(
                                 questioner.clone(),
                                 Some((target_id.clone(), msgs)),
                                 grants.clone(),
-                                None,
+                                command_workspace,
                                 Some(harness_profile),
                                 app_server.clone(),
                             )
@@ -2252,14 +2303,18 @@ pub fn spawn_worker(
                                             messages: ui,
                                         },
                                     );
+                                    let _ = completion.send(Ok(()));
                                 }
-                                Err(e) => emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: target_id.clone(),
-                                        message: e,
-                                    },
-                                ),
+                                Err(e) => {
+                                    let _ = completion.send(Err(e.clone()));
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: target_id.clone(),
+                                            message: e,
+                                        },
+                                    )
+                                }
                             }
                         }
                         Command::SetModel(model) => {
@@ -2284,7 +2339,30 @@ pub fn spawn_worker(
                                 target_id,
                             );
                         }
-                        Command::SetPermissionMode(mode) => {
+                        Command::SetPermissionMode {
+                            thread_id: target_id,
+                            mode,
+                            completion,
+                        } => {
+                            let (msgs, command_workspace, harness_profile) =
+                                match permission_mode_rebuild_input(
+                                    &app_server,
+                                    &session_id,
+                                    &target_id,
+                                ) {
+                                    Ok(input) => input,
+                                    Err(error) => {
+                                        let _ = completion.send(Err(error.clone()));
+                                        emit(
+                                            &app,
+                                            UiEvent::Error {
+                                                session_id: target_id,
+                                                message: error,
+                                            },
+                                        );
+                                        continue;
+                                    }
+                                };
                             // Persist the mode (+ derived sandbox/approval for consistency),
                             // then rebuild reseeded so the new gating + plan nudge apply
                             // without losing the conversation.
@@ -2293,18 +2371,28 @@ pub fn spawn_worker(
                             m.insert("permission_mode", mode.as_str());
                             m.insert("sandbox_mode", sandbox);
                             m.insert("approval_policy", approval);
-                            let _ = write_nanocodex_config(&m, &ConfigPaths::default().nanocodex);
-                            let msgs = protocol_thread_seed(&app_server, &session_id)
-                                .map(|(messages, _)| messages)
-                                .unwrap_or_default();
+                            if let Err(error) =
+                                write_nanocodex_config(&m, &ConfigPaths::default().nanocodex)
+                            {
+                                let error = error.to_string();
+                                let _ = completion.send(Err(error.clone()));
+                                emit(
+                                    &app,
+                                    UiEvent::Error {
+                                        session_id: target_id,
+                                        message: error,
+                                    },
+                                );
+                                continue;
+                            }
                             // Same session → keep the "always allow" grants.
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
-                                Some((session_id.clone(), msgs)),
+                                Some((target_id.clone(), msgs)),
                                 grants.clone(),
-                                None,
-                                Some(protocol_thread_profile(&app_server, &session_id)),
+                                command_workspace,
+                                Some(harness_profile),
                                 app_server.clone(),
                             )
                             .await
@@ -2321,14 +2409,18 @@ pub fn spawn_worker(
                                         None,
                                     ));
                                     emit_ready(&app, &workspace, &session_id);
+                                    let _ = completion.send(Ok(()));
                                 }
-                                Err(e) => emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: session_id.clone(),
-                                        message: e,
-                                    },
-                                ),
+                                Err(e) => {
+                                    let _ = completion.send(Err(e.clone()));
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: target_id,
+                                            message: e,
+                                        },
+                                    )
+                                }
                             }
                         }
                         Command::RequestReady => {
@@ -2599,6 +2691,42 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let store = Arc::new(JsonThreadStore::open(root.join("threads.json")).unwrap());
         (Arc::new(AppServer::new(store, || 1)), root)
+    }
+
+    #[test]
+    fn stale_permission_mode_rebuild_cannot_target_the_new_active_session() {
+        let (server, root) = protocol_server("permission-mode-target");
+        let first_workspace = root.join("first");
+        let second_workspace = root.join("second");
+        std::fs::create_dir_all(&first_workspace).unwrap();
+        std::fs::create_dir_all(&second_workspace).unwrap();
+        for (thread_id, workspace) in [
+            ("permission-first", &first_workspace),
+            ("permission-second", &second_workspace),
+        ] {
+            server
+                .dispatch(ClientRequest::ThreadCreate {
+                    thread_id: Some(ThreadId::new(thread_id).unwrap()),
+                    workspace: workspace.to_string_lossy().into_owned(),
+                    title: thread_id.into(),
+                    harness_profile: "full".into(),
+                })
+                .unwrap();
+        }
+
+        let error = permission_mode_rebuild_input(&server, "permission-second", "permission-first")
+            .unwrap_err();
+        assert!(error.contains("会话已切换"));
+        assert!(error.contains("permission-first"));
+        assert!(error.contains("permission-second"));
+
+        let (messages, workspace, profile) =
+            permission_mode_rebuild_input(&server, "permission-second", "permission-second")
+                .unwrap();
+        assert!(messages.is_empty());
+        assert_eq!(workspace, second_workspace);
+        assert_eq!(profile, "full");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -3275,7 +3403,10 @@ mod tests {
         let interactions_finished = Arc::new(AtomicBool::new(false));
         let interactions_done = interactions_finished.clone();
         lifecycle.track(std::thread::spawn(move || {
-            assert!(matches!(approval_rx.blocking_recv(), Ok(ApprovalDecision::Deny)));
+            assert!(matches!(
+                approval_rx.blocking_recv(),
+                Ok(ApprovalDecision::Deny)
+            ));
             assert!(matches!(question_rx.blocking_recv(), Ok(None)));
             interactions_done.store(true, Ordering::Release);
         }));

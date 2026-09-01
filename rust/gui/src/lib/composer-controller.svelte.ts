@@ -53,6 +53,7 @@ export class ComposerController {
   };
 
   dispatch = async (text: string, images: string[], shown: string, executionMode = this.executionMode): Promise<void> => {
+    if (this.thread.switching) return;
     const targetSessionId = this.thread.currentId;
     this.thread.beginTurn({ role: "user", text: shown, images: [...images] });
     this.thread.setRunning(targetSessionId, true);
@@ -76,6 +77,7 @@ export class ComposerController {
   };
 
   dequeue = (): void => {
+    if (this.thread.switching) return;
     if (!this.thread.busy && this.thread.queued.length > 0) {
       const next = this.thread.queued.shift();
       if (next) void this.dispatch(next.text, next.images, next.shown, next.executionMode);
@@ -83,6 +85,7 @@ export class ComposerController {
   };
 
   send = (): void => {
+    if (this.thread.switching) return;
     const text = this.input.trim();
     if (!text && this.attached.length === 0) return;
     if (this.needsWorkspace()) {

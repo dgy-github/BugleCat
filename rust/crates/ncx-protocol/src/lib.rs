@@ -431,7 +431,11 @@ pub enum ClientRequest {
     RuntimeModelSet {
         model: String,
     },
+    /// Rebuild the exact durable Thread after changing the process-wide
+    /// permission policy. The Thread identity prevents a queued request from
+    /// rebuilding whichever session happens to become active meanwhile.
     RuntimePermissionModeSet {
+        thread_id: ThreadId,
         mode: String,
     },
     ModelCatalogRead,
@@ -472,17 +476,43 @@ pub enum ClientRequest {
         id: String,
         enabled: bool,
     },
-    MemoryList,
+    /// List project-memory notes for the caller's workspace snapshot.
+    /// Runtime adapters must reject the request if the process workspace has
+    /// changed before the read executes.
+    MemoryList {
+        workspace: String,
+    },
     MemoryAdd {
         note: String,
         tags: Vec<String>,
+        workspace: String,
     },
-    MemoryConsolidate,
-    MemoryMergeStart,
-    MemoryMergeStatusRead,
-    MemoryMergeCancel,
+    MemoryConsolidate {
+        workspace: String,
+    },
+    /// Start a model-memory merge only if the runtime still owns the caller's
+    /// workspace, preventing queued work from mutating a newly selected project.
+    MemoryMergeStart {
+        workspace: String,
+    },
+    /// Read the model-memory merge projection for a workspace snapshot.
+    /// `generation` is omitted for an initial refresh and supplied by a
+    /// poller to avoid observing a replacement job after its own job ended.
+    MemoryMergeStatusRead {
+        workspace: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation: Option<u64>,
+    },
+    /// Cancel exactly the merge generation owned by this workspace snapshot.
+    MemoryMergeCancel {
+        workspace: String,
+        generation: u64,
+    },
     ForgeRuntimeStatusRead,
     ForgeJobStart {
+        /// Runtime adapters must verify this caller snapshot before spawning,
+        /// so queued work cannot write into a newly selected project.
+        workspace: String,
         rounds: u8,
         repeats: u8,
         timeout_s: u64,
@@ -490,8 +520,17 @@ pub enum ClientRequest {
         teacher: String,
         accept_margin: u8,
     },
-    ForgeJobStatusRead,
-    ForgeJobCancel,
+    /// Read a workspace snapshot; pollers provide their started generation.
+    ForgeJobStatusRead {
+        workspace: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generation: Option<u64>,
+    },
+    /// Cancel exactly the Forge generation owned by this workspace snapshot.
+    ForgeJobCancel {
+        workspace: String,
+        generation: u64,
+    },
     TurnComplete {
         thread_id: ThreadId,
         turn_id: TurnId,

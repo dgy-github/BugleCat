@@ -1,5 +1,6 @@
 use super::*;
 use ncx_protocol::{ItemId, ThreadItem};
+use std::fs;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -224,6 +225,30 @@ fn one_thread_accepts_only_one_active_turn() {
         )
         .unwrap();
     store.claim_turn(&id, turn("turn-2")).unwrap();
+}
+
+#[test]
+fn harness_profile_update_rechecks_turns_inside_the_atomic_store_transaction() {
+    let store = temp_store("profile-first-turn-race");
+    let id = ThreadId::new("thread").unwrap();
+    store.create(thread("thread")).unwrap();
+
+    // This represents the caller's earlier validation/read. A first TurnStart
+    // may complete before the caller reaches the profile write, so the store
+    // must check the durable state again inside its mutation transaction.
+    let observed = store.read(&id).unwrap().unwrap();
+    assert!(observed.turns.is_empty());
+    store.claim_turn(&id, turn("first-turn")).unwrap();
+
+    assert_eq!(
+        store
+            .set_harness_profile_if_idle(&id, "readonly".into(), 3)
+            .unwrap(),
+        None
+    );
+    let stored = store.read(&id).unwrap().unwrap();
+    assert_eq!(stored.metadata.harness_profile, "full");
+    assert_eq!(stored.turns.len(), 1);
 }
 
 #[test]

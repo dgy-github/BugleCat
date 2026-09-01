@@ -147,7 +147,20 @@ fn assert_round_trip(request: ClientRequest, expected: &[&str]) {
 }
 
 #[test]
-fn client_request_and_item_fields_use_frontend_camel_case() {
+fn memory_list_request_carries_workspace_snapshot() {
+    assert_round_trip(
+        ClientRequest::MemoryList {
+            workspace: "C:\\workspace".into(),
+        },
+        &[
+            "\"method\":\"memoryList\"",
+            "\"workspace\":\"C:\\\\workspace\"",
+        ],
+    );
+}
+
+#[test]
+fn goal_thread_and_item_requests_use_frontend_camel_case() {
     assert_round_trip(
         ClientRequest::GoalRoundStart {
             thread_id: ThreadId::new("thread-goal").unwrap(),
@@ -204,6 +217,10 @@ fn client_request_and_item_fields_use_frontend_camel_case() {
         },
         &["\"threadId\"", "\"turnId\"", "\"callId\""],
     );
+}
+
+#[test]
+fn plugin_and_interaction_requests_use_frontend_camel_case() {
     assert_round_trip(
         ClientRequest::MarketplacePluginInstall {
             marketplace_path: "marketplace.json".into(),
@@ -238,6 +255,56 @@ fn client_request_and_item_fields_use_frontend_camel_case() {
             "\"threadId\":\"thread-2\"",
         ],
     );
+}
+
+#[test]
+fn forge_and_settings_requests_use_frontend_camel_case() {
+    assert_round_trip(
+        ClientRequest::ForgeJobStart {
+            workspace: "C:\\workspace".into(),
+            rounds: 2,
+            repeats: 1,
+            timeout_s: 120,
+            budget_s: 600,
+            teacher: "panel".into(),
+            accept_margin: 1,
+        },
+        &[
+            "\"method\":\"forgeJobStart\"",
+            "\"workspace\":\"C:\\\\workspace\"",
+        ],
+    );
+    assert_round_trip(
+        ClientRequest::MemoryMergeStatusRead {
+            workspace: "C:\\workspace".into(),
+            generation: None,
+        },
+        &[
+            "\"method\":\"memoryMergeStatusRead\"",
+            "\"workspace\":\"C:\\\\workspace\"",
+        ],
+    );
+    assert_round_trip(
+        ClientRequest::MemoryMergeCancel {
+            workspace: "C:\\workspace".into(),
+            generation: 4,
+        },
+        &["\"method\":\"memoryMergeCancel\"", "\"generation\":4"],
+    );
+    assert_round_trip(
+        ClientRequest::ForgeJobStatusRead {
+            workspace: "C:\\workspace".into(),
+            generation: Some(5),
+        },
+        &["\"method\":\"forgeJobStatusRead\"", "\"generation\":5"],
+    );
+    assert_round_trip(
+        ClientRequest::ForgeJobCancel {
+            workspace: "C:\\workspace".into(),
+            generation: 6,
+        },
+        &["\"method\":\"forgeJobCancel\"", "\"generation\":6"],
+    );
     assert_round_trip(
         ClientRequest::SettingsUpdate {
             updates: BTreeMap::from([("reasoning_effort".into(), "high".into())]),
@@ -245,6 +312,41 @@ fn client_request_and_item_fields_use_frontend_camel_case() {
         &[
             "\"method\":\"settingsUpdate\"",
             "\"reasoning_effort\":\"high\"",
+        ],
+    );
+}
+
+#[test]
+fn status_refresh_generation_is_optional_but_legacy_unit_requests_are_rejected() {
+    let request: ClientRequest = serde_json::from_value(serde_json::json!({
+        "method": "forgeJobStatusRead",
+        "params": { "workspace": "C:\\workspace" }
+    }))
+    .unwrap();
+    assert!(matches!(
+        request,
+        ClientRequest::ForgeJobStatusRead {
+            workspace,
+            generation: None,
+        } if workspace == "C:\\workspace"
+    ));
+    assert!(serde_json::from_value::<ClientRequest>(serde_json::json!({
+        "method": "forgeJobCancel"
+    }))
+    .is_err());
+}
+
+#[test]
+fn permission_mode_request_serializes_thread_id_in_camel_case() {
+    assert_round_trip(
+        ClientRequest::RuntimePermissionModeSet {
+            thread_id: ThreadId::new("thread-permissions").unwrap(),
+            mode: "accept-edits".into(),
+        },
+        &[
+            "\"method\":\"runtimePermissionModeSet\"",
+            "\"threadId\":\"thread-permissions\"",
+            "\"mode\":\"accept-edits\"",
         ],
     );
 }

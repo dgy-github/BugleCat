@@ -10,7 +10,7 @@
     reasoningEffort, reasoningMenuOpen = $bindable(), reasoningEfforts, selectReasoningEffort, reasoningLabel,
     permissionMode, modeMenuOpen = $bindable(), permissionModes, selectMode, modeIcon, modeLabel,
     goalView, goalStatusLabel, goalRemainingRounds, goalLoading, goalMenuOpen = $bindable(), pauseGoal, resumeGoal,
-    busy, workspace, needsWorkspace, wsName, chooseWorkspace, turnCount, stepCount,
+    busy, switching, workspace, needsWorkspace, wsName, chooseWorkspace, turnCount, stepCount,
     tokIn, tokOut, priceIn, priceOut, priceCurrency, cost, fmtTok, currencySymbol, fmtCost,
     queued = $bindable(), attached, isImage, baseName, removeAttachment,
     showSlash, slashMatches, slashIdx = $bindable(), runSlash,
@@ -23,7 +23,7 @@
     selectMode: (id: string) => void; modeIcon: (id: string) => string; modeLabel: (id: string) => string;
     goalView: ProtocolGoalView | null; goalStatusLabel: string; goalRemainingRounds: number; goalLoading: boolean; goalMenuOpen: boolean;
     pauseGoal: () => void; resumeGoal: () => void;
-    busy: boolean; workspace: string; needsWorkspace: boolean; wsName: string; chooseWorkspace: () => void; turnCount: number; stepCount: number;
+    busy: boolean; switching: boolean; workspace: string; needsWorkspace: boolean; wsName: string; chooseWorkspace: () => void; turnCount: number; stepCount: number;
     tokIn: number; tokOut: number; priceIn: number; priceOut: number; priceCurrency: "CNY" | "USD"; cost: number;
     fmtTok: (value: number) => string; currencySymbol: (currency: "CNY" | "USD") => string; fmtCost: (value: number) => string;
     queued: QueuedTurn[]; attached: string[]; isImage: (path: string) => boolean; baseName: (path: string) => string;
@@ -42,9 +42,9 @@
   {/if}
   {#if needsWorkspace}<div class="ws-warn"><span>⚠ 当前工作区是主目录（非项目），已暂停对话以免误操作。请选择项目目录。</span><button class="plain" onclick={chooseWorkspace}>选择项目目录</button></div>{/if}
   <div class="composer-shell">
-    <textarea bind:value={input} onkeydown={onKey} oninput={() => { if (input.startsWith("/")) slashIdx = 0; }} onpaste={handlePaste} placeholder={needsWorkspace ? "请先选择项目目录…" : "给智能体发消息"} rows="2"></textarea>
+    <textarea bind:value={input} onkeydown={onKey} oninput={() => { if (input.startsWith("/")) slashIdx = 0; }} onpaste={handlePaste} placeholder={needsWorkspace ? "请先选择项目目录…" : "给智能体发消息"} disabled={switching} rows="2"></textarea>
     <div class="composer-meta">
-      <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} aria-label="添加">＋</button>
+      <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} disabled={switching} aria-label="添加">＋</button>
     <div class="model-wrap">
       <button class="model-pill" onclick={() => { modeMenuOpen = false; reasoningMenuOpen = false; modelMenuOpen = !modelMenuOpen; }} disabled={models.length === 0} title={`${routeLabel || "当前 Route"} · ${busy ? "当前任务继续使用原 Route，下一轮使用新 Route" : "切换模型"}`}><span class="model-provider">{currentProviderName || currentProvider || "Route"}</span><span>{currentModel || header}</span> ▾</button>
       {#if modelMenuOpen}
@@ -71,12 +71,12 @@
       {/if}
     </div>
     <div class="approval-wrap">
-      <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"} onclick={() => { modelMenuOpen = false; reasoningMenuOpen = false; modeMenuOpen = !modeMenuOpen; }} title="权限模式">{modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾</button>
+      <button class="approval-pill" class:danger={permissionMode === "bypass"} class:plan={permissionMode === "plan"} onclick={() => { modelMenuOpen = false; reasoningMenuOpen = false; modeMenuOpen = !modeMenuOpen; }} disabled={switching} title="权限模式">{modeIcon(permissionMode)} {modeLabel(permissionMode)} ▾</button>
       {#if modeMenuOpen}
         <button class="menu-backdrop" aria-label="关闭" onclick={() => (modeMenuOpen = false)}></button>
         <div class="approval-menu" role="menu">
           {#each permissionModes as option}
-            <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === option.id} onclick={() => selectMode(option.id)}><span class="opt-check">{permissionMode === option.id ? "✓" : ""}</span><span class="opt-text"><span class="opt-name">{modeIcon(option.id)} {option.label}</span><span class="opt-id">{option.desc}</span></span></button>
+            <button class="approval-opt" role="menuitemradio" aria-checked={permissionMode === option.id} onclick={() => selectMode(option.id)} disabled={switching}><span class="opt-check">{permissionMode === option.id ? "✓" : ""}</span><span class="opt-text"><span class="opt-name">{modeIcon(option.id)} {option.label}</span><span class="opt-id">{option.desc}</span></span></button>
           {/each}
         </div>
       {/if}
@@ -106,7 +106,7 @@
       {#if busy}
         <button class="stop-btn visible" onclick={stopGeneration} title={stopping ? "再次停止" : "停止生成"} aria-label="停止生成">■</button>
       {:else}
-        <button class="send-round" onclick={send} disabled={needsWorkspace || (input.trim() === "" && attached.length === 0)} aria-label="发送">↑</button>
+        <button class="send-round" onclick={send} disabled={switching || needsWorkspace || (input.trim() === "" && attached.length === 0)} aria-label="发送">↑</button>
       {/if}
     </div>
   </div>

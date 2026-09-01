@@ -68,7 +68,7 @@ pub(super) async fn run(
             questioner.clone(),
             Some((session_id.clone(), messages)),
             grants.clone(),
-            Some(workspace.clone()),
+            workspace.clone(),
             Some(harness_profile.clone()),
             app_server.clone(),
         )

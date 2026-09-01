@@ -69,5 +69,8 @@ bench/tasks/gen_*/
 .nanocodex/
 .ncx/
 
+# Codex desktop hook/session state (machine-local, never part of a release)
+.mimosa/
+
 # 本地隔离工作区
 .worktrees/

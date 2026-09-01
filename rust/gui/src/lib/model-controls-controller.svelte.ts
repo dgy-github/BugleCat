@@ -49,6 +49,7 @@ export class ModelControlsController {
   constructor(
     private readonly notify: (message: string) => void,
     private readonly priceApplied: (priceIn: number, priceOut: number, currency: "CNY" | "USD") => void,
+    private readonly currentThreadId: () => string,
   ) {}
 
   applyModel = (model: string, models: string[]): void => {
@@ -157,10 +158,22 @@ export class ModelControlsController {
   selectMode = async (id: string): Promise<void> => {
     this.modeMenuOpen = false;
     if (id === this.permissionMode) return;
+    const threadId = this.currentThreadId();
+    if (!threadId) {
+      this.notify("当前没有可重建的会话，无法切换权限模式。");
+      return;
+    }
     const previous = this.permissionMode;
     this.permissionMode = id;
-    try { await appServerRequest({ method: "runtimePermissionModeSet", params: { mode: id } }); }
-    catch (error) { this.permissionMode = previous; this.notify(`切换权限模式失败：${error}`); }
+    try {
+      await appServerRequest({ method: "runtimePermissionModeSet", params: { threadId, mode: id } });
+    }
+    catch (error) {
+      // Do not roll a newly selected session back to the mode that belonged to
+      // the request's old Thread. The backend rejects that stale rebuild.
+      if (this.currentThreadId() === threadId) this.permissionMode = previous;
+      this.notify(`切换权限模式失败：${error}`);
+    }
   };
 
   reasoningLabel = (id: string): string => this.reasoningEfforts.find((option) => option.id === id)?.label ?? id;

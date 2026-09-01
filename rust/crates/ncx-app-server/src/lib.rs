@@ -4,11 +4,12 @@ mod goal_driver;
 mod goal_operations;
 mod outcome;
 mod runtime_operations;
+mod thread_operations;
 pub use adapter::AppServerAdapter;
 pub use goal_driver::{GoalRoundDriveOutcome, GoalRoundDriver};
 use ncx_protocol::{
     ClientRequest, Event, EventEnvelope, ResponsePayload, ServerResponse, Thread, ThreadMetadata,
-    Turn, TurnStatus, PROTOCOL_VERSION,
+    PROTOCOL_VERSION,
 };
 use ncx_thread_store::ThreadStore;
 pub use outcome::{AppServerError, DispatchOutcome};
@@ -35,6 +36,11 @@ impl<S: ThreadStore> AppServer<S> {
     }
 
     pub fn dispatch(&self, request: ClientRequest) -> Result<DispatchOutcome, AppServerError> {
+        if runtime_operations::requires_runtime_adapter(&request) {
+            return Err(AppServerError::InvalidRequest(
+                "request requires a runtime adapter".to_string(),
+            ));
+        }
         match request {
             request @ (ClientRequest::ThreadCreate { .. }
             | ClientRequest::ThreadImport { .. }
@@ -44,10 +50,12 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::ThreadReadVisible { .. }
             | ClientRequest::ThreadArchive { .. }
             | ClientRequest::ThreadRename { .. }
-            | ClientRequest::ThreadFork { .. }) => self.dispatch_thread_metadata(request),
+            | ClientRequest::ThreadFork { .. }) => {
+                thread_operations::dispatch_metadata(self, request)
+            }
             request @ (ClientRequest::ThreadModelContextRead { .. }
             | ClientRequest::ThreadModelContextReplace { .. }) => {
-                self.dispatch_model_context(request)
+                thread_operations::dispatch_model_context(self, request)
             }
             request @ (ClientRequest::GoalRead { .. }
             | ClientRequest::GoalCreate { .. }
@@ -60,51 +68,14 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::GoalRoundStart { .. }) => goal_operations::dispatch(self, request),
             request @ (ClientRequest::TurnStart { .. }
             | ClientRequest::TurnInterrupt { .. }
-            | ClientRequest::TurnComplete { .. }) => self.dispatch_turn(request),
+            | ClientRequest::TurnComplete { .. }) => {
+                thread_operations::dispatch_turn(self, request)
+            }
             ClientRequest::ItemAppend {
                 thread_id,
                 turn_id,
                 item,
-            } => self.dispatch_item(thread_id, turn_id, item),
-            ClientRequest::ThreadCreateActivate { .. }
-            | ClientRequest::ThreadHarnessProfileSet { .. }
-            | ClientRequest::ThreadForkActivate { .. }
-            | ClientRequest::ThreadActivate { .. }
-            | ClientRequest::TurnSubmit { .. }
-            | ClientRequest::TurnInterruptLatest { .. }
-            | ClientRequest::RuntimeStatusRead
-            | ClientRequest::RuntimeReadyRefresh
-            | ClientRequest::WorkspaceSet { .. }
-            | ClientRequest::InteractionApprove { .. }
-            | ClientRequest::InteractionAnswer { .. }
-            | ClientRequest::SettingsRead
-            | ClientRequest::SettingsUpdate { .. }
-            | ClientRequest::RuntimeModelSet { .. }
-            | ClientRequest::RuntimePermissionModeSet { .. }
-            | ClientRequest::ModelCatalogRead
-            | ClientRequest::ModelPresetApply { .. }
-            | ClientRequest::CustomProviderList
-            | ClientRequest::CustomProviderSave { .. }
-            | ClientRequest::CustomProviderDelete { .. }
-            | ClientRequest::CustomProviderModelsDiscover { .. }
-            | ClientRequest::CustomProviderActivate { .. }
-            | ClientRequest::CustomProviderChatProbe { .. }
-            | ClientRequest::HarnessDiagnosticsRead
-            | ClientRequest::ExternalPluginList
-            | ClientRequest::ExternalPluginInstall { .. }
-            | ClientRequest::ExternalPluginSetEnabled { .. }
-            | ClientRequest::MemoryList
-            | ClientRequest::MemoryAdd { .. }
-            | ClientRequest::MemoryConsolidate
-            | ClientRequest::MemoryMergeStart
-            | ClientRequest::MemoryMergeStatusRead
-            | ClientRequest::MemoryMergeCancel
-            | ClientRequest::ForgeRuntimeStatusRead
-            | ClientRequest::ForgeJobStart { .. }
-            | ClientRequest::ForgeJobStatusRead
-            | ClientRequest::ForgeJobCancel => Err(AppServerError::InvalidRequest(
-                "request requires a runtime adapter".to_string(),
-            )),
+            } => thread_operations::dispatch_item(self, thread_id, turn_id, item),
             ClientRequest::CodexPluginList
             | ClientRequest::CodexPluginInstall { .. }
             | ClientRequest::CodexPluginSetEnabled { .. }
@@ -116,6 +87,7 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::DshMarketplaceInstall { .. } => Err(AppServerError::InvalidRequest(
                 "plugin requests require a host adapter".to_string(),
             )),
+            _ => unreachable!("runtime request was not intercepted above"),
         }
     }
 
@@ -186,183 +158,6 @@ impl<S: ThreadStore> AppServer<S> {
         Ok(self.outcome(payload, events))
     }
 
-    fn dispatch_thread_metadata(
-        &self,
-        request: ClientRequest,
-    ) -> Result<DispatchOutcome, AppServerError> {
-        match request {
-            ClientRequest::ThreadList { include_archived } => Ok(self.outcome(
-                ResponsePayload::Threads(self.store.list(include_archived)?),
-                Vec::new(),
-            )),
-            ClientRequest::ThreadRead { thread_id } => {
-                let thread = self.read_thread(&thread_id)?;
-                Ok(self.outcome(ResponsePayload::Thread(thread), Vec::new()))
-            }
-            ClientRequest::ThreadReadVisible { thread_id } => {
-                let thread = self.read_thread(&thread_id)?;
-                Ok(self.outcome(ResponsePayload::Thread(thread.into_visible()), Vec::new()))
-            }
-            ClientRequest::ThreadArchive {
-                thread_id,
-                archived,
-            } => self.update_thread_metadata(thread_id, |metadata| metadata.archived = archived),
-            ClientRequest::ThreadRename { thread_id, title } => {
-                let title = title.trim();
-                if title.is_empty() {
-                    return Err(AppServerError::InvalidRequest(
-                        "thread title must not be empty".to_string(),
-                    ));
-                }
-                self.update_thread_metadata(thread_id, |metadata| {
-                    metadata.title = title.to_string()
-                })
-            }
-            ClientRequest::ThreadFork {
-                thread_id,
-                new_thread_id,
-            } => {
-                let now = (self.clock)();
-                let mut thread = self.store.fork(&thread_id, new_thread_id.clone())?;
-                thread.metadata.created_at = now;
-                thread.metadata.updated_at = now;
-                self.store.update_metadata(thread.metadata.clone())?;
-                let event = self.event(
-                    new_thread_id,
-                    None,
-                    Event::ThreadCreated {
-                        metadata: thread.metadata.clone(),
-                    },
-                );
-                Ok(self.outcome(ResponsePayload::Thread(thread), vec![event]))
-            }
-            _ => unreachable!("thread metadata dispatcher received another request"),
-        }
-    }
-
-    fn dispatch_model_context(
-        &self,
-        request: ClientRequest,
-    ) -> Result<DispatchOutcome, AppServerError> {
-        match request {
-            ClientRequest::ThreadModelContextRead { thread_id } => {
-                self.read_thread(&thread_id)?;
-                Ok(self.outcome(
-                    ResponsePayload::ModelContext(self.store.read_model_context(&thread_id)?),
-                    Vec::new(),
-                ))
-            }
-            ClientRequest::ThreadModelContextReplace {
-                thread_id,
-                messages,
-            } => {
-                let message_count = messages.len();
-                self.store
-                    .replace_model_context(&thread_id, messages, (self.clock)())?;
-                let event = self.event(
-                    thread_id,
-                    None,
-                    Event::ModelContextUpdated { message_count },
-                );
-                Ok(self.outcome(ResponsePayload::Ack, vec![event]))
-            }
-            _ => unreachable!("model context dispatcher received another request"),
-        }
-    }
-
-    fn dispatch_turn(&self, request: ClientRequest) -> Result<DispatchOutcome, AppServerError> {
-        let (payload, event) = match request {
-            ClientRequest::TurnStart {
-                thread_id,
-                turn_id,
-                execution_mode,
-            } => {
-                self.store.claim_turn(
-                    &thread_id,
-                    Turn {
-                        id: turn_id.clone(),
-                        status: TurnStatus::Running,
-                        execution_mode,
-                        items: Vec::new(),
-                        started_at: (self.clock)(),
-                        completed_at: None,
-                        error: None,
-                        usage: Default::default(),
-                    },
-                )?;
-                (
-                    ResponsePayload::Ack,
-                    self.event(
-                        thread_id,
-                        Some(turn_id),
-                        Event::TurnStarted {
-                            status: TurnStatus::Running,
-                        },
-                    ),
-                )
-            }
-            ClientRequest::TurnInterrupt { thread_id, turn_id } => {
-                self.store.finish_turn(
-                    &thread_id,
-                    &turn_id,
-                    TurnStatus::Cancelled,
-                    (self.clock)(),
-                    None,
-                    Default::default(),
-                )?;
-                (
-                    ResponsePayload::Ack,
-                    self.event(
-                        thread_id,
-                        Some(turn_id),
-                        Event::TurnCompleted {
-                            status: TurnStatus::Cancelled,
-                            error: None,
-                        },
-                    ),
-                )
-            }
-            ClientRequest::TurnComplete {
-                thread_id,
-                turn_id,
-                status,
-                error,
-                usage,
-            } => {
-                self.store.finish_turn(
-                    &thread_id,
-                    &turn_id,
-                    status,
-                    (self.clock)(),
-                    error.clone(),
-                    usage,
-                )?;
-                (
-                    ResponsePayload::Ack,
-                    self.event(
-                        thread_id,
-                        Some(turn_id),
-                        Event::TurnCompleted { status, error },
-                    ),
-                )
-            }
-            _ => unreachable!("turn dispatcher received another request"),
-        };
-        Ok(self.outcome(payload, vec![event]))
-    }
-
-    fn dispatch_item(
-        &self,
-        thread_id: ncx_protocol::ThreadId,
-        turn_id: ncx_protocol::TurnId,
-        item: ncx_protocol::ThreadItem,
-    ) -> Result<DispatchOutcome, AppServerError> {
-        self.store
-            .append_item(&thread_id, &turn_id, item.clone(), (self.clock)())?;
-        let event = self.event(thread_id, Some(turn_id), Event::ItemAdded { item });
-        Ok(self.outcome(ResponsePayload::Ack, vec![event]))
-    }
-
     pub(crate) fn update_thread_metadata(
         &self,
         thread_id: ncx_protocol::ThreadId,
@@ -380,6 +175,24 @@ impl<S: ThreadStore> AppServer<S> {
             },
         );
         Ok(self.outcome(ResponsePayload::Ack, vec![event]))
+    }
+
+    /// Update the Harness Profile only while the durable Thread has never
+    /// admitted a turn. The store combines that predicate and mutation in one
+    /// transaction, preventing a first TurnStart from racing this update.
+    pub(crate) fn set_harness_profile_if_idle(
+        &self,
+        thread_id: ncx_protocol::ThreadId,
+        harness_profile: String,
+    ) -> Result<Option<DispatchOutcome>, AppServerError> {
+        let Some(metadata) =
+            self.store
+                .set_harness_profile_if_idle(&thread_id, harness_profile, (self.clock)())?
+        else {
+            return Ok(None);
+        };
+        let event = self.event(thread_id, None, Event::ThreadUpdated { metadata });
+        Ok(Some(self.outcome(ResponsePayload::Ack, vec![event])))
     }
 
     pub(crate) fn read_thread(
@@ -416,7 +229,7 @@ impl<S: ThreadStore> AppServer<S> {
                 harness_profile,
             } => {
                 runtime
-                    .validate_harness_profile(&harness_profile)
+                    .validate_harness_profile(&harness_profile, &workspace)
                     .map_err(AppServerError::Runtime)?;
                 let outcome = self.dispatch(ClientRequest::ThreadCreate {
                     thread_id: Some(thread_id.clone()),
@@ -535,9 +348,12 @@ impl<S: ThreadStore> AppServer<S> {
                 runtime.set_model(model).map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
-            ClientRequest::RuntimePermissionModeSet { mode } => {
+            ClientRequest::RuntimePermissionModeSet { thread_id, mode } => {
+                self.dispatch(ClientRequest::ThreadRead {
+                    thread_id: thread_id.clone(),
+                })?;
                 runtime
-                    .set_permission_mode(mode)
+                    .set_permission_mode(&thread_id, mode)
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
@@ -614,18 +430,20 @@ impl<S: ThreadStore> AppServer<S> {
                     .map_err(AppServerError::Runtime)?;
                 Ok(self.ack())
             }
-            request @ (ClientRequest::MemoryList
+            request @ (ClientRequest::MemoryList { .. }
             | ClientRequest::MemoryAdd { .. }
-            | ClientRequest::MemoryConsolidate
-            | ClientRequest::MemoryMergeStart
-            | ClientRequest::MemoryMergeStatusRead
-            | ClientRequest::MemoryMergeCancel
+            | ClientRequest::MemoryConsolidate { .. }
+            | ClientRequest::MemoryMergeStart { .. }
+            | ClientRequest::MemoryMergeStatusRead { .. }
+            | ClientRequest::MemoryMergeCancel { .. }
             | ClientRequest::ForgeRuntimeStatusRead
             | ClientRequest::ForgeJobStart { .. }
-            | ClientRequest::ForgeJobStatusRead
-            | ClientRequest::ForgeJobCancel) => runtime_operations::dispatch(request, runtime)
-                .map(|payload| self.response(payload))
-                .map_err(AppServerError::Runtime),
+            | ClientRequest::ForgeJobStatusRead { .. }
+            | ClientRequest::ForgeJobCancel { .. }) => {
+                runtime_operations::dispatch(request, runtime)
+                    .map(|payload| self.response(payload))
+                    .map_err(AppServerError::Runtime)
+            }
             ClientRequest::CodexPluginList => runtime
                 .list_codex_plugins()
                 .map(ResponsePayload::CodexPlugins)
