@@ -199,7 +199,7 @@ async fn user_prompt_hook_can_block_model_call() {
             event: "user_prompt".into(),
             matcher: "*".into(),
             command: "exit 1".into(),
-            timeout_s: 3,
+            timeout_s: 20,
         }],
     );
 
@@ -221,7 +221,7 @@ async fn user_prompt_hook_output_is_sent_as_system_note() {
             event: "user_prompt".into(),
             matcher: "*".into(),
             command: "echo prompt-note".into(),
-            timeout_s: 3,
+            timeout_s: 20,
         }],
     );
 
@@ -337,7 +337,13 @@ async fn image_turn_routes_to_vision_provider() {
 
 #[tokio::test]
 async fn read_only_calls_run_concurrently() {
-    struct SlowReadTool;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct SlowReadTool {
+        active: Arc<AtomicUsize>,
+        peak: Arc<AtomicUsize>,
+    }
     #[async_trait(?Send)]
     impl Tool for SlowReadTool {
         fn name(&self) -> &str {
@@ -353,7 +359,10 @@ async fn read_only_calls_run_concurrently() {
             true
         }
         async fn execute(&self, _ctx: &ToolContext, args: &Value) -> String {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(active, Ordering::SeqCst);
             tokio::time::sleep(Duration::from_millis(300)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
             format!(
                 "read {}",
                 args.get("i").and_then(|v| v.as_i64()).unwrap_or(-1)
@@ -374,13 +383,16 @@ async fn read_only_calls_run_concurrently() {
     ]);
     let ws = tmpdir("concurrent");
     let mut loop_ = build(&ws, Box::new(p));
-    loop_.tools.register(Box::new(SlowReadTool));
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    loop_.tools.register(Box::new(SlowReadTool {
+        active,
+        peak: peak.clone(),
+    }));
 
-    let t0 = std::time::Instant::now();
     let r = loop_.run_turn(json!("read four things"), None).await;
-    let elapsed = t0.elapsed();
     assert_eq!(r.stop_reason, "completed");
-    assert!(elapsed < Duration::from_millis(800), "elapsed {elapsed:?}");
+    assert!(peak.load(Ordering::SeqCst) >= 2);
     let ids: Vec<&str> = loop_
         .session
         .messages

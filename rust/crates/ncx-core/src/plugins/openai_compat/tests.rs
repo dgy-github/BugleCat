@@ -309,7 +309,7 @@ fn installed_plugin_resolves_relative_mcp_script_from_target_root() {
     fs::write(source.join("scripts/server.py"), b"# mock").unwrap();
     fs::write(
         source.join(".mcp.json"),
-        r#"{"mcpServers":{"windows":{"command":"python","args":["scripts/server.py","https://example.test/api"]}}}"#,
+        r#"{"mcpServers":{"windows":{"command":"python","args":["./scripts/server.py","https://example.test/api"]}}}"#,
     )
     .unwrap();
     fs::write(plugin.join("plugin.json"), r#"{"name":"portable"}"#).unwrap();
@@ -329,6 +329,43 @@ fn installed_plugin_resolves_relative_mcp_script_from_target_root() {
     assert_eq!(servers[0].args[1], "https://example.test/api");
 
     let _ = fs::remove_dir_all(target);
+}
+
+#[test]
+fn damaged_mcp_server_is_skipped_without_hiding_valid_servers() {
+    let workspace = temp("damaged-mcp-server");
+    let plugin = workspace.join(".ncx/codex-plugins/demo");
+    fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+    fs::write(plugin.join(MANIFEST), r#"{"name":"demo"}"#).unwrap();
+    fs::write(
+        plugin.join(".mcp.json"),
+        r#"{"mcpServers":{"broken":{"command":"../outside.exe"},"valid":{"command":"python","args":["--version"]}}}"#,
+    )
+    .unwrap();
+
+    let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0].name, "demo:valid");
+    assert_eq!(servers[0].args, vec!["--version"]);
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn bare_mcp_argument_keeps_process_cwd_semantics_even_when_file_exists_in_plugin() {
+    let workspace = temp("bare-mcp-argument");
+    let plugin = workspace.join(".ncx/codex-plugins/demo");
+    fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+    fs::write(plugin.join(MANIFEST), r#"{"name":"demo"}"#).unwrap();
+    fs::write(plugin.join("settings.toml"), "mode = 'plugin'").unwrap();
+    fs::write(
+        plugin.join(".mcp.json"),
+        r#"{"mcpServers":{"valid":{"command":"python","args":["settings.toml"]}}}"#,
+    )
+    .unwrap();
+
+    let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
+    assert_eq!(servers[0].args, vec!["settings.toml"]);
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[test]

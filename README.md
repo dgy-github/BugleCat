@@ -783,6 +783,43 @@ The normal Rust and Python suites are deterministic and offline. Explicit live
 acceptance runs cover `rust-analyzer`, external network providers, MCP hot
 reload, and real model-driven combinations of LSP, background, and PTY tools.
 
+### Reliability regressions and local development
+
+The regression suite also protects the following boundaries:
+
+- Read-only LLM Wiki memory actions remain available under
+  `approval_policy=never`, while side-effecting MCP calls must return the
+  explicit approval denial instead of being masked by compaction recovery.
+- A malformed MCP command or argument only skips that server. Other valid
+  servers remain discoverable. Only explicit `./` and `../` paths resolve from
+  the plugin root; bare arguments retain normal process CWD/PATH semantics.
+- Windows hook tests use a 20-second test timeout to avoid cold-start flakes,
+  and read-only concurrency is asserted with an in-flight peak rather than a
+  fixed wall-clock threshold.
+- Test temporary directories include the process ID so IDE and CLI runs do not
+  clean up each other's fixtures.
+
+Before submitting, run:
+
+```powershell
+cargo fmt --manifest-path rust\Cargo.toml --all -- --check
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace
+python -m pytest -q
+```
+
+Run the local Tauri development app with:
+
+```powershell
+cd rust\gui
+npm.cmd ci
+npm.cmd run tauri dev -- --target x86_64-pc-windows-msvc
+```
+
+The frontend listens on `http://localhost:5179/`. If that port is already
+owned by BugleCat, reuse the existing instance and let Vite hot-reload instead
+of starting a second development process.
+
 ## Release Packaging
 
 Recommended Windows release entry point:

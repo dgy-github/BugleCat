@@ -274,37 +274,33 @@ fn check_fasttext() -> Check {
     match FastTextModelDetector::load(&model)
         .and_then(|detector| detector.detect_language("这是中文"))
     {
-        Ok(label) if label == "zh" => {
-            return Check {
-                name: "fastText lid",
-                ok: true,
-                detail: format!("pure-rust fastText {source} detected {label}"),
-            };
-        }
-        Ok(label) => {
-            return Check {
-                name: "fastText lid",
-                ok: false,
-                detail: format!("pure-rust fastText {source} detected unexpected {label}"),
-            };
-        }
+        Ok(label) if label == "zh" => Check {
+            name: "fastText lid",
+            ok: true,
+            detail: format!("pure-rust fastText {source} detected {label}"),
+        },
+        Ok(label) => Check {
+            name: "fastText lid",
+            ok: false,
+            detail: format!("pure-rust fastText {source} detected unexpected {label}"),
+        },
         Err(err) => {
             let cli = check_fasttext_cli(&model);
             if cli.ok {
                 return cli;
             }
-            return Check {
+            Check {
                 name: "fastText lid",
                 ok: false,
                 detail: format!("{err}; CLI fallback: {}", cli.detail),
-            };
+            }
         }
     }
 }
 
 fn check_fasttext_cli(model: &str) -> Check {
     let child = Command::new("fasttext")
-        .args(["predict", &model, "-"])
+        .args(["predict", model, "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

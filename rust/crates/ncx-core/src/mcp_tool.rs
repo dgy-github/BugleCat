@@ -247,7 +247,7 @@ for line in sys.stdin:
     else:
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
 "#;
-        let dir = std::env::temp_dir().join("ncx_mcp_tool_mock");
+        let dir = std::env::temp_dir().join(format!("ncx_mcp_tool_mock_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("mock_server.py");
         std::fs::write(&p, src).unwrap();
@@ -259,7 +259,7 @@ for line in sys.stdin:
         use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
 
         let server = write_mock_server();
-        let ws = std::env::temp_dir().join("ncx_mcp_tool_ws");
+        let ws = std::env::temp_dir().join(format!("ncx_mcp_tool_ws_{}", std::process::id()));
         std::fs::create_dir_all(&ws).unwrap();
         let ws = ws.canonicalize().unwrap();
 
@@ -299,7 +299,7 @@ for line in sys.stdin:
         assert_eq!(out, "echo: hello mcp");
 
         reg.ctx.approval_policy = "never".into();
-        reg.ctx.compaction_read_only_recovery.set(true);
+        reg.ctx.compaction_read_only_recovery.set(false);
         let recalled = reg
             .execute("llmwiki", &serde_json::json!({"action": "recall_user"}))
             .await;
@@ -308,6 +308,9 @@ for line in sys.stdin:
         let mutation = reg
             .execute("llmwiki", &serde_json::json!({"action": "record_project"}))
             .await;
-        assert!(mutation.contains("context compaction consistency check"));
+        assert!(
+            mutation.contains("denied by approval policy 'never'"),
+            "{mutation}"
+        );
     }
 }

@@ -8,7 +8,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_listener = tokio::net::TcpListener::bind(config.api_addr).await?;
     let admin_listener = tokio::net::TcpListener::bind(config.admin_addr).await?;
 
-    println!("ncx-dreamina-gateway API listening on http://{}", config.api_addr);
+    println!(
+        "ncx-dreamina-gateway API listening on http://{}",
+        config.api_addr
+    );
     println!(
         "ncx-dreamina-gateway admin listening on http://{}",
         config.admin_addr

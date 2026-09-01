@@ -152,7 +152,7 @@ mod tests {
     // so they're absolute and cross-platform; no directories are created
     // (the policy check is lexical).
     fn base() -> PathBuf {
-        std::env::temp_dir().join("ncx_policy_test")
+        std::env::temp_dir().join(format!("ncx_policy_test_{}", std::process::id()))
     }
 
     #[test]

@@ -158,7 +158,8 @@ mod tests {
 
     #[tokio::test]
     async fn read_only_pool_is_bounded_and_preserves_model_order() {
-        let workspace = std::env::temp_dir().join("ncx_bounded_read_pool");
+        let workspace =
+            std::env::temp_dir().join(format!("ncx_bounded_read_pool_{}", std::process::id()));
         std::fs::create_dir_all(&workspace).unwrap();
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
         let active = Rc::new(Cell::new(0));

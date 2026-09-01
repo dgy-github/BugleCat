@@ -426,10 +426,9 @@ fn safety_snapshot(messages: &[Value], workspace: &Path) -> CompactionSafetySnap
                     .rsplit('.')
                     .next()
                     .is_some_and(|ext| (1..=8).contains(&ext.len()))
+                && !files.iter().any(|item| item == clean)
             {
-                if !files.iter().any(|item| item == clean) {
-                    files.push(clean.to_string());
-                }
+                files.push(clean.to_string());
             }
         }
     }

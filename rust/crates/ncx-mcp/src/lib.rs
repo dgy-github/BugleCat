@@ -291,7 +291,7 @@ for line in sys.stdin:
     else:
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
 "#;
-        let dir = std::env::temp_dir().join("ncx_mcp_mock");
+        let dir = std::env::temp_dir().join(format!("ncx_mcp_mock_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("mock_server.py");
         std::fs::write(&p, src).unwrap();

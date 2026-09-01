@@ -71,6 +71,7 @@ fn starts_parallel_run(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use async_trait::async_trait;
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
@@ -106,7 +107,8 @@ mod tests {
 
     #[test]
     fn dynamic_read_only_calls_form_parallel_batches_but_writes_do_not() {
-        let workspace = std::env::temp_dir().join("ncx_dynamic_read_dispatch");
+        let workspace =
+            std::env::temp_dir().join(format!("ncx_dynamic_read_dispatch_{}", std::process::id()));
         std::fs::create_dir_all(&workspace).unwrap();
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
         let mut tools = ToolRegistry::empty(ToolContext::new(workspace, policy));

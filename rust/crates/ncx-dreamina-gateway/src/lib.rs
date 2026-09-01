@@ -156,7 +156,11 @@ impl GatewayState {
         if key.is_empty() {
             return false;
         }
-        if let Some(found) = self.api_keys.iter_mut().find(|candidate| candidate.key == key) {
+        if let Some(found) = self
+            .api_keys
+            .iter_mut()
+            .find(|candidate| candidate.key == key)
+        {
             found.last_used_at = Some(now_unix());
             return true;
         }
@@ -186,7 +190,11 @@ impl GatewayState {
                 "local test pool supports up to 5 provider tokens",
             ));
         }
-        if self.provider_tokens.iter().any(|item| item.sessionid == sessionid) {
+        if self
+            .provider_tokens
+            .iter()
+            .any(|item| item.sessionid == sessionid)
+        {
             return Err(GatewayError::bad_request("provider token already exists"));
         }
         let item = ProviderToken {
@@ -232,7 +240,11 @@ impl GatewayState {
     pub fn safe_snapshot(&self) -> SafeState {
         SafeState {
             admin_ready: self.admin_password_hash.is_some(),
-            provider_tokens: self.provider_tokens.iter().map(SafeProviderToken::from).collect(),
+            provider_tokens: self
+                .provider_tokens
+                .iter()
+                .map(SafeProviderToken::from)
+                .collect(),
             api_keys: self.api_keys.iter().map(SafeApiKey::from).collect(),
             models: built_in_models(),
         }

@@ -98,9 +98,11 @@ mod tests {
                 .as_deref(),
             Some("merged fact")
         );
-        let captured = messages.borrow();
-        assert_eq!(captured.len(), 2);
-        assert_eq!(captured[1]["content"], "1. first fact\n2. second fact");
+        {
+            let captured = messages.borrow();
+            assert_eq!(captured.len(), 2);
+            assert_eq!(captured[1]["content"], "1. first fact\n2. second fact");
+        }
 
         let failed = ProviderMemorySummarizer::new(Box::new(CapturingProvider {
             messages: Rc::new(RefCell::new(Vec::new())),

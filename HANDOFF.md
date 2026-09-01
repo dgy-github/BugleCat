@@ -1,5 +1,23 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-01：MCP 安全回归、发现容错与测试门禁
+
+- MCP 副作用调用测试已与 compaction recovery 守卫解耦：在
+  `approval_policy=never` 且未开启 compaction recovery 时，副作用调用必须
+  命中明确的 `denied by approval policy 'never'` 拒绝文案；只读 LLM Wiki
+  查询仍可执行。
+- Codex 兼容插件发现按 server 隔离错误：非法 command/arg 只跳过当前
+  server，不再让整个插件目录或会话组装失败。裸 MCP 参数不再因为插件根下
+  存在同名文件而被改写；显式相对路径才解析到插件资源根。
+- Windows Hook 测试超时调整为 20 秒；只读并发回归改用 in-flight 峰值断言；
+  Agent Loop、MCP、Sandbox、Tool Scheduler 测试临时目录加入进程 ID。
+- 修复本次触及的 Rust Clippy 与 Python lint 问题，并将可靠性规则、验证命令
+  和 Tauri 本地启动方式同步写入 `README.md` 与 `README.zh-CN.md`。
+- 当前验证证据：`cargo fmt --all -- --check`、
+  `cargo clippy --workspace --all-targets -- -D warnings`、
+  `cargo test --workspace`（全量通过）以及 `python -m pytest -q`
+  （601 passed）。未提交、未推送状态需以当前 Git 状态重新核对。
+
 ## Same-session durable Goal：领域与原子存储（2026-08-27）
 
 - 参考 DeepSeek Harness 固定提交的 `goal`、`tool-goal` 和

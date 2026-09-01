@@ -111,7 +111,7 @@ impl Provider for AnthropicProvider {
     ) -> ModelResponse {
         AnthropicProvider::chat(self, messages, tools)
             .await
-            .unwrap_or_else(|error| provider_error(error))
+            .unwrap_or_else(provider_error)
     }
 }
 

@@ -41,6 +41,7 @@ pub fn idempotency_key(shot_id: &str, attempt: i64, params: &Value) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn submit_job_once<F>(
     conn: &mut rusqlite::Connection,
     project_id: &str,
@@ -200,6 +201,7 @@ pub fn fail_job_and_release_budget(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reserve_and_insert_job(
     conn: &mut rusqlite::Connection,
     project_id: &str,

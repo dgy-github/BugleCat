@@ -622,6 +622,34 @@ python -m pytest -q
 两套测试都完全离线：mock 过的 provider、可注入的 I/O，不需要真实 API key 或网络
 请求。
 
+### 可靠性回归与本地开发
+
+当前测试门禁同时覆盖安全边界、插件容错和并发稳定性：
+
+- MCP 的只读记忆查询可以在 `approval_policy=never` 下执行；有副作用的调用必须明确返回审批拒绝，不能被 compaction 守卫测试遮蔽。
+- Codex 兼容插件中单个损坏的 MCP command/arg 只会跳过当前 server，其他合法 server 仍会被发现；只有显式 `./`、`../` 相对路径会按插件资源解析，裸参数继续交给进程 CWD/PATH 处理。
+- Windows Hook 测试使用 20 秒测试超时，避免冷启动和并行调度造成误报；只读并发测试使用 in-flight 峰值断言，不依赖固定墙钟阈值。
+- 测试临时目录包含进程 ID，降低 IDE 与 CLI 并行执行时互相清理目录的风险。
+
+推荐在提交前运行：
+
+```powershell
+cargo fmt --manifest-path rust\Cargo.toml --all -- --check
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace
+python -m pytest -q
+```
+
+本地启动 Tauri 开发版：
+
+```powershell
+cd rust\gui
+npm.cmd ci
+npm.cmd run tauri dev -- --target x86_64-pc-windows-msvc
+```
+
+开发前端默认监听 `http://localhost:5179/`。如果该端口已有 BugleCat 实例，优先复用并等待热更新，不要重复启动第二个实例。
+
 ## Release 打包
 
 推荐的 Windows release 入口：

@@ -347,7 +347,16 @@ pub(crate) fn discover_codex_mcp_servers_with_home(
             if command.is_empty() {
                 continue;
             }
-            let command = resolve_mcp_process_value(&plugin.root, command)?;
+            let command = match resolve_mcp_process_value(&plugin.root, command) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!(
+                        "跳过损坏 MCP server {}:{}: {error}",
+                        plugin.manifest.name, name
+                    );
+                    continue;
+                }
+            };
             let args = config
                 .get("args")
                 .and_then(Value::as_array)
@@ -358,8 +367,17 @@ pub(crate) fn discover_codex_mcp_servers_with_home(
                         .map(|value| resolve_mcp_process_value(&plugin.root, value))
                         .collect::<Result<Vec<_>, _>>()
                 })
-                .transpose()?
-                .unwrap_or_default();
+                .transpose();
+            let args = match args {
+                Ok(args) => args.unwrap_or_default(),
+                Err(error) => {
+                    eprintln!(
+                        "跳过损坏 MCP server {}:{}: {error}",
+                        plugin.manifest.name, name
+                    );
+                    continue;
+                }
+            };
             let env = config
                 .get("env")
                 .and_then(Value::as_object)
@@ -394,8 +412,7 @@ fn resolve_mcp_process_value(root: &Path, value: &str) -> Result<String, String>
         || value.starts_with("../")
         || value.starts_with(".\\")
         || value.starts_with("..\\");
-    let bundled_resource = !value.contains("://") && root.join(path).exists();
-    let path_like = explicit_relative || bundled_resource;
+    let path_like = explicit_relative;
     if !path_like || path.is_absolute() {
         return Ok(value.to_string());
     }

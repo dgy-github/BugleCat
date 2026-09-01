@@ -52,28 +52,28 @@ def validate_graph(nodes: list[TaskNode]) -> None:
 def _find_cycle(nodes: list[TaskNode]) -> list[str]:
     """Return one cycle as an id path, or [] if the graph is acyclic (DFS colors)."""
     adj = {n.id: list(n.depends_on) for n in nodes}
-    WHITE, GRAY, BLACK = 0, 1, 2
-    color = {nid: WHITE for nid in adj}
+    white, gray, black = 0, 1, 2
+    color = {nid: white for nid in adj}
     stack: list[str] = []
 
     def dfs(u: str) -> list[str]:
-        color[u] = GRAY
+        color[u] = gray
         stack.append(u)
         for v in adj.get(u, ()):
-            if color[v] == GRAY:
+            if color[v] == gray:
                 # Found a back-edge; slice the stack from v to close the cycle.
                 i = stack.index(v)
                 return stack[i:] + [v]
-            if color[v] == WHITE:
+            if color[v] == white:
                 found = dfs(v)
                 if found:
                     return found
-        color[u] = BLACK
+        color[u] = black
         stack.pop()
         return []
 
     for nid in adj:
-        if color[nid] == WHITE:
+        if color[nid] == white:
             found = dfs(nid)
             if found:
                 return found
@@ -138,7 +138,6 @@ def propagate_skips(nodes: list[TaskNode]) -> list[str]:
     than sitting `pending` forever or being miscounted as `blocked`. Returns the
     ids newly skipped. Idempotent — safe to call after every node completes.
     """
-    by_id = {n.id: n for n in nodes}
     dead = {n.id for n in nodes if n.status in ("failed", "skipped", "cancelled")}
     newly: list[str] = []
     changed = True

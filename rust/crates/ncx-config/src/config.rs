@@ -458,7 +458,8 @@ mod tests {
             ),
             (2, 3, 1, 1, 6)
         );
-        let invalid_cases: [(&str, fn(&mut Config)); 5] = [
+        type ConfigMutator = fn(&mut Config);
+        let invalid_cases: [(&str, ConfigMutator); 5] = [
             ("orchestrator_workers", |cfg: &mut Config| {
                 cfg.orchestrator_workers = 5
             }),

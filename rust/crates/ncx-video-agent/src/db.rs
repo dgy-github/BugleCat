@@ -51,6 +51,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_shot(
         &self,
         id: &str,

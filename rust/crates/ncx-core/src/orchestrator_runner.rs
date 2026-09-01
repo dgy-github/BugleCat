@@ -324,9 +324,11 @@ mod tests {
 
     #[test]
     fn isolation_failure_is_fail_closed() {
-        let mut config = Config::default();
-        config.workspace =
-            std::env::temp_dir().join(format!("ncx_missing_runner_{}", std::process::id()));
+        let config = Config {
+            workspace: std::env::temp_dir()
+                .join(format!("ncx_missing_runner_{}", std::process::id())),
+            ..Default::default()
+        };
         let _ = std::fs::remove_dir_all(&config.workspace);
         let runner = HarnessAgentRunner::new(config.clone());
         let error = runner.prepare_worker_workspace(0).unwrap_err();
@@ -342,8 +344,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&workspace);
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::write(workspace.join("remove.txt"), "old").unwrap();
-        let mut config = Config::default();
-        config.workspace = workspace.clone();
+        let config = Config {
+            workspace: workspace.clone(),
+            ..Default::default()
+        };
         let runner = HarnessAgentRunner::new(config);
         let worker = runner.prepare_worker_workspace(0).unwrap();
         std::fs::remove_file(worker.join("remove.txt")).unwrap();
