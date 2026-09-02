@@ -437,13 +437,10 @@ pub fn valid_model_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::unique_temp_dir;
 
     fn directory(name: &str) -> ProviderDirectory {
-        let root = std::env::temp_dir().join(format!(
-            "ncx-provider-directory-{name}-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
+        let root = unique_temp_dir(&format!("ncx-provider-directory-{name}"));
         ProviderDirectory::at(root.join("providers.json"), root.join("config.toml"))
     }
 

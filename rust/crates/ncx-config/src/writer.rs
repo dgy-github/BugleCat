@@ -131,6 +131,7 @@ pub fn write_nanocodex_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::unique_temp_dir;
 
     fn map<'a>(pairs: &[(&'a str, &'a str)]) -> HashMap<&'a str, &'a str> {
         pairs.iter().copied().collect()
@@ -156,10 +157,8 @@ mod tests {
 
     #[test]
     fn writer_persists_currency_and_available_models() {
-        let tmp = std::env::temp_dir().join("ncx_writer_test_price_currency");
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = unique_temp_dir("ncx_writer_test_price_currency");
         let target = tmp.join("config.toml");
-        let _ = std::fs::remove_file(&target);
 
         write_nanocodex_config(
             &map(&[
@@ -193,10 +192,8 @@ mod tests {
 
     #[test]
     fn write_creates_and_merges() {
-        let tmp = std::env::temp_dir().join("ncx_writer_test");
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = unique_temp_dir("ncx_writer_test");
         let target = tmp.join("config.toml");
-        let _ = std::fs::remove_file(&target);
 
         write_nanocodex_config(&map(&[("api_key", "sk-1")]), &target).unwrap();
         assert!(target.is_file());
@@ -221,10 +218,8 @@ mod tests {
 
     #[test]
     fn write_ignores_unknown_keys() {
-        let tmp = std::env::temp_dir().join("ncx_writer_test_unknown");
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = unique_temp_dir("ncx_writer_test_unknown");
         let target = tmp.join("config.toml");
-        let _ = std::fs::remove_file(&target);
 
         write_nanocodex_config(&map(&[("api_key", "sk-1"), ("bogus", "nope")]), &target).unwrap();
         let parsed = std::fs::read_to_string(&target)

@@ -147,26 +147,39 @@ fn normalize(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // Mirrors tests/test_sandbox.py. Paths are built under the system temp dir
     // so they're absolute and cross-platform; no directories are created
     // (the policy check is lexical).
     fn base() -> PathBuf {
-        std::env::temp_dir().join(format!("ncx_policy_test_{}", std::process::id()))
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "ncx_policy_test-{}-{timestamp}-{sequence}",
+            std::process::id()
+        ))
     }
 
     #[test]
     fn read_only_forbids_writes() {
-        let p = SandboxPolicy::new(READ_ONLY, base());
-        assert!(p.can_read(base().join("f.py")));
-        assert!(!p.can_write(base().join("f.py")));
+        let workspace = base();
+        let p = SandboxPolicy::new(READ_ONLY, &workspace);
+        assert!(p.can_read(workspace.join("f.py")));
+        assert!(!p.can_write(workspace.join("f.py")));
         assert!(!p.writes_allowed());
     }
 
     #[test]
     fn workspace_write_allows_inside_only() {
-        let ws = base().join("ws");
-        let outside = base().join("outside");
+        let root = base();
+        let ws = root.join("ws");
+        let outside = root.join("outside");
         let p = SandboxPolicy::new(WORKSPACE_WRITE, &ws).with_allow_temp_write(false);
         assert!(p.can_write(ws.join("a.py")));
         assert!(p.can_write(ws.join("sub").join("b.py")));
@@ -177,8 +190,9 @@ mod tests {
     fn workspace_write_denies_system_temp_by_default() {
         // Workspace lives under temp, but the temp ROOT is only writable when
         // opted in — a sibling temp file stays denied by default.
-        let ws = std::env::temp_dir().join("ncx_ws");
-        let tmp_file = std::env::temp_dir().join("ncx_probe.txt");
+        let root = base();
+        let ws = root.join("ncx_ws");
+        let tmp_file = root.join("ncx_probe.txt");
 
         let default = SandboxPolicy::new(WORKSPACE_WRITE, &ws);
         assert!(!default.can_write(&tmp_file));
@@ -189,8 +203,9 @@ mod tests {
 
     #[test]
     fn workspace_write_honors_extra_writable_roots() {
-        let ws = base().join("ws");
-        let extra = base().join("extra");
+        let root = base();
+        let ws = root.join("ws");
+        let extra = root.join("extra");
         let p = SandboxPolicy::new(WORKSPACE_WRITE, &ws).with_writable_roots([&extra]);
         assert!(p.can_write(extra.join("x.py")));
     }

@@ -18,6 +18,9 @@ pub mod loader;
 pub mod provider_directory;
 pub mod writer;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub use config::{
     derive_permission_mode, permission_mode_to_knobs, Config, ConfigError, HookConfig,
     McpServerConfig, VALID_APPROVAL_POLICIES, VALID_HOOK_EVENTS, VALID_PERMISSION_MODES,

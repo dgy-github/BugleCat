@@ -242,6 +242,30 @@ pub fn format_content(res: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        for _ in 0..16 {
+            let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "{prefix}-{}-{timestamp}-{sequence}",
+                std::process::id()
+            ));
+            match fs::create_dir(&dir) {
+                Ok(()) => return dir,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("create test directory {}: {error}", dir.display()),
+            }
+        }
+        panic!("could not allocate unique test directory for {prefix}");
+    }
 
     #[test]
     fn format_content_joins_text_blocks() {
@@ -291,8 +315,7 @@ for line in sys.stdin:
     else:
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
 "#;
-        let dir = std::env::temp_dir().join(format!("ncx_mcp_mock_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = unique_temp_dir("ncx_mcp_mock");
         let p = dir.join("mock_server.py");
         std::fs::write(&p, src).unwrap();
         p

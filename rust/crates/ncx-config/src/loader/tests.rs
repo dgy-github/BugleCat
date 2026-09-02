@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::unique_temp_dir;
 use std::fs;
 
 fn empty_env() -> HashMap<String, String> {
@@ -28,8 +29,7 @@ fn no_paths(tmp: &Path) -> ConfigPaths {
 
 #[test]
 fn active_provider_route_replaces_all_stale_flat_connection_fields() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_active_provider_route");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_active_provider_route");
     let paths = ConfigPaths {
         nanocodex: tmp.join("config.toml"),
         ..no_paths(&tmp)
@@ -61,8 +61,7 @@ fn active_provider_route_replaces_all_stale_flat_connection_fields() {
 
 #[test]
 fn missing_active_provider_fails_instead_of_falling_back_to_stale_route() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_missing_active_provider");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_missing_active_provider");
     let paths = ConfigPaths {
         nanocodex: tmp.join("config.toml"),
         ..no_paths(&tmp)
@@ -76,8 +75,7 @@ fn missing_active_provider_fails_instead_of_falling_back_to_stale_route() {
 
 #[test]
 fn incomplete_active_provider_fails_without_exposing_credential() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_incomplete_active_provider");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_incomplete_active_provider");
     let paths = ConfigPaths {
         nanocodex: tmp.join("config.toml"),
         ..no_paths(&tmp)
@@ -95,8 +93,7 @@ fn incomplete_active_provider_fails_without_exposing_credential() {
 
 #[test]
 fn legacy_price_config_defaults_to_cny_and_explicit_usd_round_trips() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_price_currency");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_price_currency");
     let paths = no_paths(&tmp);
     write(&paths.nanocodex, "api_key = \"k\"\nprice_in = \"1.25\"\n");
     let legacy = load_config_impl(Overrides::default(), &paths, &empty_env()).unwrap();
@@ -151,8 +148,7 @@ fn compaction_defaults_on_with_1m_window() {
 
 #[test]
 fn load_reads_deepseek_file() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_deepseek");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_deepseek");
     let ds = tmp.join("deepseek.toml");
     write(
         &ds,
@@ -186,8 +182,7 @@ approval_policy = "on-request"
 
 #[test]
 fn overrides_win_over_file() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_override");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_override");
     let ds = tmp.join("deepseek.toml");
     write(
         &ds,
@@ -211,8 +206,7 @@ fn overrides_win_over_file() {
 
 #[test]
 fn deepseek_nested_provider_key() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_nested");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_nested");
     let ds = tmp.join("deepseek.toml");
     write(
         &ds,
@@ -237,8 +231,7 @@ fn deepseek_nested_provider_key() {
 
 #[test]
 fn max_iterations_default_and_override() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_maxiter");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_maxiter");
     let paths = no_paths(&tmp);
 
     let cfg = load_config_impl(
@@ -267,7 +260,7 @@ fn max_iterations_default_and_override() {
 
 #[test]
 fn orchestrator_budget_defaults_and_file_values() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_orchestrator_budget");
+    let tmp = unique_temp_dir("ncx_config_test_orchestrator_budget");
     let paths = ConfigPaths {
         nanocodex: tmp.join("config.toml"),
         ..no_paths(&tmp)
@@ -292,8 +285,7 @@ fn orchestrator_budget_defaults_and_file_values() {
 
 #[test]
 fn max_iterations_from_env() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_maxiter_env");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_maxiter_env");
     let cfg = load_config_impl(
         Overrides {
             workspace: Some(tmp.clone()),
@@ -308,8 +300,7 @@ fn max_iterations_from_env() {
 
 #[test]
 fn provider_protocol_can_be_isolated_by_the_host_environment() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_provider_protocol_env");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_provider_protocol_env");
     let cfg = load_config_impl(
         Overrides {
             workspace: Some(tmp.clone()),
@@ -324,8 +315,7 @@ fn provider_protocol_can_be_isolated_by_the_host_environment() {
 
 #[test]
 fn runtime_budget_and_context_edit_fields_load_from_file_env_and_overrides() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_runtime_control");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_runtime_control");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
@@ -382,8 +372,7 @@ fn runtime_budget_and_context_edit_fields_load_from_file_env_and_overrides() {
 
 #[test]
 fn hooks_load_from_nanocodex_file() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_hooks");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_hooks");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
@@ -424,8 +413,7 @@ command = "echo post"
 
 #[test]
 fn hook_event_aliases_are_normalized() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_hook_aliases");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_hook_aliases");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
@@ -463,8 +451,7 @@ command = "echo stop"
 
 #[test]
 fn hook_missing_command_fails_validation() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_hook_missing_command");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_hook_missing_command");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
@@ -498,8 +485,7 @@ matcher = "shell"
 
 #[test]
 fn nanocodex_file_wins_over_deepseek() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_nanowins");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_nanowins");
     let ds = tmp.join("deepseek.toml");
     let nano = tmp.join("nano.toml");
     write(
@@ -527,8 +513,7 @@ fn nanocodex_file_wins_over_deepseek() {
 
 #[test]
 fn env_wins_over_nanocodex_file() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_envwins");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_envwins");
     let nano = tmp.join("nano.toml");
     write(&nano, "api_key = \"sk-nano\"\n");
     let paths = ConfigPaths {
@@ -550,8 +535,7 @@ fn env_wins_over_nanocodex_file() {
 
 #[test]
 fn max_retries_default_and_env() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_retries");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_retries");
     // Default 3
     let cfg = load_config_impl(
         Overrides {
@@ -595,8 +579,7 @@ fn max_retries_default_and_env() {
 
 #[test]
 fn profile_overrides_base_but_below_env() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_profile");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_profile");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
@@ -648,8 +631,7 @@ fn profile_overrides_base_but_below_env() {
 
 #[test]
 fn profile_name_from_env_and_unknown_raises() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_profile_env");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_profile_env");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
@@ -688,8 +670,7 @@ fn profile_name_from_env_and_unknown_raises() {
 
 #[test]
 fn list_profiles_returns_sorted_names() {
-    let tmp = std::env::temp_dir().join("ncx_config_test_listprof");
-    fs::create_dir_all(&tmp).unwrap();
+    let tmp = unique_temp_dir("ncx_config_test_listprof");
     let nano = tmp.join("nano.toml");
     write(
         &nano,
