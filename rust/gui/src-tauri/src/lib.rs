@@ -41,8 +41,8 @@ use ncx_core::{
     RestoreReport, RuntimeContextSources, RuntimeHostBindings, SessionIndex,
 };
 use ncx_protocol::{
-    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, Turn,
-    TurnId, TurnStatus,
+    ClientRequest, GoalRef, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata,
+    Turn, TurnId, TurnStatus,
 };
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};
 use serde::Serialize;
@@ -1170,10 +1170,13 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
         Ok(())
     }
 
-    fn continue_goal(&self, thread_id: &ThreadId) -> Result<(), String> {
+    fn continue_goal(&self, thread_id: &ThreadId, goal: &GoalRef) -> Result<(), String> {
         self.state
             .tx
-            .send(Command::ContinueGoal(thread_id.to_string()))
+            .send(Command::ContinueGoal {
+                thread_id: thread_id.to_string(),
+                goal: goal.clone(),
+            })
             .map_err(|_| "长期目标执行队列不可用".to_string())
     }
 
@@ -6243,6 +6246,9 @@ mod tests {
         assert!(file_row.contains("flex: 0 0 auto;"));
         assert!(css
             .contains(".rightpanel .wt-list { max-height: none; overflow: visible; margin: 0; }"));
+        assert!(css.contains(
+            "min-height: 0;\n  overflow: hidden;\n  display: flex;\n  flex-direction: row;"
+        ));
         assert!(css.contains(
             ".rightpanel .wt-diff { max-height: none; overflow-x: auto; overflow-y: hidden; }"
         ));

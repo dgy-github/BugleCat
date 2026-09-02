@@ -346,6 +346,34 @@ fn damaged_mcp_server_is_skipped_without_hiding_valid_servers() {
 }
 
 #[test]
+fn malformed_mcp_args_and_env_are_skipped_without_hiding_valid_servers() {
+    let workspace = temp("malformed-mcp-values");
+    let plugin = workspace.join(".ncx/codex-plugins/demo");
+    fs::create_dir_all(plugin.join(".codex-plugin")).unwrap();
+    fs::write(plugin.join(MANIFEST), r#"{"name":"demo"}"#).unwrap();
+    fs::write(
+        plugin.join(".mcp.json"),
+        r#"{
+            "mcpServers": {
+                "bad_args_type": {"command":"python","args":"--version"},
+                "bad_args_item": {"command":"python","args":["--version",3]},
+                "bad_env_type": {"command":"python","env":["MODE=test"]},
+                "bad_env_value": {"command":"python","env":{"MODE":true}},
+                "valid": {"command":"python","args":["--version"],"env":{"MODE":"test"}}
+            }
+        }"#,
+    )
+    .unwrap();
+
+    let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0].name, "demo:valid");
+    assert_eq!(servers[0].args, vec!["--version"]);
+    assert_eq!(servers[0].env.get("MODE").map(String::as_str), Some("test"));
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
 fn damaged_mcp_plugin_resource_is_skipped_without_hiding_valid_servers() {
     let workspace = temp("damaged-mcp-plugin-resource");
     let broken = workspace.join(".ncx/codex-plugins/broken");

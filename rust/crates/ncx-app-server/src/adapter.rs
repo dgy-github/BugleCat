@@ -33,7 +33,11 @@ pub trait AppServerAdapter {
     /// Schedule the armed persisted Goal for this thread. Hosts must return
     /// only after the request is durably accepted by their local scheduler;
     /// the model call itself remains asynchronous.
-    fn continue_goal(&self, _thread_id: &ncx_protocol::ThreadId) -> Result<(), String> {
+    fn continue_goal(
+        &self,
+        _thread_id: &ncx_protocol::ThreadId,
+        _goal: &ncx_protocol::GoalRef,
+    ) -> Result<(), String> {
         Err("当前宿主未提供长期目标自动续轮".to_string())
     }
     fn runtime_status(&self) -> Result<serde_json::Value, String>;

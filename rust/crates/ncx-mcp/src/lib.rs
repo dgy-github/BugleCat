@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -22,12 +23,42 @@ const PROTOCOL: &str = "2024-11-05";
 const REQ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A tool advertised by an MCP server.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct McpToolDef {
     pub name: String,
     pub description: String,
     /// JSON Schema for the tool's arguments (the MCP `inputSchema`).
     pub input_schema: Value,
+    /// Optional MCP tool annotations. Missing or incomplete hints are kept as
+    /// `None`/partial values so the runtime can apply a fail-closed policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<McpToolAnnotations>,
+}
+
+/// Standard MCP tool annotations that influence approval decisions.
+///
+/// The protocol treats these as hints, not capabilities. In particular, the
+/// runtime only considers a call read-only when both `readOnlyHint=true` and
+/// `destructiveHint=false` are explicitly present. An absent or conflicting
+/// pair therefore remains approval-gated.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolAnnotations {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
+}
+
+impl McpToolAnnotations {
+    /// Whether this annotation pair is an explicit, non-conflicting read-only
+    /// declaration. Unknown/missing values intentionally return false.
+    pub fn explicitly_read_only(&self) -> bool {
+        self.read_only_hint == Some(true) && self.destructive_hint == Some(false)
+    }
 }
 
 /// A connected MCP server (owns the child process; killed on drop).
@@ -148,28 +179,7 @@ impl McpClient {
         let res = self.request("tools/list", json!({})).await?;
         let mut out = Vec::new();
         if let Some(tools) = res.get("tools").and_then(|t| t.as_array()) {
-            for t in tools {
-                let name = t
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                if name.is_empty() {
-                    continue;
-                }
-                out.push(McpToolDef {
-                    name,
-                    description: t
-                        .get("description")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    input_schema: t
-                        .get("inputSchema")
-                        .cloned()
-                        .unwrap_or_else(|| json!({"type": "object"})),
-                });
-            }
+            out.extend(tools.iter().filter_map(parse_tool_def));
         }
         Ok(out)
     }
@@ -181,6 +191,43 @@ impl McpClient {
             .await?;
         Ok(format_content(&res))
     }
+}
+
+/// Parse one entry from an MCP `tools/list` response. Invalid or missing
+/// annotation values are retained as an incomplete annotation object rather
+/// than causing discovery to fail; approval then fails closed in `ncx-core`.
+fn parse_tool_def(value: &Value) -> Option<McpToolDef> {
+    let name = value.get("name").and_then(Value::as_str)?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let annotations = value.get("annotations").map(|raw| {
+        let object = raw.as_object();
+        McpToolAnnotations {
+            read_only_hint: object
+                .and_then(|map| map.get("readOnlyHint"))
+                .and_then(Value::as_bool),
+            destructive_hint: object
+                .and_then(|map| map.get("destructiveHint"))
+                .and_then(Value::as_bool),
+            open_world_hint: object
+                .and_then(|map| map.get("openWorldHint"))
+                .and_then(Value::as_bool),
+        }
+    });
+    Some(McpToolDef {
+        name: name.to_string(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        input_schema: value
+            .get("inputSchema")
+            .cloned()
+            .unwrap_or_else(|| json!({"type": "object"})),
+        annotations,
+    })
 }
 
 #[cfg(windows)]
@@ -288,6 +335,49 @@ mod tests {
         assert_eq!(
             format_content(&json!({"content": [], "isError": true})),
             "(tool error with no content)"
+        );
+    }
+
+    #[test]
+    fn mcp_annotations_round_trip_with_wire_camel_case() {
+        let wire = json!({
+            "readOnlyHint": true,
+            "destructiveHint": false,
+            "openWorldHint": false,
+        });
+        let annotations: McpToolAnnotations =
+            serde_json::from_value(wire.clone()).expect("valid MCP annotations");
+        assert_eq!(annotations.read_only_hint, Some(true));
+        assert_eq!(annotations.destructive_hint, Some(false));
+        assert_eq!(annotations.open_world_hint, Some(false));
+        assert_eq!(serde_json::to_value(&annotations).unwrap(), wire);
+
+        let tool = parse_tool_def(&json!({
+            "name": "read_file",
+            "description": "read",
+            "inputSchema": {"type": "object"},
+            "annotations": wire,
+        }))
+        .expect("tool definition");
+        assert_eq!(tool.annotations, Some(annotations));
+    }
+
+    #[test]
+    fn malformed_or_partial_mcp_annotations_are_retained_for_fail_closed_policy() {
+        let partial = parse_tool_def(&json!({
+            "name": "read_file",
+            "annotations": {"readOnlyHint": true},
+        }))
+        .expect("tool definition");
+        assert_eq!(partial.annotations.unwrap().read_only_hint, Some(true));
+        assert_eq!(
+            parse_tool_def(&json!({
+                "name": "read_file",
+                "annotations": "not-an-object",
+            }))
+            .unwrap()
+            .annotations,
+            Some(McpToolAnnotations::default())
         );
     }
 

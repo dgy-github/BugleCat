@@ -55,17 +55,16 @@ impl AnthropicProvider {
             .await
             .map_err(|e| ProviderError(format!("RequestError: {e}")))?;
         let status = response.status();
+        // Failed provider responses often contain proxy HTML or diagnostic JSON
+        // with request details.  Keep only the status because ProviderError is
+        // surfaced to the model transcript and persisted by callers.
+        if !status.is_success() {
+            return Err(ProviderError(format!("HTTP {}", status.as_u16())));
+        }
         let value: Value = response
             .json()
             .await
             .map_err(|e| ProviderError(format!("decode error: {e}")))?;
-        if !status.is_success() {
-            return Err(ProviderError(format!(
-                "HTTP {}: {}",
-                status.as_u16(),
-                value
-            )));
-        }
         *self.confirmed_model.borrow_mut() = value
             .get("model")
             .and_then(Value::as_str)
@@ -171,4 +170,60 @@ fn parse_response(value: &Value) -> ModelResponse {
     }
     response.usage = usage;
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn serve_once(status: &str, body: String) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let request = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..read]);
+                if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        (format!("http://{address}/v1"), request)
+    }
+
+    #[tokio::test]
+    async fn failed_chat_preserves_status_without_echoing_html_body() {
+        let private_body = "<html>private diagnostic: anthropic-upstream-secret</html>";
+        let (base_url, request) = serve_once("502 Bad Gateway", private_body.to_string());
+        let provider = AnthropicProvider::new(
+            "anthropic-client-secret".to_string(),
+            &base_url,
+            "claude-test".to_string(),
+            5,
+        );
+
+        let error = provider.chat(&[], &[]).await.unwrap_err().to_string();
+
+        assert_eq!(error, "HTTP 502");
+        assert!(!error.contains(private_body));
+        assert!(!error.contains("anthropic-client-secret"));
+        let request = request.join().unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("post /v1/messages http/1.1"));
+        assert!(request.contains("x-api-key: anthropic-client-secret"));
+    }
 }

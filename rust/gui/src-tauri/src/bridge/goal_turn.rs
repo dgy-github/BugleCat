@@ -11,6 +11,9 @@ pub(super) struct GoalTurnInput {
     pub(super) cancel: CancelFlag,
     pub(super) approver: Rc<dyn ApprovalHandler>,
     pub(super) questioner: Rc<dyn UserQuestionHandler>,
+    /// Exact Goal identity authorized by the resume request that queued this
+    /// worker. It is intentionally carried across every scheduler boundary.
+    pub(super) expected_goal: GoalRef,
 }
 
 pub(super) async fn run(input: GoalTurnInput) {
@@ -23,6 +26,7 @@ pub(super) async fn run(input: GoalTurnInput) {
         cancel,
         approver,
         questioner,
+        expected_goal,
     } = input;
     let Ok(thread_id) = ThreadId::new(session_id.clone()) else {
         emit_safe_error(&app, &session_id, "长期目标会话标识无效。");
@@ -42,6 +46,13 @@ pub(super) async fn run(input: GoalTurnInput) {
 
     loop {
         if cancel.load(Ordering::Acquire) {
+            break;
+        }
+        // A queued worker can outlive the Goal transition that created it.
+        // Revalidate the exact identity and process-local arm before every
+        // reservation so Pause/Complete/Clear or a replacement Goal cannot be
+        // inherited by a delayed continuation.
+        if !super::goal_is_armed_for(&app_server, &session_id, &expected_goal) {
             break;
         }
         let turn_id = TurnId::new(format!("goal-turn-{}", new_session_id()))
@@ -178,7 +189,7 @@ pub(super) async fn run(input: GoalTurnInput) {
             emit_protocol_outcome(&app, &outcome);
         } else {
             failed = true;
-            let _ = app_server.disarm_goal(&thread_id);
+            let _ = app_server.disarm_goal_if_matches(&thread_id, &goal_ref(&goal));
             emit_safe_error(
                 &app,
                 &session_id,

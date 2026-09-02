@@ -10,14 +10,19 @@ pub(crate) fn dispatch<S: ThreadStore>(
     server: &AppServer<S>,
     request: ClientRequest,
 ) -> Result<DispatchOutcome, AppServerError> {
+    // A Goal's durable phase and this process-local continuation authority
+    // form one state machine. Serialize every Goal request so a durable CAS
+    // cannot be followed by a stale arm/disarm from another request.
+    let _transition = server.lock_goal_transition()?;
     match request {
         ClientRequest::GoalRead { thread_id } => {
-            server.read_thread(&thread_id)?;
-            let goal = server
-                .store
-                .read_goal(&thread_id)?
-                .map(|goal| server.goal_view(&thread_id, goal))
-                .transpose()?;
+            let mut activations = server.lock_goal_activations()?;
+            let Some((_thread, goal)) = server.store.read_with_goal(&thread_id)? else {
+                return Err(AppServerError::NotFound(thread_id.to_string()));
+            };
+            let goal = goal.map(|goal| {
+                AppServer::<S>::goal_view_with_activations(&thread_id, goal, &mut activations)
+            });
             Ok(server.outcome(ResponsePayload::Goal(goal), Vec::new()))
         }
         ClientRequest::GoalCreate {
@@ -34,7 +39,10 @@ pub(crate) fn dispatch<S: ThreadStore>(
             server,
             thread_id,
             goal,
-            ActivationUpdate::Keep,
+            // Editing advances the exact Goal revision. Require an explicit
+            // resume for automatic continuation rather than carrying an
+            // authority token over to the new revision.
+            ActivationUpdate::Disarm,
             |current, now| {
                 require_not_complete(current)?;
                 validate_definition(&objective, max_goal_rounds, current.rounds_started)?;
@@ -153,18 +161,18 @@ fn start_round<S: ThreadStore>(
         error: None,
         usage: Default::default(),
     };
-    let activations = server
-        .goal_activations
-        .lock()
-        .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?;
-    if !activations.contains(thread_id.as_str()) {
+    let mut activations = server.lock_goal_activations()?;
+    let Some(activation) = activations.get(thread_id.as_str()) else {
         return invalid("goal continuation is disarmed");
+    };
+    if activation.id != expected.id || activation.revision != expected.revision {
+        activations.remove(thread_id.as_str());
+        return invalid("goal continuation authorization is stale");
     }
     let snapshot = server
         .store
         .claim_goal_round(&thread_id, expected, round, turn)?;
-    drop(activations);
-    let view = server.goal_view(&thread_id, snapshot)?;
+    let view = AppServer::<S>::goal_view_with_activations(&thread_id, snapshot, &mut activations);
     let events = vec![
         server.event(
             thread_id.clone(),
@@ -190,6 +198,7 @@ fn create<S: ThreadStore>(
     objective: String,
     max_goal_rounds: u32,
 ) -> Result<DispatchOutcome, AppServerError> {
+    let mut activations = server.lock_goal_activations()?;
     server.read_thread(&thread_id)?;
     validate_definition(&objective, max_goal_rounds, 0)?;
     let current = server.store.read_goal(&thread_id)?;
@@ -219,12 +228,17 @@ fn create<S: ThreadStore>(
     server
         .store
         .compare_and_set_goal(&thread_id, expected, Some(goal.clone()))?;
-    changed(server, thread_id, Some(goal), ActivationUpdate::Disarm)
+    changed(
+        server,
+        thread_id,
+        Some(goal),
+        ActivationUpdate::Disarm,
+        &mut activations,
+    )
 }
 
 #[derive(Clone, Copy)]
 enum ActivationUpdate {
-    Keep,
     Arm,
     Disarm,
 }
@@ -236,6 +250,7 @@ fn mutate<S: ThreadStore>(
     activation: ActivationUpdate,
     update: impl FnOnce(&mut GoalSnapshot, i64) -> Result<(), AppServerError>,
 ) -> Result<DispatchOutcome, AppServerError> {
+    let mut activations = server.lock_goal_activations()?;
     let mut current = server
         .store
         .read_goal(&thread_id)?
@@ -256,7 +271,13 @@ fn mutate<S: ThreadStore>(
         GoalExpectation::Exact(expected),
         Some(current.clone()),
     )?;
-    changed(server, thread_id, Some(current), activation)
+    changed(
+        server,
+        thread_id,
+        Some(current),
+        activation,
+        &mut activations,
+    )
 }
 
 fn clear<S: ThreadStore>(
@@ -264,10 +285,17 @@ fn clear<S: ThreadStore>(
     thread_id: ThreadId,
     expected: GoalRef,
 ) -> Result<DispatchOutcome, AppServerError> {
+    let mut activations = server.lock_goal_activations()?;
     server
         .store
         .compare_and_set_goal(&thread_id, GoalExpectation::Exact(expected), None)?;
-    changed(server, thread_id, None, ActivationUpdate::Disarm)
+    changed(
+        server,
+        thread_id,
+        None,
+        ActivationUpdate::Disarm,
+        &mut activations,
+    )
 }
 
 fn changed<S: ThreadStore>(
@@ -275,15 +303,37 @@ fn changed<S: ThreadStore>(
     thread_id: ThreadId,
     goal: Option<GoalSnapshot>,
     activation: ActivationUpdate,
+    activations: &mut std::collections::HashMap<String, GoalRef>,
 ) -> Result<DispatchOutcome, AppServerError> {
     match activation {
-        ActivationUpdate::Keep => {}
-        ActivationUpdate::Arm => server.arm_goal(&thread_id)?,
-        ActivationUpdate::Disarm => server.disarm_goal(&thread_id)?,
+        ActivationUpdate::Arm => {
+            if let Some(goal) = goal.as_ref() {
+                activations.insert(
+                    thread_id.as_str().to_string(),
+                    GoalRef {
+                        id: goal.id.clone(),
+                        revision: goal.revision,
+                    },
+                );
+            } else {
+                activations.remove(thread_id.as_str());
+            }
+        }
+        ActivationUpdate::Disarm => {
+            activations.remove(thread_id.as_str());
+        }
     }
-    let view = goal
-        .map(|goal| server.goal_view(&thread_id, goal))
-        .transpose()?;
+    // The only durable phase allowed to retain process-local continuation
+    // authority is Active. This also heals any authority left over from an
+    // older process-local failure before the next non-active mutation.
+    if !goal
+        .as_ref()
+        .is_some_and(|goal| goal.phase == GoalPhase::Active)
+    {
+        activations.remove(thread_id.as_str());
+    }
+    let view =
+        goal.map(|goal| AppServer::<S>::goal_view_with_activations(&thread_id, goal, activations));
     let event = server.event(thread_id, None, Event::GoalChanged { goal: view.clone() });
     Ok(server.outcome(ResponsePayload::Goal(view), vec![event]))
 }

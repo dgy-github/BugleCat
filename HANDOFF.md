@@ -1,5 +1,31 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-02：Goal/MCP/Provider 与工作区面板可靠性收口（提交前现场状态）
+
+- Goal App Server 的 durable phase、process-local activation 和
+  `GoalRoundStart` 现在共用 transition lock；新增竞争测试证明在锁被持有时
+  `GoalPause` 不会绕过线性化边界。当前工作树尚未提交，以下状态均以现场 Git
+  和测试结果为准。
+- MCP 工具只在完整 `readOnlyHint=true` + `destructiveHint=false` annotations
+  下走只读路径；缺失/部分/冲突值 fail closed，`llmwiki` 写 action 仍受白名单
+  约束。`approval_policy=never` 拒绝测试已独立于 compaction 守卫。
+- OpenAI 兼容及 Anthropic Provider 的非 2xx 流式/非流式错误只返回 status，
+  不读取或回显远端正文；工作区改动面板的外层 flex 和唯一滚动容器约束已补齐，
+  防止大列表压缩叠行。
+- 现场门禁（本次修改后的最新结果）：workspace/GUI `cargo clippy`
+  （`-D warnings`）、两套 `cargo fmt --check`、Rust workspace
+  `cargo test --workspace --all-features`（App Server 38、Core 278、Provider
+  49、Thread Store 25 等）和 GUI `cargo test --lib`（140 项）均通过；
+  `npm.cmd --prefix rust\\gui run build` 完成 149 modules，`python -m pytest -q`
+  为 601 passed，Ruff 与 `git diff --check` 也通过。
+- 本地开发实例已启动并保持运行：`ncx-gui.exe` PID 6244，路径为
+  `rust\\gui\\src-tauri\\target\\x86_64-pc-windows-msvc\\debug\\ncx-gui.exe`，
+  窗口标题 `BugleCat`、Responding=True；Vite 监听 `http://localhost:5179/`。
+  当前 Computer Use 环境只提供浏览器面板，无法抓取原生 Tauri 窗口截图；
+  已通过进程/窗口句柄核验实例存在，并在 localhost 预览确认面板可挂载。
+- 当前工作树仍未提交、未推送；提交后应把 commit、远端分支和 `git ls-remote`
+  结果追加到本节，避免沿用旧 commit/PID 声明。
+
 ## 2026-09-02：交付收口与真实桌面验证
 
 - 右侧“工作区改动”面板已针对真实大改动工作区复测：文件行禁止 flex 压缩，
@@ -14,11 +40,12 @@
 - Codex MCP 与 CLI MCP 都按 server 隔离准备失败：坏 server 只记录并跳过，合法
   server 继续装配；只有全部失败或工具重名时才保留旧工具集。裸参数保留进程
   CWD/PATH 语义，显式越界路径拒绝。
-- 本轮最终门禁证据：Rust workspace 与 GUI 分别通过 `cargo fmt`、严格
-  `cargo clippy -D warnings`、单元测试（Core 276、CLI 36、GUI 140）；workspace
-  测试使用 `--all-features`，包括 Temporal feature。前端 `npm.cmd run build`
-  通过（149 modules）；Python `pytest` 601 passed、Ruff 全绿，`git diff --check`
-  通过。workspace 的 all-features 编译使用临时 `PROTOC` 工具路径，未写入仓库。
+- 本轮最终门禁证据（以顶部“提交前现场状态”为准）：Rust workspace 与 GUI
+  分别通过 `cargo fmt`、严格 `cargo clippy -D warnings`、workspace
+  `--all-features` 测试（App Server 38、Core 278、Provider 49、Thread Store
+  25 等）和 GUI 140 项单元测试；前端 `npm.cmd run build` 通过（149 modules），
+  Python `pytest` 601 passed、Ruff 全绿，`git diff --check` 通过。workspace 的
+  all-features 编译使用临时 `PROTOC` 工具路径，未写入仓库。
 - 已同步 README 的可靠性边界、完整质量门禁和 Windows MSVC 构建/安装包路径；
   `scripts/build-rust-release.ps1` 的默认 target 已与实际桌面发布 target 对齐。
   `python scripts/check_code_structure.py --git-diff HEAD` 仍会报告若干历史超长

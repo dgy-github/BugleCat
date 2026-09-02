@@ -312,3 +312,49 @@ DeepSeek preset, rejects a Yunmo preset without a credential, and proves both
 the active route and current transcript remain unchanged after the failure.
 The same isolated localhost fixture proves the next model turn reads the newly
 committed route and preserves requested/response model metadata.
+
+## Reliability boundaries adopted in the current pass (2026-09-02)
+
+### One linearization boundary for durable Goals
+
+The App Server now serializes every Goal request—including reads and
+`GoalRoundStart`—with a process-local transition lock. Within that boundary the
+server takes the activation lock and then performs the Thread Store operation.
+Consequently, a durable compare-and-set and its process-local arm/disarm are
+observed as one state-machine transition; a Goal read cannot combine a new
+phase with an old activation bit. Host callbacks such as `disarm_goal` use the
+same outer lock, while no lock is held across an external runtime callback.
+This preserves the fail-closed rule: a failed host handoff can revoke local
+authority, but cannot silently rewrite the durable Goal phase.
+
+### MCP annotations are hints, not capability grants
+
+`ncx-mcp` preserves MCP `tools/list` annotations using the wire's camelCase
+fields. `ncx-core` admits an arbitrary tool to the read-only path only when
+`readOnlyHint` is explicitly `true` and `destructiveHint` explicitly `false`.
+Missing, malformed, incomplete, or conflicting values remain approval-gated.
+The special `llmwiki` multiplexer still checks its narrow read-action allowlist
+for every call, including when the server advertises a broad read-only hint.
+The regression suite keeps the `approval_policy=never` denial assertion
+independent from the context-compaction recovery guard.
+
+### Provider error bodies stay outside the session
+
+OpenAI-compatible and Anthropic adapters classify transient status codes as
+before, but return only `HTTP <status>` for every non-success response. They do
+not buffer remote HTML/JSON diagnostics on either streaming or non-streaming
+paths. This is intentional because provider errors can be copied into model
+context and durable transcripts; localhost tests verify that response bodies
+and request credentials never appear in the surfaced error.
+
+### Desktop workspace panel constraint
+
+The GUI's outer `.workarea` now has an explicit zero minimum height and hidden
+overflow, leaving `.rp-body` as the sole vertical scroll container. Change
+rows and headers retain their minimum size. This keeps the visible workspace
+diff readable under large change sets without introducing a second nested
+scroll owner.
+
+Verification for this pass: Rust workspace and GUI strict clippy/fmt, full
+workspace `--all-features` tests, GUI library tests, Vite production build,
+Python pytest, and Ruff all pass without a real provider credential.

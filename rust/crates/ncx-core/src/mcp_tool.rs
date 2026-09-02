@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use ncx_mcp::{McpClient, McpToolDef};
+use ncx_mcp::{McpClient, McpToolAnnotations, McpToolDef};
 use ncx_sandbox::{Approver, Decision};
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -29,7 +29,10 @@ pub struct McpTool {
 
 impl McpTool {
     pub fn new(def: McpToolDef, client: Rc<Mutex<McpClient>>) -> Self {
-        let read_only = is_read_only_name(&def.name);
+        // MCP names are model-facing labels, not a trustworthy authority
+        // boundary. Only an explicit, non-conflicting protocol declaration can
+        // make an arbitrary server tool eligible for the read-only path.
+        let read_only = annotation_declares_read_only(def.annotations.as_ref());
         McpTool {
             def,
             client,
@@ -38,46 +41,46 @@ impl McpTool {
     }
 }
 
-fn mcp_call_is_read_only(name: &str, tool_is_read_only: bool, args: &Value) -> bool {
+fn annotation_declares_read_only(annotations: Option<&ncx_mcp::McpToolAnnotations>) -> bool {
+    annotations.is_some_and(ncx_mcp::McpToolAnnotations::explicitly_read_only)
+}
+
+fn mcp_call_is_read_only(
+    name: &str,
+    annotations: Option<&McpToolAnnotations>,
+    tool_is_read_only: bool,
+    args: &Value,
+) -> bool {
+    // LLM Wiki deliberately multiplexes reads and mutations behind one tool
+    // name. Even a server-level read-only annotation must not bless a write
+    // action; the repository-owned action allowlist remains the narrowest
+    // authority for this special tool.
+    if name == "llmwiki" {
+        if annotations.is_some() && !tool_is_read_only {
+            return false;
+        }
+        return matches!(
+            args.get("action").and_then(Value::as_str),
+            Some("recall_user" | "recall_project" | "project_status" | "status" | "corpus")
+        );
+    }
     if tool_is_read_only {
         return true;
     }
-    name == "llmwiki"
-        && matches!(
-            args.get("action").and_then(Value::as_str),
-            Some("recall_user" | "recall_project" | "project_status" | "status" | "corpus")
-        )
-}
-
-fn auto_deny_message(
-    name: &str,
-    tool_is_read_only: bool,
-    approval_policy: &str,
-    args: &Value,
-) -> Option<String> {
-    (!mcp_call_is_read_only(name, tool_is_read_only, args)
-        && matches!(
-            Approver::new(approval_policy).classify(name, true),
-            Decision::AutoDeny
-        ))
-    .then(|| approval_denied_message(name, approval_policy))
+    // An explicit annotation object that is missing either required hint (or
+    // contains a conflicting pair) is never upgraded by a local heuristic.
+    if annotations.is_some() {
+        return false;
+    }
+    // No name-based fallback follows. Missing, malformed, and conflicting
+    // annotations all left `tool_is_read_only` false at construction time.
+    false
 }
 
 fn approval_denied_message(name: &str, approval_policy: &str) -> String {
     format!(
         "Error: MCP tool '{name}' denied by approval policy '{approval_policy}' (non-read-only)."
     )
-}
-
-/// Heuristic: tool names that look like reads/queries don't require approval.
-fn is_read_only_name(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    for prefix in &["read_", "get_", "list_", "fetch_", "search_", "find_"] {
-        if lower.starts_with(prefix) {
-            return true;
-        }
-    }
-    matches!(lower.as_str(), "read" | "get" | "list" | "search" | "find")
 }
 
 #[async_trait(?Send)]
@@ -99,49 +102,44 @@ impl Tool for McpTool {
     }
 
     fn call_is_read_only(&self, args: &Value) -> bool {
-        mcp_call_is_read_only(&self.def.name, self.read_only, args)
+        mcp_call_is_read_only(
+            &self.def.name,
+            self.def.annotations.as_ref(),
+            self.read_only,
+            args,
+        )
     }
 
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
-        if let Some(message) =
-            auto_deny_message(&self.def.name, self.read_only, &ctx.approval_policy, args)
-        {
-            return message;
-        }
         if !self.call_is_read_only(args) {
             let decision = Approver::new(&ctx.approval_policy).classify(&self.def.name, true);
             match decision {
-                // Keep the preflight check above as the normal path so denied
-                // calls never reach an approver or the MCP process. Repeating
-                // the refusal here is a fail-safe if approval policy semantics
-                // change independently of that preflight.
                 Decision::AutoDeny => {
                     return approval_denied_message(&self.def.name, &ctx.approval_policy);
                 }
                 Decision::Ask => {
-                    if let Some(approver) = &ctx.approver {
-                        let details = serde_json::to_string_pretty(args).unwrap_or_default();
-                        let ans = approver
-                            .request(ApprovalRequest {
-                                command: format!("mcp:{} {args}", self.def.name),
-                                reason: format!(
-                                    "MCP tool '{}' may have side effects.",
-                                    self.def.name
-                                ),
-                                cwd: ctx.workspace.display().to_string(),
-                                escalated: true,
-                                details,
-                            })
-                            .await;
-                        if !ans.approved() {
-                            return format!(
-                                "Error: MCP tool '{}' not approved by the user.",
-                                self.def.name
-                            );
-                        }
+                    let Some(approver) = &ctx.approver else {
+                        return format!(
+                            "Error: MCP tool '{}' requires approval but no approver is configured.",
+                            self.def.name
+                        );
+                    };
+                    let details = serde_json::to_string_pretty(args).unwrap_or_default();
+                    let ans = approver
+                        .request(ApprovalRequest {
+                            command: format!("mcp:{} {args}", self.def.name),
+                            reason: format!("MCP tool '{}' may have side effects.", self.def.name),
+                            cwd: ctx.workspace.display().to_string(),
+                            escalated: true,
+                            details,
+                        })
+                        .await;
+                    if !ans.approved() {
+                        return format!(
+                            "Error: MCP tool '{}' not approved by the user.",
+                            self.def.name
+                        );
                     }
-                    // No approver configured: fall through and call the tool.
-                    // (Consistent with how ShellTool behaves when auto-approving.)
                 }
                 Decision::AutoApprove => {}
             }
@@ -201,19 +199,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn read_only_heuristic() {
-        assert!(is_read_only_name("read_file"));
-        assert!(is_read_only_name("get_weather"));
-        assert!(is_read_only_name("list_todos"));
-        assert!(is_read_only_name("fetch_url"));
-        assert!(is_read_only_name("search_web"));
-        assert!(is_read_only_name("find_issues"));
-        assert!(is_read_only_name("read"));
-        assert!(is_read_only_name("list"));
-        assert!(!is_read_only_name("write_file"));
-        assert!(!is_read_only_name("create_issue"));
-        assert!(!is_read_only_name("delete_branch"));
-        assert!(!is_read_only_name("execute_code"));
+    fn annotations_only_admit_explicit_non_destructive_reads() {
+        let safe = ncx_mcp::McpToolAnnotations {
+            read_only_hint: Some(true),
+            destructive_hint: Some(false),
+            open_world_hint: None,
+        };
+        assert!(annotation_declares_read_only(Some(&safe)));
+
+        for annotations in [
+            None,
+            Some(ncx_mcp::McpToolAnnotations {
+                read_only_hint: Some(true),
+                destructive_hint: None,
+                open_world_hint: None,
+            }),
+            Some(ncx_mcp::McpToolAnnotations {
+                read_only_hint: Some(true),
+                destructive_hint: Some(true),
+                open_world_hint: None,
+            }),
+            Some(ncx_mcp::McpToolAnnotations {
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                open_world_hint: None,
+            }),
+        ] {
+            assert!(!annotation_declares_read_only(annotations.as_ref()));
+        }
     }
 
     #[test]
@@ -227,6 +240,7 @@ mod tests {
         ] {
             assert!(mcp_call_is_read_only(
                 "llmwiki",
+                None,
                 false,
                 &serde_json::json!({"action": action})
             ));
@@ -234,37 +248,98 @@ mod tests {
         for action in ["initialize_project", "record_project", "propose", "approve"] {
             assert!(!mcp_call_is_read_only(
                 "llmwiki",
+                None,
                 false,
                 &serde_json::json!({"action": action})
             ));
         }
         assert!(!mcp_call_is_read_only(
             "llmwiki",
+            None,
             false,
             &serde_json::json!({})
+        ));
+        let incomplete = ncx_mcp::McpToolAnnotations {
+            read_only_hint: Some(true),
+            destructive_hint: None,
+            open_world_hint: None,
+        };
+        assert!(!mcp_call_is_read_only(
+            "llmwiki",
+            Some(&incomplete),
+            false,
+            &serde_json::json!({"action": "recall_user"})
+        ));
+        let safe = ncx_mcp::McpToolAnnotations {
+            read_only_hint: Some(true),
+            destructive_hint: Some(false),
+            open_world_hint: None,
+        };
+        assert!(mcp_call_is_read_only(
+            "llmwiki",
+            Some(&safe),
+            true,
+            &serde_json::json!({"action": "recall_user"})
+        ));
+        assert!(!mcp_call_is_read_only(
+            "llmwiki",
+            Some(&safe),
+            true,
+            &serde_json::json!({"action": "record_project"})
         ));
     }
 
     #[test]
-    fn never_policy_denies_side_effecting_mcp_calls_without_a_live_server() {
-        let mutation = auto_deny_message(
+    fn never_policy_denies_read_named_tools_without_safe_annotations() {
+        let destructive = ncx_mcp::McpToolAnnotations {
+            read_only_hint: Some(true),
+            destructive_hint: Some(true),
+            open_world_hint: None,
+        };
+        for annotations in [Some(&destructive), None] {
+            assert!(!mcp_call_is_read_only(
+                "read_file",
+                annotations,
+                annotation_declares_read_only(annotations),
+                &serde_json::json!({}),
+            ));
+            assert!(matches!(
+                Approver::new("never").classify("read_file", true),
+                Decision::AutoDeny
+            ));
+        }
+
+        let safe = ncx_mcp::McpToolAnnotations {
+            read_only_hint: Some(true),
+            destructive_hint: Some(false),
+            open_world_hint: None,
+        };
+        assert!(mcp_call_is_read_only(
+            "read_file",
+            Some(&safe),
+            annotation_declares_read_only(Some(&safe)),
+            &serde_json::json!({}),
+        ));
+    }
+
+    #[test]
+    fn never_policy_denies_side_effecting_llmwiki_actions_without_a_live_server() {
+        assert!(!mcp_call_is_read_only(
             "llmwiki",
+            None,
             false,
-            "never",
             &serde_json::json!({"action": "record_project"}),
-        )
-        .expect("side-effecting MCP call must be denied");
-        assert!(
-            mutation.contains("denied by approval policy 'never'"),
-            "{mutation}"
-        );
-        assert!(auto_deny_message(
+        ));
+        assert!(matches!(
+            Approver::new("never").classify("llmwiki", true),
+            Decision::AutoDeny
+        ));
+        assert!(mcp_call_is_read_only(
             "llmwiki",
+            None,
             false,
-            "never",
             &serde_json::json!({"action": "recall_user"}),
-        )
-        .is_none());
+        ));
     }
 
     // A live round-trip (connect → list_tools → register → execute echo tool)
@@ -285,13 +360,17 @@ for line in sys.stdin:
         pass
     elif method == "tools/list":
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"tools":[
-            {"name":"echo","description":"echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}},
+            {"name":"echo","description":"echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}},"annotations":{"readOnlyHint":True,"destructiveHint":False}},
+            {"name":"read_safe","description":"annotated read","inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":True,"destructiveHint":False}},
+            {"name":"read_destructive","description":"misleading destructive read","inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":True,"destructiveHint":True}},
+            {"name":"read_unannotated","description":"unannotated read","inputSchema":{"type":"object","properties":{}}},
             {"name":"write_note","description":"write a note","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}},
-            {"name":"llmwiki","description":"memory actions","inputSchema":{"type":"object","properties":{"action":{"type":"string"}}}}
+            {"name":"llmwiki","description":"memory actions","inputSchema":{"type":"object","properties":{"action":{"type":"string"}}},"annotations":{"readOnlyHint":True,"destructiveHint":False}}
         ]}}), flush=True)
     elif method == "tools/call":
         args = msg.get("params",{}).get("arguments",{})
-        print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"content":[{"type":"text","text":"echo: "+str(args.get("text",""))}]}}), flush=True)
+        name = msg.get("params",{}).get("name","")
+        print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"content":[{"type":"text","text":"called: "+name+": "+str(args.get("text",""))}]}}), flush=True)
     else:
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
 "#;
@@ -326,16 +405,19 @@ for line in sys.stdin:
 
         let n = match result {
             Ok(n) => n,
-            Err(e) => {
+            Err(e) if e.starts_with("spawn python:") => {
                 eprintln!("skipping mcp_tool live test (no python?): {e}");
                 return;
             }
+            Err(e) => panic!("MCP live server failed unexpectedly: {e}"),
         };
-        assert_eq!(n, 3);
+        assert_eq!(n, 6);
 
-        // echo is read-only by heuristic (starts with "echo"… actually not)
-        // write_note is non-read-only — check it's registered.
+        // Only a complete MCP annotation opts a tool into the read-only path.
         assert!(reg.get("echo").is_some());
+        assert!(reg.is_read_only("read_safe"));
+        assert!(!reg.is_read_only("read_destructive"));
+        assert!(!reg.is_read_only("read_unannotated"));
         assert!(reg.get("write_note").is_some());
         assert!(!reg.is_read_only("write_note"));
         assert!(reg.call_is_read_only("llmwiki", &serde_json::json!({"action": "recall_user"})));
@@ -344,10 +426,19 @@ for line in sys.stdin:
         let out = reg
             .execute("echo", &serde_json::json!({"text": "hello mcp"}))
             .await;
-        assert_eq!(out, "echo: hello mcp");
+        assert_eq!(out, "called: echo: hello mcp");
 
         reg.ctx.approval_policy = "never".into();
         reg.ctx.compaction_read_only_recovery.set(false);
+        let safe = reg.execute("read_safe", &serde_json::json!({})).await;
+        assert_eq!(safe, "called: read_safe: ");
+        for name in ["read_destructive", "read_unannotated"] {
+            let denied = reg.execute(name, &serde_json::json!({})).await;
+            assert!(
+                denied.contains("denied by approval policy 'never'"),
+                "{name}: {denied}"
+            );
+        }
         let recalled = reg
             .execute("llmwiki", &serde_json::json!({"action": "recall_user"}))
             .await;

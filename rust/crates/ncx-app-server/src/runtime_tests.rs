@@ -23,15 +23,16 @@ fn runtime_goal_resume_arms_and_schedules_the_exact_thread() {
     let ResponsePayload::Goal(Some(created)) = created.response.payload else {
         panic!("expected goal");
     };
+    let expected_goal = ncx_protocol::GoalRef {
+        id: created.goal.id.clone(),
+        revision: created.goal.revision,
+    };
 
     let resumed = server
         .dispatch_with_runtime(
             ClientRequest::GoalResume {
                 thread_id: thread_id.clone(),
-                goal: ncx_protocol::GoalRef {
-                    id: created.goal.id,
-                    revision: created.goal.revision,
-                },
+                goal: expected_goal.clone(),
             },
             &runtime,
         )
@@ -44,6 +45,10 @@ fn runtime_goal_resume_arms_and_schedules_the_exact_thread() {
     assert_eq!(
         runtime.calls.lock().unwrap().as_slice(),
         ["goal-continue:runtime-goal-resume"]
+    );
+    assert_eq!(
+        runtime.goal_continuations.lock().unwrap().as_slice(),
+        [expected_goal]
     );
 }
 

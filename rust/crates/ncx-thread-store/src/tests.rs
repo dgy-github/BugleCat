@@ -134,6 +134,53 @@ fn legacy_store_without_goal_map_opens_with_no_goal() {
     );
 }
 
+#[test]
+fn read_with_goal_returns_the_thread_and_goal_from_one_persisted_snapshot() {
+    let store = temp_store("read-with-goal");
+    let thread_id = ThreadId::new("thread").unwrap();
+    store.create(thread("thread")).unwrap();
+
+    // A Thread can exist without a Goal; the tuple still has to be present so
+    // callers can distinguish that state from a missing Thread.
+    let (stored_thread, stored_goal) = store
+        .read_with_goal(&thread_id)
+        .unwrap()
+        .expect("thread should be returned");
+    assert_eq!(stored_thread, thread("thread"));
+    assert_eq!(stored_goal, None);
+
+    let first = goal("goal-a", 1, "first objective");
+    store
+        .compare_and_set_goal(&thread_id, GoalExpectation::Absent, Some(first.clone()))
+        .unwrap();
+    let (stored_thread, stored_goal) = store
+        .read_with_goal(&thread_id)
+        .unwrap()
+        .expect("thread with goal should be returned");
+    assert_eq!(stored_thread.metadata.id, thread_id);
+    assert_eq!(stored_goal, Some(first.clone()));
+
+    let second = goal("goal-b", 1, "replacement objective");
+    store
+        .compare_and_set_goal(
+            &thread_id,
+            GoalExpectation::Exact(GoalRef {
+                id: first.id,
+                revision: first.revision,
+            }),
+            Some(second.clone()),
+        )
+        .unwrap();
+    let (_, stored_goal) = store
+        .read_with_goal(&thread_id)
+        .unwrap()
+        .expect("replacement thread should be returned");
+    assert_eq!(stored_goal, Some(second));
+
+    let missing = ThreadId::new("missing").unwrap();
+    assert_eq!(store.read_with_goal(&missing).unwrap(), None);
+}
+
 fn turn(id: &str) -> Turn {
     Turn {
         id: TurnId::new(id).unwrap(),

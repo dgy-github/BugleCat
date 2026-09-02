@@ -1,4 +1,6 @@
 use super::*;
+use std::sync::{mpsc, Arc, Barrier};
+use std::thread;
 
 #[test]
 fn create_and_start_turn_emit_owned_v3_events_and_mode() {
@@ -284,6 +286,80 @@ fn goal_lifecycle_is_revisioned_and_emits_durable_snapshots() {
 }
 
 #[test]
+fn goal_transition_lock_serializes_pause_against_an_in_flight_request() {
+    let server = Arc::new(server());
+    let thread_id = ThreadId::new("goal-transition-lock").unwrap();
+    server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(thread_id.clone()),
+            workspace: "workspace".into(),
+            title: "goal".into(),
+            harness_profile: "full".into(),
+        })
+        .unwrap();
+    let created = server
+        .dispatch(ClientRequest::GoalCreate {
+            thread_id: thread_id.clone(),
+            objective: "serialize goal authority".into(),
+            max_goal_rounds: 2,
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(view)) = created.response.payload else {
+        panic!("expected goal");
+    };
+    let goal = view.goal;
+    server
+        .dispatch(ClientRequest::GoalResume {
+            thread_id: thread_id.clone(),
+            goal: ncx_protocol::GoalRef {
+                id: goal.id.clone(),
+                revision: goal.revision,
+            },
+        })
+        .unwrap();
+
+    // Hold the same lock used by Goal transitions, then start a competing
+    // pause. A request that bypasses the lock (the pre-fix behavior) would
+    // complete while this guard is held; the fixed path must remain blocked.
+    let transition = server.lock_goal_transition().unwrap();
+    let entered = Arc::new(Barrier::new(2));
+    let (result_tx, result_rx) = mpsc::channel();
+    let worker_server = Arc::clone(&server);
+    let worker_entered = Arc::clone(&entered);
+    let worker = thread::spawn(move || {
+        worker_entered.wait();
+        let result = worker_server.dispatch(ClientRequest::GoalPause {
+            thread_id,
+            goal: ncx_protocol::GoalRef {
+                id: goal.id,
+                revision: goal.revision,
+            },
+        });
+        result_tx.send(result).unwrap();
+    });
+    entered.wait();
+    assert!(result_rx.try_recv().is_err());
+    drop(transition);
+
+    result_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("pause must proceed after the transition lock is released")
+        .unwrap();
+    worker.join().unwrap();
+
+    let read = server
+        .dispatch(ClientRequest::GoalRead {
+            thread_id: ThreadId::new("goal-transition-lock").unwrap(),
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(view)) = read.response.payload else {
+        panic!("expected goal");
+    };
+    assert_eq!(view.goal.phase, ncx_protocol::GoalPhase::Paused);
+    assert_eq!(view.activation, ncx_protocol::GoalActivation::Disarmed);
+}
+
+#[test]
 fn stale_or_invalid_goal_transition_performs_no_mutation() {
     let server = server();
     let thread_id = ThreadId::new("goal-stale").unwrap();
@@ -461,6 +537,127 @@ fn goal_activation_is_process_local_and_fork_never_inherits_it() {
     };
     assert_eq!(restored.goal, armed.goal);
     assert_eq!(restored.activation, ncx_protocol::GoalActivation::Disarmed);
+}
+
+#[test]
+fn goal_activation_token_cannot_authorize_a_replacement_from_another_server() {
+    let path = std::env::temp_dir().join(format!(
+        "ncx-goal-cross-server-{}-{}.json",
+        std::process::id(),
+        TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let server_a = AppServer::new(Arc::new(JsonThreadStore::open(&path).unwrap()), || 100);
+    let server_b = AppServer::new(Arc::new(JsonThreadStore::open(&path).unwrap()), || 200);
+    let thread_id = ThreadId::new("cross-server-goal").unwrap();
+
+    server_a
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(thread_id.clone()),
+            workspace: "workspace".into(),
+            title: "goal".into(),
+            harness_profile: "full".into(),
+        })
+        .unwrap();
+    let created = server_a
+        .dispatch(ClientRequest::GoalCreate {
+            thread_id: thread_id.clone(),
+            objective: "first durable objective".into(),
+            max_goal_rounds: 2,
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(created)) = created.response.payload else {
+        panic!("expected first goal");
+    };
+    let first_ref = ncx_protocol::GoalRef {
+        id: created.goal.id.clone(),
+        revision: created.goal.revision,
+    };
+    let resumed = server_a
+        .dispatch(ClientRequest::GoalResume {
+            thread_id: thread_id.clone(),
+            goal: first_ref.clone(),
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(resumed)) = resumed.response.payload else {
+        panic!("expected resumed first goal");
+    };
+    assert_eq!(resumed.activation, ncx_protocol::GoalActivation::Armed);
+
+    // The second App Server has no process-local token, but it can still
+    // perform the durable lifecycle transition through the shared store.
+    let completed = server_b
+        .dispatch(ClientRequest::GoalComplete {
+            thread_id: thread_id.clone(),
+            goal: first_ref.clone(),
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(completed)) = completed.response.payload else {
+        panic!("expected completed first goal");
+    };
+    assert_eq!(completed.goal.phase, ncx_protocol::GoalPhase::Complete);
+    assert_eq!(completed.activation, ncx_protocol::GoalActivation::Disarmed);
+
+    let replacement = server_b
+        .dispatch(ClientRequest::GoalCreate {
+            thread_id: thread_id.clone(),
+            objective: "replacement durable objective".into(),
+            max_goal_rounds: 2,
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(replacement)) = replacement.response.payload else {
+        panic!("expected replacement goal");
+    };
+    assert_ne!(replacement.goal.id, first_ref.id);
+    assert_eq!(replacement.goal.phase, ncx_protocol::GoalPhase::Active);
+    assert_eq!(
+        replacement.activation,
+        ncx_protocol::GoalActivation::Disarmed
+    );
+    let replacement_ref = ncx_protocol::GoalRef {
+        id: replacement.goal.id.clone(),
+        revision: replacement.goal.revision,
+    };
+
+    // Server A still holds the old in-memory token. It must not authorize the
+    // newly-created durable Goal, even before its next read refreshes state.
+    let stale_round = server_a.dispatch(ClientRequest::GoalRoundStart {
+        thread_id: thread_id.clone(),
+        turn_id: TurnId::new("stale-replacement-round").unwrap(),
+        goal: replacement_ref.clone(),
+        round: 1,
+        prompt: "must not run".into(),
+    });
+    assert!(matches!(
+        stale_round,
+        Err(AppServerError::InvalidRequest(message))
+            if message.contains("goal continuation authorization is stale")
+    ));
+
+    let read = server_a
+        .dispatch(ClientRequest::GoalRead {
+            thread_id: thread_id.clone(),
+        })
+        .unwrap();
+    let ResponsePayload::Goal(Some(read)) = read.response.payload else {
+        panic!("expected replacement goal from server A");
+    };
+    assert_eq!(read.goal, replacement.goal);
+    assert_eq!(read.activation, ncx_protocol::GoalActivation::Disarmed);
+
+    // The stale attempt above must not leave any authority behind, so a
+    // subsequent admission is rejected as disarmed as well.
+    let disarmed_round = server_a.dispatch(ClientRequest::GoalRoundStart {
+        thread_id,
+        turn_id: TurnId::new("disarmed-replacement-round").unwrap(),
+        goal: replacement_ref,
+        round: 1,
+        prompt: "must still not run".into(),
+    });
+    assert!(matches!(
+        disarmed_round,
+        Err(AppServerError::InvalidRequest(message))
+            if message.contains("goal continuation is disarmed")
+    ));
 }
 
 #[test]

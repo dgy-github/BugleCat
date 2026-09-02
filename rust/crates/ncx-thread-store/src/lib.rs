@@ -60,6 +60,14 @@ pub trait ThreadStore: Send + Sync {
     fn mark_runtime_activation(&self, id: &ThreadId) -> Result<(), ThreadStoreError>;
     fn list(&self, include_archived: bool) -> Result<Vec<ThreadMetadata>, ThreadStoreError>;
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError>;
+    /// Read a Thread and its durable Goal from one persisted snapshot. A
+    /// caller that projects process-local Goal authority must not combine two
+    /// independent reads, because another process may replace the Goal
+    /// between them.
+    fn read_with_goal(
+        &self,
+        id: &ThreadId,
+    ) -> Result<Option<(Thread, Option<GoalSnapshot>)>, ThreadStoreError>;
     fn read_model_context(
         &self,
         id: &ThreadId,
@@ -427,6 +435,19 @@ impl ThreadStore for JsonThreadStore {
 
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError> {
         self.inspect(|persisted| persisted.threads.get(id.as_str()).cloned())
+    }
+
+    fn read_with_goal(
+        &self,
+        id: &ThreadId,
+    ) -> Result<Option<(Thread, Option<GoalSnapshot>)>, ThreadStoreError> {
+        self.inspect(|persisted| {
+            persisted
+                .threads
+                .get(id.as_str())
+                .cloned()
+                .map(|thread| (thread, persisted.goals.get(id.as_str()).cloned()))
+        })
     }
 
     fn read_model_context(

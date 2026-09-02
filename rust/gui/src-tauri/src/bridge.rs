@@ -40,8 +40,8 @@ use ncx_core::{
     UserQuestionRequest, COMPACTED_HISTORY_PREFIX,
 };
 use ncx_protocol::{
-    ClientRequest, ExecutionMode, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, TurnId,
-    TurnStatus, TurnUsage,
+    ClientRequest, ExecutionMode, GoalRef, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem,
+    TurnId, TurnStatus, TurnUsage,
 };
 #[cfg(test)]
 use ncx_sandbox::SandboxPolicy;
@@ -502,7 +502,12 @@ pub enum Command {
     /// resolves the new route.
     SetModel(String),
     /// Run an explicitly armed persisted Goal in this existing conversation.
-    ContinueGoal(String),
+    /// The exact GoalRef is carried through the host queue so a delayed command
+    /// cannot accidentally start a replacement Goal for the same Thread.
+    ContinueGoal {
+        thread_id: String,
+        goal: GoalRef,
+    },
     Shutdown,
     /// Switch the CC permission mode (plan / default / accept-edits / bypass):
     /// persist it (+ derived sandbox/approval) and rebuild reseeded so the new
@@ -1904,7 +1909,7 @@ fn spawn_turn_worker(
                 }
             });
             finish();
-            if goal_is_armed(&goal_server, &goal_session_id) {
+            if let Some(goal_ref) = armed_goal_ref(&goal_server, &goal_session_id) {
                 spawn_goal_worker(
                     goal_app,
                     goal_server,
@@ -1916,6 +1921,7 @@ fn spawn_turn_worker(
                     goal_lifecycle,
                     goal_grants,
                     goal_session_id,
+                    goal_ref,
                 );
             }
         });
@@ -1950,10 +1956,17 @@ fn spawn_goal_worker(
     lifecycle: Arc<WorkerLifecycle>,
     session_grants: GrantRegistry,
     session_id: String,
+    expected_goal: GoalRef,
 ) {
+    // The command may have waited behind another runtime operation. Recheck
+    // the exact GoalRef before claiming the worker lease so a delayed resume
+    // cannot start a replacement Goal on the same Thread.
+    if !goal_is_armed_for(&app_server, &session_id, &expected_goal) {
+        return;
+    }
     if !lifecycle.accepts_work() {
         if let Ok(thread_id) = ThreadId::new(session_id) {
-            let _ = app_server.disarm_goal(&thread_id);
+            let _ = app_server.disarm_goal_if_matches(&thread_id, &expected_goal);
         }
         return;
     }
@@ -1968,9 +1981,9 @@ fn spawn_goal_worker(
             if let Ok(mut sessions) = running.lock() {
                 sessions.remove(&session_id);
             }
-            let _ = ThreadId::new(session_id.clone())
-                .ok()
-                .and_then(|thread_id| app_server.disarm_goal(&thread_id).ok());
+            if let Ok(thread_id) = ThreadId::new(session_id.clone()) {
+                let _ = app_server.disarm_goal_if_matches(&thread_id, &expected_goal);
+            }
             emit(
                 &app,
                 UiEvent::Error {
@@ -1991,6 +2004,7 @@ fn spawn_goal_worker(
     let failure_app = app.clone();
     let failure_server = app_server.clone();
     let thread_lifecycle = lifecycle.clone();
+    let expected_goal_for_worker = expected_goal.clone();
     let spawned = std::thread::Builder::new()
         .name(format!(
             "ncx-goal-{}",
@@ -2019,7 +2033,8 @@ fn spawn_goal_worker(
                 .build()
             else {
                 if let Ok(thread_id) = ThreadId::new(session_id.clone()) {
-                    let _ = app_server.disarm_goal(&thread_id);
+                    let _ =
+                        app_server.disarm_goal_if_matches(&thread_id, &expected_goal_for_worker);
                 }
                 emit(
                     &app,
@@ -2052,6 +2067,7 @@ fn spawn_goal_worker(
                     cancel,
                     approver,
                     questioner,
+                    expected_goal: expected_goal_for_worker.clone(),
                 })
                 .await;
             });
@@ -2109,7 +2125,7 @@ fn spawn_goal_worker(
             sessions.remove(&cleanup_session);
         }
         if let Ok(thread_id) = ThreadId::new(cleanup_session.clone()) {
-            let _ = failure_server.disarm_goal(&thread_id);
+            let _ = failure_server.disarm_goal_if_matches(&thread_id, &expected_goal);
         }
         emit(
             &failure_app,
@@ -2260,21 +2276,33 @@ fn claim_session(running: &RunningSessions, session_id: &str, kind: SessionRunKi
         .unwrap_or(false)
 }
 
-fn goal_is_armed(app_server: &AppServer<JsonThreadStore>, session_id: &str) -> bool {
+fn armed_goal_ref(app_server: &AppServer<JsonThreadStore>, session_id: &str) -> Option<GoalRef> {
     let Ok(thread_id) = ThreadId::new(session_id.to_string()) else {
-        return false;
+        return None;
     };
     app_server
         .dispatch(ClientRequest::GoalRead { thread_id })
         .ok()
         .and_then(|outcome| match outcome.response.payload {
-            ResponsePayload::Goal(Some(goal)) => Some(
-                goal.activation == ncx_protocol::GoalActivation::Armed
-                    && goal.goal.phase == ncx_protocol::GoalPhase::Active,
-            ),
+            ResponsePayload::Goal(Some(goal))
+                if goal.activation == ncx_protocol::GoalActivation::Armed
+                    && goal.goal.phase == ncx_protocol::GoalPhase::Active =>
+            {
+                Some(GoalRef {
+                    id: goal.goal.id,
+                    revision: goal.goal.revision,
+                })
+            }
             _ => None,
         })
-        .unwrap_or(false)
+}
+
+fn goal_is_armed_for(
+    app_server: &AppServer<JsonThreadStore>,
+    session_id: &str,
+    expected: &GoalRef,
+) -> bool {
+    armed_goal_ref(app_server, session_id).is_some_and(|actual| actual == *expected)
 }
 
 /// Spawn the lightweight navigation/config coordinator. It drains commands in
@@ -2672,7 +2700,7 @@ pub fn spawn_worker(startup: WorkerStartup) {
                             let _ = model;
                             emit_ready(&app, &workspace, &session_id);
                         }
-                        Command::ContinueGoal(target_id) => {
+                        Command::ContinueGoal { thread_id, goal } => {
                             spawn_goal_worker(
                                 app.clone(),
                                 app_server.clone(),
@@ -2683,7 +2711,8 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                 deferred_prompts.clone(),
                                 lifecycle.clone(),
                                 session_grants.clone(),
-                                target_id,
+                                thread_id,
+                                goal,
                             );
                         }
                         Command::SetPermissionMode {

@@ -190,9 +190,12 @@ impl DeepSeekProvider {
         // 408/409/429/5xx are transient; other 4xx are permanent.
         let code = status.as_u16();
         let transient = matches!(code, 408 | 409 | 429) || (500..600).contains(&code);
-        let text = resp.text().await.unwrap_or_default();
+        // Error bodies are controlled by the remote provider.  Do not buffer or
+        // persist them: callers place ProviderError text into the conversation
+        // transcript, and an upstream proxy may return an arbitrarily large or
+        // sensitive HTML/JSON diagnostic page.
         Err(HttpErr {
-            message: format!("HTTP {code}: {text}"),
+            message: format!("HTTP {code}"),
             transient,
         })
     }
@@ -263,13 +266,15 @@ impl DeepSeekProvider {
             if !resp.status().is_success() {
                 let code = resp.status().as_u16();
                 let transient = matches!(code, 408 | 409 | 429) || (500..600).contains(&code);
-                let text = resp.text().await.unwrap_or_default();
                 if transient && attempt < self.max_retries {
                     attempt += 1;
                     backoff_sleep(attempt).await;
                     continue;
                 }
-                return Err(ProviderError(format!("HTTP {code}: {text}")));
+                // Keep the streaming error path consistent with `post`: the
+                // remote response body is untrusted and must not become model
+                // context or a durable session record.
+                return Err(ProviderError(format!("HTTP {code}")));
             }
 
             let mut emitted = false;
@@ -582,6 +587,36 @@ impl HttpErr {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn serve_once(status: &str, body: String) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let request = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 1024];
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..read]);
+                if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        (format!("http://{address}/v1"), request)
+    }
 
     #[test]
     fn stream_open_timeout_defaults_when_unset() {
@@ -653,6 +688,45 @@ mod tests {
     fn endpoint_appends_chat_completions_without_double_slash() {
         let p = DeepSeekProvider::new("k", "https://api.deepseek.com/v1/", "m");
         assert_eq!(p.endpoint, "https://api.deepseek.com/v1/chat/completions");
+    }
+
+    #[tokio::test]
+    async fn failed_chat_exposes_only_status_not_upstream_body() {
+        let private_body = "private upstream diagnostic with api key upstream-secret";
+        let (base_url, request) = serve_once("403 Forbidden", private_body.to_string());
+        let provider = DeepSeekProvider::with_opts("client-secret", &base_url, "model", 5, 0);
+
+        let error = provider
+            .chat(&[], None, None, None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "HTTP 403");
+        assert!(!error.contains(private_body));
+        assert!(!error.contains("client-secret"));
+        assert!(request
+            .join()
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("authorization: bearer client-secret"));
+    }
+
+    #[tokio::test]
+    async fn failed_stream_exposes_only_status_not_upstream_body() {
+        let private_body = "private streaming diagnostic with token upstream-secret";
+        let (base_url, _) = serve_once("502 Bad Gateway", private_body.to_string());
+        let provider = DeepSeekProvider::with_opts("client-secret", &base_url, "model", 5, 0);
+
+        let error = provider
+            .chat_stream(&[], None, None, None, None, |_| {}, |_| {})
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "HTTP 502");
+        assert!(!error.contains(private_body));
+        assert!(!error.contains("client-secret"));
     }
 
     #[test]

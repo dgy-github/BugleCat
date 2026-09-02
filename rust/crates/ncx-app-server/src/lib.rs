@@ -13,16 +13,22 @@ use ncx_protocol::{
 };
 use ncx_thread_store::{ThreadRollbackSnapshot, ThreadStore};
 pub use outcome::{AppServerError, DispatchOutcome};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 pub struct AppServer<S: ThreadStore> {
     store: Arc<S>,
     sequence: AtomicU64,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// Thread IDs explicitly armed in this exact process lifecycle. This is
     /// intentionally absent from Thread Store persistence.
-    goal_activations: Mutex<HashSet<String>>,
+    goal_activations: Mutex<HashMap<String, ncx_protocol::GoalRef>>,
+    /// Serializes the composite Goal authority operation: durable Goal CAS,
+    /// process-local arm/disarm, and automatic round admission.  The lock
+    /// order is `goal_transition` -> `goal_activations` -> Thread Store.
+    /// Keeping the outer transition separate makes a Goal read return one
+    /// coherent durable/authority snapshot as well.
+    goal_transition: Mutex<()>,
     /// Thread IDs whose durable create/fork transaction is waiting for the
     /// host runtime to accept the matching activation. This process-local
     /// fence closes the gap between the store commit and the host handoff:
@@ -93,7 +99,8 @@ impl<S: ThreadStore> AppServer<S> {
             store,
             sequence: AtomicU64::new(1),
             clock: Arc::new(clock),
-            goal_activations: Mutex::new(HashSet::new()),
+            goal_activations: Mutex::new(HashMap::new()),
+            goal_transition: Mutex::new(()),
             pending_activations: Mutex::new(HashSet::new()),
         }
     }
@@ -372,10 +379,21 @@ impl<S: ThreadStore> AppServer<S> {
                     thread_id: thread_id.clone(),
                     goal,
                 })?;
-                if let Err(error) = runtime.continue_goal(&thread_id) {
+                let goal_ref = match &outcome.response.payload {
+                    ResponsePayload::Goal(Some(view)) => ncx_protocol::GoalRef {
+                        id: view.goal.id.clone(),
+                        revision: view.goal.revision,
+                    },
+                    _ => {
+                        return Err(AppServerError::Runtime(
+                            "goal resume returned an unexpected response".into(),
+                        ));
+                    }
+                };
+                if let Err(error) = runtime.continue_goal(&thread_id, &goal_ref) {
                     // Durable phase may remain active, but process-local authority
                     // must fail closed when the host did not accept the work.
-                    self.disarm_goal(&thread_id)?;
+                    let _ = self.disarm_goal_if_matches(&thread_id, &goal_ref);
                     return Err(AppServerError::Runtime(error));
                 }
                 Ok(outcome)
@@ -763,46 +781,82 @@ impl<S: ThreadStore> AppServer<S> {
         )
     }
 
-    pub(crate) fn goal_view(
+    /// Lock the process-local Goal authority after acquiring
+    /// [`Self::lock_goal_transition`]. Goal transitions and `GoalRoundStart`
+    /// must take both locks before touching Thread Store, so a
+    /// pause/complete/clear can never land durably and then be re-armed by an
+    /// older resume.
+    pub(crate) fn lock_goal_transition(&self) -> Result<MutexGuard<'_, ()>, AppServerError> {
+        self.goal_transition
+            .lock()
+            .map_err(|_| AppServerError::Runtime("goal transition lock is poisoned".into()))
+    }
+
+    pub(crate) fn lock_goal_activations(
         &self,
+    ) -> Result<MutexGuard<'_, HashMap<String, ncx_protocol::GoalRef>>, AppServerError> {
+        self.goal_activations
+            .lock()
+            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))
+    }
+
+    pub(crate) fn goal_view_with_activations(
         thread_id: &ncx_protocol::ThreadId,
         goal: ncx_protocol::GoalSnapshot,
-    ) -> Result<ncx_protocol::GoalView, AppServerError> {
-        let armed = self
-            .goal_activations
-            .lock()
-            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?
-            .contains(thread_id.as_str());
-        Ok(ncx_protocol::GoalView {
+        activations: &mut HashMap<String, ncx_protocol::GoalRef>,
+    ) -> ncx_protocol::GoalView {
+        let expected = ncx_protocol::GoalRef {
+            id: goal.id.clone(),
+            revision: goal.revision,
+        };
+        let armed = goal.phase == ncx_protocol::GoalPhase::Active
+            && activations
+                .get(thread_id.as_str())
+                .is_some_and(|actual| actual == &expected);
+        if !armed {
+            // A different process may have replaced the durable Goal while
+            // this process was alive. Never let an old thread-only activation
+            // bit authorize the replacement; discard the stale token as soon
+            // as it is observed.
+            activations.remove(thread_id.as_str());
+        }
+        ncx_protocol::GoalView {
             goal,
             activation: if armed {
                 ncx_protocol::GoalActivation::Armed
             } else {
                 ncx_protocol::GoalActivation::Disarmed
             },
-        })
-    }
-
-    pub(crate) fn arm_goal(
-        &self,
-        thread_id: &ncx_protocol::ThreadId,
-    ) -> Result<(), AppServerError> {
-        self.goal_activations
-            .lock()
-            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?
-            .insert(thread_id.as_str().to_string());
-        Ok(())
+        }
     }
 
     /// Revoke process-local continuation authority without mutating the
     /// durable Goal definition. Hosts call this when their accepted worker
     /// cannot be created or its durability fence fails.
     pub fn disarm_goal(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), AppServerError> {
-        self.goal_activations
-            .lock()
-            .map_err(|_| AppServerError::Runtime("goal activation lock is poisoned".into()))?
-            .remove(thread_id.as_str());
+        let _transition = self.lock_goal_transition()?;
+        self.lock_goal_activations()?.remove(thread_id.as_str());
         Ok(())
+    }
+
+    /// Revoke an activation only when it still belongs to the exact Goal
+    /// revision that a host handoff attempted to schedule. A newer explicit
+    /// resume must not be cancelled by an older callback that returns late.
+    pub fn disarm_goal_if_matches(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+        expected: &ncx_protocol::GoalRef,
+    ) -> Result<bool, AppServerError> {
+        let _transition = self.lock_goal_transition()?;
+        let mut activations = self.lock_goal_activations()?;
+        if activations
+            .get(thread_id.as_str())
+            .is_some_and(|actual| actual == expected)
+        {
+            activations.remove(thread_id.as_str());
+            return Ok(true);
+        }
+        Ok(false)
     }
 }
 

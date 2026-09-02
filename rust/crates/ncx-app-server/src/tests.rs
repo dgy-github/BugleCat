@@ -63,6 +63,7 @@ impl ProfileValidationGate {
 #[derive(Default)]
 struct RecordingRuntime {
     calls: Mutex<Vec<String>>,
+    goal_continuations: Mutex<Vec<ncx_protocol::GoalRef>>,
     validated_profiles: Mutex<Vec<(String, String)>>,
     profile_validation_gate: Option<Arc<ProfileValidationGate>>,
     create_activation_gate: Option<Arc<ProfileValidationGate>>,
@@ -144,10 +145,15 @@ impl AppServerAdapter for RecordingRuntime {
         Ok(())
     }
 
-    fn continue_goal(&self, thread_id: &ThreadId) -> Result<(), String> {
+    fn continue_goal(
+        &self,
+        thread_id: &ThreadId,
+        goal: &ncx_protocol::GoalRef,
+    ) -> Result<(), String> {
         if self.fail_goal_continue {
             return Err("worker unavailable".into());
         }
+        self.goal_continuations.lock().unwrap().push(goal.clone());
         self.calls
             .lock()
             .unwrap()

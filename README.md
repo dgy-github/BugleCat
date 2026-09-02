@@ -834,6 +834,31 @@ The regression suite also protects the following boundaries:
   selected project; status projections stay with their owning workspace and
   cancellation also requires the exact observed job generation.
 
+#### Current reliability pass (2026-09-02)
+
+- Durable Goal phase, process-local activation, and automatic-round admission
+  now share one transition lock. Goal reads return a coherent durable/armed
+  snapshot, and pause/resume/block/complete/clear cannot interleave a stale
+  arm or disarm. `GoalRoundStart` takes the same boundary before claiming a
+  Turn; host-side failure still revokes activation without rewriting the
+  durable Goal.
+- MCP read-only classification trusts only an explicit pair of annotations:
+  `readOnlyHint=true` and `destructiveHint=false`. Missing, partial, malformed,
+  or conflicting annotations remain approval-gated (fail closed); the
+  `llmwiki` multiplexed tool additionally uses its repository-owned read-action
+  allowlist, so a write action cannot inherit a server-level read hint.
+- Provider non-2xx responses (OpenAI-compatible and Anthropic, streaming and
+  non-streaming) expose only `HTTP <status>`. Remote HTML/JSON bodies and
+  credentials are neither buffered nor copied into model context, session
+  logs, or UI errors.
+- The Workspace Changes panel constrains the outer flex workarea and leaves
+  `rp-body` as its single vertical scroll owner. File rows cannot shrink, so
+  long change lists preserve readable line height instead of overlapping rows.
+
+The current pass was verified with Rust workspace `--all-features` tests and
+strict clippy, GUI Rust tests/clippy, Vite production build, Python pytest, and
+Ruff; no real provider credential or paid model call is required.
+
 Before submitting, run:
 
 ```powershell

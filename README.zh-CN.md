@@ -254,6 +254,11 @@ cargo run -p ncx-cli
 cargo run -p ncx-cli -- --resume
 cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
+
+# Tauri 桌面开发版
+cd gui
+npm ci
+npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 ```
 
 Rust REPL 里可以用 `/config` 查看解析后的配置文件路径、当前 model/sandbox/approval
@@ -662,6 +667,26 @@ python -m pytest -q
 - 空会话快速连续选择 Harness Profile 会被串行化：首轮前只会持久化并激活最后一次选择；Profile 写入与首轮 Claim 原子互斥，已在校验中的旧选择也不能越过首轮锁定。
 - Resume、Fork、新建会话和权限模式重建都会显式使用持久 Thread 的工作区；权限模式请求携带精确 `threadId`，过期 worker 会被拒绝且不写配置；宿主完成工作区切换后才返回就绪，延迟 worker 不会复用前一个进程目录。
 - Memory 列表/新增/整理/合并以及 Forge 启动/状态/取消请求都会携带工作区快照；宿主在工作区互斥围栏内校验快照，过期请求直接拒绝，不会写入新选中的项目。状态投影只属于启动它的工作区，取消还必须携带用户实际观察到的精确任务 generation。
+
+#### 当前可靠性收口（2026-09-02）
+
+- 持久 Goal 阶段、进程内 activation 和自动续轮 admission 现在共用一把
+  transition lock。Goal 读取返回一致的持久/armed 快照；pause/resume/
+  block/complete/clear 不会和旧的 arm/disarm 交错。`GoalRoundStart` 也在同一
+  边界内 claim Turn；宿主失败时只撤销 activation，不改写可恢复的持久 Goal。
+- MCP 只读分类只信任完整 annotations：`readOnlyHint=true` 且
+  `destructiveHint=false`。缺失、部分、畸形或冲突 annotations 一律保持审批门禁
+  （fail closed）；多 action 的 `llmwiki` 还要通过仓库维护的只读 action 白名单，
+  因而写 action 不会继承服务级只读提示。
+- OpenAI 兼容和 Anthropic Provider 的非 2xx 响应（流式与非流式）只暴露
+  `HTTP <status>`；远端 HTML/JSON 正文和凭据不会被读取、缓存或写入模型上下文、
+  会话日志和界面错误。
+- “工作区改动”面板约束外层 flex workarea，并让 `rp-body` 成为唯一纵向滚动容器；
+  文件行禁止压缩，长列表保持稳定行高，不再出现条目互相覆盖。
+
+本轮已用 Rust workspace `--all-features` 全量测试与严格 clippy、GUI Rust
+测试/clippy、Vite 生产构建、Python pytest 和 Ruff 验证；不需要真实 Provider
+凭据，也不会产生付费模型调用。
 
 推荐在提交前运行：
 

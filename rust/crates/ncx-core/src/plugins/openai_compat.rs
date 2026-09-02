@@ -371,19 +371,8 @@ pub(crate) fn discover_codex_mcp_servers_with_home(
                     continue;
                 }
             };
-            let args = config
-                .get("args")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(|value| resolve_mcp_process_value(&plugin.root, value))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .transpose();
-            let args = match args {
-                Ok(args) => args.unwrap_or_default(),
+            let args = match resolve_mcp_args(&plugin.root, config.get("args")) {
+                Ok(args) => args,
                 Err(error) => {
                     eprintln!(
                         "跳过损坏 MCP server {}:{}: {error}",
@@ -392,18 +381,16 @@ pub(crate) fn discover_codex_mcp_servers_with_home(
                     continue;
                 }
             };
-            let env = config
-                .get("env")
-                .and_then(Value::as_object)
-                .map(|entries| {
-                    entries
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            value.as_str().map(|value| (key.clone(), value.to_string()))
-                        })
-                        .collect::<HashMap<_, _>>()
-                })
-                .unwrap_or_default();
+            let env = match resolve_mcp_env(config.get("env")) {
+                Ok(env) => env,
+                Err(error) => {
+                    eprintln!(
+                        "跳过损坏 MCP server {}:{}: {error}",
+                        plugin.manifest.name, name
+                    );
+                    continue;
+                }
+            };
             servers.push(McpServerConfig {
                 name: format!("{}:{name}", plugin.manifest.name),
                 command,
@@ -445,6 +432,43 @@ fn resolve_mcp_process_value(root: &Path, value: &str) -> Result<String, String>
     Ok(validate_resource(root, value)?
         .to_string_lossy()
         .into_owned())
+}
+
+fn resolve_mcp_args(root: &Path, raw: Option<&Value>) -> Result<Vec<String>, String> {
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = raw.as_array() else {
+        return Err("MCP args 必须是字符串数组".into());
+    };
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let value = value
+                .as_str()
+                .ok_or_else(|| format!("MCP args[{index}] 必须是字符串"))?;
+            resolve_mcp_process_value(root, value)
+        })
+        .collect()
+}
+
+fn resolve_mcp_env(raw: Option<&Value>) -> Result<HashMap<String, String>, String> {
+    let Some(raw) = raw else {
+        return Ok(HashMap::new());
+    };
+    let Some(entries) = raw.as_object() else {
+        return Err("MCP env 必须是字符串映射".into());
+    };
+    entries
+        .iter()
+        .map(|(key, value)| {
+            let value = value
+                .as_str()
+                .ok_or_else(|| format!("MCP env['{key}'] 必须是字符串"))?;
+            Ok((key.clone(), value.to_string()))
+        })
+        .collect()
 }
 
 /// Parse enabled plugin App declarations. Apps are hosted connector resources,

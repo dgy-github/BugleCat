@@ -59,7 +59,12 @@ impl<'a, S: ThreadStore> GoalRoundDriver<'a, S> {
         }
 
         if let Err(error) = checkpoint() {
-            self.server.disarm_goal(thread_id)?;
+            // The checkpoint may yield to another Goal transition. Revoke
+            // only the authority token we observed, so a newer explicit
+            // resume cannot be cancelled by this stale worker.
+            let _ = self
+                .server
+                .disarm_goal_if_matches(thread_id, &goal_ref(&before))?;
             return Err(AppServerError::Runtime(format!(
                 "goal durability checkpoint failed: {error}"
             )));
@@ -95,7 +100,9 @@ impl<'a, S: ThreadStore> GoalRoundDriver<'a, S> {
                 Ok(GoalRoundDriveOutcome::Idle)
             }
             Err(error) => {
-                self.server.disarm_goal(thread_id)?;
+                let _ = self
+                    .server
+                    .disarm_goal_if_matches(thread_id, &goal_ref(&after))?;
                 Err(error)
             }
         }
@@ -108,13 +115,14 @@ impl<'a, S: ThreadStore> GoalRoundDriver<'a, S> {
         goal: GoalRef,
     ) -> Result<(), AppServerError> {
         self.finish_turn(thread_id, turn_id, TurnStatus::Cancelled, None)?;
+        let expected = goal.clone();
         match self.server.dispatch(ClientRequest::GoalPause {
             thread_id: thread_id.clone(),
             goal,
         }) {
             Ok(_) => Ok(()),
             Err(error) => {
-                self.server.disarm_goal(thread_id)?;
+                let _ = self.server.disarm_goal_if_matches(thread_id, &expected)?;
                 Err(error)
             }
         }
@@ -134,6 +142,7 @@ impl<'a, S: ThreadStore> GoalRoundDriver<'a, S> {
             TurnStatus::Failed,
             Some("automatic goal round could not start".into()),
         )?;
+        let expected = goal.clone();
         match self.server.dispatch(ClientRequest::GoalBlock {
             thread_id: thread_id.clone(),
             goal,
@@ -144,7 +153,7 @@ impl<'a, S: ThreadStore> GoalRoundDriver<'a, S> {
         }) {
             Ok(_) => Ok(()),
             Err(error) => {
-                self.server.disarm_goal(thread_id)?;
+                let _ = self.server.disarm_goal_if_matches(thread_id, &expected)?;
                 Err(error)
             }
         }
