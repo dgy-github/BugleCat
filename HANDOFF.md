@@ -1,10 +1,10 @@
 # HANDOFF — nanocodex (Rust 线)
 
-## 2026-09-02：Goal/MCP/Provider 与工作区面板可靠性收口（提交前现场状态）
+## 2026-09-02：Goal/MCP/Provider 与工作区面板可靠性收口（最新现场状态）
 
 - Goal App Server 的 durable phase、process-local activation 和
   `GoalRoundStart` 现在共用 transition lock；新增竞争测试证明在锁被持有时
-  `GoalPause` 不会绕过线性化边界。代码已提交到 `154c1e1`，以下状态均以现场
+  `GoalPause` 不会绕过线性化边界。代码修复与文档收口已提交，以下状态均以现场
   Git 和测试结果为准。
 - MCP 工具只在完整 `readOnlyHint=true` + `destructiveHint=false` annotations
   下走只读路径；缺失/部分/冲突值 fail closed，`llmwiki` 写 action 仍受白名单
@@ -24,8 +24,9 @@
   当前 Computer Use 环境只提供浏览器面板，无法抓取原生 Tauri 窗口截图；
   已通过进程/窗口句柄核验实例存在，并在 localhost 预览确认面板可挂载。
 - 已提交并推送：分支 `feat/deepseek-harness-components` 的远端
-  `refs/heads/feat/deepseek-harness-components` 已由 `git ls-remote` 确认为
-  `154c1e1a9d39f4b7353855e45a34b26cd80c3404`；当前工作树 clean。
+  `refs/heads/feat/deepseek-harness-components` 已用 `git ls-remote` 与本地 `HEAD`
+  对比确认一致；当前工作树 clean。最终提交号以交付时的
+  `git rev-parse HEAD` 和远端核对输出为准。
 - 个人知识库索引已按当前源码重新生成（4,870 个符号）；
   `python scripts/generate_project_memory.py --check` 通过。
 
