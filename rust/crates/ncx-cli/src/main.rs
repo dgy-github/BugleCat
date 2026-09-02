@@ -383,18 +383,18 @@ fn dispatch_slash(
 async fn reload_mcp_tools(agent: &mut AgentLoop, current_names: &mut Vec<String>) -> String {
     let servers = load_mcp_servers();
     let server_count = servers.len();
-    let prepared = match prepare_configured_mcp_tools(&servers).await {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            return format!(
-                "MCP reload failed: {error}. Existing {} MCP tool(s) retained.",
-                current_names.len()
-            );
-        }
-    };
+    let prepared = prepare_configured_mcp_tools(&servers).await;
+    report_mcp_server_failures(&prepared.failures);
+    if !servers.is_empty() && prepared.successful_servers == 0 {
+        return format!(
+            "MCP reload failed: all {server_count} configured server(s) failed. Existing {} MCP tool(s) retained.",
+            current_names.len()
+        );
+    }
 
     let old_count = current_names.len();
-    match agent.tools.replace_tools(current_names, prepared) {
+    let skipped_server_count = prepared.failures.len();
+    match agent.tools.replace_tools(current_names, prepared.tools) {
         Ok(new_names) => {
             let new_count = new_names.len();
             *current_names = new_names;
@@ -406,8 +406,13 @@ async fn reload_mcp_tools(agent: &mut AgentLoop, current_names: &mut Vec<String>
                     active_tools: new_count,
                 }),
             );
+            let skipped = if skipped_server_count > 0 {
+                format!("; {skipped_server_count} server(s) skipped")
+            } else {
+                String::new()
+            };
             format!(
-                "MCP reload complete: {server_count} server(s), {new_count} tool(s) active; replaced {old_count}."
+                "MCP reload complete: {server_count} server(s), {new_count} tool(s) active; replaced {old_count}{skipped}."
             )
         }
         Err(error) => {
@@ -416,18 +421,54 @@ async fn reload_mcp_tools(agent: &mut AgentLoop, current_names: &mut Vec<String>
     }
 }
 
-async fn prepare_configured_mcp_tools(
+struct PreparedMcpTools {
+    tools: Vec<Box<dyn Tool>>,
+    successful_servers: usize,
+    failures: Vec<(String, String)>,
+}
+
+async fn prepare_configured_mcp_tools(servers: &[McpServerConfig]) -> PreparedMcpTools {
+    prepare_configured_mcp_tools_with(servers, |server| {
+        let name = server.name.clone();
+        let command = server.command.clone();
+        let args = server.args.clone();
+        let env = server.env.clone();
+        async move { prepare_mcp_server_tools(&name, &command, &args, &env).await }
+    })
+    .await
+}
+
+async fn prepare_configured_mcp_tools_with<F, Fut>(
     servers: &[McpServerConfig],
-) -> Result<Vec<Box<dyn Tool>>, String> {
-    let mut prepared = Vec::new();
+    mut prepare: F,
+) -> PreparedMcpTools
+where
+    F: FnMut(&McpServerConfig) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<Box<dyn Tool>>, String>>,
+{
+    let mut tools = Vec::new();
+    let mut successful_servers = 0;
+    let mut failures = Vec::new();
     for server in servers {
-        let mut tools =
-            prepare_mcp_server_tools(&server.name, &server.command, &server.args, &server.env)
-                .await
-                .map_err(|error| format!("server '{}': {error}", server.name))?;
-        prepared.append(&mut tools);
+        match prepare(server).await {
+            Ok(mut server_tools) => {
+                successful_servers += 1;
+                tools.append(&mut server_tools);
+            }
+            Err(error) => failures.push((server.name.clone(), error)),
+        }
     }
-    Ok(prepared)
+    PreparedMcpTools {
+        tools,
+        successful_servers,
+        failures,
+    }
+}
+
+fn report_mcp_server_failures(failures: &[(String, String)]) {
+    for (name, error) in failures {
+        eprintln!("mcp: skipped server '{name}': {error}");
+    }
 }
 
 use command_support::*;

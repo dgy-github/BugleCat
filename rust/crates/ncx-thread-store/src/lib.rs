@@ -22,6 +22,42 @@ use storage::{
 pub trait ThreadStore: Send + Sync {
     fn create(&self, thread: Thread) -> Result<(), ThreadStoreError>;
     fn create_many(&self, threads: Vec<Thread>) -> Result<(), ThreadStoreError>;
+    /// Persist a newly provisioned Thread and return a compare-and-delete
+    /// receipt in the same store transaction. Runtime hosts use this when a
+    /// durable create is followed by host-side activation.
+    fn create_with_rollback(
+        &self,
+        thread: Thread,
+    ) -> Result<ThreadRollbackSnapshot, ThreadStoreError>;
+    /// Fork and return the exact post-fork state that can be compensated if a
+    /// host runtime rejects activation. `created_at`/`updated_at` are applied
+    /// as part of the operation's durable metadata.
+    fn fork_with_rollback(
+        &self,
+        source: &ThreadId,
+        target: ThreadId,
+        created_at: i64,
+        updated_at: i64,
+    ) -> Result<(Thread, ThreadRollbackSnapshot), ThreadStoreError>;
+    /// Remove the target and all of its side domains only when it still
+    /// exactly matches a snapshot captured immediately after provisioning.
+    ///
+    /// This is intentionally a compare-and-delete operation: it must never
+    /// erase a Thread that has accepted a turn or was changed by another
+    /// caller while a host runtime operation was in flight. `false` means the
+    /// rollback fence did not match and the caller must retain the durable
+    /// state rather than guessing.
+    fn discard_if_unchanged(
+        &self,
+        snapshot: &ThreadRollbackSnapshot,
+    ) -> Result<bool, ThreadStoreError>;
+    /// Record that a host is about to activate an existing durable Thread.
+    ///
+    /// The marker is monotonic and deliberately remains after the host call.
+    /// It lets a provisioning receipt created by another process detect that
+    /// the target was handed to a runtime, even though runtime ownership itself
+    /// is process-local and does not otherwise change durable Thread data.
+    fn mark_runtime_activation(&self, id: &ThreadId) -> Result<(), ThreadStoreError>;
     fn list(&self, include_archived: bool) -> Result<Vec<ThreadMetadata>, ThreadStoreError>;
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError>;
     fn read_model_context(
@@ -92,6 +128,32 @@ struct PersistedState {
     model_contexts: BTreeMap<String, StoredModelContext>,
     #[serde(default)]
     goals: BTreeMap<String, GoalSnapshot>,
+    /// Monotonic per-Thread write epochs used by host-runtime handoff
+    /// receipts. The serialized name is retained for compatibility with
+    /// existing stores, but every successful mutation advances the epoch so a
+    /// compare-and-delete receipt is safe from ABA changes.
+    #[serde(default)]
+    runtime_activation_epochs: BTreeMap<String, u64>,
+}
+
+/// Opaque compare-and-delete receipt for a just-provisioned Thread.
+///
+/// Thread creation and GUI/CLI runtime activation span two different state
+/// owners. Keeping every persistent domain in this receipt lets the store
+/// prove that no later operation touched the target before it compensates a
+/// rejected activation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThreadRollbackSnapshot {
+    thread: Thread,
+    model_context: Option<StoredModelContext>,
+    goal: Option<GoalSnapshot>,
+    runtime_activation_epoch: u64,
+}
+
+impl ThreadRollbackSnapshot {
+    pub fn thread_id(&self) -> &ThreadId {
+        &self.thread.metadata.id
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +225,93 @@ impl JsonThreadStore {
     }
 }
 
+fn snapshot_for_state(
+    persisted: &PersistedState,
+    id: &str,
+) -> Result<ThreadRollbackSnapshot, ThreadStoreError> {
+    let thread = persisted
+        .threads
+        .get(id)
+        .cloned()
+        .ok_or_else(|| ThreadStoreError::NotFound(id.to_string()))?;
+    Ok(ThreadRollbackSnapshot {
+        thread,
+        model_context: persisted.model_contexts.get(id).cloned(),
+        goal: persisted.goals.get(id).cloned(),
+        runtime_activation_epoch: persisted
+            .runtime_activation_epochs
+            .get(id)
+            .copied()
+            .unwrap_or_default(),
+    })
+}
+
+/// Advance the durable version for one Thread after a successful mutation.
+///
+/// The backing field retains its original `runtime_activation_epochs` name so
+/// older processes preserve it when they rewrite the JSON file. Its purpose is
+/// broader than runtime activation: a rollback receipt must reject a target
+/// that was changed and later restored to byte-for-byte identical state.
+fn advance_thread_write_epoch(persisted: &mut PersistedState, id: &str) {
+    let epoch = persisted
+        .runtime_activation_epochs
+        .entry(id.to_string())
+        .or_default();
+    *epoch = epoch.saturating_add(1);
+}
+
+fn fork_into_state(
+    state: &mut StoreState,
+    source: &ThreadId,
+    target: ThreadId,
+    timestamps: Option<(i64, i64)>,
+) -> Result<Thread, ThreadStoreError> {
+    if state.persisted.threads.contains_key(target.as_str()) {
+        return Err(ThreadStoreError::AlreadyExists(target.to_string()));
+    }
+    let mut forked = state
+        .persisted
+        .threads
+        .get(source.as_str())
+        .cloned()
+        .ok_or_else(|| ThreadStoreError::NotFound(source.to_string()))?;
+    forked.metadata.id = target.clone();
+    forked.metadata.archived = false;
+    if let Some((created_at, updated_at)) = timestamps {
+        forked.metadata.created_at = created_at;
+        forked.metadata.updated_at = updated_at;
+    }
+    for turn in &mut forked.turns {
+        if turn.status == TurnStatus::Running {
+            turn.status = TurnStatus::Cancelled;
+            turn.error = Some("forked while source turn was still running".to_string());
+        }
+    }
+    state
+        .persisted
+        .threads
+        .insert(target.as_str().to_string(), forked.clone());
+    if let Some(source_context) = state.persisted.model_contexts.get(source.as_str()).cloned() {
+        state.persisted.model_contexts.insert(
+            target.as_str().to_string(),
+            StoredModelContext {
+                thread_id: target.clone(),
+                ..source_context
+            },
+        );
+    }
+    if let Some(source_goal) = state.persisted.goals.get(source.as_str()).cloned() {
+        state
+            .persisted
+            .goals
+            .insert(target.as_str().to_string(), source_goal);
+    }
+    // Forking writes a new durable target, so its epoch must be initialized
+    // even when the caller does not request a rollback receipt.
+    advance_thread_write_epoch(&mut state.persisted, target.as_str());
+    Ok(forked)
+}
+
 pub fn default_thread_store_path() -> PathBuf {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -178,8 +327,30 @@ impl ThreadStore for JsonThreadStore {
             if state.persisted.threads.contains_key(&id) {
                 return Err(ThreadStoreError::AlreadyExists(id));
             }
-            state.persisted.threads.insert(id, thread);
+            state.persisted.threads.insert(id.clone(), thread);
+            // A newly created Thread starts a fresh durable write history.
+            // Keep that history even when no host handoff receipt is used so
+            // every later compare-and-delete fence has a real version base.
+            advance_thread_write_epoch(&mut state.persisted, &id);
             Ok(())
+        })
+    }
+
+    fn create_with_rollback(
+        &self,
+        thread: Thread,
+    ) -> Result<ThreadRollbackSnapshot, ThreadStoreError> {
+        self.mutate(|state| {
+            let id = thread.metadata.id.as_str().to_string();
+            if state.persisted.threads.contains_key(&id) {
+                return Err(ThreadStoreError::AlreadyExists(id));
+            }
+            state.persisted.threads.insert(id.clone(), thread);
+            // Provisioning establishes the receipt's first write version.
+            // Any later mutation or host activation advances it, preventing a
+            // failed activation from deleting a Thread another caller used.
+            advance_thread_write_epoch(&mut state.persisted, &id);
+            snapshot_for_state(&state.persisted, &id)
         })
     }
 
@@ -193,11 +364,50 @@ impl ThreadStore for JsonThreadStore {
                 }
             }
             for thread in threads {
-                state
-                    .persisted
-                    .threads
-                    .insert(thread.metadata.id.as_str().to_string(), thread);
+                let id = thread.metadata.id.as_str().to_string();
+                state.persisted.threads.insert(id.clone(), thread);
+                advance_thread_write_epoch(&mut state.persisted, &id);
             }
+            Ok(())
+        })
+    }
+
+    fn discard_if_unchanged(
+        &self,
+        snapshot: &ThreadRollbackSnapshot,
+    ) -> Result<bool, ThreadStoreError> {
+        self.mutate(|state| {
+            let id = snapshot.thread_id().as_str();
+            if state.active_turns.contains_key(id)
+                || state.persisted.threads.get(id) != Some(&snapshot.thread)
+                || state.persisted.model_contexts.get(id) != snapshot.model_context.as_ref()
+                || state.persisted.goals.get(id) != snapshot.goal.as_ref()
+                || state
+                    .persisted
+                    .runtime_activation_epochs
+                    .get(id)
+                    .copied()
+                    .unwrap_or_default()
+                    != snapshot.runtime_activation_epoch
+            {
+                return Ok(false);
+            }
+            state.persisted.threads.remove(id);
+            state.persisted.model_contexts.remove(id);
+            state.persisted.goals.remove(id);
+            // Keep the epoch as a tombstone. If an old receipt is retried
+            // after this ID is provisioned again, creation advances this
+            // value and the old receipt cannot delete the new Thread.
+            Ok(true)
+        })
+    }
+
+    fn mark_runtime_activation(&self, id: &ThreadId) -> Result<(), ThreadStoreError> {
+        self.mutate(|state| {
+            if !state.persisted.threads.contains_key(id.as_str()) {
+                return Err(ThreadStoreError::NotFound(id.to_string()));
+            }
+            advance_thread_write_epoch(&mut state.persisted, id.as_str());
             Ok(())
         })
     }
@@ -245,6 +455,7 @@ impl ThreadStore for JsonThreadStore {
                 .persisted
                 .model_contexts
                 .insert(id.as_str().to_string(), context.clone());
+            advance_thread_write_epoch(&mut state.persisted, id.as_str());
             Ok(context)
         })
     }
@@ -280,7 +491,7 @@ impl ThreadStore for JsonThreadStore {
                     }),
                 });
             }
-            match replacement {
+            let result = match replacement {
                 Some(goal) => {
                     state
                         .persisted
@@ -292,19 +503,27 @@ impl ThreadStore for JsonThreadStore {
                     state.persisted.goals.remove(id.as_str());
                     Ok(None)
                 }
-            }
+            };
+            // A successful compare-and-set is a write event even when the
+            // replacement is equal to the current value (or both are absent).
+            // This closes the ABA gap for rollback receipts.
+            advance_thread_write_epoch(&mut state.persisted, id.as_str());
+            result
         })
     }
 
     fn update_metadata(&self, metadata: ThreadMetadata) -> Result<(), ThreadStoreError> {
         self.mutate(|state| {
-            let id = metadata.id.as_str();
-            let thread = state
-                .persisted
-                .threads
-                .get_mut(id)
-                .ok_or_else(|| ThreadStoreError::NotFound(id.to_string()))?;
-            thread.metadata = metadata;
+            let id = metadata.id.as_str().to_string();
+            {
+                let thread = state
+                    .persisted
+                    .threads
+                    .get_mut(&id)
+                    .ok_or_else(|| ThreadStoreError::NotFound(id.to_string()))?;
+                thread.metadata = metadata;
+            }
+            advance_thread_write_epoch(&mut state.persisted, &id);
             Ok(())
         })
     }
@@ -336,7 +555,9 @@ impl ThreadStore for JsonThreadStore {
             }
             thread.metadata.harness_profile = harness_profile;
             thread.metadata.updated_at = updated_at;
-            Ok(Some(thread.metadata.clone()))
+            let metadata = thread.metadata.clone();
+            advance_thread_write_epoch(&mut state.persisted, key);
+            Ok(Some(metadata))
         })
     }
 
@@ -409,57 +630,41 @@ impl ThreadStore for JsonThreadStore {
                 .persisted
                 .goals
                 .insert(thread.as_str().to_string(), goal.clone());
+            advance_thread_write_epoch(&mut state.persisted, thread.as_str());
             Ok(goal)
         })
     }
 
     fn fork(&self, source: &ThreadId, target: ThreadId) -> Result<Thread, ThreadStoreError> {
+        self.mutate(|state| fork_into_state(state, source, target, None))
+    }
+
+    fn fork_with_rollback(
+        &self,
+        source: &ThreadId,
+        target: ThreadId,
+        created_at: i64,
+        updated_at: i64,
+    ) -> Result<(Thread, ThreadRollbackSnapshot), ThreadStoreError> {
         self.mutate(|state| {
-            if state.persisted.threads.contains_key(target.as_str()) {
-                return Err(ThreadStoreError::AlreadyExists(target.to_string()));
-            }
-            let mut forked = state
-                .persisted
-                .threads
-                .get(source.as_str())
-                .cloned()
-                .ok_or_else(|| ThreadStoreError::NotFound(source.to_string()))?;
-            forked.metadata.id = target.clone();
-            forked.metadata.archived = false;
-            for turn in &mut forked.turns {
-                if turn.status == TurnStatus::Running {
-                    turn.status = TurnStatus::Cancelled;
-                    turn.error = Some("forked while source turn was still running".to_string());
-                }
-            }
-            state
-                .persisted
-                .threads
-                .insert(target.as_str().to_string(), forked.clone());
-            if let Some(source_context) =
-                state.persisted.model_contexts.get(source.as_str()).cloned()
-            {
-                state.persisted.model_contexts.insert(
-                    target.as_str().to_string(),
-                    StoredModelContext {
-                        thread_id: target.clone(),
-                        ..source_context
-                    },
-                );
-            }
-            if let Some(source_goal) = state.persisted.goals.get(source.as_str()).cloned() {
-                state
-                    .persisted
-                    .goals
-                    .insert(target.as_str().to_string(), source_goal);
-            }
-            Ok(forked)
+            let forked = fork_into_state(
+                state,
+                source,
+                target.clone(),
+                Some((created_at, updated_at)),
+            )?;
+            let receipt = snapshot_for_state(&state.persisted, target.as_str())?;
+            Ok((forked, receipt))
         })
     }
 
     fn claim_turn(&self, thread: &ThreadId, turn: Turn) -> Result<(), ThreadStoreError> {
         let store_path = self.path.clone();
-        self.mutate(|state| claim_turn_in_state(state, &store_path, thread, turn))
+        self.mutate(|state| {
+            claim_turn_in_state(state, &store_path, thread, turn)?;
+            advance_thread_write_epoch(&mut state.persisted, thread.as_str());
+            Ok(())
+        })
     }
 
     fn append_item(
@@ -487,6 +692,7 @@ impl ThreadStore for JsonThreadStore {
                 .expect("owned turn must belong to a stored thread")
                 .metadata
                 .updated_at = updated_at;
+            advance_thread_write_epoch(&mut state.persisted, thread.as_str());
             Ok(())
         })
     }
@@ -515,6 +721,7 @@ impl ThreadStore for JsonThreadStore {
                 .metadata
                 .updated_at = completed_at;
             state.active_turns.remove(thread.as_str());
+            advance_thread_write_epoch(&mut state.persisted, thread.as_str());
             Ok(())
         })
     }

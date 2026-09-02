@@ -102,9 +102,9 @@ tool.
 
 - The CLI builds to a native `ncx.exe`, so users do not need Python, virtual
   environments, or editable installs.
-- Release builds use strip, LTO, size optimization, and a Windows GNU target;
-  the current CLI zip is under 2 MB while still including README, license, and
-  config example files.
+- CLI release builds use strip, LTO, size optimization, and the Windows MSVC target
+  used by the desktop installer;
+  the CLI package includes README, license, and config example files.
 - Startup avoids Python interpreter/import overhead and is suitable for short
   one-shot commands as well as interactive REPL use.
 - Typed ownership makes parallel worker isolation and result promotion easier
@@ -207,7 +207,8 @@ only adding more features:
 - **Sandbox & approval state machine** — three sandbox modes and four approval
   policies gate every file/shell/network action.
 - **MCP integration + marketplace** — load servers from `mcp.toml`, or install
-  from a built-in / remote catalog; tools surface as `mcp__<server>__<tool>`.
+  from a built-in / remote catalog; tools retain the names supplied by their
+  servers, and duplicate names are rejected.
   `/mcp reload` prepares and atomically swaps the active external tool set in
   the same process.
 - **Plugin ecosystem** — install Codex-compatible resource plugins that bundle
@@ -284,7 +285,7 @@ sending the entire catalog on every model call.
 | `session_search`, `session_trace`, `session_event_read/search/trace` | Query saved session snapshots and redacted events. |
 | `skill` | Load a discovered skill body on demand. |
 | `remember` | Append a durable note to user memory. |
-| `mcp__<server>__<tool>` | Any tool exposed by a connected MCP server. |
+| `<tool>` (MCP) | A tool exposed by a connected MCP server, using its server-supplied name. |
 
 ## Install
 
@@ -292,8 +293,8 @@ Current Rust release line:
 
 ```powershell
 cd path\to\BugleCat
-rustup toolchain install stable-x86_64-pc-windows-gnu
-cargo +stable-x86_64-pc-windows-gnu build --manifest-path rust\Cargo.toml -p ncx-cli --release
+rustup toolchain install stable-x86_64-pc-windows-msvc
+cargo +stable-x86_64-pc-windows-msvc build --manifest-path rust\Cargo.toml -p ncx-cli --release
 
 cd rust\gui
 npm ci
@@ -324,7 +325,7 @@ cargo run -p ncx-cli -- --memory-merge
 # Tauri desktop app
 cd gui
 npm ci
-npm run tauri -- dev
+npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 ```
 
 Inside the Rust REPL, `/config` shows the resolved config file path, current
@@ -518,10 +519,12 @@ The Rust `ncx` REPL can apply MCP config changes without restarting:
 ```
 
 Reload prepares every configured server before replacing the active MCP tool
-set. A connection error or tool-name conflict leaves the previous set active;
-an empty config removes all active MCP tools.
+set. A failed server is skipped while the successfully prepared servers replace
+the set; if every configured server fails, or a tool-name conflict is found,
+the previous set stays active. An empty config removes all active MCP tools.
 
-Each server's tools surface to the model as `mcp__<server>__<tool>`. A
+Each server's tools retain the name supplied by that server. Tool-name conflicts
+are rejected during the atomic reload, so choose distinct MCP tool names. A
 **marketplace** adds one-click install from a built-in curated catalog or a
 remote catalog (`NANOCODEX_MARKETPLACE_URL`); every entry funnels through the
 same name-validation and dup-check as a hand-added server, and remote catalogs
@@ -790,14 +793,16 @@ The regression suite also protects the following boundaries:
 - Read-only LLM Wiki memory actions remain available under
   `approval_policy=never`, while side-effecting MCP calls must return the
   explicit approval denial instead of being masked by compaction recovery.
-- A malformed MCP command or argument only skips that server. Other valid
-  servers remain discoverable. Only explicit `./` and `../` paths resolve from
-  the plugin root; bare arguments retain normal process CWD/PATH semantics.
+- A malformed MCP resource, command, argument, or unavailable server only skips
+  that plugin/server. Other valid servers still load. Explicit `./` paths resolve
+  from the plugin root; escaping `../` paths are rejected, while bare arguments
+  retain normal process CWD/PATH semantics.
 - Windows hook tests use a 20-second test timeout to avoid cold-start flakes,
   and read-only concurrency is asserted with an in-flight peak rather than a
   fixed wall-clock threshold.
-- Test temporary directories include the process ID so IDE and CLI runs do not
-  clean up each other's fixtures.
+- Test temporary directories use a unique session ID (time, process ID, and a
+  monotonic sequence), so concurrent IDE and CLI runs cannot clean up each
+  other's fixtures.
 - The Workspace Changes panel has one scroll owner and non-shrinking file rows,
   so large diffs do not overlap or clip their filenames. Switching workspaces
   clears pending panel/sidebar projections, including the Forge observer (the
@@ -805,6 +810,15 @@ The regression suite also protects the following boundaries:
   automatically, including after initial startup); an in-flight memory merge is
   cancelled only before a real
   process-directory change and cannot commit its old draft afterward.
+- A per-file Workspace Changes preview is capped at 1,000 lines or 192 KiB and
+  says when it is truncated. Only one preview stays open at a time, preventing
+  a generated or minified file from creating an unbounded WebView DOM tree.
+- Bursty session events share one in-flight sidebar refresh and coalesce into a
+  trailing refresh, rather than repeatedly reading every persisted thread.
+- A create or fork that the host runtime rejects is compensated with an exact
+  durable snapshot check. The rollback removes the new Thread and any copied
+  model context/Goal only if nothing changed it, so retries can reuse the ID
+  without deleting a Thread that has since become active.
 - Rapid Harness Profile choices on an empty thread are serialized. The last
   choice is the one persisted and activated before its first turn; profiles
   remain locked once a turn exists. The durable write and first-turn claim are
@@ -824,9 +838,14 @@ Before submitting, run:
 
 ```powershell
 cargo fmt --manifest-path rust\Cargo.toml --all -- --check
-cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets -- -D warnings
-cargo test --manifest-path rust\Cargo.toml --workspace
+cargo fmt --manifest-path rust\gui\src-tauri\Cargo.toml --all -- --check
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
+cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
+npm.cmd --prefix rust\gui run build
 python -m pytest -q
+python -m ruff check .
 ```
 
 Run the local Tauri development app with:
@@ -834,7 +853,7 @@ Run the local Tauri development app with:
 ```powershell
 cd rust\gui
 npm.cmd ci
-npm.cmd run tauri dev -- --target x86_64-pc-windows-msvc
+npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 ```
 
 The frontend listens on `http://localhost:5179/`. If that port is already
@@ -849,18 +868,18 @@ Recommended Windows release entry point:
 .\scripts\build-rust-release.ps1
 ```
 
-The script runs the Rust workspace tests, builds the Windows GNU release binary,
-creates `releases\nanocodex-<version>-x86_64-pc-windows-gnu.zip`, builds the
+The script runs the Rust workspace tests, builds the Windows MSVC release binary,
+creates `releases\nanocodex-<version>-x86_64-pc-windows-msvc.zip`, builds the
 Tauri NSIS installer, then writes `releases\SHA256SUMS.txt` and
 `releases\release-manifest.json`. Use `-SkipTauri` for a CLI-only package or
 `-SkipTests` only after the same target has already passed in CI/local release
 validation.
 
-Manual Windows GNU CLI release:
+Manual Windows MSVC CLI release:
 
 ```powershell
 cd rust
-cargo build --release --workspace --target x86_64-pc-windows-gnu
+cargo build --release --workspace --target x86_64-pc-windows-msvc
 ```
 
 Manual Tauri desktop installer:
@@ -873,12 +892,13 @@ npm.cmd run tauri:installer
 
 The desktop build now targets the Windows NSIS installer explicitly. The
 installer is emitted under
-`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\bundle\nsis\`.
+`rust\gui\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\`.
 The GUI Settings dialog also exposes the resolved `~/.nanocodex/config.toml`
 path and buttons to open the config file or its directory.
 
 The Tauri crate deliberately keeps `crate-type = ["lib"]`; changing it to
-`cdylib` or `staticlib` overflows the Windows GNU linker's export table.
+`cdylib` or `staticlib` previously overflowed the Windows GNU linker's export
+table, so validate the release target before changing it.
 
 ## Security Notes
 

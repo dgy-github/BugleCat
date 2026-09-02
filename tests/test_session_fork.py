@@ -8,8 +8,6 @@ pure over data (no GUI), mirroring test_skills.py / test_mcp_store.py.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from nanocodex.agent.session import Session
 
 

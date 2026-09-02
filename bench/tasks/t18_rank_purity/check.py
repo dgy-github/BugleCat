@@ -1,4 +1,6 @@
-import importlib.util, sys, os, copy
+import copy
+import importlib.util
+import os
 
 path = os.path.join(os.getcwd(), "solution.py")
 assert os.path.exists(path), "solution.py not found"

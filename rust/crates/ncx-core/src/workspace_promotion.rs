@@ -118,7 +118,7 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("ncx_promotion_{name}_{}", std::process::id()))
+        crate::test_support::unique_temp_dir(&format!("ncx_promotion_{name}"))
     }
 
     fn setup(name: &str) -> (PathBuf, PathBuf, WorkspaceSnapshot) {

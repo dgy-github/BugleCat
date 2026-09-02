@@ -28,13 +28,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
+import genome  # noqa: E402
 from process_control import run_owned  # noqa: E402
-import genome as G  # noqa: E402
 
 SCHEMA = "ncx-forge-trajectory/v1"
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -67,12 +66,12 @@ def _resolve_system_prompt(genome_path: str | None) -> str:
     study); project-instruction/memory/skill suffixes are run-context, not data."""
     base = ""
     try:
-        base = G.extract_current().system_prompt
+        base = genome.extract_current().system_prompt
     except Exception:  # noqa: BLE001
         pass
     if genome_path:
         try:
-            g = G.Genome.load(Path(genome_path))
+            g = genome.Genome.load(Path(genome_path))
             if g.system_prompt.strip():
                 base = g.system_prompt
         except Exception:  # noqa: BLE001

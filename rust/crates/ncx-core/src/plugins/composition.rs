@@ -224,14 +224,8 @@ fn apply_overlay(entries: &mut [PluginEntry], overlay: OverlaySpec) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     fn fixture() -> PathBuf {
-        let id = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("ncx-harness-composition-{id}"));
+        let root = crate::test_support::unique_temp_dir("ncx-harness-composition");
         fs::create_dir_all(root.join("profiles")).unwrap();
         fs::create_dir_all(root.join("bundles")).unwrap();
         fs::write(

@@ -107,8 +107,7 @@ mod tests {
 
     #[test]
     fn dynamic_read_only_calls_form_parallel_batches_but_writes_do_not() {
-        let workspace =
-            std::env::temp_dir().join(format!("ncx_dynamic_read_dispatch_{}", std::process::id()));
+        let workspace = crate::test_support::unique_temp_dir("ncx_dynamic_read_dispatch");
         std::fs::create_dir_all(&workspace).unwrap();
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
         let mut tools = ToolRegistry::empty(ToolContext::new(workspace, policy));

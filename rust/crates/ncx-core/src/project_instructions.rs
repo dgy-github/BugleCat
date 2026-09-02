@@ -122,8 +122,7 @@ mod tests {
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
-        let d =
-            std::env::temp_dir().join(format!("ncx_instructions_{name}_{}", std::process::id()));
+        let d = crate::test_support::unique_temp_dir(&format!("ncx_instructions_{name}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

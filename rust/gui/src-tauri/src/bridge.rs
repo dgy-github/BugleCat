@@ -18,13 +18,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{mpsc::Sender as SyncSender, Arc, Mutex};
 
 use async_trait::async_trait;
 use ncx_app_server::AppServer;
 use ncx_config::{
-    load_config, permission_mode_to_knobs, write_nanocodex_config, Config, ConfigPaths, Overrides,
+    load_config, permission_mode_to_knobs, write_nanocodex_config, Config, ConfigPaths,
+    McpServerConfig, Overrides,
 };
 #[cfg(test)]
 use ncx_core::ToolContext;
@@ -101,6 +102,222 @@ pub struct DeferredPrompt {
     pub execution_mode: ExecutionMode,
 }
 pub type DeferredPrompts = Arc<Mutex<HashMap<String, DeferredPrompt>>>;
+
+/// A single-winner handoff between a synchronous Tauri request and the serial
+/// GUI worker. If the caller times out, it atomically aborts a still-pending
+/// command; a worker that finishes building afterward must not install the
+/// stale session. Conversely, once the worker accepts, a racing timeout treats
+/// the operation as successful so the App Server never compensates durable
+/// state that the runtime already owns.
+pub struct RuntimeActivationFence {
+    state: AtomicU8,
+}
+
+impl RuntimeActivationFence {
+    const PENDING: u8 = 0;
+    const ACCEPTED: u8 = 1;
+    const ABORTED: u8 = 2;
+
+    pub fn new() -> Self {
+        Self {
+            state: AtomicU8::new(Self::PENDING),
+        }
+    }
+
+    pub fn accept(&self) -> bool {
+        self.state
+            .compare_exchange(
+                Self::PENDING,
+                Self::ACCEPTED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    pub fn abort(&self) -> bool {
+        self.state
+            .compare_exchange(
+                Self::PENDING,
+                Self::ABORTED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    pub fn is_accepted(&self) -> bool {
+        self.state.load(Ordering::Acquire) == Self::ACCEPTED
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        self.state.load(Ordering::Acquire) == Self::ABORTED
+    }
+}
+
+pub type RuntimeActivation = Arc<RuntimeActivationFence>;
+
+/// Process-local coordinator for all commands that can replace the single
+/// live GUI runtime.  A fence by itself only solves a timeout race for one
+/// request; the coordinator additionally makes a newer New/Resume/Fork or
+/// permission rebuild invalidate an older request that is still queued or
+/// building.  The mutex is held only around the tiny generation/state
+/// transition (or a synchronous commit closure), never across `await`.
+#[derive(Default)]
+pub struct RuntimeActivationCoordinator {
+    state: Mutex<RuntimeActivationCoordinatorState>,
+}
+
+#[derive(Default)]
+struct RuntimeActivationCoordinatorState {
+    generation: u64,
+    active: Option<(u64, RuntimeActivation)>,
+}
+
+impl RuntimeActivationCoordinator {
+    /// Start the newest activation and invalidate an older pending handoff.
+    pub fn begin(&self) -> RuntimeActivation {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, previous)) = state.active.take() {
+            // An already accepted handoff owns the runtime and must not be
+            // turned into a timeout failure. `abort` is therefore deliberately
+            // a no-op for ACCEPTED; pending work is the only state invalidated.
+            previous.abort();
+        }
+        state.generation = state.generation.saturating_add(1).max(1);
+        let activation = Arc::new(RuntimeActivationFence::new());
+        state.active = Some((state.generation, activation.clone()));
+        activation
+    }
+
+    fn is_active_locked(
+        state: &RuntimeActivationCoordinatorState,
+        activation: &RuntimeActivation,
+    ) -> bool {
+        state
+            .active
+            .as_ref()
+            .map(|(generation, current)| {
+                *generation == state.generation && Arc::ptr_eq(current, activation)
+            })
+            .unwrap_or(false)
+    }
+
+    /// Return true while this activation is still the newest non-aborted one.
+    pub fn is_current(&self, activation: &RuntimeActivation) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::is_active_locked(&state, activation) && !activation.is_aborted()
+    }
+
+    /// Atomically accept the handoff if it is still current.  This must happen
+    /// immediately before replacing the worker's global agent/workspace state.
+    #[allow(dead_code)]
+    pub fn accept_if_current(&self, activation: &RuntimeActivation) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if Self::is_active_locked(&state, activation)
+            && (activation.is_accepted() || activation.accept())
+        {
+            return true;
+        }
+        // Keep the per-request fence terminal so a caller that is still
+        // waiting cannot later mistake this stale command for success.
+        activation.abort();
+        false
+    }
+
+    /// Accept and apply a synchronous runtime replacement as one linearizable
+    /// operation. A caller uses this after an asynchronous build and puts
+    /// every process-global assignment in `operation`; a newer `begin()` then
+    /// cannot slip between acceptance and those assignments.
+    pub fn commit_if_current<T>(
+        &self,
+        activation: &RuntimeActivation,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !Self::is_active_locked(&state, activation)
+            || activation.is_aborted()
+            || (!activation.is_accepted() && !activation.accept())
+        {
+            activation.abort();
+            return None;
+        }
+        Some(operation())
+    }
+
+    /// Abort only this activation's pending state.  A timeout for an older
+    /// request must never cancel the newer active token.
+    pub fn abort_if_pending(&self, activation: &RuntimeActivation) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if Self::is_active_locked(&state, activation) {
+            return activation.abort();
+        }
+        false
+    }
+
+    /// Check that an activation remains the newest non-aborted runtime command.
+    /// Every side effect after an await must make this check again instead of
+    /// assuming that an earlier acceptance still wins after a newer request.
+    pub fn can_proceed(&self, activation: &RuntimeActivation) -> bool {
+        self.is_current(activation)
+    }
+
+    /// Run one synchronous side effect only while this activation is current.
+    /// This closes the check-then-write gap for config persistence without
+    /// holding the coordinator lock over asynchronous agent construction.
+    pub fn run_if_current<T>(
+        &self,
+        activation: &RuntimeActivation,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !Self::is_active_locked(&_state, activation)
+            || activation.is_aborted()
+            || activation.is_accepted()
+        {
+            return None;
+        }
+        Some(operation())
+    }
+
+    /// Run a compensating side effect only after this activation has lost the
+    /// handoff, while it is still the newest token. Holding the coordinator
+    /// lock across the short operation prevents a racing `begin()` or worker
+    /// commit from making an old compensation overwrite a newer runtime.
+    pub fn run_if_current_and_aborted<T>(
+        &self,
+        activation: &RuntimeActivation,
+        operation: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !Self::is_active_locked(&_state, activation) || !activation.is_aborted() {
+            return None;
+        }
+        Some(operation())
+    }
+}
+
 pub struct WorkerLifecycle {
     shutting_down: AtomicBool,
     handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
@@ -257,6 +474,7 @@ pub enum Command {
         id: String,
         workspace: PathBuf,
         harness_profile: String,
+        activation: RuntimeActivation,
         completion: SyncSender<Result<(), String>>,
     },
     /// Continue a saved session: reseed the agent from its snapshot, keeping the
@@ -264,6 +482,7 @@ pub enum Command {
     Resume {
         id: String,
         workspace: PathBuf,
+        activation: RuntimeActivation,
         completion: SyncSender<Result<(), String>>,
     },
     /// Branch a saved session: reseed a NEW session from the snapshot, leaving
@@ -272,6 +491,7 @@ pub enum Command {
         source_id: String,
         target_id: String,
         workspace: PathBuf,
+        activation: RuntimeActivation,
         completion: SyncSender<Result<(), String>>,
     },
     /// Change the approval policy live (no session reset) + persist it.
@@ -293,6 +513,7 @@ pub enum Command {
         /// navigation command may be ahead of this queued rebuild.
         thread_id: String,
         mode: String,
+        activation: RuntimeActivation,
         /// The protocol request does not complete until the worker has either
         /// rebuilt this exact Thread or rejected it as stale.
         completion: SyncSender<Result<(), String>>,
@@ -1128,11 +1349,12 @@ async fn build_agent(
     if !mcp_servers.is_empty() {
         let mut prepared = Vec::new();
         for server in &mcp_servers {
-            let mut server_tools =
+            append_prepared_mcp_tools(
+                server,
                 prepare_mcp_server_tools(&server.name, &server.command, &server.args, &server.env)
-                    .await
-                    .map_err(|error| format!("Codex MCP server '{}': {error}", server.name))?;
-            prepared.append(&mut server_tools);
+                    .await,
+                &mut prepared,
+            );
         }
         let active_tools = prepared.len();
         tools.replace_tools(&[], prepared)?;
@@ -1148,7 +1370,7 @@ async fn build_agent(
     let system_prompt = tools
         .service::<ContextServiceDescriptor>("context")
         .ok_or_else(|| "Harness Context 服务未启用".to_string())?
-        .assemble(&runtime_system_prompt(
+        .assemble(runtime_system_prompt(
             &cfg.active_provider_id,
             &cfg.provider_protocol,
             &cfg.model,
@@ -1165,6 +1387,17 @@ async fn build_agent(
         .clone()
         .apply(AgentLoop::from_runtime_services(tools, session)?);
     Ok((agent, cfg.workspace.clone(), session_id, log_path))
+}
+
+fn append_prepared_mcp_tools(
+    server: &McpServerConfig,
+    result: Result<Vec<Box<dyn ncx_core::Tool>>, String>,
+    prepared: &mut Vec<Box<dyn ncx_core::Tool>>,
+) {
+    match result {
+        Ok(mut server_tools) => prepared.append(&mut server_tools),
+        Err(error) => eprintln!("跳过无法启动的 Codex MCP server '{}': {error}", server.name),
+    }
 }
 
 fn runtime_system_prompt(provider_id: &str, protocol: &str, model: &str) -> String {
@@ -1448,16 +1681,16 @@ fn spawn_turn_worker(
 
     let turn_id =
         TurnId::new(format!("turn-{}", new_session_id())).expect("generated turn id is non-empty");
-    let protocol_turn = match ProtocolTurnGuard::start(
-        Some(app.clone()),
-        app_server.clone(),
-        &session_id,
-        &workspace,
-        turn_id.clone(),
-        &text,
+    let protocol_turn = match ProtocolTurnGuard::start(ProtocolTurnStart {
+        app: Some(app.clone()),
+        server: app_server.clone(),
+        session_id: &session_id,
+        workspace: &workspace,
+        turn_id: turn_id.clone(),
+        user_text: &text,
         execution_mode,
-        &harness_profile,
-    ) {
+        harness_profile: &harness_profile,
+    }) {
         Ok(turn) => turn,
         Err(message) => {
             if let Ok(mut sessions) = running.lock() {
@@ -1810,16 +2043,16 @@ fn spawn_goal_worker(
                     active_session,
                     pending: questions,
                 });
-                goal_turn::run(
-                    app.clone(),
-                    app_server.clone(),
-                    session_grants.clone(),
-                    session_id.clone(),
-                    workspace.clone(),
+                goal_turn::run(goal_turn::GoalTurnInput {
+                    app: app.clone(),
+                    app_server: app_server.clone(),
+                    session_grants: session_grants.clone(),
+                    session_id: session_id.clone(),
+                    workspace: workspace.clone(),
                     cancel,
                     approver,
                     questioner,
-                )
+                })
                 .await;
             });
             finish();
@@ -1896,17 +2129,29 @@ struct ProtocolTurnGuard {
     finished: bool,
 }
 
+struct ProtocolTurnStart<'a> {
+    app: Option<AppHandle>,
+    server: Arc<AppServer<JsonThreadStore>>,
+    session_id: &'a str,
+    workspace: &'a Path,
+    turn_id: TurnId,
+    user_text: &'a str,
+    execution_mode: ExecutionMode,
+    harness_profile: &'a str,
+}
+
 impl ProtocolTurnGuard {
-    fn start(
-        app: Option<AppHandle>,
-        server: Arc<AppServer<JsonThreadStore>>,
-        session_id: &str,
-        workspace: &Path,
-        turn_id: TurnId,
-        user_text: &str,
-        execution_mode: ExecutionMode,
-        harness_profile: &str,
-    ) -> Result<Self, String> {
+    fn start(input: ProtocolTurnStart<'_>) -> Result<Self, String> {
+        let ProtocolTurnStart {
+            app,
+            server,
+            session_id,
+            workspace,
+            turn_id,
+            user_text,
+            execution_mode,
+            harness_profile,
+        } = input;
         let thread_id = ThreadId::new(session_id.to_string()).map_err(|error| error.to_string())?;
         if server
             .dispatch(ClientRequest::ThreadRead {
@@ -2035,19 +2280,36 @@ fn goal_is_armed(app_server: &AppServer<JsonThreadStore>, session_id: &str) -> b
 /// Spawn the lightweight navigation/config coordinator. It drains commands in
 /// order, but each prompt is handed to its own session-scoped turn thread so
 /// different conversations can continue concurrently.
-pub fn spawn_worker(
-    app: AppHandle,
-    app_server: Arc<AppServer<JsonThreadStore>>,
-    mut rx: UnboundedReceiver<Command>,
-    pending: PendingMap,
-    questions: PendingQuestionMap,
-    cancels: CancelRegistry,
-    running: RunningSessions,
-    deferred_prompts: DeferredPrompts,
-    lifecycle: Arc<WorkerLifecycle>,
-    session_grants: GrantRegistry,
-    startup_workspace: PathBuf,
-) {
+pub struct WorkerStartup {
+    pub app: AppHandle,
+    pub app_server: Arc<AppServer<JsonThreadStore>>,
+    pub rx: UnboundedReceiver<Command>,
+    pub pending: PendingMap,
+    pub questions: PendingQuestionMap,
+    pub cancels: CancelRegistry,
+    pub running: RunningSessions,
+    pub deferred_prompts: DeferredPrompts,
+    pub lifecycle: Arc<WorkerLifecycle>,
+    pub session_grants: GrantRegistry,
+    pub runtime_activation: Arc<RuntimeActivationCoordinator>,
+    pub startup_workspace: PathBuf,
+}
+
+pub fn spawn_worker(startup: WorkerStartup) {
+    let WorkerStartup {
+        app,
+        app_server,
+        mut rx,
+        pending,
+        questions,
+        cancels,
+        running,
+        deferred_prompts,
+        lifecycle,
+        session_grants,
+        runtime_activation,
+        startup_workspace,
+    } = startup;
     let coordinator_lifecycle = lifecycle.clone();
     let spawned = std::thread::Builder::new()
         .name("ncx-agent".into())
@@ -2158,14 +2420,24 @@ pub fn spawn_worker(
                             id,
                             workspace: command_workspace,
                             harness_profile,
+                            activation,
                             completion,
                         } => {
-                            grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            // The Tauri caller may have timed out while this
+                            // command waited behind another navigation. Do not
+                            // create an expensive stale runtime in that case.
+                            if !runtime_activation.can_proceed(&activation) {
+                                let _ = completion.send(Err(
+                                    "新建会话初始化已被更新的运行态切换取消".to_string(),
+                                ));
+                                continue;
+                            }
+                            let next_grants = Rc::new(RefCell::new(SessionGrants::default()));
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
                                 Some((id, Vec::new())),
-                                grants.clone(),
+                                next_grants.clone(),
                                 command_workspace,
                                 Some(harness_profile),
                                 app_server.clone(),
@@ -2173,10 +2445,26 @@ pub fn spawn_worker(
                             .await
                             {
                                 Ok((a, ws, sid, _)) => {
-                                    agent = a;
-                                    workspace = ws;
-                                    session_id = sid;
-                                    set_active_session(&active_session, &session_id);
+                                    // The successful builder must win this
+                                    // fence before touching live state. If the
+                                    // caller won with abort(), its App Server
+                                    // transaction has already compensated the
+                                    // durable Thread.
+                                    if runtime_activation
+                                        .commit_if_current(&activation, || {
+                                            grants = next_grants;
+                                            agent = a;
+                                            workspace = ws;
+                                            session_id = sid;
+                                            set_active_session(&active_session, &session_id);
+                                        })
+                                        .is_none()
+                                    {
+                                        let _ = completion
+                                            .send(Err("新建会话初始化已被更新的运行态切换取消"
+                                                .to_string()));
+                                        continue;
+                                    }
                                     agent.set_event_sink(make_sink(
                                         app.clone(),
                                         session_id.clone(),
@@ -2194,48 +2482,76 @@ pub fn spawn_worker(
                                     let _ = completion.send(Ok(()));
                                 }
                                 Err(e) => {
+                                    // Suppress a late build failure after the
+                                    // request has already timed out and the UI
+                                    // returned to its previous session.
+                                    let report_error =
+                                        runtime_activation.abort_if_pending(&activation);
                                     let _ = completion.send(Err(e.clone()));
-                                    emit(
-                                        &app,
-                                        UiEvent::Error {
-                                            session_id: String::new(),
-                                            message: e,
-                                        },
-                                    )
+                                    if report_error {
+                                        emit(
+                                            &app,
+                                            UiEvent::Error {
+                                                session_id: String::new(),
+                                                message: e,
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
                         Command::Resume {
                             id,
                             workspace: command_workspace,
+                            activation,
                             completion,
                         } => {
+                            if !runtime_activation.can_proceed(&activation) {
+                                let _ = completion
+                                    .send(Err("恢复会话已被更新的运行态切换取消".to_string()));
+                                continue;
+                            }
                             let loaded = protocol_thread_seed(&app_server, &id);
                             let Some((msgs, _)) = loaded else {
                                 let message = format!("no saved snapshot for session {id}");
+                                let report_error = runtime_activation.abort_if_pending(&activation);
                                 let _ = completion.send(Err(message.clone()));
-                                emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: id.clone(),
-                                        message,
-                                    },
-                                );
+                                if report_error {
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: id.clone(),
+                                            message,
+                                        },
+                                    );
+                                }
                                 continue;
                             };
                             let ui = protocol_thread_ui(&app_server, &id)
                                 .unwrap_or_else(|| snapshot_to_ui(&msgs));
-                            // The runtime adapter already transitioned the process CWD
-                            // under its workspace gate. Keep the worker independent from
-                            // that global state: the durable Thread metadata is the sole
-                            // authority for this session's runtime workspace.
-                            workspace = command_workspace;
-                            grants = Rc::new(RefCell::new(SessionGrants::default()));
-                            if let Ok(mut registry) = session_grants.lock() {
-                                registry.remove(&id);
+                            // The seed/UI reads above may race a newer
+                            // navigation. Accept and replace every global
+                            // runtime field as one linearizable handoff.
+                            if runtime_activation
+                                .commit_if_current(&activation, || {
+                                    // The runtime adapter already transitioned the process CWD
+                                    // under its workspace gate. Keep the worker independent from
+                                    // that global state: the durable Thread metadata is the sole
+                                    // authority for this session's runtime workspace.
+                                    workspace = command_workspace;
+                                    grants = Rc::new(RefCell::new(SessionGrants::default()));
+                                    if let Ok(mut registry) = session_grants.lock() {
+                                        registry.remove(&id);
+                                    }
+                                    session_id = id;
+                                    set_active_session(&active_session, &session_id);
+                                })
+                                .is_none()
+                            {
+                                let _ = completion
+                                    .send(Err("恢复会话已被更新的运行态切换取消".to_string()));
+                                continue;
                             }
-                            session_id = id;
-                            set_active_session(&active_session, &session_id);
                             // A resumed thread is a state/navigation operation. Building
                             // tools, plugins and the current Provider Route belongs to the
                             // per-turn worker below; awaiting it here blocks the command
@@ -2254,30 +2570,46 @@ pub fn spawn_worker(
                             source_id,
                             target_id,
                             workspace: command_workspace,
+                            activation,
                             completion,
                         } => {
-                            let loaded = protocol_thread_seed(&app_server, &source_id);
+                            if !runtime_activation.can_proceed(&activation) {
+                                let _ = completion.send(Err(
+                                    "分叉会话初始化已被更新的运行态切换取消".to_string(),
+                                ));
+                                continue;
+                            }
+                            // App Server already copied the source snapshot
+                            // into `target_id` transactionally. Reading the
+                            // source here would let later source turns leak
+                            // into this fork while it waits in the worker queue.
+                            let loaded = protocol_thread_seed(&app_server, &target_id);
                             let Some((msgs, _)) = loaded else {
-                                let message = format!("no saved snapshot for session {source_id}");
-                                let _ = completion.send(Err(message.clone()));
-                                emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: source_id.clone(),
-                                        message,
-                                    },
+                                let message = format!(
+                                    "no saved snapshot for fork target {target_id} (source {source_id})"
                                 );
+                                let report_error = runtime_activation.abort_if_pending(&activation);
+                                let _ = completion.send(Err(message.clone()));
+                                if report_error {
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: target_id.clone(),
+                                            message,
+                                        },
+                                    );
+                                }
                                 continue;
                             };
-                            let ui = protocol_thread_ui(&app_server, &source_id)
+                            let ui = protocol_thread_ui(&app_server, &target_id)
                                 .unwrap_or_else(|| snapshot_to_ui(&msgs));
-                            grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            let next_grants = Rc::new(RefCell::new(SessionGrants::default()));
                             let harness_profile = protocol_thread_profile(&app_server, &target_id);
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
                                 Some((target_id.clone(), msgs)),
-                                grants.clone(),
+                                next_grants.clone(),
                                 command_workspace,
                                 Some(harness_profile),
                                 app_server.clone(),
@@ -2285,10 +2617,21 @@ pub fn spawn_worker(
                             .await
                             {
                                 Ok((a, ws, sid, _)) => {
-                                    agent = a;
-                                    workspace = ws;
-                                    session_id = sid;
-                                    set_active_session(&active_session, &session_id);
+                                    if runtime_activation
+                                        .commit_if_current(&activation, || {
+                                            grants = next_grants;
+                                            agent = a;
+                                            workspace = ws;
+                                            session_id = sid;
+                                            set_active_session(&active_session, &session_id);
+                                        })
+                                        .is_none()
+                                    {
+                                        let _ = completion
+                                            .send(Err("分叉会话初始化已被更新的运行态切换取消"
+                                                .to_string()));
+                                        continue;
+                                    }
                                     agent.set_event_sink(make_sink(
                                         app.clone(),
                                         session_id.clone(),
@@ -2306,14 +2649,18 @@ pub fn spawn_worker(
                                     let _ = completion.send(Ok(()));
                                 }
                                 Err(e) => {
+                                    let report_error =
+                                        runtime_activation.abort_if_pending(&activation);
                                     let _ = completion.send(Err(e.clone()));
-                                    emit(
-                                        &app,
-                                        UiEvent::Error {
-                                            session_id: target_id.clone(),
-                                            message: e,
-                                        },
-                                    )
+                                    if report_error {
+                                        emit(
+                                            &app,
+                                            UiEvent::Error {
+                                                session_id: target_id.clone(),
+                                                message: e,
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2342,8 +2689,14 @@ pub fn spawn_worker(
                         Command::SetPermissionMode {
                             thread_id: target_id,
                             mode,
+                            activation,
                             completion,
                         } => {
+                            if !runtime_activation.can_proceed(&activation) {
+                                let _ = completion
+                                    .send(Err("切换权限模式已被更新的运行态切换取消".to_string()));
+                                continue;
+                            }
                             let (msgs, command_workspace, harness_profile) =
                                 match permission_mode_rebuild_input(
                                     &app_server,
@@ -2352,14 +2705,18 @@ pub fn spawn_worker(
                                 ) {
                                     Ok(input) => input,
                                     Err(error) => {
+                                        let report_error =
+                                            runtime_activation.abort_if_pending(&activation);
                                         let _ = completion.send(Err(error.clone()));
-                                        emit(
-                                            &app,
-                                            UiEvent::Error {
-                                                session_id: target_id,
-                                                message: error,
-                                            },
-                                        );
+                                        if report_error {
+                                            emit(
+                                                &app,
+                                                UiEvent::Error {
+                                                    session_id: target_id,
+                                                    message: error,
+                                                },
+                                            );
+                                        }
                                         continue;
                                     }
                                 };
@@ -2371,18 +2728,32 @@ pub fn spawn_worker(
                             m.insert("permission_mode", mode.as_str());
                             m.insert("sandbox_mode", sandbox);
                             m.insert("approval_policy", approval);
-                            if let Err(error) =
-                                write_nanocodex_config(&m, &ConfigPaths::default().nanocodex)
-                            {
+                            // Do the synchronous config commit under the same
+                            // coordinator lock used by begin(). Otherwise a
+                            // navigation can supersede this request between a
+                            // current-token check and the actual write.
+                            let Some(write_result) = runtime_activation
+                                .run_if_current(&activation, || {
+                                    write_nanocodex_config(&m, &ConfigPaths::default().nanocodex)
+                                })
+                            else {
+                                let _ = completion
+                                    .send(Err("切换权限模式已被更新的运行态切换取消".to_string()));
+                                continue;
+                            };
+                            if let Err(error) = write_result {
                                 let error = error.to_string();
+                                let report_error = runtime_activation.abort_if_pending(&activation);
                                 let _ = completion.send(Err(error.clone()));
-                                emit(
-                                    &app,
-                                    UiEvent::Error {
-                                        session_id: target_id,
-                                        message: error,
-                                    },
-                                );
+                                if report_error {
+                                    emit(
+                                        &app,
+                                        UiEvent::Error {
+                                            session_id: target_id,
+                                            message: error,
+                                        },
+                                    );
+                                }
                                 continue;
                             }
                             // Same session → keep the "always allow" grants.
@@ -2398,10 +2769,21 @@ pub fn spawn_worker(
                             .await
                             {
                                 Ok((a, ws, sid, _)) => {
-                                    agent = a;
-                                    workspace = ws;
-                                    session_id = sid;
-                                    set_active_session(&active_session, &session_id);
+                                    if runtime_activation
+                                        .commit_if_current(&activation, || {
+                                            agent = a;
+                                            workspace = ws;
+                                            session_id = sid;
+                                            set_active_session(&active_session, &session_id);
+                                        })
+                                        .is_none()
+                                    {
+                                        let _ =
+                                            completion
+                                                .send(Err("切换权限模式已被更新的运行态切换取消"
+                                                    .to_string()));
+                                        continue;
+                                    }
                                     agent.set_event_sink(make_sink(
                                         app.clone(),
                                         session_id.clone(),
@@ -2412,14 +2794,18 @@ pub fn spawn_worker(
                                     let _ = completion.send(Ok(()));
                                 }
                                 Err(e) => {
+                                    let report_error =
+                                        runtime_activation.abort_if_pending(&activation);
                                     let _ = completion.send(Err(e.clone()));
-                                    emit(
-                                        &app,
-                                        UiEvent::Error {
-                                            session_id: target_id,
-                                            message: e,
-                                        },
-                                    )
+                                    if report_error {
+                                        emit(
+                                            &app,
+                                            UiEvent::Error {
+                                                session_id: target_id,
+                                                message: e,
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2683,8 +3069,72 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ncx_core::Skill;
+    use ncx_core::{Skill, Tool};
     use ncx_sandbox::WORKSPACE_WRITE;
+
+    #[test]
+    fn runtime_activation_fence_has_one_winner() {
+        let fence = RuntimeActivationFence::new();
+        assert!(!fence.is_accepted());
+        assert!(!fence.is_aborted());
+        assert!(fence.accept());
+        assert!(fence.is_accepted());
+        assert!(!fence.accept());
+        assert!(!fence.abort());
+
+        let aborted = RuntimeActivationFence::new();
+        assert!(aborted.abort());
+        assert!(aborted.is_aborted());
+        assert!(!aborted.accept());
+    }
+
+    struct PreparedMcpTestTool;
+
+    #[async_trait(?Send)]
+    impl Tool for PreparedMcpTestTool {
+        fn name(&self) -> &str {
+            "valid_mcp_tool"
+        }
+
+        fn description(&self) -> &str {
+            "test MCP tool"
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object"})
+        }
+
+        async fn execute(&self, _: &ToolContext, _: &Value) -> String {
+            String::new()
+        }
+    }
+
+    #[test]
+    fn unavailable_mcp_server_does_not_discard_prepared_servers() {
+        let broken = McpServerConfig {
+            name: "broken".into(),
+            command: "missing-ncx-mcp".into(),
+            args: Vec::new(),
+            env: HashMap::new(),
+        };
+        let valid = McpServerConfig {
+            name: "valid".into(),
+            command: "mock".into(),
+            args: Vec::new(),
+            env: HashMap::new(),
+        };
+        let mut prepared: Vec<Box<dyn Tool>> = Vec::new();
+
+        append_prepared_mcp_tools(&broken, Err("spawn missing-ncx-mcp".into()), &mut prepared);
+        append_prepared_mcp_tools(
+            &valid,
+            Ok(vec![Box::new(PreparedMcpTestTool)]),
+            &mut prepared,
+        );
+
+        assert_eq!(prepared.len(), 1);
+        assert_eq!(prepared[0].name(), "valid_mcp_tool");
+    }
 
     fn protocol_server(name: &str) -> (Arc<AppServer<JsonThreadStore>>, PathBuf) {
         let root = std::env::temp_dir().join(format!("ncx-protocol-{name}-{}", new_session_id()));
@@ -2725,6 +3175,48 @@ mod tests {
                 .unwrap();
         assert!(messages.is_empty());
         assert_eq!(workspace, second_workspace);
+        assert_eq!(profile, "full");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fork_target_seed_is_snapshotted_from_the_target_thread() {
+        let (server, root) = protocol_server("fork-target-seed");
+        let source = ThreadId::new("fork-source").unwrap();
+        let target = ThreadId::new("fork-target").unwrap();
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(source.clone()),
+                workspace: root.to_string_lossy().into_owned(),
+                title: "source".into(),
+                harness_profile: "full".into(),
+            })
+            .unwrap();
+        server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: source.clone(),
+                messages: vec![json!({"role": "user", "content": "snapshot-at-fork"})],
+            })
+            .unwrap();
+        server
+            .dispatch(ClientRequest::ThreadFork {
+                thread_id: source.clone(),
+                new_thread_id: target.clone(),
+            })
+            .unwrap();
+        // A source turn arriving after the fork must not be visible to the
+        // target worker, even if that worker was delayed in the queue.
+        server
+            .dispatch(ClientRequest::ThreadModelContextReplace {
+                thread_id: source,
+                messages: vec![json!({"role": "user", "content": "later-source-turn"})],
+            })
+            .unwrap();
+
+        let (messages, _) = protocol_thread_seed(&server, target.as_str()).unwrap();
+        let _ui = protocol_thread_ui(&server, target.as_str()).unwrap();
+        let profile = protocol_thread_profile(&server, target.as_str());
+        assert_eq!(messages[0]["content"], "snapshot-at-fork");
         assert_eq!(profile, "full");
         let _ = std::fs::remove_dir_all(root);
     }
@@ -2806,16 +3298,16 @@ mod tests {
     fn protocol_turn_persists_user_item_and_releases_ownership_on_completion() {
         let (server, root) = protocol_server("complete");
         let turn_id = TurnId::new("turn-1").unwrap();
-        let mut guard = ProtocolTurnGuard::start(
-            None,
-            server.clone(),
-            "thread-1",
-            &root,
-            turn_id.clone(),
-            "执行任务",
-            ExecutionMode::Agent,
-            "full",
-        )
+        let mut guard = ProtocolTurnGuard::start(ProtocolTurnStart {
+            app: None,
+            server: server.clone(),
+            session_id: "thread-1",
+            workspace: &root,
+            turn_id: turn_id.clone(),
+            user_text: "执行任务",
+            execution_mode: ExecutionMode::Agent,
+            harness_profile: "full",
+        })
         .unwrap();
         guard.complete("completed");
 
@@ -2833,16 +3325,16 @@ mod tests {
             matches!(thread.turns[0].items[0], ThreadItem::UserMessage { ref text, .. } if text == "执行任务")
         );
 
-        let next = ProtocolTurnGuard::start(
-            None,
+        let next = ProtocolTurnGuard::start(ProtocolTurnStart {
+            app: None,
             server,
-            "thread-1",
-            &root,
-            TurnId::new("turn-2").unwrap(),
-            "下一轮",
-            ExecutionMode::Agent,
-            "full",
-        );
+            session_id: "thread-1",
+            workspace: &root,
+            turn_id: TurnId::new("turn-2").unwrap(),
+            user_text: "下一轮",
+            execution_mode: ExecutionMode::Agent,
+            harness_profile: "full",
+        });
         assert!(next.is_ok(), "completed turn must release thread ownership");
         drop(next);
         let _ = std::fs::remove_dir_all(root);
@@ -2852,16 +3344,16 @@ mod tests {
     fn visible_history_uses_full_turns_when_model_context_is_compacted() {
         let (server, root) = protocol_server("visible-history");
         let turn_id = TurnId::new("turn-history").unwrap();
-        let mut guard = ProtocolTurnGuard::start(
-            None,
-            server.clone(),
-            "thread-history",
-            &root,
-            turn_id.clone(),
-            "必须保留的原始问题",
-            ExecutionMode::Agent,
-            "full",
-        )
+        let mut guard = ProtocolTurnGuard::start(ProtocolTurnStart {
+            app: None,
+            server: server.clone(),
+            session_id: "thread-history",
+            workspace: &root,
+            turn_id: turn_id.clone(),
+            user_text: "必须保留的原始问题",
+            execution_mode: ExecutionMode::Agent,
+            harness_profile: "full",
+        })
         .unwrap();
         server
             .dispatch(ClientRequest::ItemAppend {
@@ -2956,16 +3448,16 @@ mod tests {
     #[test]
     fn stored_model_context_wins_over_reconstructing_noisy_thread_items() {
         let (server, root) = protocol_server("stored-context");
-        let mut guard = ProtocolTurnGuard::start(
-            None,
-            server.clone(),
-            "thread-context",
-            &root,
-            TurnId::new("turn-context").unwrap(),
-            "旧请求",
-            ExecutionMode::Agent,
-            "full",
-        )
+        let mut guard = ProtocolTurnGuard::start(ProtocolTurnStart {
+            app: None,
+            server: server.clone(),
+            session_id: "thread-context",
+            workspace: &root,
+            turn_id: TurnId::new("turn-context").unwrap(),
+            user_text: "旧请求",
+            execution_mode: ExecutionMode::Agent,
+            harness_profile: "full",
+        })
         .unwrap();
         guard.complete("completed");
         server
@@ -2993,29 +3485,29 @@ mod tests {
     #[test]
     fn dropped_protocol_turn_fails_and_releases_ownership() {
         let (server, root) = protocol_server("drop");
-        let guard = ProtocolTurnGuard::start(
-            None,
-            server.clone(),
-            "thread-drop",
-            &root,
-            TurnId::new("turn-drop-1").unwrap(),
-            "会异常退出",
-            ExecutionMode::Agent,
-            "full",
-        )
+        let guard = ProtocolTurnGuard::start(ProtocolTurnStart {
+            app: None,
+            server: server.clone(),
+            session_id: "thread-drop",
+            workspace: &root,
+            turn_id: TurnId::new("turn-drop-1").unwrap(),
+            user_text: "会异常退出",
+            execution_mode: ExecutionMode::Agent,
+            harness_profile: "full",
+        })
         .unwrap();
         drop(guard);
 
-        let next = ProtocolTurnGuard::start(
-            None,
+        let next = ProtocolTurnGuard::start(ProtocolTurnStart {
+            app: None,
             server,
-            "thread-drop",
-            &root,
-            TurnId::new("turn-drop-2").unwrap(),
-            "恢复执行",
-            ExecutionMode::Agent,
-            "full",
-        );
+            session_id: "thread-drop",
+            workspace: &root,
+            turn_id: TurnId::new("turn-drop-2").unwrap(),
+            user_text: "恢复执行",
+            execution_mode: ExecutionMode::Agent,
+            harness_profile: "full",
+        });
         assert!(
             next.is_ok(),
             "dropped turn must not leave permanent ownership"
@@ -3191,9 +3683,11 @@ mod tests {
 
     #[test]
     fn ready_snapshot_hides_the_internal_legacy_provider_marker() {
-        let mut cfg = Config::default();
-        cfg.active_provider_id = "legacy".into();
-        cfg.base_url = "https://api.yunmo-ai.com/v1/".into();
+        let mut cfg = Config {
+            active_provider_id: "legacy".into(),
+            base_url: "https://api.yunmo-ai.com/v1/".into(),
+            ..Config::default()
+        };
         assert_eq!(visible_provider_id(&cfg), "yunmo");
         cfg.base_url = "https://unlisted.example/v1".into();
         assert_eq!(visible_provider_id(&cfg), "manual");

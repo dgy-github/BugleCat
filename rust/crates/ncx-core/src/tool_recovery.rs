@@ -298,7 +298,7 @@ mod tests {
     }
 
     fn fixture(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("ncx_recovery_{name}"));
+        let root = crate::test_support::unique_temp_dir(&format!("ncx_recovery_{name}"));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("nested")).unwrap();
         std::fs::write(root.join("nested/value.txt"), "literal [value\n").unwrap();

@@ -76,26 +76,26 @@ def title_for(subsystem: str) -> str:
 
 
 def render(rec: dict, idx: int) -> str:
-    L = [f"\n### {idx}. {title_for(rec.get('subsystem',''))}\n"]
-    L.append(f"**一句话**：{rec.get('one_liner','')}\n")
-    L.append(f"**工作原理**：{rec.get('how_it_works','')}\n")
-    L.append(f"**设计理由（为什么）**：{rec.get('design_rationale','')}\n")
-    L.append("**关键机制**：")
+    lines = [f"\n### {idx}. {title_for(rec.get('subsystem',''))}\n"]
+    lines.append(f"**一句话**：{rec.get('one_liner','')}\n")
+    lines.append(f"**工作原理**：{rec.get('how_it_works','')}\n")
+    lines.append(f"**设计理由（为什么）**：{rec.get('design_rationale','')}\n")
+    lines.append("**关键机制**：")
     for m in rec.get("key_mechanisms", []):
-        L.append(f"- **{m['name']}** — {m['detail']}")
-    L.append("\n**控制 / 数据流**：")
+        lines.append(f"- **{m['name']}** — {m['detail']}")
+    lines.append("\n**控制 / 数据流**：")
     for i, st in enumerate(rec.get("flow_steps", []), 1):
-        L.append(f"{i}. {st}")
-    L.append("\n**面试话术点 / 候选人应能说出**：")
+        lines.append(f"{i}. {st}")
+    lines.append("\n**面试话术点 / 候选人应能说出**：")
     for t in rec.get("interview_talking_points", []):
-        L.append(f"- {t}")
-    L.append("\n**取舍与坑（适合做故障题/追问）**：")
+        lines.append(f"- {t}")
+    lines.append("\n**取舍与坑（适合做故障题/追问）**：")
     for g in rec.get("tradeoffs_or_gotchas", []):
-        L.append(f"- {g}")
+        lines.append(f"- {g}")
     refs = rec.get("code_refs", [])
     if refs:
-        L.append("\n**代码引用**：" + " · ".join(f"`{r}`" for r in refs))
-    return "\n".join(L) + "\n"
+        lines.append("\n**代码引用**：" + " · ".join(f"`{r}`" for r in refs))
+    return "\n".join(lines) + "\n"
 
 
 def build() -> str:

@@ -9,11 +9,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
+import nanocodex.cli as cli_mod
 from nanocodex.agent.loop import AgentLoop
 from nanocodex.agent.session import Session
-import nanocodex.cli as cli_mod
 from nanocodex.cli import _dispatch_slash, _run_loop_command
 from nanocodex.config import Config
 from nanocodex.provider.base import ModelResponse

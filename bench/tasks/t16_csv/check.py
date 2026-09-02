@@ -1,4 +1,5 @@
 import importlib
+
 m = importlib.import_module("lineparser")
 parse_line = m.parse_line
 ParseError = m.ParseError

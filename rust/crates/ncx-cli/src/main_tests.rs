@@ -3,7 +3,66 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use ncx_core::vision_provider_from_config;
+    use ncx_core::ToolContext;
+
+    struct TestMcpTool;
+
+    #[async_trait(?Send)]
+    impl Tool for TestMcpTool {
+        fn name(&self) -> &str {
+            "valid_mcp_tool"
+        }
+
+        fn description(&self) -> &str {
+            "A deterministic MCP test tool."
+        }
+
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            "ok".to_string()
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_mcp_preparation_skips_failed_servers_and_keeps_valid_tools() {
+        let servers = vec![
+            McpServerConfig {
+                name: "broken".to_string(),
+                command: "missing-mcp".to_string(),
+                args: Vec::new(),
+                env: HashMap::new(),
+            },
+            McpServerConfig {
+                name: "valid".to_string(),
+                command: "mock-mcp".to_string(),
+                args: Vec::new(),
+                env: HashMap::new(),
+            },
+        ];
+
+        let prepared = prepare_configured_mcp_tools_with(&servers, |server| {
+            let result = if server.name == "valid" {
+                Ok(vec![Box::new(TestMcpTool) as Box<dyn Tool>])
+            } else {
+                Err("mock spawn failure".to_string())
+            };
+            async move { result }
+        })
+        .await;
+
+        assert_eq!(prepared.successful_servers, 1);
+        assert_eq!(
+            prepared.failures,
+            vec![("broken".to_string(), "mock spawn failure".to_string())]
+        );
+        assert_eq!(prepared.tools.len(), 1);
+        assert_eq!(prepared.tools[0].name(), "valid_mcp_tool");
+    }
 
     #[test]
     fn help_lists_all_commands() {

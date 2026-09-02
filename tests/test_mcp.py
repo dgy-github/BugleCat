@@ -42,9 +42,9 @@ class _Block:
 
 
 class _Result:
-    def __init__(self, content, isError=False):
+    def __init__(self, content, is_error=False):
         self.content = content
-        self.isError = isError
+        self.isError = is_error
 
 
 def test_extract_text_object_shape():
@@ -65,7 +65,7 @@ def test_extract_text_marks_non_text():
 
 
 def test_extract_text_error_prefixed():
-    res = _Result([_Block("text", "boom")], isError=True)
+    res = _Result([_Block("text", "boom")], is_error=True)
     assert extract_text(res).startswith("Error from MCP tool")
 
 
@@ -82,15 +82,15 @@ def test_extract_text_empty():
 
 
 class _StructResult:
-    def __init__(self, content, structuredContent=None, isError=False):
+    def __init__(self, content, structured_content=None, is_error=False):
         self.content = content
-        self.structuredContent = structuredContent
-        self.isError = isError
+        self.structuredContent = structured_content
+        self.isError = is_error
 
 
 def test_extract_structured_object_shape():
     res = _StructResult([_Block("text", "18 window(s) found.")],
-                        structuredContent={"ok": True, "windows": [{"window_id": "12345"}]})
+                        structured_content={"ok": True, "windows": [{"window_id": "12345"}]})
     sc = extract_structured(res)
     assert sc == {"ok": True, "windows": [{"window_id": "12345"}]}
 
@@ -110,7 +110,7 @@ def test_format_result_surfaces_window_list():
     # actual handles. The model must SEE the handles to act.
     res = _StructResult(
         [_Block("text", "2 window(s) found.")],
-        structuredContent={"ok": True, "windows": [
+        structured_content={"ok": True, "windows": [
             {"window_id": "65814", "title": "WeChat", "process": "Weixin.exe"},
             {"window_id": "131072", "title": "Code", "process": "Code.exe"},
         ]},
@@ -123,7 +123,7 @@ def test_format_result_surfaces_window_list():
 
 def test_format_result_strips_ok_and_error_keys():
     res = _StructResult([_Block("text", "done")],
-                        structuredContent={"ok": True, "error": None})
+                        structured_content={"ok": True, "error": None})
     # Only bookkeeping keys -> nothing useful to add, so just the text.
     assert format_result(res) == "done"
 
@@ -134,7 +134,7 @@ def test_format_result_no_structured_is_just_text():
 
 def test_format_result_truncates_huge_payload():
     big = {"blob": "x" * 20000}
-    res = _StructResult([_Block("text", "ok")], structuredContent=big)
+    res = _StructResult([_Block("text", "ok")], structured_content=big)
     out = format_result(res)
     assert "(truncated)" in out
     assert len(out) < 9000                  # capped, not the full 20k
@@ -198,10 +198,10 @@ def test_discover_default_path_is_nanocodex(monkeypatch, tmp_path):
 
 
 class _FakeDesc:
-    def __init__(self, name, description, inputSchema):
+    def __init__(self, name, description, input_schema):
         self.name = name
         self.description = description
-        self.inputSchema = inputSchema
+        self.inputSchema = input_schema
 
 
 class _FakeListResult:

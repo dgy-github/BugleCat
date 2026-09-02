@@ -1,5 +1,6 @@
 param(
-    [string]$Target = "x86_64-pc-windows-gnu",
+    [ValidateSet("x86_64-pc-windows-msvc")]
+    [string]$Target = "x86_64-pc-windows-msvc",
     [string]$OutputDir = "releases",
     [string]$Version = "",
     [switch]$SkipTests,

@@ -21,6 +21,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+
+# --- prompt templates (loaded from files next to this module) ---------------
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from nanocodex.agent.images import encode_image_block
@@ -31,10 +34,6 @@ from nanocodex.storyboard.models import (
     ContinuityReport,
     Shot,
 )
-
-# --- prompt templates (loaded from files next to this module) ---------------
-
-from pathlib import Path
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 

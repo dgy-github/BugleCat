@@ -57,7 +57,7 @@
   const workspace = () => runtime.workspace;
   const threadLifecycle = new ThreadLifecycleController(
     thread, usage, workspace,
-    { restore: (path) => runtime.restoreWorkspace(path), reconcile: () => runtime.reconcileWorkspace() },
+    { reconcile: () => runtime.reconcileWorkspace() },
   );
   const goalController = new GoalController(thread);
   const composer = new ComposerController(thread, () => runtime.needsWorkspace, () => scrollDown());

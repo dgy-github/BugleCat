@@ -14,14 +14,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
 import forge  # noqa: E402
-import genome as G  # noqa: E402
-import teacher as T  # noqa: E402
-import viz  # noqa: E402
+import genome  # noqa: E402
+import teacher  # noqa: E402
 
-BASE = G.Genome(system_prompt="base prompt", tool_desc={"read_file": "rf", "apply_patch": "ap"})
+BASE = genome.Genome(system_prompt="base prompt", tool_desc={"read_file": "rf", "apply_patch": "ap"})
 
 
-class FakeTeacher(T.TeacherBackend):
+class FakeTeacher(teacher.TeacherBackend):
     def __init__(self, name, toml):
         self.name = name
         self._toml = toml
@@ -50,17 +49,17 @@ def _mock_eval(genome_path, tasks, repeats, timeout, model=None):
 
 
 def _install(monkey_eval, panel):
-    orig = (forge.G.extract_current, forge.ev.evaluate, forge.T.build_panel,
+    orig = (forge.genome.extract_current, forge.ev.evaluate, forge.teacher.build_panel,
             forge.GENOMES_DIR, forge.RUNS_DIR)
     tmp = Path(tempfile.mkdtemp(prefix="forge_pop_"))
     forge.GENOMES_DIR = tmp / "genomes"
     forge.RUNS_DIR = tmp / "runs"
-    forge.G.extract_current = lambda: BASE.copy()
+    forge.genome.extract_current = lambda: BASE.copy()
     forge.ev.evaluate = monkey_eval
-    forge.T.build_panel = lambda verbose=True: panel
+    forge.teacher.build_panel = lambda verbose=True: panel
 
     def restore():
-        (forge.G.extract_current, forge.ev.evaluate, forge.T.build_panel,
+        (forge.genome.extract_current, forge.ev.evaluate, forge.teacher.build_panel,
          forge.GENOMES_DIR, forge.RUNS_DIR) = orig
     return restore, tmp
 
@@ -94,8 +93,8 @@ def test_empty_eval_is_worst_not_best():
     obj = forge._objectives(empty)
     assert obj.cost == float("inf") and obj.passrate == 0.0, obj
     # And it is dominated by any real genome.
-    import pareto as P
-    assert P.Objectives(0.3, 100.0).dominates(obj)
+    import pareto
+    assert pareto.Objectives(0.3, 100.0).dominates(obj)
 
 
 def test_reeval_parents_rescores_surviving_members():
@@ -106,7 +105,7 @@ def test_reeval_parents_rescores_surviving_members():
 
     def drifting_eval(genome_path, tasks, repeats, timeout, model=None):
         calls["n"] += 1
-        content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
+        _ = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
         r = ev.EvalResult(genome=str(genome_path))
         # cost drifts upward on each successive eval of the SAME genome -> a re-eval
         # produces a different objective than the first draw.
@@ -122,7 +121,8 @@ def test_reeval_parents_rescores_surviving_members():
     def run(reeval):
         restore, _ = _install(drifting_eval, panel)
         try:
-            calls["n"] = 0; seen_costs.clear()
+            calls["n"] = 0
+            seen_costs.clear()
             forge.evolve(rounds=2, train_tasks=["t_a", "t_b"], holdout_tasks=["t_b"],
                          repeats=1, timeout=10, budget_s=999, teachers="panel",
                          stamp="P3", pop_cap=3, test_tasks=None, reeval_parents=reeval)
@@ -153,10 +153,13 @@ if __name__ == "__main__":
     failed = 0
     for fn in fns:
         try:
-            fn(); print(f"ok   {fn.__name__}")
+            fn()
+            print(f"ok   {fn.__name__}")
         except AssertionError as e:
-            failed += 1; print(f"FAIL {fn.__name__}: {e}")
+            failed += 1
+            print(f"FAIL {fn.__name__}: {e}")
         except Exception as e:  # noqa: BLE001
-            failed += 1; print(f"ERR  {fn.__name__}: {type(e).__name__}: {e}")
+            failed += 1
+            print(f"ERR  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     raise SystemExit(1 if failed else 0)

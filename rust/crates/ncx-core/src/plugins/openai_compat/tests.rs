@@ -1,12 +1,6 @@
 use super::*;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 fn temp(name: &str) -> PathBuf {
-    let id = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!("ncx-codex-plugin-{name}-{id}"))
+    crate::test_support::unique_temp_dir(&format!("ncx-codex-plugin-{name}"))
 }
 
 fn fixture(root: &Path, name: &str) {
@@ -290,6 +284,7 @@ fn official_path_based_mcp_hooks_and_interface_resources_are_supported() {
         r#"{"name":"path-plugin","interface":{"logo":"../outside.png"}}"#,
     )
     .unwrap();
+    assert!(load_record(plugin.clone()).unwrap_err().contains("越界"));
     assert!(
         CodexPluginCatalog::new(workspace.join(".ncx/codex-plugins"))
             .discover()
@@ -346,6 +341,56 @@ fn damaged_mcp_server_is_skipped_without_hiding_valid_servers() {
     let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
     assert_eq!(servers.len(), 1);
     assert_eq!(servers[0].name, "demo:valid");
+    assert_eq!(servers[0].args, vec!["--version"]);
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn damaged_mcp_plugin_resource_is_skipped_without_hiding_valid_servers() {
+    let workspace = temp("damaged-mcp-plugin-resource");
+    let broken = workspace.join(".ncx/codex-plugins/broken");
+    fs::create_dir_all(broken.join(".codex-plugin")).unwrap();
+    fs::write(
+        broken.join(MANIFEST),
+        r#"{"name":"broken","mcpServers":"./missing-mcp.json"}"#,
+    )
+    .unwrap();
+
+    let valid = workspace.join(".ncx/codex-plugins/valid");
+    fs::create_dir_all(valid.join(".codex-plugin")).unwrap();
+    fs::write(valid.join(MANIFEST), r#"{"name":"valid"}"#).unwrap();
+    fs::write(
+        valid.join(".mcp.json"),
+        r#"{"mcpServers":{"server":{"command":"python","args":["--version"]}}}"#,
+    )
+    .unwrap();
+
+    let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0].name, "valid:server");
+    assert_eq!(servers[0].args, vec!["--version"]);
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn damaged_plugin_manifest_is_skipped_without_hiding_valid_mcp_servers() {
+    let workspace = temp("damaged-plugin-manifest");
+    let broken = workspace.join(".ncx/codex-plugins/broken");
+    fs::create_dir_all(broken.join(".codex-plugin")).unwrap();
+    fs::write(broken.join(MANIFEST), "{ not valid JSON").unwrap();
+
+    let valid = workspace.join(".ncx/codex-plugins/valid");
+    fs::create_dir_all(valid.join(".codex-plugin")).unwrap();
+    fs::write(valid.join(MANIFEST), r#"{"name":"valid"}"#).unwrap();
+    fs::write(
+        valid.join(".mcp.json"),
+        r#"{"mcpServers":{"server":{"command":"python","args":["--version"]}}}"#,
+    )
+    .unwrap();
+
+    let servers = discover_codex_mcp_servers_with_home(&workspace, None).unwrap();
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0].name, "valid:server");
     assert_eq!(servers[0].args, vec!["--version"]);
     let _ = fs::remove_dir_all(workspace);
 }

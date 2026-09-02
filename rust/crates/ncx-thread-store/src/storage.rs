@@ -129,6 +129,7 @@ pub(super) fn recover_orphaned_turns(
     persisted: &mut PersistedState,
 ) -> Result<bool, ThreadStoreError> {
     let mut recovered = false;
+    let mut recovered_threads = Vec::new();
     for (id, thread) in &mut persisted.threads {
         if !thread
             .turns
@@ -150,7 +151,14 @@ pub(super) fn recover_orphaned_turns(
                 recovered = true;
             }
         }
+        recovered_threads.push(id.clone());
         drop(lease);
+    }
+    // Recovery is a durable write just like an explicit finish operation. It
+    // must invalidate any provisioning receipt that was captured before the
+    // restart, even if a future caller restores the same visible Thread data.
+    for id in recovered_threads {
+        super::advance_thread_write_epoch(persisted, &id);
     }
     Ok(recovered)
 }

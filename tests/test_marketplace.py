@@ -22,7 +22,6 @@ from nanocodex.tools.marketplace import (
 )
 from nanocodex.tools.mcp_store import McpStore, is_valid_server_name
 
-
 # --- built-in catalog -----------------------------------------------------
 
 

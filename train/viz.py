@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import html
 import json
-import sys
 from pathlib import Path
 
 W, H, PAD = 640, 380, 56  # scatter canvas

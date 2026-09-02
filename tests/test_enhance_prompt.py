@@ -12,7 +12,6 @@ from nanocodex.agent.enhance_prompt import (
     should_enhance,
 )
 
-
 # --- should_enhance ---------------------------------------------------------
 
 def test_should_enhance_accepts_normal_text():

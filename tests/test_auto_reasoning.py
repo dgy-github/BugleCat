@@ -15,7 +15,6 @@ from nanocodex.agent.auto_reasoning import (
     select_auto_effort,
 )
 
-
 # --- select_auto_effort: keyword rules -----------------------------------
 
 def test_high_effort_keyword_english_gives_max():

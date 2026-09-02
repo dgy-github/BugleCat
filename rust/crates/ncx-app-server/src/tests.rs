@@ -65,6 +65,10 @@ struct RecordingRuntime {
     calls: Mutex<Vec<String>>,
     validated_profiles: Mutex<Vec<(String, String)>>,
     profile_validation_gate: Option<Arc<ProfileValidationGate>>,
+    create_activation_gate: Option<Arc<ProfileValidationGate>>,
+    fork_activation_gate: Option<Arc<ProfileValidationGate>>,
+    fail_create_thread: bool,
+    fail_fork_thread: bool,
     fail_goal_continue: bool,
 }
 
@@ -87,6 +91,12 @@ impl AppServerAdapter for RecordingRuntime {
 
     fn create_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
         self.calls.lock().unwrap().push(format!("new:{thread_id}"));
+        if let Some(gate) = &self.create_activation_gate {
+            gate.block_validation();
+        }
+        if self.fail_create_thread {
+            return Err("worker rejected new thread".into());
+        }
         Ok(())
     }
 
@@ -103,6 +113,12 @@ impl AppServerAdapter for RecordingRuntime {
             .lock()
             .unwrap()
             .push(format!("fork:{source_id}:{target_id}"));
+        if let Some(gate) = &self.fork_activation_gate {
+            gate.block_validation();
+        }
+        if self.fail_fork_thread {
+            return Err("worker rejected fork".into());
+        }
         Ok(())
     }
 

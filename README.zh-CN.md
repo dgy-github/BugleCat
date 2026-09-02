@@ -73,12 +73,12 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 **性能与交付层面**
 
 - CLI 构建成原生 `ncx.exe`，用户不需要准备 Python、虚拟环境或 editable install。
-- release 构建启用 strip、LTO、体积优化，并面向 Windows GNU target；当前 CLI zip
-  小于 2 MB，且已经包含 README、LICENSE 和配置样例。
+- CLI release 构建启用 strip、LTO、体积优化，并默认使用桌面安装包对应的 Windows MSVC target；CLI 包
+  包含 README、LICENSE 和配置样例。
 - 启动路径避开 Python 解释器和 import 开销，适合短的一次性命令，也适合交互 REPL。
 - 显式所有权让并行 worker 隔离、结果选择和 promote 更容易推理，不容易出现共享可变状态
   泄漏。
-- 221 个 Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
+- Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
   沙箱策略、工具和编排器。
 
 **平台控制面补齐**
@@ -147,7 +147,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - **沙箱与审批状态机** —— 三种沙箱模式、四种审批策略，拦截每一次文件/shell/网络
   动作。
 - **MCP 集成 + 市场** —— 从 `mcp.toml` 加载服务，或从内置 / 远程目录一键安装；
-  工具以 `mcp__<server>__<tool>` 形式暴露。
+  工具保留服务端提供的名称，重名会被拒绝。
 - **插件生态** —— 可从本地、Git、NPM 或社区市场安装兼容 Codex 的资源插件，把
   Skills、MCP、Apps、Hooks 和 UI 插槽组合发布，并在安装前检查兼容性和能力冲突。
 - **Skills 系统** —— 用户 skill 加三个内置编码 skill；只注入名称 + 描述，正文
@@ -218,9 +218,23 @@ nanocodex/
 | `manage_schedule` | 在对话里创建 / 列出 / 取消定时任务。 |
 | `manage_skills` | 在对话里创建 / 列出 / 读取 / 删除用户 skill。 |
 | `remember` | 往用户记忆里追加一条持久笔记。 |
-| `mcp__<server>__<tool>` | 已连接 MCP 服务暴露的任意工具。 |
+| `<tool>`（MCP） | 已连接 MCP 服务暴露的工具，使用服务端提供的名称。 |
 
 ## 安装
+
+当前 Rust release 线：
+
+```powershell
+cd path\to\BugleCat
+rustup toolchain install stable-x86_64-pc-windows-msvc
+cargo +stable-x86_64-pc-windows-msvc build --manifest-path rust\Cargo.toml -p ncx-cli --release
+
+cd rust\gui
+npm ci
+npm run tauri:build
+```
+
+这需要 Rust toolchain 和 Node.js 18 或更新版本。原 Python 实现仍可用于参考和原型：
 
 ```powershell
 cd path\to\BugleCat
@@ -408,7 +422,18 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "D:\\projects"]
 nanocodex --mcp
 ```
 
-每个服务的工具以 `mcp__<server>__<tool>` 暴露给模型。一个**市场**支持从内置精选
+Rust `ncx` REPL 可以不重启而应用 MCP 配置变更：
+
+```text
+/mcp reload
+```
+
+重载会先准备每个已配置服务；某个服务连接失败时只跳过它，已成功准备的服务仍会原子替换
+当前工具集。若所有已配置服务都失败，或发现工具重名，则保留原有工具集；空配置会移除全部
+活动 MCP 工具。
+
+每个服务的工具保留服务端提供的名称；原子重载会拒绝工具重名，因此应为 MCP 工具选择
+互不冲突的名称。一个**市场**支持从内置精选
 目录或远程目录（`NANOCODEX_MARKETPLACE_URL`）一键安装；每个条目都走和手动添加
 服务相同的名称校验与去重，远程目录被当作不可信数据处理。更多见
 `mcp.example.toml`。
@@ -610,7 +635,7 @@ Rust release 线：
 
 ```powershell
 cd rust
-cargo test --workspace --target x86_64-pc-windows-gnu
+cargo test --workspace --target x86_64-pc-windows-msvc
 ```
 
 Python 线：
@@ -627,10 +652,13 @@ python -m pytest -q
 当前测试门禁同时覆盖安全边界、插件容错和并发稳定性：
 
 - MCP 的只读记忆查询可以在 `approval_policy=never` 下执行；有副作用的调用必须明确返回审批拒绝，不能被 compaction 守卫测试遮蔽。
-- Codex 兼容插件中单个损坏的 MCP command/arg 只会跳过当前 server，其他合法 server 仍会被发现；只有显式 `./`、`../` 相对路径会按插件资源解析，裸参数继续交给进程 CWD/PATH 处理。
+- Codex 兼容插件中单个损坏的 MCP 资源、command、arg 或无法启动的 server 只会跳过当前插件/server，其他合法 server 仍会被发现并装配；显式 `./` 路径会按插件根解析，越界的 `../` 路径会被拒绝，裸参数继续交给进程 CWD/PATH 处理。
 - Windows Hook 测试使用 20 秒测试超时，避免冷启动和并行调度造成误报；只读并发测试使用 in-flight 峰值断言，不依赖固定墙钟阈值。
-- 测试临时目录包含进程 ID，降低 IDE 与 CLI 并行执行时互相清理目录的风险。
+- 测试临时目录使用唯一 session ID（时间、进程 ID 和单调序号），避免 IDE 与 CLI 并行执行时互相清理目录。
 - “工作区改动”面板只有一个滚动容器，文件行禁止被 flex 压缩；大量 diff 不会再重叠或裁切文件名。切换工作区会清空仍在返回的面板/侧栏投影（包括 Forge 状态观察器；后台 Forge 任务本身继续运行并会在启动和切换后自动刷新投影）；仅在进程 CWD 真正改变前才取消模型记忆整理，旧工作区草稿不能在切换后提交。
+- 单个“工作区改动”预览最多返回 1,000 行或 192 KiB，并明确提示已截断；同一时刻只展开一个预览，生成文件或压缩文件不会创建无上限的 WebView DOM 节点。
+- 会话 Ready、标题和完成等突发事件会共用一个正在进行的侧栏刷新，并合并为尾随刷新，而不是反复读取全部持久会话。
+- 新建或分叉会话若未被宿主运行时接受，会基于精确的持久快照做补偿：只有目标 Thread、模型上下文和 Goal 都未被后续修改时才删除，因此可安全重试同一 ID，也不会误删已进入运行态的会话。
 - 空会话快速连续选择 Harness Profile 会被串行化：首轮前只会持久化并激活最后一次选择；Profile 写入与首轮 Claim 原子互斥，已在校验中的旧选择也不能越过首轮锁定。
 - Resume、Fork、新建会话和权限模式重建都会显式使用持久 Thread 的工作区；权限模式请求携带精确 `threadId`，过期 worker 会被拒绝且不写配置；宿主完成工作区切换后才返回就绪，延迟 worker 不会复用前一个进程目录。
 - Memory 列表/新增/整理/合并以及 Forge 启动/状态/取消请求都会携带工作区快照；宿主在工作区互斥围栏内校验快照，过期请求直接拒绝，不会写入新选中的项目。状态投影只属于启动它的工作区，取消还必须携带用户实际观察到的精确任务 generation。
@@ -639,9 +667,14 @@ python -m pytest -q
 
 ```powershell
 cargo fmt --manifest-path rust\Cargo.toml --all -- --check
-cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets -- -D warnings
-cargo test --manifest-path rust\Cargo.toml --workspace
+cargo fmt --manifest-path rust\gui\src-tauri\Cargo.toml --all -- --check
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
+cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
+npm.cmd --prefix rust\gui run build
 python -m pytest -q
+python -m ruff check .
 ```
 
 本地启动 Tauri 开发版：
@@ -649,7 +682,7 @@ python -m pytest -q
 ```powershell
 cd rust\gui
 npm.cmd ci
-npm.cmd run tauri dev -- --target x86_64-pc-windows-msvc
+npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 ```
 
 开发前端默认监听 `http://localhost:5179/`。如果该端口已有 BugleCat 实例，优先复用并等待热更新，不要重复启动第二个实例。
@@ -662,17 +695,17 @@ npm.cmd run tauri dev -- --target x86_64-pc-windows-msvc
 .\scripts\build-rust-release.ps1
 ```
 
-脚本会先跑 Rust workspace 测试，再构建 Windows GNU release 二进制，生成
-`releases\nanocodex-<version>-x86_64-pc-windows-gnu.zip`，构建 Tauri NSIS
+脚本会先跑 Rust workspace 测试，再构建 Windows MSVC release 二进制，生成
+`releases\nanocodex-<version>-x86_64-pc-windows-msvc.zip`，构建 Tauri NSIS
 installer，并写出 `releases\SHA256SUMS.txt` 和 `releases\release-manifest.json`。
 只需要 CLI 包时可加 `-SkipTauri`；只有同 target 已在 CI 或本地 release 验证通过时，
 才建议加 `-SkipTests`。
 
-手动 Windows GNU CLI release：
+手动 Windows MSVC CLI release：
 
 ```powershell
 cd rust
-cargo build --release --workspace --target x86_64-pc-windows-gnu
+cargo build --release --workspace --target x86_64-pc-windows-msvc
 ```
 
 手动 Tauri 桌面 installer：
@@ -684,12 +717,12 @@ npm.cmd run tauri:installer
 ```
 
 桌面构建现在明确产出 Windows NSIS installer，安装包位于
-`rust\gui\src-tauri\target\x86_64-pc-windows-gnu\release\bundle\nsis\`。
+`rust\gui\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\`。
 GUI 的 Settings 弹窗也会展示解析后的 `~/.nanocodex/config.toml` 路径，并提供打开配置文件
 和配置目录的入口。
 
-Tauri crate 特意保留 `crate-type = ["lib"]`；改成 `cdylib` 或 `staticlib` 会让
-Windows GNU 链接器的 export ordinal 表溢出。
+Tauri crate 特意保留 `crate-type = ["lib"]`；改成 `cdylib` 或 `staticlib` 曾让
+Windows GNU 链接器的 export ordinal 表溢出，修改前需重新验证目标 release。
 
 ## 安全说明
 

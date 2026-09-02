@@ -36,10 +36,10 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
-import genome as G  # noqa: E402
-import pareto as PA  # noqa: E402
-import splits as S  # noqa: E402
-import teacher as T  # noqa: E402
+import genome  # noqa: E402
+import pareto  # noqa: E402
+import splits  # noqa: E402
+import teacher  # noqa: E402
 from process_control import run_owned  # noqa: E402
 
 GENOMES_DIR = Path(os.environ.get(
@@ -150,7 +150,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     def elapsed() -> float:
         return time.perf_counter() - t0
 
-    panel = [b for b in T.build_panel() if teachers == "panel" or b.name == teachers]
+    panel = [b for b in teacher.build_panel() if teachers == "panel" or b.name == teachers]
     if not panel:
         print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
         return {"error": "no teacher"}
@@ -159,11 +159,11 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     # caps and the legal tool set. The starting `champion` is normally the same,
     # but `--from-genome` lets a run start from a DEGRADED scaffold to create
     # real headroom (an honest capability test: can the optimizer recover it?).
-    baseline = G.extract_current()
+    baseline = genome.extract_current()
     if from_genome:
-        champion = G.Genome.load(Path(from_genome))
+        champion = genome.Genome.load(Path(from_genome))
         print(f"[forge] starting from supplied genome {from_genome} "
-              f"(diff vs default: {G.diff(baseline, champion)})")
+              f"(diff vs default: {genome.diff(baseline, champion)})")
     else:
         champion = baseline.copy()
     champ_path = GENOMES_DIR / f"{stamp}_gen0_start.toml"
@@ -201,19 +201,19 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                       f"{champ_train.total_runs}) but no usable trajectories to feed the "
                       f"teacher — cannot propose. Stopping.")
             break
-        prompt = T.build_teacher_prompt(champion, failures)
+        prompt = teacher.build_teacher_prompt(champion, failures)
         round_log = {"round": rnd, "candidates": []}
         candidates = []  # (teacher_name, genome, eval)
         for backend in panel:
             if elapsed() > budget_s:
                 break
             resp = backend.propose(prompt)
-            cand, why = T.parse_candidate(resp or "", champion)
+            cand, why = teacher.parse_candidate(resp or "", champion)
             if not cand:
                 print(f"[forge]   round {rnd} {backend.name}: rejected ({why})")
                 round_log["candidates"].append({"teacher": backend.name, "status": why})
                 continue
-            errs = G.validate(cand, baseline)
+            errs = genome.validate(cand, baseline)
             if errs:
                 print(f"[forge]   round {rnd} {backend.name}: invalid ({errs[0]})")
                 round_log["candidates"].append({"teacher": backend.name, "status": f"invalid: {errs[0]}"})
@@ -222,7 +222,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             cand.save(cpath)
             cev = ev.evaluate(str(cpath), train_tasks, repeats, timeout)
             print(f"[forge]   round {rnd} {backend.name}: train "
-                  f"{cev.total_passes}/{cev.total_runs}  changed[{G.diff(champion, cand)!r}]")
+                  f"{cev.total_passes}/{cev.total_runs}  changed[{genome.diff(champion, cand)!r}]")
             candidates.append((backend.name, cand, cev, cpath))
             round_log["candidates"].append({
                 "teacher": backend.name, "status": "evaluated",
@@ -261,7 +261,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     champion.save(champ_final)
     lineage["champion"] = {"path": str(champ_final),
                            "train": champ_train.total_passes, "holdout": champ_hold.total_passes,
-                           "diff_vs_baseline": G.diff(baseline, champion)}
+                           "diff_vs_baseline": genome.diff(baseline, champion)}
 
     # Final, unbiased number: score baseline vs champion ONCE on the frozen test
     # split (never used for acceptance). The only honest "did training help?".
@@ -278,11 +278,11 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                            "runs": base_test.total_runs}
     (RUNS_DIR / f"lineage_{stamp}.json").write_text(json.dumps(lineage, indent=2), encoding="utf-8")
     print(f"[forge] done in {elapsed():.0f}s. champion -> {champ_final}")
-    print(f"[forge] champion vs baseline:\n{G.diff(baseline, champion)}")
+    print(f"[forge] champion vs baseline:\n{genome.diff(baseline, champion)}")
     return lineage
 
 
-def _objectives(ev_result) -> PA.Objectives:
+def _objectives(ev_result) -> pareto.Objectives:
     """Map an EvalResult to (pass-rate ↑, cost ↓).
 
     Cost = mean total TOKENS per task when ncx reported usage (the real cost);
@@ -293,7 +293,7 @@ def _objectives(ev_result) -> PA.Objectives:
     never the best — otherwise a zero-task misconfiguration would be undominated
     and silently win the front (masking the misconfig as a green champion)."""
     if ev_result.total_runs == 0 or not ev_result.tasks:
-        return PA.Objectives(passrate=0.0, cost=float("inf"))
+        return pareto.Objectives(passrate=0.0, cost=float("inf"))
     pr = ev_result.total_passes / ev_result.total_runs
     tokens = ev_result.mean_tokens
     if tokens > 0:
@@ -301,7 +301,7 @@ def _objectives(ev_result) -> PA.Objectives:
     else:
         times = [t.mean_s for t in ev_result.tasks.values()]
         cost = round(sum(times) / len(times), 1)  # latency fallback
-    return PA.Objectives(passrate=pr, cost=cost)
+    return pareto.Objectives(passrate=pr, cost=cost)
 
 
 def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
@@ -329,12 +329,12 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     def elapsed() -> float:
         return time.perf_counter() - t0
 
-    panel = [b for b in T.build_panel() if teachers == "panel" or b.name == teachers]
+    panel = [b for b in teacher.build_panel() if teachers == "panel" or b.name == teachers]
     if not panel:
         print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
         return {"error": "no teacher"}
 
-    baseline = G.extract_current()
+    baseline = genome.extract_current()
     counter = {"n": 0}
 
     def new_id(tag: str) -> str:
@@ -350,7 +350,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         return {"id": gid, "genome": genome, "path": path, "ev": ev_r, "obj": obj,
                 "gen": gen, "parent": parent, "teacher": teacher}
 
-    start_genome = G.Genome.load(Path(from_genome)) if from_genome else baseline.copy()
+    start_genome = genome.Genome.load(Path(from_genome)) if from_genome else baseline.copy()
     if from_genome:
         print(f"[forge] population start from {from_genome}")
     seed_member = make_member(start_genome, 0, None, None, "start")
@@ -381,14 +381,14 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             failures = parent["ev"].failing_trajectories(top_k=3)
             if not failures:
                 continue  # nothing to learn from this parent this round
-            prompt = T.build_teacher_prompt(parent["genome"], failures)
+            prompt = teacher.build_teacher_prompt(parent["genome"], failures)
             for backend in panel:
                 if elapsed() > budget_s:
                     break
-                cand, why = T.parse_candidate(backend.propose(prompt) or "", parent["genome"])
+                cand, why = teacher.parse_candidate(backend.propose(prompt) or "", parent["genome"])
                 if not cand:
                     continue
-                if G.validate(cand, baseline):
+                if genome.validate(cand, baseline):
                     continue
                 child = make_member(cand, rnd, parent["id"], backend.name, backend.name)
                 children.append(child)
@@ -396,7 +396,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                 print(f"[forge]   gen{rnd} {backend.name}: pass {child['obj'].passrate:.2f} "
                       f"cost {child['obj'].cost}  (parent {parent['id']})")
         combined = population + children
-        population = PA.select_population(combined, pop_cap, key=lambda m: m["obj"])
+        population = pareto.select_population(combined, pop_cap, key=lambda m: m["obj"])
         gens_log.append({"gen": rnd, "evaluated": [c["id"] for c in children],
                          "front": [m["id"] for m in population]})
         print(f"[forge]   gen{rnd}: front = {[(m['id'], round(m['obj'].passrate,2), m['obj'].cost) for m in population]}")
@@ -405,7 +405,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             break
 
     front_ids = {m["id"] for m in population}
-    champ = PA.best(population, key=lambda m: m["obj"])
+    champ = pareto.best(population, key=lambda m: m["obj"])
     for nd in nodes:
         nd["on_front_final"] = nd["id"] in front_ids
 
@@ -419,7 +419,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         lineage["champion"] = {"id": champ["id"], "passrate": champ["obj"].passrate,
                                "cost": champ["obj"].cost}
         print(f"[forge] champion = {champ['id']} (pass {champ['obj'].passrate:.2f}, cost {champ['obj'].cost})")
-        print(f"[forge] champion vs baseline:\n{G.diff(baseline, champ['genome'])}")
+        print(f"[forge] champion vs baseline:\n{genome.diff(baseline, champ['genome'])}")
         if test_tasks:
             base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_start.toml"),
                                     test_tasks, repeats, timeout, model)
@@ -502,7 +502,7 @@ def main() -> int:
             print("[forge] self-check failed — refusing to train (use --no-gate to override).")
             return 1
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        sp = S.load_splits()
+        sp = splits.load_splits()
         train_tasks = [t.strip() for t in a.train_tasks.split(",") if t.strip()] or sp["train"]
         holdout_tasks = [t.strip() for t in a.holdout_tasks.split(",") if t.strip()] or sp["val"]
         test_tasks = [t.strip() for t in a.test_tasks.split(",") if t.strip()] or sp["test"]
@@ -517,7 +517,7 @@ def main() -> int:
             print("[forge] self-check failed — refusing to train (use --no-gate to override).")
             return 1
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        sp = S.load_splits()
+        sp = splits.load_splits()
         train_tasks = [t.strip() for t in a.train_tasks.split(",") if t.strip()] or sp["train"]
         holdout_tasks = [t.strip() for t in a.holdout_tasks.split(",") if t.strip()] or sp["val"]
         test_tasks = [t.strip() for t in a.test_tasks.split(",") if t.strip()] or sp["test"]

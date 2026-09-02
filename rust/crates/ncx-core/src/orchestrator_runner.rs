@@ -325,8 +325,7 @@ mod tests {
     #[test]
     fn isolation_failure_is_fail_closed() {
         let config = Config {
-            workspace: std::env::temp_dir()
-                .join(format!("ncx_missing_runner_{}", std::process::id())),
+            workspace: crate::test_support::unique_temp_dir("ncx_missing_runner"),
             ..Default::default()
         };
         let _ = std::fs::remove_dir_all(&config.workspace);
@@ -339,8 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_promotion_applies_deletions_and_cleans_all_scratch() {
-        let workspace =
-            std::env::temp_dir().join(format!("ncx_runner_promotion_{}", std::process::id()));
+        let workspace = crate::test_support::unique_temp_dir("ncx_runner_promotion");
         let _ = std::fs::remove_dir_all(&workspace);
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::write(workspace.join("remove.txt"), "old").unwrap();

@@ -50,6 +50,9 @@ pub mod user_question;
 mod workspace_promotion;
 pub mod workspace_tools;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub use agent_loop::{
     suggest_title_with_provider, AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult,
 };

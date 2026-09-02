@@ -45,7 +45,7 @@ impl Provider for ScriptedProvider {
 }
 
 fn tmpdir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("ncx_loop_{name}_{}", std::process::id()));
+    let d = crate::test_support::unique_temp_dir(&format!("ncx_loop_{name}"));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d.canonicalize().unwrap()

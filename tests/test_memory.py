@@ -11,32 +11,31 @@ from pathlib import Path
 
 import pytest
 
-from nanocodex.agent import memory_store as M
+from nanocodex.agent import memory_store as memory_store
 from nanocodex.agent.memory_store import MemoryStore, format_bullet
-
 
 # --- pure: load -----------------------------------------------------------
 
 def test_load_returns_none_for_missing_file(tmp_path):
-    assert M.load(tmp_path / "nope.md") is None
+    assert memory_store.load(tmp_path / "nope.md") is None
 
 
 def test_load_returns_none_for_blank_file(tmp_path):
     p = tmp_path / "memory.md"
     p.write_text("   \n\t\n", encoding="utf-8")
-    assert M.load(p) is None
+    assert memory_store.load(p) is None
 
 
 def test_load_returns_content(tmp_path):
     p = tmp_path / "memory.md"
     p.write_text("- a fact", encoding="utf-8")
-    assert M.load(p) == "- a fact"
+    assert memory_store.load(p) == "- a fact"
 
 
 # --- pure: as_system_block ------------------------------------------------
 
 def test_as_system_block_wraps_in_user_memory_tag():
-    block = M.as_system_block("- likes Chinese replies", source=Path("/x/memory.md"))
+    block = memory_store.as_system_block("- likes Chinese replies", source=Path("/x/memory.md"))
     assert block.startswith("<user_memory ")
     assert 'source="' in block
     assert "- likes Chinese replies" in block
@@ -44,27 +43,27 @@ def test_as_system_block_wraps_in_user_memory_tag():
 
 
 def test_as_system_block_empty_content_returns_empty_string():
-    assert M.as_system_block("   ") == ""
+    assert memory_store.as_system_block("   ") == ""
 
 
 def test_as_system_block_truncates_oversized_content():
-    big = "x" * (M._MAX_MEMORY_CHARS + 5000)
-    block = M.as_system_block(big)
+    big = "x" * (memory_store._MAX_MEMORY_CHARS + 5000)
+    block = memory_store.as_system_block(big)
     assert "truncated" in block
     # The body is capped near the limit (plus tags/marker overhead).
-    assert len(block) < M._MAX_MEMORY_CHARS + 1000
+    assert len(block) < memory_store._MAX_MEMORY_CHARS + 1000
 
 
 # --- pure: render_for_prompt ----------------------------------------------
 
 def test_render_for_prompt_empty_when_no_file(tmp_path):
-    assert M.render_for_prompt(tmp_path / "nope.md") == ""
+    assert memory_store.render_for_prompt(tmp_path / "nope.md") == ""
 
 
 def test_render_for_prompt_wraps_existing(tmp_path):
     p = tmp_path / "memory.md"
     p.write_text("- a durable fact", encoding="utf-8")
-    out = M.render_for_prompt(p)
+    out = memory_store.render_for_prompt(p)
     assert "<user_memory" in out
     assert "- a durable fact" in out
 
@@ -122,7 +121,7 @@ def _policy(tmp_path):
 def test_build_system_prompt_includes_memory_block(tmp_path):
     from nanocodex.agent.prompt import build_system_prompt
 
-    memory = M.as_system_block("- partner is X", source=tmp_path / "memory.md")
+    memory = memory_store.as_system_block("- partner is X", source=tmp_path / "memory.md")
     prompt = build_system_prompt(_policy(tmp_path), "on-request", memory=memory)
     assert "# User memory" in prompt
     assert "- partner is X" in prompt
@@ -140,7 +139,7 @@ def test_build_system_prompt_omits_memory_section_when_empty(tmp_path):
 
 def test_remember_tool_appends_and_reports(tmp_path, monkeypatch):
     # Point the default memory path at a tmp file so the tool writes there.
-    monkeypatch.setattr(M, "DEFAULT_MEMORY_PATH", tmp_path / "memory.md")
+    monkeypatch.setattr(memory_store, "DEFAULT_MEMORY_PATH", tmp_path / "memory.md")
     from nanocodex.tools.remember_tool import RememberTool
 
     tool = RememberTool(ctx=None)
@@ -150,7 +149,7 @@ def test_remember_tool_appends_and_reports(tmp_path, monkeypatch):
 
 
 def test_remember_tool_rejects_empty_note(tmp_path, monkeypatch):
-    monkeypatch.setattr(M, "DEFAULT_MEMORY_PATH", tmp_path / "memory.md")
+    monkeypatch.setattr(memory_store, "DEFAULT_MEMORY_PATH", tmp_path / "memory.md")
     from nanocodex.tools.remember_tool import RememberTool
 
     tool = RememberTool(ctx=None)

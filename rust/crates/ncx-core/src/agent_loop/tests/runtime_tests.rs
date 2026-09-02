@@ -247,7 +247,7 @@ async fn stop_hook_output_is_appended_to_final_text() {
             event: "stop".into(),
             matcher: "*".into(),
             command: "echo stop-ok".into(),
-            timeout_s: 3,
+            timeout_s: 20,
         }],
     );
 

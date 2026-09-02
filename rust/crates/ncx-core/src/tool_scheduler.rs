@@ -158,8 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_only_pool_is_bounded_and_preserves_model_order() {
-        let workspace =
-            std::env::temp_dir().join(format!("ncx_bounded_read_pool_{}", std::process::id()));
+        let workspace = crate::test_support::unique_temp_dir("ncx_bounded_read_pool");
         std::fs::create_dir_all(&workspace).unwrap();
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
         let active = Rc::new(Cell::new(0));
@@ -190,6 +189,11 @@ mod tests {
             vec!["result-0", "result-1", "result-2", "result-3", "result-4"]
         );
         assert_eq!(active.get(), 0);
+        assert!(
+            peak.get() >= 2,
+            "read-only calls regressed to serial execution; peak concurrency was {}",
+            peak.get()
+        );
         assert!(peak.get() <= 2, "peak concurrency was {}", peak.get());
     }
 }

@@ -300,7 +300,6 @@ mod tests {
     };
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn context() -> ToolContext {
         let workspace = PathBuf::from("runtime-plugin-test");
@@ -516,11 +515,7 @@ mod tests {
 
     #[test]
     fn external_profile_bundle_and_overlay_drive_runtime_selection() {
-        let id = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("ncx-runtime-profile-{id}"));
+        let root = crate::test_support::unique_temp_dir("ncx-runtime-profile");
         std::fs::create_dir_all(root.join("profiles")).unwrap();
         std::fs::create_dir_all(root.join("bundles")).unwrap();
         std::fs::write(

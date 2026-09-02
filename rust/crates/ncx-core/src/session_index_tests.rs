@@ -15,7 +15,7 @@ fn parse_ts_ms_orders_legacy_iso_before_ms_epoch() {
 }
 
 fn tmp_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("ncx_session_index_{name}_{}", now_stamp()))
+    crate::test_support::unique_temp_dir(&format!("ncx_session_index_{name}"))
 }
 
 fn msgs() -> Vec<Value> {

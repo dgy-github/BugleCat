@@ -2,16 +2,28 @@ use super::*;
 use ncx_app_server::{GoalRoundDriveOutcome, GoalRoundDriver};
 use ncx_protocol::{GoalRef, TurnUsage};
 
-pub(super) async fn run(
-    app: AppHandle,
-    app_server: Arc<AppServer<JsonThreadStore>>,
-    session_grants: GrantRegistry,
-    session_id: String,
-    workspace: PathBuf,
-    cancel: CancelFlag,
-    approver: Rc<dyn ApprovalHandler>,
-    questioner: Rc<dyn UserQuestionHandler>,
-) {
+pub(super) struct GoalTurnInput {
+    pub(super) app: AppHandle,
+    pub(super) app_server: Arc<AppServer<JsonThreadStore>>,
+    pub(super) session_grants: GrantRegistry,
+    pub(super) session_id: String,
+    pub(super) workspace: PathBuf,
+    pub(super) cancel: CancelFlag,
+    pub(super) approver: Rc<dyn ApprovalHandler>,
+    pub(super) questioner: Rc<dyn UserQuestionHandler>,
+}
+
+pub(super) async fn run(input: GoalTurnInput) {
+    let GoalTurnInput {
+        app,
+        app_server,
+        session_grants,
+        session_id,
+        workspace,
+        cancel,
+        approver,
+        questioner,
+    } = input;
     let Ok(thread_id) = ThreadId::new(session_id.clone()) else {
         emit_safe_error(&app, &session_id, "长期目标会话标识无效。");
         return;

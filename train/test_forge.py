@@ -15,13 +15,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
 import forge  # noqa: E402
-import genome as G  # noqa: E402
-import teacher as T  # noqa: E402
+import genome  # noqa: E402
+import teacher  # noqa: E402
 
-BASELINE = G.Genome(system_prompt="base prompt", tool_desc={"read_file": "rf", "apply_patch": "ap"})
+BASELINE = genome.Genome(system_prompt="base prompt", tool_desc={"read_file": "rf", "apply_patch": "ap"})
 
 
-class FakeTeacher(T.TeacherBackend):
+class FakeTeacher(teacher.TeacherBackend):
     def __init__(self, name, override_toml):
         self.name = name
         self._toml = override_toml
@@ -33,16 +33,16 @@ class FakeTeacher(T.TeacherBackend):
 
 def _install(monkey_eval):
     """Point forge at deterministic stand-ins. Returns a restore() callable."""
-    orig = (forge.G.extract_current, forge.ev.evaluate, forge.T.build_panel,
+    orig = (forge.genome.extract_current, forge.ev.evaluate, forge.teacher.build_panel,
             forge.GENOMES_DIR, forge.RUNS_DIR)
     tmp = Path(tempfile.mkdtemp(prefix="forge_test_"))
     forge.GENOMES_DIR = tmp / "genomes"
     forge.RUNS_DIR = tmp / "runs"
-    forge.G.extract_current = lambda: BASELINE.copy()
+    forge.genome.extract_current = lambda: BASELINE.copy()
     forge.ev.evaluate = monkey_eval
 
     def restore():
-        (forge.G.extract_current, forge.ev.evaluate, forge.T.build_panel,
+        (forge.genome.extract_current, forge.ev.evaluate, forge.teacher.build_panel,
          forge.GENOMES_DIR, forge.RUNS_DIR) = orig
     return restore
 
@@ -70,7 +70,7 @@ def _eval_from_content(improves_train: bool, holdout_ok: bool):
 
 def test_accepts_when_train_improves_and_holdout_holds():
     restore = _install(_eval_from_content(improves_train=True, holdout_ok=True))
-    forge.T.build_panel = lambda verbose=True: [FakeTeacher("fake", 'system_prompt = "IMPROVED prompt"')]
+    forge.teacher.build_panel = lambda verbose=True: [FakeTeacher("fake", 'system_prompt = "IMPROVED prompt"')]
     try:
         lin = forge.train(rounds=1, train_tasks=["t_a"], holdout_tasks=["hold_b"],
                           repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T1")
@@ -84,7 +84,7 @@ def test_accepts_when_train_improves_and_holdout_holds():
 
 def test_rejects_when_holdout_regresses():
     restore = _install(_eval_from_content(improves_train=True, holdout_ok=False))
-    forge.T.build_panel = lambda verbose=True: [FakeTeacher("fake", 'system_prompt = "IMPROVED prompt"')]
+    forge.teacher.build_panel = lambda verbose=True: [FakeTeacher("fake", 'system_prompt = "IMPROVED prompt"')]
     try:
         lin = forge.train(rounds=1, train_tasks=["t_a"], holdout_tasks=["hold_b"],
                           repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T2")
@@ -99,7 +99,7 @@ def test_rejects_when_holdout_regresses():
 def test_invalid_candidate_is_skipped():
     restore = _install(_eval_from_content(improves_train=True, holdout_ok=True))
     # Override blanks a load-bearing description -> validate() rejects it.
-    forge.T.build_panel = lambda verbose=True: [
+    forge.teacher.build_panel = lambda verbose=True: [
         FakeTeacher("bad", '[tool_desc]\napply_patch = ""')]
     try:
         lin = forge.train(rounds=1, train_tasks=["t_a"], holdout_tasks=["hold_b"],

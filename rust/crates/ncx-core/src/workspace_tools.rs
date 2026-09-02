@@ -374,7 +374,7 @@ mod tests {
     use ncx_sandbox::{SandboxPolicy, READ_ONLY};
 
     fn fixture(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("ncx_workspace_tools_{name}"));
+        let root = crate::test_support::unique_temp_dir(&format!("ncx_workspace_tools_{name}"));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src/nested")).unwrap();
         std::fs::create_dir_all(root.join(".hidden")).unwrap();

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from nanocodex.tools.schedule_tool import ManageScheduleTool
-from nanocodex.tools.base import ToolContext
 from nanocodex.sandbox.approval import ON_REQUEST, Approver
 from nanocodex.sandbox.executor import make_executor
 from nanocodex.sandbox.policy import WORKSPACE_WRITE, SandboxPolicy
+from nanocodex.tools.base import ToolContext
+from nanocodex.tools.schedule_tool import ManageScheduleTool
 
 
 @pytest.fixture

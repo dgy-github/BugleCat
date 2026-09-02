@@ -13,13 +13,11 @@ import pytest
 from nanocodex.agent.skills_store import (
     BUILTIN_SKILLS_DIR,
     DEFAULT_SKILLS_DIR,
-    Skill,
     SkillsStore,
     discover_skills,
     is_valid_skill_name,
     parse_skill,
 )
-
 
 # --- parse_skill (pure) ---------------------------------------------------
 

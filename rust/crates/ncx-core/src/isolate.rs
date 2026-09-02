@@ -62,7 +62,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("ncx_isolate_{name}"));
+        let d = crate::test_support::unique_temp_dir(&format!("ncx_isolate_{name}"));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

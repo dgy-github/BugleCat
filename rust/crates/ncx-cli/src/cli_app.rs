@@ -189,14 +189,16 @@ async fn attach_mcp(
     if servers.is_empty() {
         eprintln!("mcp: --mcp set but no servers found in ~/.nanocodex/mcp.toml");
     }
-    let prepared = match prepare_configured_mcp_tools(&servers).await {
-        Ok(prepared) => prepared,
-        Err(error) => {
-            eprintln!("mcp: load failed: {error}");
-            return Ok(Vec::new());
-        }
-    };
-    match tools.replace_tools(&[], prepared) {
+    let prepared = prepare_configured_mcp_tools(&servers).await;
+    report_mcp_server_failures(&prepared.failures);
+    if !servers.is_empty() && prepared.successful_servers == 0 {
+        eprintln!(
+            "mcp: all {} configured server(s) failed; continuing without MCP tools",
+            servers.len()
+        );
+        return Ok(Vec::new());
+    }
+    match tools.replace_tools(&[], prepared.tools) {
         Ok(names) => {
             tools.replace_service(
                 "mcp",

@@ -65,9 +65,9 @@ def main() -> None:
     sections = split_sections(raw)
 
     # preamble (title + usage note before "## 目录")
-    preamble_lines = [l for l in preamble.split("\n") if l.strip()]
+    preamble_lines = [line for line in preamble.split("\n") if line.strip()]
     title_line = preamble_lines[0].lstrip("# ").strip()
-    intro_md = "\n".join(l for l in preamble_lines[1:])
+    intro_md = "\n".join(line for line in preamble_lines[1:])
     intro_html = md_to_html(intro_md)
 
     toc_entries = []

@@ -163,6 +163,291 @@ fn runtime_requests_are_routed_by_the_app_server() {
 }
 
 #[test]
+fn failed_runtime_create_is_compensated_and_same_id_can_retry() {
+    let server = server();
+    let id = ThreadId::new("create-rollback").unwrap();
+    let rejected = RecordingRuntime {
+        fail_create_thread: true,
+        ..Default::default()
+    };
+    let request = ClientRequest::ThreadCreateActivate {
+        thread_id: id.clone(),
+        workspace: "workspace".into(),
+        title: "title".into(),
+        harness_profile: "full".into(),
+    };
+
+    assert!(server
+        .dispatch_with_runtime(request.clone(), &rejected)
+        .is_err());
+    assert!(server
+        .dispatch(ClientRequest::ThreadRead {
+            thread_id: id.clone(),
+        })
+        .is_err());
+    let listed = server
+        .dispatch(ClientRequest::ThreadList {
+            include_archived: true,
+        })
+        .unwrap();
+    assert!(matches!(
+        listed.response.payload,
+        ResponsePayload::Threads(ref threads) if threads.is_empty()
+    ));
+
+    // The failed activation must not reserve the caller-provided ID.
+    server
+        .dispatch_with_runtime(request, &RecordingRuntime::default())
+        .unwrap();
+}
+
+#[test]
+fn pending_runtime_create_rejects_a_concurrent_activation_before_compensation() {
+    let server = Arc::new(server());
+    let id = ThreadId::new("create-activation-race").unwrap();
+    let gate = Arc::new(ProfileValidationGate::default());
+    let rejected = Arc::new(RecordingRuntime {
+        create_activation_gate: Some(gate.clone()),
+        fail_create_thread: true,
+        ..Default::default()
+    });
+    let request = ClientRequest::ThreadCreateActivate {
+        thread_id: id.clone(),
+        workspace: "workspace".into(),
+        title: "title".into(),
+        harness_profile: "full".into(),
+    };
+    let pending_server = server.clone();
+    let pending_runtime = rejected.clone();
+    let pending = std::thread::spawn(move || {
+        pending_server.dispatch_with_runtime(request, pending_runtime.as_ref())
+    });
+
+    gate.wait_until_entered();
+    let activation_error = server
+        .dispatch_with_runtime(
+            ClientRequest::ThreadActivate {
+                thread_id: id.clone(),
+            },
+            &RecordingRuntime::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        activation_error,
+        AppServerError::InvalidRequest(ref message)
+            if message.contains("activation is still in progress")
+    ));
+
+    gate.release();
+    assert!(pending.join().unwrap().is_err());
+    assert!(server
+        .dispatch(ClientRequest::ThreadRead { thread_id: id })
+        .is_err());
+}
+
+fn assert_cross_process_runtime_handoff_keeps_provisioned_thread(
+    request: impl FnOnce(ThreadId) -> ClientRequest,
+) {
+    let path = std::env::temp_dir().join(format!(
+        "ncx-app-server-cross-process-{}-{}.json",
+        std::process::id(),
+        TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&path);
+    let creating_server = Arc::new(AppServer::new(
+        Arc::new(JsonThreadStore::open(&path).unwrap()),
+        || 100,
+    ));
+    // A separate JsonThreadStore/AppServer simulates a second GUI or CLI
+    // process. Its durable activation marker must survive the first process's
+    // failed host handoff.
+    let activating_server = AppServer::new(Arc::new(JsonThreadStore::open(&path).unwrap()), || 100);
+    let id = ThreadId::new("cross-process-activation").unwrap();
+    let gate = Arc::new(ProfileValidationGate::default());
+    let rejected = Arc::new(RecordingRuntime {
+        create_activation_gate: Some(gate.clone()),
+        fail_create_thread: true,
+        ..Default::default()
+    });
+    let create_request = ClientRequest::ThreadCreateActivate {
+        thread_id: id.clone(),
+        workspace: "workspace".into(),
+        title: "title".into(),
+        harness_profile: "full".into(),
+    };
+    let pending_server = creating_server.clone();
+    let pending_runtime = rejected.clone();
+    let pending = std::thread::spawn(move || {
+        pending_server.dispatch_with_runtime(create_request, pending_runtime.as_ref())
+    });
+
+    gate.wait_until_entered();
+    activating_server
+        .dispatch_with_runtime(request(id.clone()), &RecordingRuntime::default())
+        .unwrap();
+
+    gate.release();
+    let error = pending.join().unwrap().unwrap_err();
+    assert!(matches!(
+        error,
+        AppServerError::Runtime(ref message) if message.contains("was changed during activation and was retained")
+    ));
+    assert!(activating_server
+        .dispatch(ClientRequest::ThreadRead { thread_id: id })
+        .is_ok());
+}
+
+#[test]
+fn cross_process_runtime_handoffs_keep_a_thread_when_the_provisioning_host_fails() {
+    assert_cross_process_runtime_handoff_keeps_provisioned_thread(|thread_id| {
+        ClientRequest::ThreadActivate { thread_id }
+    });
+    // The host queues the Turn before its worker starts a durable Turn. It
+    // must therefore establish the same cross-process rollback fence.
+    assert_cross_process_runtime_handoff_keeps_provisioned_thread(|thread_id| {
+        ClientRequest::TurnSubmit {
+            thread_id,
+            text: "queued while another host activates".into(),
+            images: Vec::new(),
+            execution_mode: ncx_protocol::ExecutionMode::Agent,
+        }
+    });
+    assert_cross_process_runtime_handoff_keeps_provisioned_thread(|thread_id| {
+        ClientRequest::RuntimePermissionModeSet {
+            thread_id,
+            mode: "default".into(),
+        }
+    });
+    assert_cross_process_runtime_handoff_keeps_provisioned_thread(|thread_id| {
+        ClientRequest::TurnInterruptLatest { thread_id }
+    });
+    assert_cross_process_runtime_handoff_keeps_provisioned_thread(|thread_id| {
+        ClientRequest::InteractionApprove {
+            thread_id: Some(thread_id),
+            id: 7,
+            decision: "once".into(),
+        }
+    });
+    assert_cross_process_runtime_handoff_keeps_provisioned_thread(|thread_id| {
+        ClientRequest::InteractionAnswer {
+            thread_id: Some(thread_id),
+            id: 8,
+            answer: Some("keep the provisioned thread".into()),
+        }
+    });
+}
+
+#[test]
+fn failed_runtime_fork_removes_target_thread_context_and_goal() {
+    let server = server();
+    let source = ThreadId::new("fork-source").unwrap();
+    let target = ThreadId::new("fork-rollback").unwrap();
+    server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(source.clone()),
+            workspace: "workspace".into(),
+            title: "source".into(),
+            harness_profile: "full".into(),
+        })
+        .unwrap();
+    server
+        .dispatch(ClientRequest::ThreadModelContextReplace {
+            thread_id: source.clone(),
+            messages: vec![serde_json::json!({"role":"assistant","content":"seed"})],
+        })
+        .unwrap();
+    server
+        .dispatch(ClientRequest::GoalCreate {
+            thread_id: source.clone(),
+            objective: "finish fork rollback".into(),
+            max_goal_rounds: 3,
+        })
+        .unwrap();
+
+    let rejected = RecordingRuntime {
+        fail_fork_thread: true,
+        ..Default::default()
+    };
+    assert!(server
+        .dispatch_with_runtime(
+            ClientRequest::ThreadForkActivate {
+                thread_id: source,
+                new_thread_id: target.clone(),
+            },
+            &rejected,
+        )
+        .is_err());
+    assert!(server
+        .dispatch(ClientRequest::ThreadRead {
+            thread_id: target.clone(),
+        })
+        .is_err());
+    assert!(server
+        .dispatch(ClientRequest::ThreadModelContextRead {
+            thread_id: target.clone(),
+        })
+        .is_err());
+    assert!(server
+        .dispatch(ClientRequest::GoalRead { thread_id: target })
+        .is_err());
+}
+
+#[test]
+fn pending_runtime_fork_rejects_activation_of_the_new_target() {
+    let server = Arc::new(server());
+    let source = ThreadId::new("fork-activation-source").unwrap();
+    let target = ThreadId::new("fork-activation-target").unwrap();
+    server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(source.clone()),
+            workspace: "workspace".into(),
+            title: "source".into(),
+            harness_profile: "full".into(),
+        })
+        .unwrap();
+    let gate = Arc::new(ProfileValidationGate::default());
+    let rejected = Arc::new(RecordingRuntime {
+        fork_activation_gate: Some(gate.clone()),
+        fail_fork_thread: true,
+        ..Default::default()
+    });
+    let pending_server = server.clone();
+    let pending_runtime = rejected.clone();
+    let pending_source = source.clone();
+    let pending_target = target.clone();
+    let pending = std::thread::spawn(move || {
+        pending_server.dispatch_with_runtime(
+            ClientRequest::ThreadForkActivate {
+                thread_id: pending_source,
+                new_thread_id: pending_target,
+            },
+            pending_runtime.as_ref(),
+        )
+    });
+
+    gate.wait_until_entered();
+    let activation_error = server
+        .dispatch_with_runtime(
+            ClientRequest::ThreadActivate {
+                thread_id: target.clone(),
+            },
+            &RecordingRuntime::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        activation_error,
+        AppServerError::InvalidRequest(ref message)
+            if message.contains("activation is still in progress")
+    ));
+
+    gate.release();
+    assert!(pending.join().unwrap().is_err());
+    assert!(server
+        .dispatch(ClientRequest::ThreadRead { thread_id: target })
+        .is_err());
+}
+
+#[test]
 fn harness_profile_uses_the_last_serialized_selection_before_the_first_turn() {
     let server = server();
     let runtime = RecordingRuntime::default();

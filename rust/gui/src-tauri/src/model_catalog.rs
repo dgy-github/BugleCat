@@ -48,32 +48,37 @@ const GEMINI_PRICING: &str = "https://ai.google.dev/gemini-api/docs/latest-model
 const OPENROUTER_PRICING: &str = "https://openrouter.ai/models";
 const YUNMO_HOME: &str = "https://api.yunmo-ai.com/";
 
-fn model(
-    provider_id: &str,
-    model_id: &str,
-    display_name: &str,
-    base_url: &str,
-    price_in: f64,
-    price_out: f64,
-    price_currency: &str,
-    source_url: &str,
-    context_length: Option<u64>,
-) -> CatalogModel {
-    CatalogModel {
-        provider_id: provider_id.into(),
-        model_id: model_id.into(),
-        display_name: display_name.into(),
-        base_url: base_url.into(),
-        price_in,
-        price_out,
-        price_currency: price_currency.into(),
-        price_source: PriceSource::OfficialDirect,
-        pricing_note: None,
-        source_url: source_url.into(),
-        updated_at: UPDATED_AT.into(),
-        context_length,
-        direct_available: true,
-    }
+/// Keep catalog entries compact while making the fixed schema explicit at the
+/// call site. A macro avoids a wide positional helper function that Clippy
+/// rightfully treats as an API smell.
+macro_rules! model {
+    (
+        $provider_id:expr,
+        $model_id:expr,
+        $display_name:expr,
+        $base_url:expr,
+        $price_in:expr,
+        $price_out:expr,
+        $price_currency:expr,
+        $source_url:expr,
+        $context_length:expr $(,)?
+    ) => {
+        CatalogModel {
+            provider_id: $provider_id.into(),
+            model_id: $model_id.into(),
+            display_name: $display_name.into(),
+            base_url: $base_url.into(),
+            price_in: $price_in,
+            price_out: $price_out,
+            price_currency: $price_currency.into(),
+            price_source: PriceSource::OfficialDirect,
+            pricing_note: None,
+            source_url: $source_url.into(),
+            updated_at: UPDATED_AT.into(),
+            context_length: $context_length,
+            direct_available: true,
+        }
+    };
 }
 
 fn with_pricing_note(mut preset: CatalogModel, note: &str) -> CatalogModel {
@@ -88,7 +93,7 @@ fn aggregator_model(
     price_out: f64,
     context_length: Option<u64>,
 ) -> CatalogModel {
-    let mut preset = model(
+    let mut preset = model!(
         "openrouter",
         model_id,
         display_name,
@@ -111,7 +116,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "deepseek".into(),
             name: "DeepSeek".into(),
             models: vec![
-                with_pricing_note(model(
+                with_pricing_note(model!(
                     "deepseek",
                     "deepseek-v4-flash",
                     "DeepSeek V4 Flash",
@@ -122,7 +127,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     DEEPSEEK_PRICING,
                     Some(1_000_000),
                 ), "显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
-                with_pricing_note(model(
+                with_pricing_note(model!(
                     "deepseek",
                     "deepseek-v4-pro",
                     "DeepSeek V4 Pro",
@@ -133,7 +138,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     DEEPSEEK_PRICING,
                     Some(1_000_000),
                 ), "显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
-                with_pricing_note(model(
+                with_pricing_note(model!(
                     "deepseek",
                     "deepseek-v4-flash-vision-exp",
                     "DeepSeek V4 Flash Vision Exp",
@@ -149,7 +154,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
         CatalogProvider {
             id: "bailian".into(),
             name: "阿里百炼".into(),
-            models: vec![model(
+            models: vec![model!(
                 "bailian",
                 "qwen3.7-max",
                 "Qwen3.7 Max",
@@ -165,7 +170,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "ark".into(),
             name: "火山方舟".into(),
             models: vec![
-                model(
+                model!(
                     "ark",
                     "doubao-seed-evolving",
                     "豆包 Seed Evolving",
@@ -176,7 +181,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     ARK_PRICING,
                     Some(1_000_000),
                 ),
-                model(
+                model!(
                     "ark",
                     "doubao-seed-2.0-code",
                     "豆包 Seed 2.0 Code",
@@ -193,7 +198,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "zhipu".into(),
             name: "智谱 AI".into(),
             models: vec![
-                model(
+                model!(
                     "zhipu",
                     "glm-5.2",
                     "GLM-5.2",
@@ -204,7 +209,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     ZHIPU_PRICING,
                     Some(1_000_000),
                 ),
-                model(
+                model!(
                     "zhipu",
                     "glm-4.7-flash",
                     "GLM-4.7 Flash（免费）",
@@ -221,7 +226,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "moonshot".into(),
             name: "月之暗面 Kimi".into(),
             models: vec![
-                model(
+                model!(
                     "moonshot",
                     "kimi-k3",
                     "Kimi K3",
@@ -232,7 +237,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     MOONSHOT_PRICING,
                     Some(1_000_000),
                 ),
-                model(
+                model!(
                     "moonshot",
                     "kimi-k2.7-code",
                     "Kimi K2.7 Code",
@@ -249,7 +254,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "minimax".into(),
             name: "MiniMax".into(),
             models: vec![
-                model(
+                model!(
                     "minimax",
                     "MiniMax-M3",
                     "MiniMax M3",
@@ -260,7 +265,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     MINIMAX_PRICING,
                     None,
                 ),
-                model(
+                model!(
                     "minimax",
                     "MiniMax-M2.7-highspeed",
                     "MiniMax M2.7 极速版",
@@ -277,7 +282,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "openai".into(),
             name: "OpenAI".into(),
             models: vec![
-                model(
+                model!(
                     "openai",
                     "gpt-5.6-sol",
                     "GPT-5.6 Sol",
@@ -288,7 +293,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     OPENAI_PRICING,
                     Some(1_050_000),
                 ),
-                model(
+                model!(
                     "openai",
                     "gpt-5.6-terra",
                     "GPT-5.6 Terra",
@@ -299,7 +304,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     OPENAI_PRICING,
                     Some(1_050_000),
                 ),
-                model(
+                model!(
                     "openai",
                     "gpt-5.6-luna",
                     "GPT-5.6 Luna",
@@ -316,7 +321,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "yunmo".into(),
             name: "云末 AI（中转）".into(),
             models: vec![{
-                let mut preset = model(
+                let mut preset = model!(
                     "yunmo",
                     "gpt-5.6-sol",
                     "GPT-5.6 Sol（云末中转）",
@@ -337,7 +342,7 @@ pub fn catalog() -> Vec<CatalogProvider> {
             id: "gemini".into(),
             name: "Google Gemini".into(),
             models: vec![with_pricing_note(
-                model(
+                model!(
                     "gemini",
                     "gemini-3.7-flash",
                     "Gemini 3.7 Flash",
@@ -378,7 +383,7 @@ pub fn find_preset(provider_id: &str, model_id: &str) -> Option<CatalogModel> {
 }
 
 pub fn yunmo_model(model_id: &str) -> CatalogModel {
-    let mut preset = model(
+    let mut preset = model!(
         "yunmo",
         model_id,
         model_id,

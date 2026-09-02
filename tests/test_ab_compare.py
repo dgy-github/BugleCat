@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -28,7 +27,6 @@ from nanocodex.agent.ab_compare import (
     summarize_result,
     worktree_name,
 )
-
 
 # --- a duck-typed stand-in for loop.TurnResult ----------------------------
 

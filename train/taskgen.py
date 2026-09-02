@@ -30,7 +30,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import teacher as T  # noqa: E402
+import teacher  # noqa: E402
 from process_control import run_owned  # noqa: E402
 
 BENCH_TASKS = Path(__file__).resolve().parent.parent / "bench" / "tasks"
@@ -157,7 +157,7 @@ def admit(task: dict, name: str, overwrite: bool = False) -> Path:
 def generate(n: int, backend_name: str = "", timeout: int = 240,
              overwrite: bool = False) -> list[str]:
     """Generate up to n self-validated tasks; return admitted task names."""
-    panel = T.build_panel()
+    panel = teacher.build_panel()
     if backend_name:
         panel = [b for b in panel if b.name == backend_name]
     if not panel:

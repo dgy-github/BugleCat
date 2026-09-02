@@ -5,7 +5,6 @@ import type { ThreadController } from "./thread-controller.svelte";
 import type { UsageController } from "./usage-controller.svelte";
 
 type WorkspaceRecovery = {
-  restore: (workspace: string) => Promise<string>;
   reconcile: () => Promise<string>;
 };
 
@@ -20,6 +19,12 @@ export class ThreadLifecycleController {
   // the newest projection: a slow response from an earlier workspace/session
   // event must not overwrite a newer sidebar snapshot.
   private refreshGeneration = 0;
+  // Runtime events can arrive in bursts (Ready, title, completion, and a
+  // sidebar action). A refresh is one list request plus up to 50 reads, so
+  // coalesce every request that arrives while it is running into one trailing
+  // pass instead of creating an unbounded fan-out of obsolete requests.
+  private refreshInFlight: Promise<void> | null = null;
+  private refreshDirty = false;
   private profileSelectionGeneration = 0;
   private profileSelectionQueue: Promise<void> = Promise.resolve();
   // Workspace activation changes a process-global CWD. Associate recovery
@@ -100,7 +105,28 @@ export class ThreadLifecycleController {
     });
   };
 
-  refresh = async (): Promise<void> => {
+  refresh = (): Promise<void> => {
+    if (this.refreshInFlight) {
+      this.refreshDirty = true;
+      return this.refreshInFlight;
+    }
+    const flight = this.runRefreshLoop();
+    this.refreshInFlight = flight;
+    return flight;
+  };
+
+  private runRefreshLoop = async (): Promise<void> => {
+    try {
+      do {
+        this.refreshDirty = false;
+        await this.refreshOnce();
+      } while (this.refreshDirty);
+    } finally {
+      this.refreshInFlight = null;
+    }
+  };
+
+  private refreshOnce = async (): Promise<void> => {
     const generation = ++this.refreshGeneration;
     try {
       const metadata = await appServerRequest<{ id: string }[]>({ method: "threadList", params: { includeArchived: true } });
@@ -191,6 +217,7 @@ export class ThreadLifecycleController {
     this.thread.expectReady(id);
     this.usage.restore(id);
     this.thread.restore(id);
+    let activationAccepted = false;
     try {
       this.thread.busy = this.thread.runningSessions.has(id);
       // Activation emits a legacy snapshot through `loaded`. Suppress that one
@@ -199,6 +226,7 @@ export class ThreadLifecycleController {
       // rounds completed after the last legacy snapshot write).
       this.thread.skipNextLoaded(id);
       await appServerRequest({ method: "threadActivate", params: { threadId: id } });
+      activationAccepted = true;
       const visible = await appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: id } });
       this.activeHarnessProfile = visible.metadata.harnessProfile || "full";
       this.selectedHarnessProfile = this.activeHarnessProfile;
@@ -217,10 +245,19 @@ export class ThreadLifecycleController {
       }
       this.thread.switching = false;
     } catch (error) {
-      this.thread.clearSkippedLoaded(id);
-      const recovery = await this.restoreWorkspaceAfterNavigationFailure(navigation, id, previousWorkspace);
+      if (activationAccepted) {
+        this.keepAcceptedNavigation(
+          navigation,
+          id,
+          title || "会话",
+          `会话已切换，但加载最新历史失败：${error}`,
+        );
+        return;
+      }
+      const recovery = await this.reconcileWorkspaceAfterRejectedNavigation(navigation, id, previousWorkspace);
       if (!recovery.current) return;
       if (!recovery.restored) {
+        this.thread.clearSkippedLoaded(id);
         this.leaveNavigationUnbound(
           navigation,
           id,
@@ -235,6 +272,7 @@ export class ThreadLifecycleController {
       this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.usage.restore(previousId);
       this.thread.restore(previousId);
+      this.thread.clearSkippedLoaded(id);
       this.thread.messages.push({ role: "note", text: `继续会话失败：${error}` });
       void this.refresh();
     }
@@ -253,9 +291,14 @@ export class ThreadLifecycleController {
     const forkTitle = this.nextForkTitle(title || "分叉会话");
     const newThreadId = this.newThreadId();
     this.thread.title = forkTitle; this.thread.currentId = ""; this.usage.reset();
+    let activationAccepted = false;
     try {
       this.thread.expectReady(newThreadId);
+      // Fork also emits a legacy `loaded` snapshot. Keep it suppressed until
+      // the durable Thread remains the final history authority.
+      this.thread.skipNextLoaded(newThreadId);
       const forked = await appServerRequest<ProtocolThread>({ method: "threadForkActivate", params: { threadId: id, newThreadId } });
+      activationAccepted = true;
       this.activeHarnessProfile = forked.metadata.harnessProfile || "full";
       this.selectedHarnessProfile = this.activeHarnessProfile;
       await appServerRequest({ method: "threadRename", params: { threadId: newThreadId, title: forkTitle } });
@@ -263,9 +306,19 @@ export class ThreadLifecycleController {
       this.thread.switching = false;
       await this.refresh();
     } catch (error) {
-      const recovery = await this.restoreWorkspaceAfterNavigationFailure(navigation, newThreadId, previousWorkspace);
+      if (activationAccepted) {
+        this.keepAcceptedNavigation(
+          navigation,
+          newThreadId,
+          forkTitle,
+          `分叉会话已切换，但后续更新失败：${error}`,
+        );
+        return;
+      }
+      const recovery = await this.reconcileWorkspaceAfterRejectedNavigation(navigation, newThreadId, previousWorkspace);
       if (!recovery.current) return;
       if (!recovery.restored) {
+        this.thread.clearSkippedLoaded(newThreadId);
         this.leaveNavigationUnbound(
           navigation,
           newThreadId,
@@ -279,6 +332,7 @@ export class ThreadLifecycleController {
       this.thread.stopping = false;
       this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.usage.restore(previousId); this.thread.restore(previousId);
+      this.thread.clearSkippedLoaded(newThreadId);
       this.thread.messages.push({ role: "note", text: `分叉失败：${error}` });
       void this.refresh();
     }
@@ -308,46 +362,59 @@ export class ThreadLifecycleController {
       && this.thread.switching
       && (this.thread.currentId === expectedId || this.thread.currentId === "");
 
-  private restoreWorkspaceAfterNavigationFailure = async (
+  // Once the backend activation returns successfully, it owns the process
+  // CWD. A later UI-only request (visible-history read or title update) must
+  // not use the pre-navigation workspace recovery path and undo that accepted
+  // runtime handoff.
+  private keepAcceptedNavigation = (
+    generation: number,
+    threadId: string,
+    title: string,
+    message: string,
+  ): void => {
+    if (!this.ownsNavigation(generation, threadId)) return;
+    this.thread.currentId = threadId;
+    this.thread.title = title;
+    this.thread.restore(threadId);
+    this.thread.busy = this.thread.runningSessions.has(threadId);
+    this.thread.stopping = false;
+    this.thread.switching = false;
+    this.thread.messages.push({ role: "note", text: message });
+    void this.refresh();
+  };
+
+  // The backend performs an aborted handoff's CWD rollback while it still owns
+  // the runtime/workspace gates. The frontend only reads back that outcome; a
+  // delayed `workspaceSet(previous)` here could otherwise overwrite a newer
+  // handoff that began after the rejected request returned.
+  private reconcileWorkspaceAfterRejectedNavigation = async (
     generation: number,
     expectedId: string,
     previousWorkspace: string,
   ): Promise<{ current: boolean; restored: boolean; detail: string }> => {
     if (!this.ownsNavigation(generation, expectedId)) return { current: false, restored: false, detail: "" };
     this.thread.sealReadyFence();
-    if (previousWorkspace) {
-      try {
-        await this.workspaceRecovery.restore(previousWorkspace);
-        return {
-          current: this.ownsNavigation(generation, expectedId),
-          restored: this.ownsNavigation(generation, expectedId),
-          detail: "",
-        };
-      } catch (rollback) {
-        return this.reconcileFailedWorkspaceRollback(generation, expectedId, `；恢复原工作区失败：${rollback}`);
-      }
-    }
-    return this.reconcileFailedWorkspaceRollback(generation, expectedId, "；原工作区不可用，无法回滚");
-  };
-
-  private reconcileFailedWorkspaceRollback = async (
-    generation: number,
-    expectedId: string,
-    detail: string,
-  ): Promise<{ current: boolean; restored: false; detail: string }> => {
-    if (!this.ownsNavigation(generation, expectedId)) return { current: false, restored: false, detail: "" };
     try {
       const workspace = await this.workspaceRecovery.reconcile();
+      const current = this.ownsNavigation(generation, expectedId);
+      if (!current) return { current: false, restored: false, detail: "" };
+      if (previousWorkspace && this.sameWorkspace(previousWorkspace, workspace)) {
+        return { current: true, restored: true, detail: "" };
+      }
       const suffix = workspace ? `；当前工作区：${workspace}` : "；当前工作区未能确认";
-      return { current: this.ownsNavigation(generation, expectedId), restored: false, detail: `${detail}${suffix}` };
+      return { current: true, restored: false, detail: `；后端未能恢复原工作区${suffix}` };
     } catch {
       return {
         current: this.ownsNavigation(generation, expectedId),
         restored: false,
-        detail: `${detail}；当前工作区未能确认，已禁止继续操作`,
+        detail: "；当前工作区未能确认，已禁止继续操作",
       };
     }
   };
+
+  private sameWorkspace = (left: string, right: string): boolean =>
+    left.replace(/[\\/]+$/u, "").replaceAll("\\", "/")
+      === right.replace(/[\\/]+$/u, "").replaceAll("\\", "/");
 
   private leaveNavigationUnbound = (
     generation: number,
@@ -376,6 +443,10 @@ export class ThreadLifecycleController {
 
   private invalidateRefresh = (): void => {
     this.refreshGeneration += 1;
+    // A navigation/profile mutation deliberately invalidates any queued
+    // trailing pass. Callers that still need a fresh projection explicitly
+    // invoke refresh after their mutation succeeds.
+    this.refreshDirty = false;
   };
 
   private invalidateProfileSelection = (): void => {

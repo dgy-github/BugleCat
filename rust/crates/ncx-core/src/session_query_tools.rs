@@ -1,8 +1,6 @@
 //! Read-only Harness-style queries over the versioned Thread/Turn store.
 
 use std::path::PathBuf;
-#[cfg(test)]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use ncx_protocol::{Thread, ThreadId, ThreadItem, ThreadMetadata};
@@ -260,16 +258,6 @@ fn limit(args: &Value) -> usize {
         .clamp(1, MAX_RESULTS as u64) as usize
 }
 #[cfg(test)]
-fn now_epoch_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .try_into()
-        .unwrap_or(i64::MAX)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use ncx_protocol::{ItemId, Turn, TurnId, TurnStatus, TurnUsage};
@@ -278,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn searches_visible_thread_projection_without_tool_logs() {
-        let root = std::env::temp_dir().join(format!("ncx_session_query_{}", now_epoch_millis()));
+        let root = crate::test_support::unique_temp_dir("ncx_session_query");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("threads-v2.json");
         let store = JsonThreadStore::open(&path).unwrap();

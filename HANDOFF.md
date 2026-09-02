@@ -1,5 +1,29 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-02：交付收口与真实桌面验证
+
+- 右侧“工作区改动”面板已针对真实大改动工作区复测：文件行禁止 flex 压缩，
+  `rp-body` 是唯一纵向滚动容器；长路径以省略号显示，不再与相邻条目重叠。
+  单次 diff 预览限制为 1,000 行或 192 KiB，超过限制会显示截断说明，且同一时刻
+  只展开一个文件，避免 WebView 为生成文件创建无界 DOM。
+- 宿主运行时的工作区/CWD 切换和 worker 确认共用串行围栏；创建或分叉被运行时
+  拒绝时，仅在精确持久快照仍未变化的情况下回滚新 Thread、模型上下文和 Goal。
+  工作区选择器把 CWD 与新 Thread 创建合并为一次 `threadCreateActivate`，失败后
+  只读取并校准实际工作区，不再用延迟 `workspaceSet` 覆盖较新的切换。侧栏突发
+  事件合并为正在进行的一次刷新及一次尾随刷新，避免反复全量读取持久会话。
+- Codex MCP 与 CLI MCP 都按 server 隔离准备失败：坏 server 只记录并跳过，合法
+  server 继续装配；只有全部失败或工具重名时才保留旧工具集。裸参数保留进程
+  CWD/PATH 语义，显式越界路径拒绝。
+- 本轮最终门禁证据：Rust workspace 与 GUI 分别通过 `cargo fmt`、严格
+  `cargo clippy -D warnings`、单元测试（Core 276、CLI 36、GUI 140）；workspace
+  测试使用 `--all-features`，包括 Temporal feature。前端 `npm.cmd run build`
+  通过（149 modules）；Python `pytest` 601 passed、Ruff 全绿，`git diff --check`
+  通过。workspace 的 all-features 编译使用临时 `PROTOC` 工具路径，未写入仓库。
+- 已同步 README 的可靠性边界、完整质量门禁和 Windows MSVC 构建/安装包路径；
+  `scripts/build-rust-release.ps1` 的默认 target 已与实际桌面发布 target 对齐。
+  `python scripts/check_code_structure.py --git-diff HEAD` 仍会报告若干历史超长
+  文件；它不是本次已通过的 fmt/clippy/ruff 门禁，需作为独立结构债务处理。
+
 ## 2026-09-01：MCP 安全回归、发现容错与测试门禁
 
 - MCP 副作用调用测试已与 compaction recovery 守卫解耦：在

@@ -276,13 +276,13 @@ async fn compact_hooks_wrap_persisted_compaction_and_feed_runtime_notes() {
                 event: "pre_compact".into(),
                 matcher: "*".into(),
                 command: "echo before-compact".into(),
-                timeout_s: 3,
+                timeout_s: 20,
             },
             HookConfig {
                 event: "post_compact".into(),
                 matcher: "*".into(),
                 command: "echo after-compact".into(),
-                timeout_s: 3,
+                timeout_s: 20,
             },
         ],
     );

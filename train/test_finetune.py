@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import finetune as F  # noqa: E402  (must import WITHOUT trl/torch installed)
+import finetune  # noqa: E402  (must import WITHOUT trl/torch installed)
 
 _REC_PASS = {
     "schema": "ncx-forge-trajectory/v1", "task": "t_a", "reward": 1, "tokens": 100,
@@ -37,12 +37,12 @@ def _write(tmp: Path, recs) -> Path:
 def test_load_records_filters_reward_pass_only():
     tmp = Path(tempfile.mkdtemp(prefix="ft_"))
     p = _write(tmp, [_REC_PASS, _REC_FAIL])
-    assert len(F.load_records(p, reward_pass_only=True)) == 1
-    assert len(F.load_records(p, reward_pass_only=False)) == 2
+    assert len(finetune.load_records(p, reward_pass_only=True)) == 1
+    assert len(finetune.load_records(p, reward_pass_only=False)) == 2
 
 
 def test_to_chat_prepends_system_and_keeps_tool_calls():
-    ex = F.to_chat(_REC_PASS)
+    ex = finetune.to_chat(_REC_PASS)
     roles = [m["role"] for m in ex["messages"]]
     assert roles[0] == "system" and ex["messages"][0]["content"] == "You are a precise agent."
     # the STALE in-body system message is dropped
@@ -56,16 +56,16 @@ def test_to_chat_prepends_system_and_keeps_tool_calls():
 def test_build_sft_dataset_passes_only():
     tmp = Path(tempfile.mkdtemp(prefix="ft2_"))
     p = _write(tmp, [_REC_PASS, _REC_FAIL])
-    ex = F.build_sft_dataset([p], reward_pass_only=True)
+    ex = finetune.build_sft_dataset([p], reward_pass_only=True)
     assert len(ex) == 1 and ex[0]["task"] == "t_a"
 
 
 def test_bench_reward_unknown_task_is_zero():
-    assert F.bench_reward("does_not_exist_task", Path(tempfile.mkdtemp())) == 0.0
+    assert finetune.bench_reward("does_not_exist_task", Path(tempfile.mkdtemp())) == 0.0
 
 
 def test_rl_design_is_documented():
-    d = F.rl_design()
+    d = finetune.rl_design()
     assert "bench_reward" in d and "episode" in d
 
 
@@ -74,10 +74,13 @@ if __name__ == "__main__":
     failed = 0
     for fn in fns:
         try:
-            fn(); print(f"ok   {fn.__name__}")
+            fn()
+            print(f"ok   {fn.__name__}")
         except AssertionError as e:
-            failed += 1; print(f"FAIL {fn.__name__}: {e}")
+            failed += 1
+            print(f"FAIL {fn.__name__}: {e}")
         except Exception as e:  # noqa: BLE001
-            failed += 1; print(f"ERR  {fn.__name__}: {type(e).__name__}: {e}")
+            failed += 1
+            print(f"ERR  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     raise SystemExit(1 if failed else 0)

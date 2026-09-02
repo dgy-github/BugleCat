@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from nanocodex.sandbox.approval import NEVER, ApprovalRequest, Decision, step_decision
+from nanocodex.sandbox.approval import ApprovalRequest, Decision, step_decision
 from nanocodex.tools.base import Tool, ToolContext
 
 # nanocodex's OWN, isolated MCP config — deliberately NOT ~/.codex/config.toml

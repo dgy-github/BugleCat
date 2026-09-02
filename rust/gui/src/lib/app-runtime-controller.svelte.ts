@@ -35,17 +35,8 @@ export class AppRuntimeController {
     return this.workspace ? this.workspace.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || this.workspace : "";
   }
 
-  // Thread activation/forking selects a durable Thread workspace inside the
-  // backend before its worker has finished rebuilding. If that later step
-  // fails, the lifecycle controller uses these two methods to restore (or at
-  // least truthfully reconcile) the process-wide CWD before it rebinds UI.
-  restoreWorkspace = async (path: string): Promise<string> => {
-    const workspace = await appServerRequest<string>({ method: "workspaceSet", params: { path } });
-    this.workspace = workspace;
-    this.workspaceChanged();
-    return workspace;
-  };
-
+  // Runtime handoffs own process-CWD changes in the backend. UI recovery only
+  // reads this status before it decides whether a previous Thread can rebind.
   reconcileWorkspace = async (): Promise<string> => {
     try {
       const status = await appServerRequest<{ workspace: string }>({ method: "runtimeStatusRead" });
@@ -60,6 +51,19 @@ export class AppRuntimeController {
       this.workspaceChanged();
       throw error;
     }
+  };
+
+  private sameWorkspace = (left: string, right: string): boolean => {
+    const normalize = (value: string): string => value.trim().replace(/[\\/]+$/u, "").replaceAll("\\", "/");
+    const normalizedLeft = normalize(left);
+    const normalizedRight = normalize(right);
+    const windowsPath = /^[A-Za-z]:\//u.test(normalizedLeft)
+      || /^[A-Za-z]:\//u.test(normalizedRight)
+      || normalizedLeft.startsWith("//")
+      || normalizedRight.startsWith("//");
+    return windowsPath
+      ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+      : normalizedLeft === normalizedRight;
   };
 
   start = async (): Promise<void> => {
@@ -176,8 +180,6 @@ export class AppRuntimeController {
       const previousTitle = this.thread.title;
       const previousMessages = [...this.thread.messages];
       const previousWorkspace = this.workspace;
-      let workspaceChanged = false;
-      let workspaceRestored = false;
       try {
         const threadId = `thread-${crypto.randomUUID()}`;
         this.thread.expectReady(threadId);
@@ -190,24 +192,23 @@ export class AppRuntimeController {
         this.usage.reset();
         this.thread.queued = [];
         this.composer.attached = [];
-        const workspace = await appServerRequest<string>({ method: "workspaceSet", params: { path: directory } });
-        workspaceChanged = true;
-        // Reflect the actual process workspace immediately. If the following
-        // Thread creation or rollback fails, showing the previous path would
-        // make workspace-bound operations fail closed but leave the user on a
-        // misleading project label.
-        this.workspace = workspace;
-        this.workspaceChanged();
-        const created = await appServerRequest<{ metadata: { harnessProfile: string } }>({
+        // ThreadCreateActivate owns the complete workspace handoff. Keeping
+        // the picker as one request lets the backend roll back CWD atomically
+        // if worker initialization fails; a separate workspaceSet here could
+        // race a newer navigation and be impossible to compensate safely.
+        const created = await appServerRequest<{ metadata: { workspace: string; harnessProfile: string } }>({
           method: "threadCreateActivate",
           params: {
             threadId,
-            workspace,
+            workspace: directory,
             title: "(no prompt yet)",
             harnessProfile: this.lifecycle.selectedHarnessProfile,
           },
         });
+        const workspace = created.metadata.workspace;
+        const workspaceDidChange = this.workspace !== workspace;
         this.workspace = workspace;
+        if (workspaceDidChange) this.workspaceChanged();
         this.lifecycle.activeHarnessProfile = created.metadata.harnessProfile || this.lifecycle.selectedHarnessProfile;
         this.thread.currentId = threadId;
         this.thread.restore(threadId);
@@ -218,26 +219,20 @@ export class AppRuntimeController {
         this.thread.switching = false;
         void this.lifecycle.refresh();
       } catch (error) {
-        // Stop every delayed Ready while the process CWD is being restored.
-        // The matching old-session fence is installed only after rollback has
-        // succeeded; on a failed rollback this stays sealed fail-closed.
+        // The backend owns CWD compensation for a rejected activation. Read
+        // the actual runtime state instead of issuing a delayed workspaceSet,
+        // which could overwrite a newer handoff.
         this.thread.sealReadyFence();
-        let rollbackError = "";
-        if (workspaceChanged && previousWorkspace) {
-          try {
-            await this.restoreWorkspace(previousWorkspace);
-            workspaceRestored = true;
-          } catch (rollback) {
-            rollbackError = `；恢复原工作区也失败：${rollback}`;
-            try { rollbackError += `；当前工作区：${await this.reconcileWorkspace()}`; }
-            catch { rollbackError += "；当前工作区未能确认，已禁止继续操作"; }
-          }
+        let currentWorkspace = "";
+        let reconcileError = "";
+        try {
+          currentWorkspace = await this.reconcileWorkspace();
+        } catch (reconcile) {
+          reconcileError = `；当前工作区未能确认：${reconcile}`;
         }
-        if (workspaceChanged && !workspaceRestored) {
-          // CWD changed but could not be restored. Do not rebind the old
-          // Thread/UI to a different workspace. Keep the original ready fence
-          // installed so a delayed Ready for the old session cannot bind this
-          // safe empty state to the new process CWD.
+        if (!currentWorkspace || !previousWorkspace || !this.sameWorkspace(previousWorkspace, currentWorkspace)) {
+          // Do not bind old session state unless the backend proves that CWD is
+          // back in the original project.
           this.thread.busy = false;
           this.thread.stopping = false;
           this.thread.switching = false;
@@ -246,7 +241,7 @@ export class AppRuntimeController {
           this.thread.queued = [];
           this.thread.messages = [{
             role: "note",
-            text: `已切换工作区到 ${this.workspace}，但新会话初始化失败：${error}${rollbackError}。当前未绑定会话，请新建会话后重试。`,
+            text: `切换工作区失败：${error}${reconcileError || `；当前工作区：${currentWorkspace}`}。当前未绑定会话，请新建会话后重试。`,
           }];
           this.usage.reset();
           void this.lifecycle.refresh();
@@ -254,8 +249,7 @@ export class AppRuntimeController {
         }
         // Keep rejecting delayed events until the old session is safely bound
         // again. `handleReady` consumes this fence only when it accepts the
-        // matching Ready event. With no prior session, leave the fence sealed
-        // so the empty state remains fail-closed.
+        // matching Ready event.
         if (previousId) this.thread.expectReady(previousId);
         this.thread.busy = this.thread.runningSessions.has(previousId);
         this.thread.switching = false;
@@ -264,8 +258,8 @@ export class AppRuntimeController {
         this.thread.restore(previousId);
         this.thread.messages = previousMessages;
         this.usage.restore(previousId);
-        if (workspaceRestored) void this.lifecycle.refresh();
-        this.thread.messages.push({ role: "note", text: `切换工作区失败：${error}${rollbackError}` });
+        void this.lifecycle.refresh();
+        this.thread.messages.push({ role: "note", text: `切换工作区失败：${error}` });
       }
     } catch (error) {
       this.thread.messages.push({ role: "note", text: `打开工作区选择器失败：${error}` });

@@ -358,7 +358,7 @@ mod tests {
     use super::*;
 
     fn tmp_ws(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("ncx_checkpoint_{name}_{}", now_stamp()));
+        let dir = crate::test_support::unique_temp_dir(&format!("ncx_checkpoint_{name}"));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

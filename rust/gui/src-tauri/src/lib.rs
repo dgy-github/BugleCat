@@ -20,10 +20,10 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use ncx_app_server::{AppServer, AppServerAdapter, DispatchOutcome};
@@ -52,7 +52,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use bridge::{
     emit_protocol_outcome, request_cancel, safe_session_file_stem, spawn_worker, CancelRegistry,
     Command, DeferredPrompt, DeferredPrompts, GrantRegistry, PendingMap, PendingQuestionMap,
-    RunningSessions, SessionRunKind, WorkerLifecycle,
+    RunningSessions, RuntimeActivation, RuntimeActivationCoordinator, SessionRunKind,
+    WorkerLifecycle, WorkerStartup,
 };
 
 #[derive(Serialize)]
@@ -94,6 +95,16 @@ struct AppState {
     provider_catalog: ProviderCatalogService,
     provider_chat_probe: ProviderChatProbeService,
     provider_activation: ProviderActivationGate,
+    /// Linearizes every command that can replace the process-global Agent
+    /// runtime (new, resume, fork, and permission-mode rebuild).
+    runtime_activation: Arc<RuntimeActivationCoordinator>,
+    /// Keeps a runtime activation's CWD transition, worker handoff, and
+    /// acknowledgement together.  The activation coordinator fences late
+    /// worker commits; this gate also prevents an older caller from changing
+    /// the process CWD after a newer caller already selected its workspace.
+    ///
+    /// Lock ordering is always `runtime_handoff_gate` then `workspace_gate`.
+    runtime_handoff_gate: RuntimeHandoffGate,
     openrouter_models: Mutex<Vec<CatalogModel>>,
     yunmo_models: Mutex<Vec<CatalogModel>>,
     /// Serializes process-CWD transitions with workspace-bound GUI operations.
@@ -107,6 +118,88 @@ struct AppState {
 
 struct ProviderActivationGate {
     state: Mutex<ProviderActivationDiagnostics>,
+}
+
+/// A process-wide permit for the part of a runtime handoff that can change
+/// the process CWD. A plain mutex would provide the same production
+/// serialization, but this wrapper also exposes a deterministic test probe
+/// for the contention boundary.
+#[derive(Default)]
+struct RuntimeHandoffGate {
+    state: Mutex<RuntimeHandoffGateState>,
+    available: Condvar,
+    #[cfg(test)]
+    waiter_arrived: Condvar,
+}
+
+#[derive(Default)]
+struct RuntimeHandoffGateState {
+    held: bool,
+    #[cfg(test)]
+    waiters: usize,
+}
+
+struct RuntimeHandoffPermit<'a> {
+    gate: &'a RuntimeHandoffGate,
+}
+
+impl RuntimeHandoffGate {
+    fn acquire(&self) -> Result<RuntimeHandoffPermit<'_>, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "运行态切换状态不可用".to_string())?;
+        if state.held {
+            #[cfg(test)]
+            {
+                state.waiters += 1;
+                self.waiter_arrived.notify_all();
+            }
+            while state.held {
+                state = self
+                    .available
+                    .wait(state)
+                    .map_err(|_| "运行态切换状态不可用".to_string())?;
+            }
+            #[cfg(test)]
+            {
+                state.waiters -= 1;
+            }
+        }
+        state.held = true;
+        Ok(RuntimeHandoffPermit { gate: self })
+    }
+
+    #[cfg(test)]
+    fn wait_until_contended(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while state.waiters == 0 {
+            let (next, timeout) = self
+                .waiter_arrived
+                .wait_timeout(state, Duration::from_secs(5))
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            assert!(
+                !timeout.timed_out(),
+                "second runtime handoff never reached the serialization gate"
+            );
+            state = next;
+        }
+    }
+}
+
+impl Drop for RuntimeHandoffPermit<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .gate
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.held = false;
+        self.gate.available.notify_one();
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -496,6 +589,10 @@ fn transition_workspace_for_state(path: &Path, state: &AppState) -> Result<Strin
 /// binds to its id. Do not create a legacy-only session here: Goal reads and the
 /// rest of the protocol would have no matching Thread record.
 fn set_workspace_for_state(path: String, state: &AppState) -> Result<String, String> {
+    // A normal WorkspaceSet is serialized with in-flight New/Resume/Fork
+    // handoffs. Startup calls `transition_workspace_for_state` directly,
+    // before a worker exists, and deliberately does not need this gate.
+    let _runtime_handoff_gate = state.runtime_handoff_gate.acquire()?;
     transition_workspace_for_state(Path::new(path.trim()), state)
 }
 
@@ -684,22 +781,35 @@ fn set_permission_mode_for_state(
     mode: String,
     state: &AppState,
 ) -> Result<(), String> {
+    // Hold the handoff gate from token creation through the worker's result.
+    // This establishes one order for every runtime replacement, including
+    // the process-CWD transition performed by the navigation operations.
+    let _runtime_handoff_gate = state.runtime_handoff_gate.acquire()?;
     // Do not snapshot the process CWD here. A workspace transition can run
     // between this request and the worker command. The worker validates this
     // durable Thread against its active session and resolves its own stored
     // workspace before rebuilding.
+    let activation = state.runtime_activation.begin();
     let (completion_tx, completion_rx) = mpsc::channel();
-    state
+    if state
         .tx
         .send(Command::SetPermissionMode {
             thread_id: thread_id.to_string(),
             mode,
+            activation: activation.clone(),
             completion: completion_tx,
         })
-        .map_err(|_| "agent thread is not running".to_string())?;
-    completion_rx
-        .recv_timeout(Duration::from_secs(30))
-        .map_err(|_| "切换权限模式超时：后台 Agent 未在 30 秒内完成重建".to_string())?
+        .is_err()
+    {
+        state.runtime_activation.abort_if_pending(&activation);
+        return Err("agent thread is not running".to_string());
+    }
+    await_runtime_activation(
+        completion_rx,
+        &state.runtime_activation,
+        activation,
+        "切换权限模式超时：后台 Agent 未在 30 秒内完成重建",
+    )
 }
 
 /// Ask the agent thread to re-emit its `ready` snapshot (called by the UI once
@@ -736,6 +846,103 @@ struct GuiAppServerAdapter<'a> {
     app: &'a AppHandle,
 }
 
+/// Wait for a serialized GUI runtime command without guessing who won a
+/// timeout race. The worker installs a new live session only after it wins the
+/// same activation fence. If it already accepted while the receiver timed out,
+/// treating the request as successful prevents the App Server from deleting
+/// durable state now owned by that runtime.
+fn await_runtime_activation(
+    completion: mpsc::Receiver<Result<(), String>>,
+    coordinator: &RuntimeActivationCoordinator,
+    activation: RuntimeActivation,
+    timeout_message: &str,
+) -> Result<(), String> {
+    match completion.recv_timeout(Duration::from_secs(30)) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) if coordinator.abort_if_pending(&activation) => {
+            Err(timeout_message.to_string())
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) if activation.is_accepted() => Ok(()),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(timeout_message.to_string()),
+        Err(mpsc::RecvTimeoutError::Disconnected) if activation.is_accepted() => Ok(()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            coordinator.abort_if_pending(&activation);
+            Err("后台 Agent 在完成初始化前停止响应".to_string())
+        }
+    }
+}
+
+/// Finish one runtime handoff and compensate a process-global CWD change when
+/// the worker rejected (or never accepted) the activation. The handoff gate is
+/// held by every caller, so this helper acquires `workspace_gate` second and
+/// keeps the established `runtime_handoff_gate -> workspace_gate` order.
+///
+/// A timeout/error first aborts the pending activation. The coordinator then
+/// runs the short rollback only if that token is still the newest one and is
+/// terminally aborted. An accepted token (including a result racing a timeout)
+/// and a token superseded by a newer handoff are left untouched.
+fn finish_runtime_handoff(
+    state: &AppState,
+    activation: &RuntimeActivation,
+    previous_cwd: &Path,
+    target_workspace: &Path,
+    result: Result<(), String>,
+) -> Result<(), String> {
+    let Err(error) = result else {
+        return result;
+    };
+    let rollback = run_failed_handoff_rollback(
+        &state.runtime_activation,
+        activation,
+        || -> Result<(), String> {
+            let _workspace_gate = state
+                .workspace_gate
+                .lock()
+                .map_err(|_| "工作区回滚状态不可用".to_string())?;
+            let current =
+                std::env::current_dir().map_err(|current_error| current_error.to_string())?;
+            // Never overwrite a workspace selected after this handoff. Under the
+            // runtime gate this should only differ when an external caller or a
+            // deliberately racing test changed the process CWD.
+            if !workspace_matches(&bridge::display_path(target_workspace), &current) {
+                return Ok(());
+            }
+            if memory_merge_cancellation_required_for_workspace_transition(previous_cwd, &current) {
+                // The target workspace may have started a merge while the worker
+                // was initializing. Cancel it before returning to the old CWD so
+                // its prepared draft cannot commit after this failed handoff.
+                state.memory_merge.cancel_for_workspace_switch()?;
+            }
+            std::env::set_current_dir(previous_cwd).map_err(|rollback_error| {
+                format!(
+                    "cannot restore workspace {}: {rollback_error}",
+                    previous_cwd.display()
+                )
+            })?;
+            bridge::save_last_workspace(previous_cwd);
+            Ok(())
+        },
+    );
+    match rollback {
+        None | Some(Ok(())) => Err(error),
+        Some(Err(rollback_error)) => {
+            Err(format!("{error}；恢复进入前工作区失败：{rollback_error}"))
+        }
+    }
+}
+
+/// Fence an unsuccessful activation before running a short compensation. The
+/// closure is skipped for an accepted token and for a stale token replaced by
+/// a later handoff, so it is safe for process-global effects such as CWD.
+fn run_failed_handoff_rollback<T>(
+    coordinator: &RuntimeActivationCoordinator,
+    activation: &RuntimeActivation,
+    rollback: impl FnOnce() -> T,
+) -> Option<T> {
+    coordinator.abort_if_pending(activation);
+    coordinator.run_if_current_and_aborted(activation, rollback)
+}
+
 impl AppServerAdapter for GuiAppServerAdapter<'_> {
     fn validate_harness_profile(&self, profile: &str, workspace: &str) -> Result<(), String> {
         let workspace = PathBuf::from(bridge::display_path(Path::new(workspace)));
@@ -743,59 +950,203 @@ impl AppServerAdapter for GuiAppServerAdapter<'_> {
     }
 
     fn create_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
-        let metadata = thread_metadata_for_state(thread_id, self.state)?;
+        // Keep the handoff gate until the worker accepts or rejects this
+        // activation. `transition_workspace_for_state` then takes the
+        // workspace gate second, preserving the global lock order.
+        let _runtime_handoff_gate = self.state.runtime_handoff_gate.acquire()?;
+        let previous_cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+        let activation = self.state.runtime_activation.begin();
+        let metadata = match thread_metadata_for_state(thread_id, self.state) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.state.runtime_activation.abort_if_pending(&activation);
+                return Err(error);
+            }
+        };
         let workspace = workspace_path_from_metadata(&metadata);
-        transition_workspace_for_state(&workspace, self.state)?;
+        let target_workspace = workspace.clone();
+        if let Err(error) = transition_workspace_for_state(&workspace, self.state) {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err(error),
+            );
+        }
+        if !self.state.runtime_activation.can_proceed(&activation) {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err("新建会话已被更新的运行态切换取消".to_string()),
+            );
+        }
         let (completion_tx, completion_rx) = mpsc::channel();
-        self.state
+        if self
+            .state
             .tx
             .send(Command::New {
                 id: thread_id.to_string(),
                 workspace,
                 harness_profile: metadata.harness_profile,
+                activation: activation.clone(),
                 completion: completion_tx,
             })
-            .map_err(|_| "agent thread is not running".to_string())?;
-        completion_rx
-            .recv_timeout(Duration::from_secs(30))
-            .map_err(|_| "切换工作区超时：后台 Agent 未在 30 秒内完成初始化".to_string())?
+            .is_err()
+        {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err("agent thread is not running".to_string()),
+            );
+        }
+        finish_runtime_handoff(
+            self.state,
+            &activation,
+            &previous_cwd,
+            &target_workspace,
+            await_runtime_activation(
+                completion_rx,
+                &self.state.runtime_activation,
+                activation.clone(),
+                "切换工作区超时：后台 Agent 未在 30 秒内完成初始化",
+            ),
+        )
     }
 
     fn activate_thread(&self, thread_id: &ThreadId) -> Result<(), String> {
-        let metadata = thread_metadata_for_state(thread_id, self.state)?;
+        let _runtime_handoff_gate = self.state.runtime_handoff_gate.acquire()?;
+        let previous_cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+        let activation = self.state.runtime_activation.begin();
+        let metadata = match thread_metadata_for_state(thread_id, self.state) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.state.runtime_activation.abort_if_pending(&activation);
+                return Err(error);
+            }
+        };
         let workspace = workspace_path_from_metadata(&metadata);
-        transition_workspace_for_state(&workspace, self.state)?;
+        let target_workspace = workspace.clone();
+        if let Err(error) = transition_workspace_for_state(&workspace, self.state) {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err(error),
+            );
+        }
+        if !self.state.runtime_activation.can_proceed(&activation) {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err("恢复会话已被更新的运行态切换取消".to_string()),
+            );
+        }
         let (completion_tx, completion_rx) = mpsc::channel();
-        self.state
+        if self
+            .state
             .tx
             .send(Command::Resume {
                 id: thread_id.to_string(),
                 workspace,
+                activation: activation.clone(),
                 completion: completion_tx,
             })
-            .map_err(|_| "agent thread is not running".to_string())?;
-        completion_rx
-            .recv_timeout(Duration::from_secs(30))
-            .map_err(|_| "恢复会话超时：后台 Agent 未在 30 秒内完成切换".to_string())?
+            .is_err()
+        {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err("agent thread is not running".to_string()),
+            );
+        }
+        finish_runtime_handoff(
+            self.state,
+            &activation,
+            &previous_cwd,
+            &target_workspace,
+            await_runtime_activation(
+                completion_rx,
+                &self.state.runtime_activation,
+                activation.clone(),
+                "恢复会话超时：后台 Agent 未在 30 秒内完成切换",
+            ),
+        )
     }
 
     fn fork_thread(&self, source_id: &ThreadId, target_id: &ThreadId) -> Result<(), String> {
-        let metadata = thread_metadata_for_state(target_id, self.state)?;
+        let _runtime_handoff_gate = self.state.runtime_handoff_gate.acquire()?;
+        let previous_cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+        let activation = self.state.runtime_activation.begin();
+        let metadata = match thread_metadata_for_state(target_id, self.state) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.state.runtime_activation.abort_if_pending(&activation);
+                return Err(error);
+            }
+        };
         let workspace = workspace_path_from_metadata(&metadata);
-        transition_workspace_for_state(&workspace, self.state)?;
+        let target_workspace = workspace.clone();
+        if let Err(error) = transition_workspace_for_state(&workspace, self.state) {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err(error),
+            );
+        }
+        if !self.state.runtime_activation.can_proceed(&activation) {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err("分叉会话已被更新的运行态切换取消".to_string()),
+            );
+        }
         let (completion_tx, completion_rx) = mpsc::channel();
-        self.state
+        if self
+            .state
             .tx
             .send(Command::Fork {
                 source_id: source_id.to_string(),
                 target_id: target_id.to_string(),
                 workspace,
+                activation: activation.clone(),
                 completion: completion_tx,
             })
-            .map_err(|_| "agent thread is not running".to_string())?;
-        completion_rx
-            .recv_timeout(Duration::from_secs(30))
-            .map_err(|_| "分叉会话超时：后台 Agent 未在 30 秒内完成切换".to_string())?
+            .is_err()
+        {
+            return finish_runtime_handoff(
+                self.state,
+                &activation,
+                &previous_cwd,
+                &target_workspace,
+                Err("agent thread is not running".to_string()),
+            );
+        }
+        finish_runtime_handoff(
+            self.state,
+            &activation,
+            &previous_cwd,
+            &target_workspace,
+            await_runtime_activation(
+                completion_rx,
+                &self.state.runtime_activation,
+                activation.clone(),
+                "分叉会话超时：后台 Agent 未在 30 秒内完成切换",
+            ),
+        )
     }
 
     fn submit_turn(
@@ -1556,7 +1907,7 @@ fn write_preset_with_config(
     cfg: &Config,
 ) -> Result<(), String> {
     let route_id = format!("preset:{}", preset.provider_id);
-    let provider_key = resolve_preset_key(directory, &cfg, preset)?;
+    let provider_key = resolve_preset_key(directory, cfg, preset)?;
     let provider_name = catalog()
         .into_iter()
         .find(|provider| provider.id == preset.provider_id)
@@ -2191,6 +2542,288 @@ pub struct FileChange {
     kind: String, // modified | added | deleted | renamed | untracked
 }
 
+// The right-side diff panel renders one DOM node per line. Bound both the
+// response payload and the line count before crossing the Tauri boundary so a
+// generated or minified file cannot freeze the WebView just by being opened.
+const MAX_DIFF_PREVIEW_BYTES: usize = 192 * 1024;
+const MAX_DIFF_PREVIEW_LINES: usize = 1_000;
+
+#[derive(Serialize)]
+struct DiffPreview {
+    text: String,
+    truncated: bool,
+}
+
+fn bounded_diff_preview(text: &str) -> DiffPreview {
+    let mut line_end = text.len();
+    let mut omitted_only_terminal_newline = false;
+    let mut newline_count = 0;
+    for (index, byte) in text.bytes().enumerate() {
+        if byte != b'\n' {
+            continue;
+        }
+        newline_count += 1;
+        if newline_count == MAX_DIFF_PREVIEW_LINES {
+            // The Svelte renderer splits on newlines, which turns a
+            // trailing newline into an additional empty DOM node. Exclude the
+            // delimiter itself so every returned preview has at most the
+            // advertised number of rendered line nodes.
+            line_end = index;
+            omitted_only_terminal_newline = index + 1 == text.len();
+            break;
+        }
+    }
+
+    let mut end = line_end.min(MAX_DIFF_PREVIEW_BYTES);
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    DiffPreview {
+        text: text[..end].to_string(),
+        truncated: end < text.len() && !(omitted_only_terminal_newline && end == line_end),
+    }
+}
+
+/// The raw prefix collected from a child diff stream. The stream reader keeps
+/// the first byte/line outside the preview only as a probe, so the caller can
+/// distinguish an exact-limit diff from one that must be terminated.
+struct BoundedDiffBytes {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+/// Read a bounded child-output prefix without buffering the complete stream.
+/// Reaching either limit performs a one-byte probe: EOF means the preview is
+/// exact; any byte beyond it makes the caller kill and reap the child.
+fn read_bounded_diff_bytes<R: std::io::Read>(
+    reader: &mut R,
+    byte_limit: usize,
+    line_limit: usize,
+) -> std::io::Result<BoundedDiffBytes> {
+    let mut bytes = Vec::with_capacity(byte_limit);
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut newline_count = 0;
+
+    if line_limit == 0 || byte_limit == 0 {
+        let mut probe = [0_u8; 1];
+        return Ok(BoundedDiffBytes {
+            bytes,
+            truncated: reader.read(&mut probe)? != 0,
+        });
+    }
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(BoundedDiffBytes {
+                bytes,
+                truncated: false,
+            });
+        }
+
+        let remaining = byte_limit.saturating_sub(bytes.len());
+        if remaining == 0 {
+            let mut probe = [0_u8; 1];
+            return Ok(BoundedDiffBytes {
+                bytes,
+                truncated: reader.read(&mut probe)? != 0,
+            });
+        }
+
+        let take = read.min(remaining);
+        let start = bytes.len();
+        bytes.extend_from_slice(&buffer[..take]);
+        if let Some(end) = buffer[..take].iter().enumerate().find_map(|(index, byte)| {
+            (*byte == b'\n').then(|| {
+                newline_count += 1;
+                (newline_count == line_limit).then_some(start + index + 1)
+            })?
+        }) {
+            bytes.truncate(end);
+            let mut probe = [0_u8; 1];
+            return Ok(BoundedDiffBytes {
+                bytes,
+                truncated: end < start + take || read > take || reader.read(&mut probe)? != 0,
+            });
+        }
+
+        if read > take {
+            return Ok(BoundedDiffBytes {
+                bytes,
+                truncated: true,
+            });
+        }
+        if bytes.len() == byte_limit {
+            let mut probe = [0_u8; 1];
+            return Ok(BoundedDiffBytes {
+                bytes,
+                truncated: reader.read(&mut probe)? != 0,
+            });
+        }
+    }
+}
+
+/// Converts a bounded raw prefix to text without manufacturing a replacement
+/// character for a UTF-8 scalar split by the byte limit. Actual invalid input
+/// remains unreadable/binary and uses the command's normal fallback path.
+fn bounded_diff_utf8(bytes: Vec<u8>, truncated: bool) -> Option<String> {
+    match String::from_utf8(bytes) {
+        Ok(text) => Some(text),
+        Err(error) => {
+            let valid_up_to = error.utf8_error().valid_up_to();
+            let incomplete_tail = error.utf8_error().error_len().is_none();
+            if !truncated || !incomplete_tail {
+                return None;
+            }
+            let mut bytes = error.into_bytes();
+            bytes.truncate(valid_up_to);
+            String::from_utf8(bytes).ok()
+        }
+    }
+}
+
+/// Read only a bounded prefix from `git diff`. `Command::output()` is unsafe
+/// for this panel because it buffers the complete diff before the UI limit is
+/// applied; a generated tracked file can otherwise consume unbounded memory.
+/// The child is always waited on, including the early-kill path, so Windows
+/// does not retain a hidden git process after the panel request returns.
+fn bounded_git_diff_preview(workspace: &Path, path: &str) -> Result<Option<DiffPreview>, String> {
+    let mut child = ProcessCommand::new("git")
+        .args(["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--", path])
+        .current_dir(workspace)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("failed to run git: {error}"))?;
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("git diff stdout was not captured".to_string());
+    };
+    let bounded =
+        read_bounded_diff_bytes(&mut stdout, MAX_DIFF_PREVIEW_BYTES, MAX_DIFF_PREVIEW_LINES)
+            .map_err(|error| format!("failed to read git diff: {error}"));
+    drop(stdout);
+    let bounded = match bounded {
+        Ok(bounded) => bounded,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    if bounded.truncated {
+        let _ = child.kill();
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("failed to wait for git diff: {error}"))?;
+    if !status.success() && !bounded.truncated {
+        return Ok(None);
+    }
+    let Some(text) = bounded_diff_utf8(bounded.bytes, bounded.truncated) else {
+        return Ok(None);
+    };
+    let mut preview = bounded_diff_preview(&text);
+    preview.truncated |= bounded.truncated;
+    Ok(Some(preview))
+}
+
+/// Resolve a diff path only inside the active workspace. Git's `--` argument
+/// is safe from option injection, but the untracked-file fallback also opens a
+/// filesystem path and must reject absolute paths, `..`, and symlinks escaping
+/// the workspace boundary.
+fn workspace_relative_file(workspace: &Path, path: &str) -> Option<PathBuf> {
+    let relative = Path::new(path);
+    if !is_workspace_relative_path(relative) {
+        return None;
+    }
+    let workspace = workspace.canonicalize().ok()?;
+    let candidate = workspace.join(relative).canonicalize().ok()?;
+    candidate.starts_with(&workspace).then_some(candidate)
+}
+
+fn is_workspace_relative_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn bounded_untracked_diff_preview(content: &str) -> DiffPreview {
+    let mut text = String::new();
+    for (lines, line) in content.lines().enumerate() {
+        if lines == MAX_DIFF_PREVIEW_LINES {
+            return DiffPreview {
+                text,
+                truncated: true,
+            };
+        }
+        if !text.is_empty() && !append_diff_preview_chunk(&mut text, "\n") {
+            return DiffPreview {
+                text,
+                truncated: true,
+            };
+        }
+        if !append_diff_preview_chunk(&mut text, "+") || !append_diff_preview_chunk(&mut text, line)
+        {
+            return DiffPreview {
+                text,
+                truncated: true,
+            };
+        }
+    }
+    DiffPreview {
+        text,
+        truncated: false,
+    }
+}
+
+fn read_untracked_diff_preview(path: &Path) -> Result<DiffPreview, std::io::Error> {
+    let file = fs::File::open(path)?;
+    // Read only a few bytes past the budget so we can detect truncation while
+    // still trimming an incomplete UTF-8 scalar at the boundary.
+    let probe_limit = (MAX_DIFF_PREVIEW_BYTES as u64).saturating_add(4);
+    let mut bytes = Vec::with_capacity(probe_limit as usize);
+    let mut limited = std::io::Read::take(file, probe_limit);
+    std::io::Read::read_to_end(&mut limited, &mut bytes)?;
+    let source_was_longer = bytes.len() > MAX_DIFF_PREVIEW_BYTES;
+    if source_was_longer {
+        bytes.truncate(MAX_DIFF_PREVIEW_BYTES);
+    }
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(text) => text,
+        // A valid UTF-8 file can end inside one four-byte scalar only because
+        // the byte probe intentionally stopped at its fixed resource limit.
+        Err(error) if source_was_longer && error.valid_up_to() >= bytes.len().saturating_sub(3) => {
+            bytes.truncate(error.valid_up_to());
+            std::str::from_utf8(&bytes).expect("valid UTF-8 prefix")
+        }
+        Err(error) => {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, error));
+        }
+    };
+    let mut preview = bounded_untracked_diff_preview(text);
+    preview.truncated |= source_was_longer;
+    Ok(preview)
+}
+
+/// Appends as much as fits without splitting a UTF-8 scalar. Callers stop on
+/// `false`, so even a single minified source line cannot inflate the preview.
+fn append_diff_preview_chunk(preview: &mut String, chunk: &str) -> bool {
+    let remaining = MAX_DIFF_PREVIEW_BYTES.saturating_sub(preview.len());
+    if chunk.len() <= remaining {
+        preview.push_str(chunk);
+        return true;
+    }
+    let mut end = remaining;
+    while end > 0 && !chunk.is_char_boundary(end) {
+        end -= 1;
+    }
+    preview.push_str(&chunk[..end]);
+    false
+}
+
 /// The working-tree change set vs HEAD: one entry per changed file with +/-
 /// line counts (like the reference's working-tree panel).
 #[tauri::command]
@@ -2253,28 +2886,36 @@ fn git_changes(
     })
 }
 
-/// The diff for a single file (vs HEAD). Untracked files show their content as
-/// added lines.
+/// A bounded preview of the diff for one file (vs HEAD). Untracked files show
+/// their content as added lines. Both paths share the same line/byte budget.
 #[tauri::command]
 fn git_file_diff(
     path: String,
     expected_workspace: String,
     state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<DiffPreview, String> {
     with_workspace_snapshot(&state, &expected_workspace, |workspace| {
-        let out = run_git(workspace, &["diff", "HEAD", "--", &path]).unwrap_or_default();
-        if !out.trim().is_empty() {
-            return Ok(out);
+        if !is_workspace_relative_path(Path::new(&path)) {
+            return Ok(bounded_diff_preview(
+                "(no textual diff — invalid path outside the workspace)",
+            ));
+        }
+        if let Some(preview) = bounded_git_diff_preview(workspace, &path)? {
+            if !preview.text.trim().is_empty() {
+                return Ok(preview);
+            }
         }
         // Untracked / no tracked diff: show the file content as added lines.
-        match std::fs::read_to_string(workspace.join(&path)) {
-            Ok(content) => Ok(content
-                .lines()
-                .take(500)
-                .map(|line| format!("+{line}"))
-                .collect::<Vec<_>>()
-                .join("\n")),
-            Err(_) => Ok("(no textual diff — binary or unreadable)".into()),
+        let Some(file) = workspace_relative_file(workspace, &path) else {
+            return Ok(bounded_diff_preview(
+                "(no textual diff — binary, unreadable, or outside the workspace)",
+            ));
+        };
+        match read_untracked_diff_preview(&file) {
+            Ok(preview) => Ok(preview),
+            Err(_) => Ok(bounded_diff_preview(
+                "(no textual diff — binary or unreadable)",
+            )),
         }
     })
 }
@@ -2447,12 +3088,12 @@ fn open_local_artifact(path: String) -> Result<(), String> {
     let target = validated_local_artifact(&path)?;
     #[cfg(target_os = "windows")]
     {
-        return ProcessCommand::new("rundll32.exe")
+        ProcessCommand::new("rundll32.exe")
             .arg("url.dll,FileProtocolHandler")
             .arg(&target)
             .spawn()
             .map(|_| ())
-            .map_err(|error| format!("无法打开产物文件: {error}"));
+            .map_err(|error| format!("无法打开产物文件: {error}"))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -3995,6 +4636,8 @@ pub fn run() {
     let provider_directory = ProviderDirectoryService::default();
     let provider_catalog = ProviderCatalogService::default();
     let provider_chat_probe = ProviderChatProbeService::default();
+    let runtime_activation = Arc::new(RuntimeActivationCoordinator::default());
+    let runtime_activation_for_worker = runtime_activation.clone();
     if let Ok(index) = session_index.lock() {
         if let Err(error) = migrate_legacy_threads(&index, &app_server) {
             eprintln!("thread migration: {error}");
@@ -4017,6 +4660,8 @@ pub fn run() {
             provider_catalog,
             provider_chat_probe,
             provider_activation: ProviderActivationGate::default(),
+            runtime_activation,
+            runtime_handoff_gate: RuntimeHandoffGate::default(),
             openrouter_models: Mutex::new(Vec::new()),
             yunmo_models: Mutex::new(Vec::new()),
             workspace_gate: Mutex::new(()),
@@ -4041,19 +4686,20 @@ pub fn run() {
             }
             // Hand the agent thread an AppHandle (to emit events), the receiver
             // (to take prompts), and the shared pending-approvals map.
-            spawn_worker(
-                app.handle().clone(),
-                app_server.clone(),
+            spawn_worker(WorkerStartup {
+                app: app.handle().clone(),
+                app_server: app_server.clone(),
                 rx,
-                pending_for_worker,
-                questions_for_worker,
-                cancels_for_worker,
-                running_for_worker,
-                deferred_prompts_for_worker,
-                worker_lifecycle_for_setup,
+                pending: pending_for_worker,
+                questions: questions_for_worker,
+                cancels: cancels_for_worker,
+                running: running_for_worker,
+                deferred_prompts: deferred_prompts_for_worker,
+                lifecycle: worker_lifecycle_for_setup,
                 session_grants,
+                runtime_activation: runtime_activation_for_worker,
                 startup_workspace,
-            );
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -4117,6 +4763,112 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn runtime_activation_reports_worker_disconnect_without_calling_it_a_timeout() {
+        let (sender, receiver) = mpsc::channel::<Result<(), String>>();
+        drop(sender);
+        let coordinator = RuntimeActivationCoordinator::default();
+        let activation = coordinator.begin();
+
+        let error =
+            await_runtime_activation(receiver, &coordinator, activation.clone(), "timed out")
+                .unwrap_err();
+        assert_eq!(error, "后台 Agent 在完成初始化前停止响应");
+        assert!(activation.is_aborted());
+    }
+
+    #[test]
+    fn runtime_activation_coordinator_invalidates_only_pending_work() {
+        let coordinator = RuntimeActivationCoordinator::default();
+        let older = coordinator.begin();
+        let newer = coordinator.begin();
+        assert!(older.is_aborted());
+        assert!(!coordinator.can_proceed(&older));
+        assert!(coordinator.is_current(&newer));
+        assert!(!coordinator.accept_if_current(&older));
+        assert!(coordinator.accept_if_current(&newer));
+
+        // A completed handoff stays accepted when a later command begins; it
+        // simply stops being eligible for any additional global writes.
+        let accepted = coordinator.begin();
+        assert!(coordinator.accept_if_current(&accepted));
+        let replacement = coordinator.begin();
+        assert!(accepted.is_accepted());
+        assert!(!coordinator.abort_if_pending(&accepted));
+        assert!(!coordinator.can_proceed(&accepted));
+        assert!(coordinator.is_current(&replacement));
+    }
+
+    #[test]
+    fn accepted_runtime_activation_survives_a_late_receiver_disconnect() {
+        let (sender, receiver) = mpsc::channel::<Result<(), String>>();
+        drop(sender);
+        let coordinator = RuntimeActivationCoordinator::default();
+        let activation = coordinator.begin();
+        assert!(coordinator.accept_if_current(&activation));
+
+        assert!(
+            await_runtime_activation(receiver, &coordinator, activation.clone(), "timed out",)
+                .is_ok()
+        );
+        assert!(activation.is_accepted());
+    }
+
+    #[test]
+    fn runtime_activation_timeout_cannot_abort_a_newer_token() {
+        let coordinator = RuntimeActivationCoordinator::default();
+        let older = coordinator.begin();
+        let newer = coordinator.begin();
+        assert!(!coordinator.abort_if_pending(&older));
+        assert!(coordinator.is_current(&newer));
+        assert!(!newer.is_aborted());
+    }
+
+    #[test]
+    fn failed_handoff_rollback_only_runs_for_the_current_unaccepted_activation() {
+        let coordinator = RuntimeActivationCoordinator::default();
+        let failed = coordinator.begin();
+        let mut rollbacks = 0;
+
+        // The failed caller atomically fences its worker before compensating.
+        // This is the same gate that protects the real process-CWD restore,
+        // but uses a local counter so the test is independent of wall clocks
+        // and the test process's global CWD.
+        assert_eq!(
+            run_failed_handoff_rollback(&coordinator, &failed, || {
+                rollbacks += 1;
+                "restored"
+            }),
+            Some("restored")
+        );
+        assert_eq!(rollbacks, 1);
+        assert!(failed.is_aborted());
+
+        let accepted = coordinator.begin();
+        assert!(coordinator.accept_if_current(&accepted));
+        assert_eq!(
+            run_failed_handoff_rollback(&coordinator, &accepted, || {
+                rollbacks += 1;
+                "must not restore an accepted handoff"
+            }),
+            None
+        );
+        assert_eq!(rollbacks, 1);
+
+        let stale = coordinator.begin();
+        let newer = coordinator.begin();
+        assert_eq!(
+            run_failed_handoff_rollback(&coordinator, &stale, || {
+                rollbacks += 1;
+                "must not restore over a newer handoff"
+            }),
+            None
+        );
+        assert_eq!(rollbacks, 1);
+        assert!(coordinator.is_current(&newer));
+        assert!(!newer.is_aborted());
     }
 
     #[test]
@@ -4296,12 +5048,14 @@ mod tests {
 
     #[test]
     fn settings_snapshot_exposes_vision_parser_without_leaking_its_key() {
-        let mut cfg = Config::default();
-        cfg.vl_model = "qwen3.7-plus".into();
-        cfg.vl_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1".into();
-        cfg.vl_api_key = "secret-vision-key".into();
-        cfg.dashscope_token_plan_key = "sk-sp-secret-plan".into();
-        cfg.dashscope_workspace_key = "sk-ws-secret-workspace".into();
+        let cfg = Config {
+            vl_model: "qwen3.7-plus".into(),
+            vl_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+            vl_api_key: "secret-vision-key".into(),
+            dashscope_token_plan_key: "sk-sp-secret-plan".into(),
+            dashscope_workspace_key: "sk-ws-secret-workspace".into(),
+            ..Config::default()
+        };
 
         let settings = settings_from_config(&cfg);
 
@@ -5157,13 +5911,26 @@ mod tests {
         assert!(!app.contains("invoke<SessionRow[]>(\"list_sessions\")"));
         let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let refresh = lifecycle
-            .split_once("refresh = async")
+            .split_once("refresh =")
             .unwrap()
             .1
             .split_once("archive = async")
             .unwrap()
             .0;
         assert!(!refresh.contains("method: \"threadRead\""));
+    }
+
+    #[test]
+    fn sidebar_refresh_coalesces_bursty_events_with_one_trailing_pass() {
+        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        assert!(lifecycle.contains("private refreshInFlight: Promise<void> | null = null;"));
+        assert!(lifecycle.contains("private refreshDirty = false;"));
+        assert!(lifecycle.contains("if (this.refreshInFlight) {\n      this.refreshDirty = true;"));
+        assert!(lifecycle.contains("const flight = this.runRefreshLoop();"));
+        assert!(lifecycle.contains("await this.refreshOnce();"));
+        assert!(lifecycle.contains("} while (this.refreshDirty);"));
+        assert!(lifecycle.contains("const generation = ++this.refreshGeneration;"));
+        assert!(lifecycle.contains("if (generation !== this.refreshGeneration) return;"));
     }
 
     #[test]
@@ -5362,8 +6129,110 @@ mod tests {
     }
 
     #[test]
+    fn diff_preview_caps_lines_bytes_and_preserves_utf8() {
+        let exact_bytes =
+            read_bounded_diff_bytes(&mut std::io::Cursor::new(b"abcd"), 4, 10).unwrap();
+        assert_eq!(exact_bytes.bytes.as_slice(), b"abcd");
+        assert!(!exact_bytes.truncated);
+
+        let over_bytes =
+            read_bounded_diff_bytes(&mut std::io::Cursor::new(b"abcde"), 4, 10).unwrap();
+        assert_eq!(over_bytes.bytes.as_slice(), b"abcd");
+        assert!(over_bytes.truncated);
+
+        let exact_lines =
+            read_bounded_diff_bytes(&mut std::io::Cursor::new(b"a\nb\n"), 64, 2).unwrap();
+        assert_eq!(exact_lines.bytes.as_slice(), b"a\nb\n");
+        assert!(!exact_lines.truncated);
+
+        let over_lines =
+            read_bounded_diff_bytes(&mut std::io::Cursor::new(b"a\nb\nc"), 64, 2).unwrap();
+        assert_eq!(over_lines.bytes.as_slice(), b"a\nb\n");
+        assert!(over_lines.truncated);
+
+        let split_utf8 =
+            read_bounded_diff_bytes(&mut std::io::Cursor::new("a界".as_bytes()), 3, 10).unwrap();
+        assert_eq!(split_utf8.bytes.as_slice(), &"a界".as_bytes()[..3]);
+        assert!(split_utf8.truncated);
+        assert_eq!(
+            bounded_diff_utf8(split_utf8.bytes, split_utf8.truncated).as_deref(),
+            Some("a")
+        );
+
+        let line_limited = (0..=MAX_DIFF_PREVIEW_LINES)
+            .map(|index| format!("line-{index}\n"))
+            .collect::<String>();
+        let lines = bounded_diff_preview(&line_limited);
+        assert!(lines.truncated);
+        assert_eq!(lines.text.lines().count(), MAX_DIFF_PREVIEW_LINES);
+        assert_eq!(lines.text.split('\n').count(), MAX_DIFF_PREVIEW_LINES);
+        assert!(!lines.text.ends_with('\n'));
+        assert!(!lines
+            .text
+            .contains(&format!("line-{MAX_DIFF_PREVIEW_LINES}")));
+
+        let exact_rendered_lines = (0..MAX_DIFF_PREVIEW_LINES)
+            .map(|index| format!("line-{index}\n"))
+            .collect::<String>();
+        let exact_rendered = bounded_diff_preview(&exact_rendered_lines);
+        assert!(!exact_rendered.truncated);
+        assert_eq!(
+            exact_rendered.text.split('\n').count(),
+            MAX_DIFF_PREVIEW_LINES
+        );
+        assert!(!exact_rendered.text.ends_with('\n'));
+
+        let byte_limited = "界".repeat(MAX_DIFF_PREVIEW_BYTES);
+        let bytes = bounded_diff_preview(&byte_limited);
+        assert!(bytes.truncated);
+        assert!(bytes.text.len() <= MAX_DIFF_PREVIEW_BYTES);
+        assert!(byte_limited.is_char_boundary(bytes.text.len()));
+
+        let untracked = bounded_untracked_diff_preview(&line_limited);
+        assert!(untracked.truncated);
+        assert_eq!(untracked.text.lines().count(), MAX_DIFF_PREVIEW_LINES);
+        assert!(untracked.text.starts_with("+line-0"));
+
+        let root = unique_test_dir("diff-preview-utf8");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("large.txt");
+        fs::write(
+            &path,
+            format!("{}界tail", "a".repeat(MAX_DIFF_PREVIEW_BYTES - 1)),
+        )
+        .unwrap();
+        let file_preview = read_untracked_diff_preview(&path).unwrap();
+        assert!(file_preview.truncated);
+        assert!(file_preview.text.len() <= MAX_DIFF_PREVIEW_BYTES);
+        assert!(file_preview.text.starts_with('+'));
+        assert_eq!(
+            workspace_relative_file(&root, "large.txt"),
+            Some(path.canonicalize().unwrap())
+        );
+        assert!(is_workspace_relative_path(Path::new("nested/large.txt")));
+        assert!(!is_workspace_relative_path(Path::new("")));
+        assert!(!is_workspace_relative_path(Path::new(".")));
+        assert!(!is_workspace_relative_path(Path::new("..")));
+        assert!(!is_workspace_relative_path(Path::new("../outside.txt")));
+        assert!(!is_workspace_relative_path(Path::new("/absolute.txt")));
+        #[cfg(windows)]
+        assert!(!is_workspace_relative_path(Path::new(
+            "C:drive-relative.txt"
+        )));
+        assert!(workspace_relative_file(&root, "../outside.txt").is_none());
+        assert!(workspace_relative_file(&root, &path.to_string_lossy()).is_none());
+        let _ = fs::remove_dir_all(root);
+
+        let complete = bounded_diff_preview("one\ntwo\n");
+        assert!(!complete.truncated);
+        assert_eq!(complete.text, "one\ntwo\n");
+    }
+
+    #[test]
     fn workspace_diff_panel_keeps_rows_intact_and_uses_the_panel_scroll() {
         let css = include_str!("../../src/app.css");
+        let controller = include_str!("../../src/lib/git-workspace-controller.svelte.ts");
+        let panel = include_str!("../../src/components/WorkspacePanels.svelte");
         let file_row = css
             .split_once(".wt-file {")
             .unwrap()
@@ -5377,6 +6246,25 @@ mod tests {
         assert!(css.contains(
             ".rightpanel .wt-diff { max-height: none; overflow-x: auto; overflow-y: hidden; }"
         ));
+        assert!(css.contains(".wt-diff-notice"));
+        assert!(
+            controller.contains("export type DiffPreview = { text: string; truncated: boolean }")
+        );
+        assert!(controller.contains("private diffPreviewGeneration = 0;"));
+        assert!(controller.contains("private pendingDiffPath: string | null = null;"));
+        assert!(controller.contains(
+            "if (Object.hasOwn(this.diffOpenFiles, path) || this.pendingDiffPath === path) {"
+        ));
+        assert!(controller.contains("this.pendingDiffPath = path;"));
+        assert!(controller.contains("this.pendingDiffPath = null;"));
+        assert!(controller.contains("invoke<DiffPreview | string>(\"git_file_diff\""));
+        assert!(
+            controller.contains("this.diffOpenFiles = { [path]: normalizeDiffPreview(response) };")
+        );
+        assert!(panel.contains("diffOpenFiles[file.path].truncated"));
+        assert!(panel.contains("Object.hasOwn(diffOpenFiles, file.path)"));
+        assert!(panel.contains("diffOpenFiles[file.path].text.split(\"\\n\")"));
+        assert!(panel.contains("预览已截断"));
     }
 
     #[test]
@@ -5461,7 +6349,7 @@ mod tests {
         for method in [
             "runtimeStatusRead",
             "runtimeReadyRefresh",
-            "workspaceSet",
+            "threadCreateActivate",
             "interactionApprove",
             "interactionAnswer",
         ] {
@@ -5482,6 +6370,10 @@ mod tests {
                 "legacy runtime command remains: {legacy}"
             );
         }
+        assert!(
+            !runtime.contains("method: \"workspaceSet\""),
+            "the workspace picker must hand off CWD and Thread creation atomically"
+        );
         assert!(
             runtime.find("method: \"interactionApprove\"").unwrap()
                 < runtime.find("this.thread.removeApproval").unwrap()
@@ -5508,8 +6400,20 @@ mod tests {
             .unwrap()
             .0;
 
-        assert!(runtime.contains("method: \"workspaceSet\""));
-        assert!(runtime.contains("method: \"threadCreateActivate\""));
+        let chooser = runtime
+            .split_once("chooseWorkspace = async")
+            .unwrap()
+            .1
+            .split_once("  decide = async")
+            .unwrap()
+            .0;
+
+        assert!(chooser.contains("method: \"threadCreateActivate\""));
+        assert!(chooser.contains("workspace: directory,"));
+        assert!(
+            !chooser.contains("method: \"workspaceSet\""),
+            "the picker must not split the CWD transition from durable Thread creation"
+        );
         assert!(runtime.contains("private workspacePickerOpen = false;"));
         assert!(runtime.contains("if (this.thread.switching || this.workspacePickerOpen) return;"));
         assert!(runtime.contains("const pickerSessionId = this.thread.currentId;"));
@@ -5529,15 +6433,23 @@ mod tests {
                     .find("if (this.thread.currentId !== pickerSessionId) return;")
                     .unwrap()
         );
-        assert!(runtime.contains("this.workspace = workspace;\n        this.workspaceChanged();"));
-        assert!(runtime.contains("if (workspaceChanged && !workspaceRestored)"));
-        assert!(runtime.contains("let workspaceRestored = false;"));
-        assert!(runtime.contains("if (workspaceRestored) void this.lifecycle.refresh();"));
+        assert!(chooser.contains("const workspace = created.metadata.workspace;"));
+        assert!(chooser.contains("const workspaceDidChange = this.workspace !== workspace;"));
+        assert!(chooser.contains("this.workspace = workspace;"));
+        assert!(chooser.contains("if (workspaceDidChange) this.workspaceChanged();"));
         assert!(runtime.contains("const workspaceDidChange = this.workspace !== event.workspace;"));
         assert!(runtime.contains("if (workspaceDidChange) {\n      this.workspaceChanged();\n      void this.lifecycle.refresh();\n    }"));
         assert!(
-            runtime.find("method: \"threadCreateActivate\"").unwrap()
-                < runtime.find("this.thread.currentId = threadId").unwrap()
+            chooser.find("method: \"threadCreateActivate\"").unwrap()
+                < chooser
+                    .find("const workspace = created.metadata.workspace;")
+                    .unwrap()
+        );
+        assert!(
+            chooser
+                .find("const workspace = created.metadata.workspace;")
+                .unwrap()
+                < chooser.find("this.thread.currentId = threadId").unwrap()
         );
         assert_eq!(
             composer
@@ -5604,41 +6516,43 @@ mod tests {
         let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
         let app = include_str!("../../src/App.svelte");
+        let backend = include_str!("lib.rs");
 
-        // A chooser failure seals the new-session fence before it awaits the
-        // CWD rollback. No stale Ready can bind while currentId is empty.
-        let chooser_failure = runtime
-            .split_once("} catch (error) {\n        // Stop every delayed Ready")
+        // The picker delegates the entire CWD + worker handoff to one backend
+        // request. Its failure branch reads the final state, never queues a
+        // stale workspaceSet compensation after a newer handoff.
+        let chooser = runtime
+            .split_once("chooseWorkspace = async")
             .unwrap()
             .1
-            .split_once("    } catch (error) {\n      this.thread.messages.push")
+            .split_once("  decide = async")
             .unwrap()
             .0;
+        assert!(!chooser.contains("method: \"workspaceSet\""));
+        assert!(chooser.contains("method: \"threadCreateActivate\""));
+        assert!(chooser.contains("workspace: directory,"));
+        assert!(chooser.contains("const workspace = created.metadata.workspace;"));
+        assert!(!runtime.contains("restoreWorkspace = async"));
+        let chooser_failure = chooser.split_once("} catch (error) {").unwrap().1;
         assert!(chooser_failure.contains("this.thread.sealReadyFence();"));
-        assert!(chooser_failure.contains("await this.restoreWorkspace(previousWorkspace);"));
+        assert!(chooser_failure.contains("await this.reconcileWorkspace();"));
+        assert!(chooser_failure.contains("this.sameWorkspace(previousWorkspace, currentWorkspace)"));
+        assert!(!chooser_failure.contains("this.restoreWorkspace("));
         assert!(chooser_failure.contains("if (previousId) this.thread.expectReady(previousId);"));
         assert!(
             chooser_failure
                 .find("this.thread.sealReadyFence();")
                 .unwrap()
                 < chooser_failure
-                    .find("await this.restoreWorkspace(previousWorkspace);")
-                    .unwrap()
-        );
-        assert!(
-            chooser_failure
-                .find("await this.restoreWorkspace(previousWorkspace);")
-                .unwrap()
-                < chooser_failure
-                    .find("if (previousId) this.thread.expectReady(previousId);")
+                    .find("await this.reconcileWorkspace();")
                     .unwrap()
         );
         assert!(!runtime.contains("clearExpectedReady"));
 
-        // Resume/Fork transition process CWD in the adapter. If either later
-        // await fails, both must restore the durable previous workspace before
-        // rebinding its thread; a failed rollback deliberately leaves an empty,
-        // sealed UI instead.
+        // Resume/Fork transition process CWD in the adapter. If an unaccepted
+        // handoff fails, the backend rolls it back under its gates; the UI only
+        // reads the resulting CWD before rebinding its old Thread. It must not
+        // issue a delayed workspaceSet that can overwrite a newer handoff.
         for operation in ["resume = async", "fork = async"] {
             let body = lifecycle
                 .split_once(operation)
@@ -5649,22 +6563,71 @@ mod tests {
                 .0;
             assert!(body.contains("const previousWorkspace = this.workspace();"));
             assert!(body.contains("const navigation = this.beginNavigation();"));
-            assert!(body.contains("await this.restoreWorkspaceAfterNavigationFailure("));
+            assert!(body.contains("await this.reconcileWorkspaceAfterRejectedNavigation("));
             assert!(body.contains("if (previousId) this.thread.expectReady(previousId);"));
             assert!(body.contains("this.leaveNavigationUnbound("));
             assert!(
-                body.find("await this.restoreWorkspaceAfterNavigationFailure(")
+                body.find("await this.reconcileWorkspaceAfterRejectedNavigation(")
                     .unwrap()
                     < body
                         .find("if (previousId) this.thread.expectReady(previousId);")
                         .unwrap()
             );
+            // Once the backend handoff has returned successfully, later UI
+            // reads/renames must not run the pre-handoff CWD compensation.
+            let accepted = body.find("if (activationAccepted)").unwrap();
+            let rollback = body
+                .find("await this.reconcileWorkspaceAfterRejectedNavigation(")
+                .unwrap();
+            assert!(accepted < rollback);
+            assert!(body.contains("this.keepAcceptedNavigation("));
+            assert!(body.contains("let activationAccepted = false;"));
+            assert!(body.contains("activationAccepted = true;"));
+            let accepted_branch = &body[accepted..rollback];
+            if operation == "resume = async" {
+                let clear = body.find("this.thread.clearSkippedLoaded(id);").unwrap();
+                let accepted_return = accepted + accepted_branch.find("return;").unwrap();
+                assert!(
+                    accepted_return < rollback && rollback < clear,
+                    "an accepted resume must retain its legacy Loaded suppression"
+                );
+            } else {
+                let skip = body
+                    .find("this.thread.skipNextLoaded(newThreadId);")
+                    .unwrap();
+                let clear = body
+                    .find("this.thread.clearSkippedLoaded(newThreadId);")
+                    .unwrap();
+                let accepted_return = accepted + accepted_branch.find("return;").unwrap();
+                assert!(skip < accepted);
+                assert!(
+                    accepted_return < rollback && rollback < clear,
+                    "an accepted fork must retain its legacy Loaded suppression"
+                );
+            }
         }
         assert!(lifecycle.contains("this.thread.sealReadyFence();"));
-        assert!(lifecycle.contains("this.workspaceRecovery.restore(previousWorkspace)"));
+        assert!(!lifecycle.contains("workspaceRecovery.restore("));
         assert!(lifecycle.contains("this.workspaceRecovery.reconcile()"));
-        assert!(app.contains("restore: (path) => runtime.restoreWorkspace(path)"));
+        assert!(lifecycle.contains("private sameWorkspace"));
+        assert!(!app.contains("restore: (path) => runtime.restoreWorkspace(path)"));
         assert!(app.contains("reconcile: () => runtime.reconcileWorkspace()"));
+
+        let handoff = backend
+            .split_once("fn finish_runtime_handoff(")
+            .unwrap()
+            .1
+            .split_once("impl AppServerAdapter")
+            .unwrap()
+            .0;
+        let cancel = handoff
+            .find("state.memory_merge.cancel_for_workspace_switch()?;")
+            .unwrap();
+        let restore = handoff
+            .find("std::env::set_current_dir(previous_cwd)")
+            .unwrap();
+        assert!(handoff.contains("run_failed_handoff_rollback"));
+        assert!(cancel < restore);
 
         // The pending expected id is only consumed by an accepted matching
         // Ready; sealing blocks all Ready events in a safe empty state.
@@ -5810,8 +6773,10 @@ mod tests {
     #[test]
     fn enabled_codex_mcp_resources_feed_the_gui_runtime_diagnostics() {
         let bridge = include_str!("bridge.rs");
-        assert!(bridge.contains("discover_codex_mcp_servers(&cfg.workspace)?"));
+        assert!(bridge.contains("let mcp_servers = discover_codex_mcp_servers(&cfg.workspace)"));
         assert!(bridge.contains("prepare_mcp_server_tools("));
+        assert!(bridge.contains("append_prepared_mcp_tools("));
+        assert!(bridge.contains("跳过无法启动的 Codex MCP server"));
         assert!(bridge.contains("configured_servers: mcp_servers.len()"));
         assert!(bridge.contains("active_tools"));
         assert!(bridge.contains("tools.replace_service("));
@@ -5941,6 +6906,50 @@ mod tests {
     }
 
     #[test]
+    fn runtime_handoff_serializes_cwd_transition_through_worker_acknowledgement() {
+        let gate = Arc::new(RuntimeHandoffGate::default());
+        let (events_tx, events_rx) = mpsc::channel();
+        let (worker_ack_tx, worker_ack_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        let first_gate = Arc::clone(&gate);
+        let first_events_tx = events_tx.clone();
+        let first = std::thread::spawn(move || {
+            let _permit = first_gate.acquire().unwrap();
+            first_events_tx.send("A transition").unwrap();
+            ready_tx.send(()).unwrap();
+            worker_ack_rx.recv().unwrap();
+            first_events_tx.send("A ack").unwrap();
+            // The permit is deliberately held until this acknowledgement has
+            // been published, just as the real handoff waits for its worker.
+        });
+
+        ready_rx.recv().unwrap();
+        assert_eq!(events_rx.recv().unwrap(), "A transition");
+
+        let second_gate = Arc::clone(&gate);
+        let second_events_tx = events_tx.clone();
+        let second = std::thread::spawn(move || {
+            let _permit = second_gate.acquire().unwrap();
+            second_events_tx.send("B transition").unwrap();
+        });
+
+        // This is a state-based contention point, not a sleep or an elapsed
+        // time guess: B has registered as a waiter while A still owns the
+        // permit, so no CWD transition from B can have happened yet.
+        gate.wait_until_contended();
+        assert!(matches!(
+            events_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        worker_ack_tx.send(()).unwrap();
+        assert_eq!(events_rx.recv().unwrap(), "A ack");
+        assert_eq!(events_rx.recv().unwrap(), "B transition");
+        first.join().unwrap();
+        second.join().unwrap();
+    }
+
+    #[test]
     fn archived_sessions_render_below_recent_sessions() {
         let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
         let sidebar_component = include_str!("../../src/components/SessionSidebar.svelte");
@@ -6033,19 +7042,32 @@ mod tests {
             nanocodex: root.join("config.toml"),
         };
         let directory = ProviderDirectoryService::from_paths(&paths);
-        let mut cfg = Config::default();
-        cfg.deepseek_api_key = "legacy-deepseek".into();
-        cfg.yunmo_api_key = "legacy-yunmo".into();
+        let cfg = Config {
+            deepseek_api_key: "legacy-deepseek".into(),
+            yunmo_api_key: "legacy-yunmo".into(),
+            ..Config::default()
+        };
         let deepseek = find_preset("deepseek", "deepseek-v4-flash").unwrap();
         let yunmo = yunmo_model("gpt-5.6-sol");
 
-        write_preset_with_config(&directory, &deepseek, &[deepseek.model_id.clone()], &cfg)
-            .unwrap();
+        write_preset_with_config(
+            &directory,
+            &deepseek,
+            std::slice::from_ref(&deepseek.model_id),
+            &cfg,
+        )
+        .unwrap();
         assert_eq!(
             directory.get("preset:deepseek").unwrap().api_key,
             "legacy-deepseek"
         );
-        write_preset_with_config(&directory, &yunmo, &[yunmo.model_id.clone()], &cfg).unwrap();
+        write_preset_with_config(
+            &directory,
+            &yunmo,
+            std::slice::from_ref(&yunmo.model_id),
+            &cfg,
+        )
+        .unwrap();
         assert_eq!(
             directory.get("preset:yunmo").unwrap().api_key,
             "legacy-yunmo"

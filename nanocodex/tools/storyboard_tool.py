@@ -19,7 +19,6 @@ agent can relay exactly what the user still needs to set.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 from typing import Any
 
 from nanocodex.tools.base import Tool

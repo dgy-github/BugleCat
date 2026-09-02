@@ -4,7 +4,7 @@ mod tests {
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
 
     fn tmp_ws(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("ncx_approve_{name}"));
+        let d = crate::test_support::unique_temp_dir(&format!("ncx_approve_{name}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d.canonicalize().unwrap()
@@ -450,7 +450,7 @@ async fn skill_tool_registered_only_when_skills_present() {
                 event: "pre_tool".into(),
                 matcher: "dummy".into(),
                 command: "exit 1".into(),
-                timeout_s: 3,
+                timeout_s: 20,
             }]);
         let mut reg = ToolRegistry::empty(ctx);
         reg.register(Box::new(NamedTool("dummy", "test tool")));
@@ -469,7 +469,7 @@ async fn skill_tool_registered_only_when_skills_present() {
                 event: "post_tool".into(),
                 matcher: "*".into(),
                 command: "echo post-ok".into(),
-                timeout_s: 3,
+                timeout_s: 20,
             }]);
         let mut reg = ToolRegistry::empty(ctx);
         reg.register(Box::new(NamedTool("dummy", "test tool")));

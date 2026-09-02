@@ -16,6 +16,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
+
 if os.name != "nt":
     raise RuntimeError("windows-computer-use only supports Windows")
 
@@ -97,13 +98,13 @@ class KEYBDINPUT(ctypes.Structure):
     ]
 
 
-class INPUT_UNION(ctypes.Union):
+class InputUnion(ctypes.Union):
     _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
 
 
 class INPUT(ctypes.Structure):
     _anonymous_ = ("u",)
-    _fields_ = [("type", wintypes.DWORD), ("u", INPUT_UNION)]
+    _fields_ = [("type", wintypes.DWORD), ("u", InputUnion)]
 
 
 server = MCPServer(

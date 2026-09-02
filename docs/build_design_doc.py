@@ -54,11 +54,12 @@ def _arrow(x1, y1, x2, y2, label="", dash=""):
 
 
 def arch_svg():
-    A = "#6ea8fe"; O = "#e8a33d"
+    accent_blue = "#6ea8fe"
+    accent_orange = "#e8a33d"
     s = [f'<svg viewBox="0 0 780 430" role="img" aria-label="Runtime architecture and training meta-loop" style="width:100%;max-width:780px">{_DEF}']
     s.append('<text x="390" y="16" text-anchor="middle" font-size="12" fill="#6b7785">运行时（单回合）</text>')
     s.append(_box(20, 70, 96, 46, "用户", "提示"))
-    s.append(_box(150, 34, 380, 150, "Agent 回合循环", "ncx-core · 单线程 (!Send)", A, A))
+    s.append(_box(150, 34, 380, 150, "Agent 回合循环", "ncx-core · 单线程 (!Send)", accent_blue, accent_blue))
     s.append(_box(178, 78, 130, 48, "调模型"))
     s.append(_box(372, 78, 130, 48, "跑工具"))
     s.append(_arrow(308, 92, 372, 92))
@@ -70,15 +71,15 @@ def arch_svg():
     s.append(_arrow(502, 96, 566, 90, "对话"))
     s.append(_box(372, 232, 150, 44, "工具", "read_file·apply_patch·shell·…"))
     s.append(_arrow(437, 126, 437, 232))
-    s.append(_box(566, 232, 196, 44, "沙箱 + 审批", "只读/可写/全权 · 询问/自动/拒绝", O, O))
+    s.append(_box(566, 232, 196, 44, "沙箱 + 审批", "只读/可写/全权 · 询问/自动/拒绝", accent_orange, accent_orange))
     s.append(_arrow(522, 254, 566, 254))
     s.append(_box(20, 232, 150, 44, "项目记忆", "召回(线索) / 记忆"))
     s.append(_arrow(170, 250, 178, 120, "召回"))
     s.append('<text x="390" y="312" text-anchor="middle" font-size="12" fill="#6b7785">元循环 — ncx-forge（离线训练）</text>')
-    s.append(_box(20, 330, 150, 50, "教师面板", "codex / claude / api", O, O))
+    s.append(_box(20, 330, 150, 50, "教师面板", "codex / claude / api", accent_orange, accent_orange))
     s.append(_box(210, 330, 150, 50, "genome", "NCX_GENOME (提示+描述)"))
     s.append(_box(400, 330, 150, 50, "评测器", "agent × bench → reward"))
-    s.append(_box(590, 330, 150, 50, "接受门", "噪声感知 / Pareto", A, A))
+    s.append(_box(590, 330, 150, 50, "接受门", "噪声感知 / Pareto", accent_blue, accent_blue))
     s.append(_arrow(170, 355, 210, 355, "变异"))
     s.append(_arrow(360, 355, 400, 355, "注入"))
     s.append(_arrow(550, 355, 590, 355, "评分"))
@@ -88,7 +89,7 @@ def arch_svg():
 
 
 def mindmap_svg():
-    RT, TR = "#6ea8fe", "#e8a33d"  # runtime / training category colors
+    runtime_color, training_color = "#6ea8fe", "#e8a33d"
     root = ("nanocodex", "Rust 编码 agent + ncx-forge")
     # (name, sub, category): runtime = the live agent; training = the offline meta-loop.
     branches = [
@@ -101,19 +102,19 @@ def mindmap_svg():
         ("Skills · MCP · 视觉", "渐进披露 · stdio JSON-RPC · 路由", "rt"),
         ("ncx-forge 训练", "genome · 教师 · bench fitness · Pareto · SFT/RL", "tr"),
     ]
-    H = 60 * len(branches) + 56
-    s = [f'<svg viewBox="0 0 800 {H}" role="img" aria-label="Subsystem mind map, colored by runtime vs training" style="width:100%;max-width:800px">{_DEF}']
+    height = 60 * len(branches) + 56
+    s = [f'<svg viewBox="0 0 800 {height}" role="img" aria-label="Subsystem mind map, colored by runtime vs training" style="width:100%;max-width:800px">{_DEF}']
     # legend
     s.append('<rect x="470" y="8" width="12" height="12" rx="3" fill="#6ea8fe"/>'
              '<text x="488" y="18" font-size="11" fill="#9aa7b4">运行时（在线 agent）</text>')
     s.append('<rect x="628" y="8" width="12" height="12" rx="3" fill="#e8a33d"/>'
              '<text x="646" y="18" font-size="11" fill="#9aa7b4">训练（元循环）</text>')
-    cy = (H + 36) / 2
+    cy = (height + 36) / 2
     s.append(f'<rect x="14" y="{cy-28}" width="150" height="56" rx="12" fill="#1a2230" stroke="#cfd7e0" stroke-width="2"/>')
     s.append(f'<text x="89" y="{cy-4}" text-anchor="middle" font-size="14" font-weight="600" fill="#e6edf3">{root[0]}</text>')
     s.append(f'<text x="89" y="{cy+15}" text-anchor="middle" font-size="10.5" fill="#9aa7b4">{root[1]}</text>')
     for i, (name, sub, cat) in enumerate(branches):
-        col = RT if cat == "rt" else TR
+        col = runtime_color if cat == "rt" else training_color
         by = 46 + i * 60
         s.append(f'<path d="M164,{cy} C 250,{cy} 250,{by+22} 320,{by+22}" fill="none" stroke="{col}" stroke-opacity="0.5" stroke-width="1.5"/>')
         s.append(f'<rect x="320" y="{by}" width="232" height="44" rx="9" fill="#161b22" stroke="{col}" stroke-width="1.5"/>')

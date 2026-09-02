@@ -29,9 +29,9 @@ class _Block:
 
 
 class _Result:
-    def __init__(self, content, isError=False):
+    def __init__(self, content, is_error=False):
         self.content = content
-        self.isError = isError
+        self.isError = is_error
 
 
 def _ctx(tmp_path, approver):

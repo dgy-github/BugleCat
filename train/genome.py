@@ -11,7 +11,6 @@ no dependency on the legacy nanocodex python package).
 """
 from __future__ import annotations
 
-import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field

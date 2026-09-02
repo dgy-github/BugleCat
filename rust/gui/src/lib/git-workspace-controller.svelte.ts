@@ -3,6 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 export type BranchInfo = { name: string; current: boolean };
 export type Commit = { hash: string; subject: string; when: string };
 export type FileChange = { path: string; added: number; removed: number; kind: string };
+export type DiffPreview = { text: string; truncated: boolean };
+
+function normalizeDiffPreview(value: DiffPreview | string): DiffPreview {
+  // Tolerate a still-running older desktop backend during hot reload. The
+  // current backend always sends the structured form so truncation can be
+  // shown explicitly.
+  return typeof value === "string" ? { text: value, truncated: false } : value;
+}
 
 export class GitWorkspaceController {
   branches = $state<BranchInfo[]>([]);
@@ -10,8 +18,13 @@ export class GitWorkspaceController {
   busy = $state(false);
   branchCommits = $state<Record<string, Commit[]>>({});
   diffFiles = $state<FileChange[]>([]);
-  diffOpenFiles = $state<Record<string, string>>({});
+  diffOpenFiles = $state<Record<string, DiffPreview>>({});
   private diffGeneration = 0;
+  private diffPreviewGeneration = 0;
+  // A request has no rendered preview until it resolves. Keep its path
+  // separately so a second click cancels that pending expansion instead of
+  // issuing a duplicate request which would reopen the row later.
+  private pendingDiffPath: string | null = null;
   private workspaceGeneration = 0;
   // A reset invalidates every operation from the previous workspace. Track
   // operation tokens so an older `finally` cannot hide a newer spinner.
@@ -26,6 +39,8 @@ export class GitWorkspaceController {
   reset = (): void => {
     this.workspaceGeneration += 1;
     this.diffGeneration += 1;
+    this.diffPreviewGeneration += 1;
+    this.pendingDiffPath = null;
     this.activeBusyOperations.clear();
     this.busy = false;
     this.branches = [];
@@ -99,9 +114,11 @@ export class GitWorkspaceController {
 
   loadDiff = async (): Promise<void> => {
     const generation = ++this.diffGeneration;
+    this.diffPreviewGeneration += 1;
     const workspaceGeneration = this.workspaceGeneration;
     const expectedWorkspace = this.workspace();
     this.diffOpenFiles = {};
+    this.pendingDiffPath = null;
     try {
       const files = await invoke<FileChange[]>("git_changes", { expectedWorkspace });
       if (generation === this.diffGeneration && workspaceGeneration === this.workspaceGeneration) this.diffFiles = files;
@@ -114,18 +131,31 @@ export class GitWorkspaceController {
   };
 
   toggleFile = async (path: string): Promise<void> => {
-    if (path in this.diffOpenFiles) {
-      const { [path]: _drop, ...rest } = this.diffOpenFiles;
-      this.diffOpenFiles = rest;
+    const previewGeneration = ++this.diffPreviewGeneration;
+    if (Object.hasOwn(this.diffOpenFiles, path) || this.pendingDiffPath === path) {
+      this.pendingDiffPath = null;
+      this.diffOpenFiles = {};
       return;
     }
+    // A bounded preview is still intentionally kept to one expanded file:
+    // this prevents a large change set from accumulating many line-node trees
+    // while the user browses through it. The request generation also keeps a
+    // slow preview from reopening after the user selected another file.
+    this.diffOpenFiles = {};
+    this.pendingDiffPath = path;
     const generation = this.workspaceGeneration;
     const expectedWorkspace = this.workspace();
     try {
-      const diff = await invoke<string>("git_file_diff", { path, expectedWorkspace });
-      if (generation === this.workspaceGeneration) this.diffOpenFiles = { ...this.diffOpenFiles, [path]: diff };
+      const response = await invoke<DiffPreview | string>("git_file_diff", { path, expectedWorkspace });
+      if (generation === this.workspaceGeneration && previewGeneration === this.diffPreviewGeneration) {
+        this.pendingDiffPath = null;
+        this.diffOpenFiles = { [path]: normalizeDiffPreview(response) };
+      }
     } catch (error) {
-      if (generation === this.workspaceGeneration) this.diffOpenFiles = { ...this.diffOpenFiles, [path]: `diff failed: ${error}` };
+      if (generation === this.workspaceGeneration && previewGeneration === this.diffPreviewGeneration) {
+        this.pendingDiffPath = null;
+        this.diffOpenFiles = { [path]: { text: `diff failed: ${error}`, truncated: false } };
+      }
     }
   };
 

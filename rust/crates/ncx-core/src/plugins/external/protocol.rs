@@ -290,16 +290,8 @@ mod tests {
     use std::fs;
     use std::io::Read;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     fn temp_root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "ncx-{name}-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
+        crate::test_support::unique_temp_dir(&format!("ncx-{name}"))
     }
 
     fn fixture() -> ExternalPluginRecord {

@@ -402,7 +402,6 @@ pub fn context_descriptor(ctx: &ToolContext) -> ContextServiceDescriptor {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct FailingCatalogClient;
     impl ProviderCatalogClient for FailingCatalogClient {
@@ -453,11 +452,7 @@ mod tests {
 
     #[test]
     fn provider_directory_service_owns_route_activation_and_safe_diagnostics() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("ncx-provider-service-{nonce}"));
+        let root = crate::test_support::unique_temp_dir("ncx-provider-service");
         let paths = ConfigPaths {
             deepseek: PathBuf::from(&root).join("deepseek.toml"),
             codex: PathBuf::from(&root).join("codex.toml"),
@@ -490,11 +485,7 @@ mod tests {
 
     #[test]
     fn catalog_failure_cannot_mutate_the_active_provider_route() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("ncx-provider-catalog-{nonce}"));
+        let root = crate::test_support::unique_temp_dir("ncx-provider-catalog");
         let paths = ConfigPaths {
             deepseek: root.join("deepseek.toml"),
             codex: root.join("codex.toml"),
@@ -528,11 +519,7 @@ mod tests {
 
     #[test]
     fn route_validation_requires_the_selected_model_without_mutating_files() {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("ncx-provider-validation-{nonce}"));
+        let root = crate::test_support::unique_temp_dir("ncx-provider-validation");
         let paths = ConfigPaths {
             deepseek: root.join("deepseek.toml"),
             codex: root.join("codex.toml"),

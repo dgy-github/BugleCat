@@ -30,7 +30,7 @@ from typing import Any, Optional
 from nanocodex.agent import LoopHooks
 from nanocodex.config import ConfigError
 from nanocodex.provider.deepseek import ProviderError
-from nanocodex.sandbox import Approver, ApprovalRequest
+from nanocodex.sandbox import ApprovalRequest, Approver
 
 # Remembers GUI state across launches (last project, scheduler toggle, …).
 _STATE_FILE = Path.home() / ".nanocodex" / "gui_state.json"
@@ -308,16 +308,16 @@ class NanocodexGUI:
         # Both palettes live in _palette_for(); the saved choice (Settings →
         # General) selects one. Every widget reads self._palette, so switching
         # the theme + rebuilding re-colors the whole UI.
-        P = self._palette = _palette_for(self._theme)
-        self.root.configure(bg=P["bg"])
+        palette = self._palette = _palette_for(self._theme)
+        self.root.configure(bg=palette["bg"])
 
         def flat_btn(parent, text, command, *, accent=False):
             return tk.Button(
                 parent, text=text, command=command,
-                bg=P["accent"] if accent else P["panel"],
-                fg=P["accent_fg"] if accent else P["fg"],
-                activebackground=P["accent"] if accent else P["border"],
-                activeforeground=P["accent_fg"] if accent else P["fg"],
+                bg=palette["accent"] if accent else palette["panel"],
+                fg=palette["accent_fg"] if accent else palette["fg"],
+                activebackground=palette["accent"] if accent else palette["border"],
+                activeforeground=palette["accent_fg"] if accent else palette["fg"],
                 relief="flat", bd=0, padx=14, pady=6,
                 font=("Segoe UI", 9), cursor="hand2",
                 highlightthickness=0,
@@ -343,7 +343,7 @@ class NanocodexGUI:
                     tw.wm_geometry(f"+{x}+{y}")
                     tk.Label(
                         tw, text=text, justify="left",
-                        bg=P["fg"], fg=P["bg"], relief="flat", bd=0,
+                        bg=palette["fg"], fg=palette["bg"], relief="flat", bd=0,
                         font=("Segoe UI", 9), padx=8, pady=4,
                     ).pack()
                     tip["win"] = tw
@@ -365,7 +365,7 @@ class NanocodexGUI:
             return widget
 
         # --- top bar -----------------------------------------------------
-        top = tk.Frame(self.root, bg=P["bg"])
+        top = tk.Frame(self.root, bg=palette["bg"])
         top.pack(fill=tk.X, padx=16, pady=(14, 8))
         self.open_btn = flat_btn(top, "Open project", self._on_open_project)
         self.open_btn.pack(side=tk.LEFT)
@@ -385,15 +385,15 @@ class NanocodexGUI:
         self.storyboard_btn.pack(side=tk.LEFT, padx=(8, 0))
         add_tooltip(self.storyboard_btn,
                     "分镜：把故事拆成章节+镜头先预览，\n满意后再出片（出片真实计费）")
-        self.ws_label = tk.Label(top, text="", anchor="w", bg=P["bg"],
-                                 fg=P["muted"], font=("Segoe UI", 9))
+        self.ws_label = tk.Label(top, text="", anchor="w", bg=palette["bg"],
+                                 fg=palette["muted"], font=("Segoe UI", 9))
         self.ws_label.pack(side=tk.LEFT, padx=(12, 0), fill=tk.X, expand=True)
         self._auto_var = tk.BooleanVar(value=False)
         self.auto_chk = tk.Checkbutton(
             top, text="Auto-approve", variable=self._auto_var,
-            command=self._on_toggle_auto, bg=P["bg"], fg=P["muted"],
-            activebackground=P["bg"], activeforeground=P["fg"],
-            selectcolor=P["panel"], relief="flat", bd=0,
+            command=self._on_toggle_auto, bg=palette["bg"], fg=palette["muted"],
+            activebackground=palette["bg"], activeforeground=palette["fg"],
+            selectcolor=palette["panel"], relief="flat", bd=0,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
         )
         self.auto_chk.pack(side=tk.RIGHT)
@@ -403,9 +403,9 @@ class NanocodexGUI:
         self._sched_var = tk.BooleanVar(value=self._scheduler_enabled)
         self.sched_chk = tk.Checkbutton(
             top, text="Scheduler", variable=self._sched_var,
-            command=self._on_toggle_scheduler, bg=P["bg"], fg=P["muted"],
-            activebackground=P["bg"], activeforeground=P["fg"],
-            selectcolor=P["panel"], relief="flat", bd=0,
+            command=self._on_toggle_scheduler, bg=palette["bg"], fg=palette["muted"],
+            activebackground=palette["bg"], activeforeground=palette["fg"],
+            selectcolor=palette["panel"], relief="flat", bd=0,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
         )
         self.sched_chk.pack(side=tk.RIGHT, padx=(0, 12))
@@ -414,15 +414,15 @@ class NanocodexGUI:
         self._files_var = tk.BooleanVar(value=False)
         self.files_chk = tk.Checkbutton(
             top, text="Files", variable=self._files_var,
-            command=self._on_toggle_file_panel, bg=P["bg"], fg=P["muted"],
-            activebackground=P["bg"], activeforeground=P["fg"],
-            selectcolor=P["panel"], relief="flat", bd=0,
+            command=self._on_toggle_file_panel, bg=palette["bg"], fg=palette["muted"],
+            activebackground=palette["bg"], activeforeground=palette["fg"],
+            selectcolor=palette["panel"], relief="flat", bd=0,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
         )
         self.files_chk.pack(side=tk.RIGHT, padx=(0, 12))
 
         # hairline separator under the top bar
-        tk.Frame(self.root, bg=P["border"], height=1).pack(side=tk.TOP, fill=tk.X)
+        tk.Frame(self.root, bg=palette["border"], height=1).pack(side=tk.TOP, fill=tk.X)
 
         # IMPORTANT: pack the bottom bars FIRST (side=BOTTOM) so they always
         # reserve their space. The expanding transcript is packed LAST and only
@@ -430,30 +430,30 @@ class NanocodexGUI:
         # status bars off the bottom.
 
         # --- status bar (very bottom): model switcher + clickable usage --
-        status_bar = tk.Frame(self.root, bg=P["panel"])
+        status_bar = tk.Frame(self.root, bg=palette["panel"])
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
-        tk.Frame(self.root, bg=P["border"], height=1).pack(side=tk.BOTTOM, fill=tk.X)
+        tk.Frame(self.root, bg=palette["border"], height=1).pack(side=tk.BOTTOM, fill=tk.X)
         # Model switcher lives down here now (not the top bar).
         self.model_btn = tk.Button(
             status_bar, text="model: …", command=self._on_pick_model,
-            bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-            activeforeground=P["fg"], relief="flat", bd=0, padx=12, pady=4,
+            bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+            activeforeground=palette["fg"], relief="flat", bd=0, padx=12, pady=4,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
         )
         self.model_btn.pack(side=tk.LEFT)
         # Clickable context usage — click to expand a details popup.
         self.status = tk.Label(
-            status_bar, text="starting…", anchor="w", bg=P["panel"], fg=P["fg"],
+            status_bar, text="starting…", anchor="w", bg=palette["panel"], fg=palette["fg"],
             font=("Segoe UI", 10), padx=8, pady=6, cursor="hand2",
         )
         self.status.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.status.bind("<Button-1>", lambda e: self._show_context_details())
 
         # --- input bar (above status) ------------------------------------
-        bottom = tk.Frame(self.root, bg=P["bg"])
+        bottom = tk.Frame(self.root, bg=palette["bg"])
         bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=12)
-        tk.Frame(self.root, bg=P["border"], height=1).pack(side=tk.BOTTOM, fill=tk.X)
-        entry_wrap = tk.Frame(bottom, bg=P["panel"], highlightbackground=P["border"],
+        tk.Frame(self.root, bg=palette["border"], height=1).pack(side=tk.BOTTOM, fill=tk.X)
+        entry_wrap = tk.Frame(bottom, bg=palette["panel"], highlightbackground=palette["border"],
                               highlightthickness=1, bd=0)
         entry_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
         # Starts at 2 rows and auto-grows with content up to 12 rows (then the
@@ -462,8 +462,8 @@ class NanocodexGUI:
         self._entry_min_rows = 2
         self._entry_max_rows = 12
         self.entry = tk.Text(entry_wrap, height=self._entry_min_rows, wrap=tk.WORD,
-                             font=("Cascadia Code", 11), bg=P["panel"], fg=P["fg"],
-                             insertbackground=P["fg"], relief="flat", bd=0,
+                             font=("Cascadia Code", 11), bg=palette["panel"], fg=palette["fg"],
+                             insertbackground=palette["fg"], relief="flat", bd=0,
                              padx=12, pady=8, highlightthickness=0)
         self.entry.pack(fill=tk.BOTH, expand=True)
         # Enter sends; Shift+Enter inserts a newline (chat-box convention).
@@ -491,8 +491,8 @@ class NanocodexGUI:
         # Dedicated, always-visible Stop button (disabled until a turn runs).
         self.stop_btn = tk.Button(
             bottom, text="■ Stop", command=self._request_stop,
-            bg=P["panel"], fg=P["err"], activebackground=P["border"],
-            activeforeground=P["err"], relief="flat", bd=0, padx=14, pady=6,
+            bg=palette["panel"], fg=palette["err"], activebackground=palette["border"],
+            activeforeground=palette["err"], relief="flat", bd=0, padx=14, pady=6,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
             state=tk.DISABLED,
         )
@@ -504,8 +504,8 @@ class NanocodexGUI:
         # resumes instead of making the user type "continue".
         self.continue_btn = tk.Button(
             bottom, text="▶ Continue", command=self._on_continue,
-            bg=P["panel"], fg=P["accent"], activebackground=P["border"],
-            activeforeground=P["accent"], relief="flat", bd=0, padx=14, pady=6,
+            bg=palette["panel"], fg=palette["accent"], activebackground=palette["border"],
+            activeforeground=palette["accent"], relief="flat", bd=0, padx=14, pady=6,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
             state=tk.DISABLED,
         )
@@ -516,25 +516,25 @@ class NanocodexGUI:
         # --- body: session sidebar (left) + transcript (right) -----------
         # A horizontal container so the directory list sits beside the
         # transcript and both share the space left by the bars above/below.
-        body = tk.Frame(self.root, bg=P["bg"])
+        body = tk.Frame(self.root, bg=palette["bg"])
         body.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
         # Left sidebar: a scrollable directory of past conversations. Click a
         # row to view that session's summary. Width is fixed so the transcript
         # gets the rest; pack_propagate(False) keeps the frame from shrinking
         # to its contents.
-        sidebar = tk.Frame(body, bg=P["panel"], width=240)
+        sidebar = tk.Frame(body, bg=palette["panel"], width=240)
         sidebar.pack(side=tk.LEFT, fill=tk.Y)
         sidebar.pack_propagate(False)
-        tk.Frame(body, bg=P["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+        tk.Frame(body, bg=palette["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(
-            sidebar, text="Sessions", anchor="w", bg=P["panel"], fg=P["muted"],
+            sidebar, text="Sessions", anchor="w", bg=palette["panel"], fg=palette["muted"],
             font=("Segoe UI", 9, "bold"), padx=12, pady=8,
         ).pack(side=tk.TOP, fill=tk.X)
         self.session_list = tk.Listbox(
-            sidebar, bg=P["panel"], fg=P["fg"], relief="flat", bd=0,
+            sidebar, bg=palette["panel"], fg=palette["fg"], relief="flat", bd=0,
             font=("Segoe UI", 9), activestyle="none",
-            selectbackground=P["accent"], selectforeground=P["accent_fg"],
+            selectbackground=palette["accent"], selectforeground=palette["accent_fg"],
             highlightthickness=0,
         )
         self.session_list.pack(side=tk.TOP, fill=tk.BOTH, expand=True,
@@ -550,64 +550,64 @@ class NanocodexGUI:
         # not enter the transcript", so this panel is how the conversation stays
         # uncluttered yet the automation stays visible. Fixed height so it never
         # crowds out the Sessions list above it.
-        tk.Frame(sidebar, bg=P["border"], height=1).pack(side=tk.TOP, fill=tk.X)
+        tk.Frame(sidebar, bg=palette["border"], height=1).pack(side=tk.TOP, fill=tk.X)
         # Read-only status read-out; the single on/off control is the top-bar
         # "Scheduler" toggle (no duplicate switch here, matching the design).
         tk.Label(
-            sidebar, text="Scheduled", anchor="w", bg=P["panel"], fg=P["muted"],
+            sidebar, text="Scheduled", anchor="w", bg=palette["panel"], fg=palette["muted"],
             font=("Segoe UI", 9, "bold"), padx=12, pady=8,
         ).pack(side=tk.TOP, fill=tk.X)
         self.schedule_panel = tk.Text(
-            sidebar, height=8, wrap="word", bg=P["panel"], fg=P["fg"],
+            sidebar, height=8, wrap="word", bg=palette["panel"], fg=palette["fg"],
             relief="flat", bd=0, font=("Segoe UI", 9), padx=12, pady=4,
             highlightthickness=0, state=tk.DISABLED, cursor="arrow",
         )
         self.schedule_panel.pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
-        self.schedule_panel.tag_config("running", foreground=P["ok"])
-        self.schedule_panel.tag_config("idle", foreground=P["fg"])
-        self.schedule_panel.tag_config("off", foreground=P["muted"])
-        self.schedule_panel.tag_config("empty", foreground=P["muted"])
+        self.schedule_panel.tag_config("running", foreground=palette["ok"])
+        self.schedule_panel.tag_config("idle", foreground=palette["fg"])
+        self.schedule_panel.tag_config("off", foreground=palette["muted"])
+        self.schedule_panel.tag_config("empty", foreground=palette["muted"])
 
         # --- transcript (fills whatever space remains) -------------------
         self.output = scrolledtext.ScrolledText(
             body, wrap=tk.WORD, state=tk.DISABLED,
-            font=("Cascadia Code", 11), bg=P["bg"], fg=P["fg"],
-            insertbackground=P["fg"], relief="flat", bd=0,
+            font=("Cascadia Code", 11), bg=palette["bg"], fg=palette["fg"],
+            insertbackground=palette["fg"], relief="flat", bd=0,
             padx=18, pady=14, highlightthickness=0, spacing3=4,
         )
         self.output.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.output.tag_config("user", foreground=P["accent"], font=("Cascadia Code", 11, "bold"))
-        self.output.tag_config("reasoning", foreground=P["reason"], font=("Cascadia Code", 10, "italic"))
-        self.output.tag_config("content", foreground=P["fg"])
-        self.output.tag_config("tool", foreground=P["tool"])
-        self.output.tag_config("result_ok", foreground=P["ok"])
-        self.output.tag_config("result_err", foreground=P["err"])
-        self.output.tag_config("system", foreground=P["muted"])
+        self.output.tag_config("user", foreground=palette["accent"], font=("Cascadia Code", 11, "bold"))
+        self.output.tag_config("reasoning", foreground=palette["reason"], font=("Cascadia Code", 10, "italic"))
+        self.output.tag_config("content", foreground=palette["fg"])
+        self.output.tag_config("tool", foreground=palette["tool"])
+        self.output.tag_config("result_ok", foreground=palette["ok"])
+        self.output.tag_config("result_err", foreground=palette["err"])
+        self.output.tag_config("system", foreground=palette["muted"])
 
         # --- right-side file-diff dock (created hidden; manual toggle) ----
         # Packed with side=RIGHT so it's order-independent of the LEFT-packed
         # expanding transcript. NOT packed here — _show_file_panel packs it
         # (and its 1px border) on demand; the user opens it via the top-bar
         # "Files" switch. width fixed like the sidebar via pack_propagate(False).
-        self._file_panel_border = tk.Frame(body, bg=P["border"], width=1)
-        self.file_panel = tk.Frame(body, bg=P["panel"], width=460)
+        self._file_panel_border = tk.Frame(body, bg=palette["border"], width=1)
+        self.file_panel = tk.Frame(body, bg=palette["panel"], width=460)
         self.file_panel.pack_propagate(False)
-        fp_head = tk.Frame(self.file_panel, bg=P["panel"])
+        fp_head = tk.Frame(self.file_panel, bg=palette["panel"])
         fp_head.pack(side=tk.TOP, fill=tk.X)
         self.file_panel_title = tk.Label(
-            fp_head, text="(no edits yet)", anchor="w", bg=P["panel"],
-            fg=P["muted"], font=("Segoe UI", 9, "bold"), padx=12, pady=8,
+            fp_head, text="(no edits yet)", anchor="w", bg=palette["panel"],
+            fg=palette["muted"], font=("Segoe UI", 9, "bold"), padx=12, pady=8,
         )
         self.file_panel_title.pack(side=tk.LEFT, fill=tk.X, expand=True)
         flat_btn(fp_head, "×", self._hide_file_panel).pack(side=tk.RIGHT, padx=(0, 8))
-        tk.Frame(self.file_panel, bg=P["border"], height=1).pack(side=tk.TOP, fill=tk.X)
-        fp_body = tk.Frame(self.file_panel, bg=P["bg"])
+        tk.Frame(self.file_panel, bg=palette["border"], height=1).pack(side=tk.TOP, fill=tk.X)
+        fp_body = tk.Frame(self.file_panel, bg=palette["bg"])
         fp_body.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         fp_vsb = tk.Scrollbar(fp_body, orient=tk.VERTICAL)
         fp_hsb = tk.Scrollbar(fp_body, orient=tk.HORIZONTAL)
         self.file_view = tk.Text(
             fp_body, wrap="none", state=tk.DISABLED,
-            font=("Cascadia Code", 10), bg=P["bg"], fg=P["fg"],
+            font=("Cascadia Code", 10), bg=palette["bg"], fg=palette["fg"],
             relief="flat", bd=0, padx=8, pady=8, highlightthickness=0,
             yscrollcommand=fp_vsb.set, xscrollcommand=fp_hsb.set, cursor="arrow",
         )
@@ -616,12 +616,12 @@ class NanocodexGUI:
         fp_vsb.pack(side=tk.RIGHT, fill=tk.Y)
         fp_hsb.pack(side=tk.BOTTOM, fill=tk.X)
         self.file_view.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.file_view.tag_config("lineno", foreground=P["muted"])
-        self.file_view.tag_config("added", background=P["diff_add_bg"], foreground=P["fg"])
-        self.file_view.tag_config("removed", background=P["diff_del_bg"], foreground=P["fg"])
-        self.file_view.tag_config("context", foreground=P["fg"])
-        self.file_view.tag_config("meta", foreground=P["accent"], font=("Cascadia Code", 10, "bold"))
-        self.file_view.tag_config("hunk", foreground=P["muted"], font=("Cascadia Code", 10, "italic"))
+        self.file_view.tag_config("lineno", foreground=palette["muted"])
+        self.file_view.tag_config("added", background=palette["diff_add_bg"], foreground=palette["fg"])
+        self.file_view.tag_config("removed", background=palette["diff_del_bg"], foreground=palette["fg"])
+        self.file_view.tag_config("context", foreground=palette["fg"])
+        self.file_view.tag_config("meta", foreground=palette["accent"], font=("Cascadia Code", 10, "bold"))
+        self.file_view.tag_config("hunk", foreground=palette["muted"], font=("Cascadia Code", 10, "italic"))
 
     # --- auto-approve + context usage ------------------------------------
 
@@ -776,7 +776,7 @@ class NanocodexGUI:
         a header (used / window, %), a colored progress bar, then categories
         sorted by size with a color swatch, token count, and percentage."""
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         loop = self._loop
         if loop is None:
             return
@@ -790,7 +790,7 @@ class NanocodexGUI:
             except Exception:
                 pass
 
-        dlg = tk.Toplevel(self.root, bg=P["panel"])
+        dlg = tk.Toplevel(self.root, bg=palette["panel"])
         self._ctx_dlg = dlg
         dlg.title("Context window")
         dlg.resizable(True, True)
@@ -799,12 +799,12 @@ class NanocodexGUI:
         # Colors for the categories (swatch + bar segments), theme-aware so the
         # bar reads cleanly on both the light and dark palettes.
         cat_colors = {
-            "Messages": P["cat_messages"],
-            "System prompt": P["cat_system"],
-            "Free space": P["cat_free"],
+            "Messages": palette["cat_messages"],
+            "System prompt": palette["cat_system"],
+            "Free space": palette["cat_free"],
         }
 
-        txt = tk.Text(dlg, wrap="word", bg=P["panel"], fg=P["fg"],
+        txt = tk.Text(dlg, wrap="word", bg=palette["panel"], fg=palette["fg"],
                       font=("Segoe UI", 10), relief="flat", bd=0,
                       padx=16, pady=14, highlightthickness=0, spacing1=2, spacing3=2)
         txt.pack(fill="both", expand=True)
@@ -838,22 +838,22 @@ class NanocodexGUI:
             head = f"{_fmt_tok(used)} / {_fmt_tok(window)} ({pct}%)" if window else f"{_fmt_tok(used)} tokens"
 
             # --- header ---
-            txt.tag_config("title", font=("Segoe UI", 11), foreground=P["muted"])
-            txt.tag_config("head", font=("Segoe UI", 12, "bold"), foreground=P["fg"])
+            txt.tag_config("title", font=("Segoe UI", 11), foreground=palette["muted"])
+            txt.tag_config("head", font=("Segoe UI", 12, "bold"), foreground=palette["fg"])
             txt.insert("end", "Context window   ", "title")
             txt.insert("end", head + "\n\n", "head")
 
             # --- progress bar: a Canvas (not block chars, which wrap on a
             # proportional font) for a single clean proportional bar ---
             bar_w, bar_h = 396, 14
-            bar = tk.Canvas(txt, width=bar_w, height=bar_h, bg=P["bg"],
+            bar = tk.Canvas(txt, width=bar_w, height=bar_h, bg=palette["bg"],
                             highlightthickness=0, bd=0)
             x = 0
             for name, tok in cats:
                 seg = int(round(tok / denom * bar_w)) if denom else 0
                 if seg <= 0:
                     continue
-                color = cat_colors.get(name, P["accent"])
+                color = cat_colors.get(name, palette["accent"])
                 bar.create_rectangle(x, 0, min(x + seg, bar_w), bar_h,
                                      fill=color, width=0)
                 x += seg
@@ -861,9 +861,9 @@ class NanocodexGUI:
             txt.insert("end", "\n\n")
 
             # --- per-category rows (swatch + name + tokens + pct) ---
-            txt.tag_config("muted", foreground=P["muted"])
+            txt.tag_config("muted", foreground=palette["muted"])
             for name, tok in cats:
-                color = cat_colors.get(name, P["accent"])
+                color = cat_colors.get(name, palette["accent"])
                 sw = f"sw_{name}"
                 txt.tag_config(sw, foreground=color)
                 row_pct = (tok / denom * 100) if denom else 0
@@ -985,6 +985,7 @@ class NanocodexGUI:
     def _mcp_thread_main(self, servers) -> None:
         """Owns a persistent event loop the MCP connection stays bound to."""
         import asyncio as _asyncio
+
         from nanocodex.tools.mcp import McpManager
 
         loop = _asyncio.new_event_loop()
@@ -1064,6 +1065,7 @@ class NanocodexGUI:
     def _scheduler_thread_main(self) -> None:
         """Own an event loop and poll the ScheduleStore until told to stop."""
         import asyncio as _asyncio
+
         from nanocodex.agent.schedule import ScheduleStore
         from nanocodex.agent.schedule_runner import run_forever
 
@@ -1098,7 +1100,9 @@ class NanocodexGUI:
         (never here too — a threading.Lock isn't reentrant).
         """
         from nanocodex.cli import (
-            _build_loop, _desktop_only_approver, _auto_deny_approver,
+            _auto_deny_approver,
+            _build_loop,
+            _desktop_only_approver,
         )
 
         allow_desktop = bool(getattr(task, "allow_desktop", False))
@@ -1373,7 +1377,7 @@ class NanocodexGUI:
         if frame is None:
             return
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         for child in frame.winfo_children():
             child.destroy()
 
@@ -1381,25 +1385,25 @@ class NanocodexGUI:
             servers = McpStore().list()
         except Exception as exc:  # noqa: BLE001
             tk.Label(frame, text=f"Could not read mcp.toml: {exc}", anchor="w",
-                     bg=P["bg"], fg=P["err"], font=("Segoe UI", 9)).pack(
+                     bg=palette["bg"], fg=palette["err"], font=("Segoe UI", 9)).pack(
                          side=tk.TOP, fill=tk.X)
             return
         if not servers:
             tk.Label(frame, text="No MCP servers configured yet.", anchor="w",
-                     bg=P["bg"], fg=P["muted"], font=("Segoe UI", 10)).pack(
+                     bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 10)).pack(
                          side=tk.TOP, fill=tk.X, pady=8)
             return
 
         for s in servers:
-            row = tk.Frame(frame, bg=P["panel"])
+            row = tk.Frame(frame, bg=palette["panel"])
             row.pack(side=tk.TOP, fill=tk.X, pady=3)
             state = "on" if s.enabled else "off"
-            dot = P["ok"] if s.enabled else P["muted"]
-            tk.Label(row, text="●", bg=P["panel"], fg=dot,
+            dot = palette["ok"] if s.enabled else palette["muted"]
+            tk.Label(row, text="●", bg=palette["panel"], fg=dot,
                      font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(8, 6), pady=6)
             desc = f"{s.name}  [{state}]\n{s.command} {' '.join(s.args)}".rstrip()
-            tk.Label(row, text=desc, anchor="w", justify="left", bg=P["panel"],
-                     fg=P["fg"], font=("Cascadia Code", 9)).pack(
+            tk.Label(row, text=desc, anchor="w", justify="left", bg=palette["panel"],
+                     fg=palette["fg"], font=("Cascadia Code", 9)).pack(
                          side=tk.LEFT, fill=tk.X, expand=True, pady=4)
 
             def _remove(name=s.name) -> None:
@@ -1412,14 +1416,14 @@ class NanocodexGUI:
                 McpStore().set_enabled(name, not enabled)
                 self._refresh_plugin_list()
 
-            tk.Button(row, text="Remove", command=_remove, bg=P["panel"],
-                      fg=P["err"], activebackground=P["border"],
-                      activeforeground=P["err"], relief="flat", bd=0, padx=10,
+            tk.Button(row, text="Remove", command=_remove, bg=palette["panel"],
+                      fg=palette["err"], activebackground=palette["border"],
+                      activeforeground=palette["err"], relief="flat", bd=0, padx=10,
                       pady=4, font=("Segoe UI", 9), cursor="hand2",
                       highlightthickness=0).pack(side=tk.RIGHT, padx=(0, 8))
             tk.Button(row, text=("Disable" if s.enabled else "Enable"),
-                      command=_toggle, bg=P["panel"], fg=P["fg"],
-                      activebackground=P["border"], activeforeground=P["fg"],
+                      command=_toggle, bg=palette["panel"], fg=palette["fg"],
+                      activebackground=palette["border"], activeforeground=palette["fg"],
                       relief="flat", bd=0, padx=10, pady=4, font=("Segoe UI", 9),
                       cursor="hand2", highlightthickness=0).pack(
                           side=tk.RIGHT, padx=(0, 6))
@@ -1439,7 +1443,7 @@ class NanocodexGUI:
         blank window. Keep tuple pads on .pack()/.grid() throughout.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
 
         prev = getattr(self, "_settings_dlg", None)
         if prev is not None:
@@ -1448,7 +1452,7 @@ class NanocodexGUI:
             except Exception:  # noqa: BLE001
                 pass
 
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         self._settings_dlg = dlg
         dlg.title("Settings")
         dlg.resizable(True, True)
@@ -1456,15 +1460,15 @@ class NanocodexGUI:
         dlg.minsize(560, 400)
 
         # Horizontal split: fixed-width nav on the left, content fills the rest.
-        nav = tk.Frame(dlg, bg=P["panel"], width=168)
+        nav = tk.Frame(dlg, bg=palette["panel"], width=168)
         nav.pack(side=tk.LEFT, fill=tk.Y)
         nav.pack_propagate(False)
-        tk.Frame(dlg, bg=P["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
-        content = tk.Frame(dlg, bg=P["bg"])
+        tk.Frame(dlg, bg=palette["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+        content = tk.Frame(dlg, bg=palette["bg"])
         content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self._settings_content = content
 
-        tk.Label(nav, text="Settings", anchor="w", bg=P["panel"], fg=P["fg"],
+        tk.Label(nav, text="Settings", anchor="w", bg=palette["panel"], fg=palette["fg"],
                  font=("Segoe UI", 11, "bold"), padx=14).pack(
                      side=tk.TOP, fill=tk.X, pady=(14, 8))
 
@@ -1474,8 +1478,8 @@ class NanocodexGUI:
         for name in _settings_sections():
             b = tk.Button(
                 nav, text=name, command=lambda n=name: self._settings_show_section(n),
-                anchor="w", bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                activeforeground=P["fg"], relief="flat", bd=0, padx=14, pady=8,
+                anchor="w", bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                activeforeground=palette["fg"], relief="flat", bd=0, padx=14, pady=8,
                 font=("Segoe UI", 10), cursor="hand2", highlightthickness=0,
             )
             b.pack(side=tk.TOP, fill=tk.X)
@@ -1486,7 +1490,7 @@ class NanocodexGUI:
 
     def _settings_show_section(self, name: str) -> None:
         """Repaint the content frame with *name*'s section; re-highlight nav."""
-        P = self._palette
+        palette = self._palette
         content = getattr(self, "_settings_content", None)
         if content is None:
             return
@@ -1495,10 +1499,10 @@ class NanocodexGUI:
         for nm, btn in getattr(self, "_settings_nav_btns", {}).items():
             active = nm == name
             btn.config(
-                bg=P["accent"] if active else P["panel"],
-                fg=P["accent_fg"] if active else P["fg"],
-                activebackground=P["accent"] if active else P["border"],
-                activeforeground=P["accent_fg"] if active else P["fg"],
+                bg=palette["accent"] if active else palette["panel"],
+                fg=palette["accent_fg"] if active else palette["fg"],
+                activebackground=palette["accent"] if active else palette["border"],
+                activeforeground=palette["accent_fg"] if active else palette["fg"],
             )
         for child in content.winfo_children():
             child.destroy()
@@ -1516,26 +1520,26 @@ class NanocodexGUI:
     def _settings_section_header(self, parent, title: str, sub: str) -> None:
         """Shared title + subtitle for a settings section (tuple pads on pack)."""
         tk = self._tk
-        P = self._palette
-        tk.Label(parent, text=title, anchor="w", bg=P["bg"], fg=P["fg"],
+        palette = self._palette
+        tk.Label(parent, text=title, anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 12, "bold"), padx=18).pack(
                      side=tk.TOP, fill=tk.X, pady=(16, 2))
         if sub:
-            tk.Label(parent, text=sub, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(parent, text=sub, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9), padx=18, wraplength=480,
                      justify="left").pack(side=tk.TOP, fill=tk.X, pady=(0, 10))
 
     def _settings_section_general(self, parent) -> None:
         """Read-only workspace + model overview (model is changed in Config)."""
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         self._settings_section_header(
             parent, "General",
             "Current workspace and model. Change the model or other settings "
             "in the Config section.")
         cfg = getattr(self._loop, "_cfg", None) if self._loop else None
         info = cfg.redacted() if cfg is not None else {}
-        grid = tk.Frame(parent, bg=P["bg"])
+        grid = tk.Frame(parent, bg=palette["bg"])
         grid.pack(side=tk.TOP, fill=tk.X, padx=18)
         grid.columnconfigure(1, weight=1)
         rows = [
@@ -1546,10 +1550,10 @@ class NanocodexGUI:
             ("reasoning", info.get("reasoning_effort", "(unset)")),
         ]
         for r, (k, v) in enumerate(rows):
-            tk.Label(grid, text=k, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(grid, text=k, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w",
                                                 padx=(0, 12), pady=3)
-            tk.Label(grid, text=str(v), anchor="w", bg=P["bg"], fg=P["fg"],
+            tk.Label(grid, text=str(v), anchor="w", bg=palette["bg"], fg=palette["fg"],
                      font=("Cascadia Code", 10)).grid(row=r, column=1, sticky="w",
                                                       pady=3)
 
@@ -1557,32 +1561,32 @@ class NanocodexGUI:
         # The whole UI reads self._palette, so switching the theme + rebuilding
         # the widgets re-colors everything live. 'light' is the Codex-style
         # default (white canvas); 'dark' is the original GitHub-dark look.
-        tk.Label(parent, text="Appearance", anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(parent, text="Appearance", anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 12, "bold"), padx=18).pack(
                      side=tk.TOP, fill=tk.X, pady=(20, 2))
         tk.Label(parent, text="Theme applies immediately (the transcript is kept).",
-                 anchor="w", bg=P["bg"], fg=P["muted"], font=("Segoe UI", 9),
+                 anchor="w", bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 9),
                  padx=18).pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
-        trow = tk.Frame(parent, bg=P["bg"])
+        trow = tk.Frame(parent, bg=palette["bg"])
         trow.pack(side=tk.TOP, fill=tk.X, padx=18)
-        tk.Label(trow, text="theme", anchor="w", bg=P["bg"], fg=P["muted"],
+        tk.Label(trow, text="theme", anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 12))
         theme_var = tk.StringVar(value=self._theme)
         om = tk.OptionMenu(trow, theme_var, *VALID_THEMES,
                            command=lambda t: self._on_pick_theme(t))
-        om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                  activeforeground=P["fg"], relief="flat", bd=0,
+        om.config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                  activeforeground=palette["fg"], relief="flat", bd=0,
                   highlightthickness=0, font=("Segoe UI", 9), anchor="w")
-        om["menu"].config(bg=P["panel"], fg=P["fg"],
-                          activebackground=P["accent"],
-                          activeforeground=P["accent_fg"])
+        om["menu"].config(bg=palette["panel"], fg=palette["fg"],
+                          activebackground=palette["accent"],
+                          activeforeground=palette["accent_fg"])
         om.pack(side=tk.LEFT)
 
     def _on_pick_theme(self, theme: str) -> None:
         """Switch the UI theme: persist it, rebuild every widget, restore the
         transcript text, and reopen Settings on this section.
 
-        Rebuilding is how the ~300 ``P[...]`` lookups re-color at once — we tear
+        Rebuilding is how the ~300 ``palette[...]`` lookups re-color at once — we tear
         down the root's children and re-run _build_widgets() with the new
         palette, then replay the saved transcript so the conversation isn't lost.
         """
@@ -1642,7 +1646,7 @@ class NanocodexGUI:
         reasoning, persisted to ~/.nanocodex/config.toml and applied via rebuild.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         self._settings_section_header(
             parent, "Config",
             "Saved to ~/.nanocodex/config.toml (separate from ~/.deepseek's). "
@@ -1662,19 +1666,19 @@ class NanocodexGUI:
         cur_vl_model = info.get("vl_model", "")
         cur_ark_masked = info.get("ark_api_key", "(unset)")
 
-        form = tk.Frame(parent, bg=P["bg"])
+        form = tk.Frame(parent, bg=palette["bg"])
         form.pack(side=tk.TOP, fill=tk.X, padx=18)
         form.columnconfigure(1, weight=1)
         row = [0]  # mutable counter so the helpers can share it
 
         def _label(text: str) -> None:
-            tk.Label(form, text=text, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(form, text=text, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9)).grid(row=row[0], column=0, sticky="w",
                                                 padx=(0, 10), pady=3)
 
         def _entry(*, show: str | None = None, prefill: str = "") -> "Any":
-            e = tk.Entry(form, bg=P["panel"], fg=P["fg"], relief="flat",
-                         insertbackground=P["fg"], font=("Cascadia Code", 10))
+            e = tk.Entry(form, bg=palette["panel"], fg=palette["fg"], relief="flat",
+                         insertbackground=palette["fg"], font=("Cascadia Code", 10))
             if show:
                 e.config(show=show)
             if prefill:
@@ -1685,65 +1689,86 @@ class NanocodexGUI:
         def _option(choices: tuple, current: str) -> "Any":
             var = tk.StringVar(value=current if current in choices else choices[0])
             om = tk.OptionMenu(form, var, *choices)
-            om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                      activeforeground=P["fg"], relief="flat", bd=0,
+            om.config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                      activeforeground=palette["fg"], relief="flat", bd=0,
                       highlightthickness=0, font=("Segoe UI", 9), anchor="w")
-            om["menu"].config(bg=P["panel"], fg=P["fg"],
-                              activebackground=P["accent"],
-                              activeforeground=P["accent_fg"])
+            om["menu"].config(bg=palette["panel"], fg=palette["fg"],
+                              activebackground=palette["accent"],
+                              activeforeground=palette["accent_fg"])
             om.grid(row=row[0], column=1, sticky="we", pady=3)
             return var
 
         from nanocodex.config import (
-            VALID_SANDBOX_MODES, VALID_APPROVAL_POLICIES,
+            VALID_APPROVAL_POLICIES,
+            VALID_SANDBOX_MODES,
         )
 
         # current key (masked, read-only) — never echo the full secret.
         _label("current key")
-        tk.Label(form, text=cur_masked, anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(form, text=cur_masked, anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Cascadia Code", 10)).grid(row=row[0], column=1,
                                                   sticky="w", pady=3)
         row[0] += 1
-        _label("new API key"); key_e = _entry(show="*"); row[0] += 1
-        _label("base URL"); base_e = _entry(prefill=cur_base); row[0] += 1
-        _label("model"); model_e = _entry(prefill=cur_model); row[0] += 1
-        _label("sandbox"); sandbox_var = _option(VALID_SANDBOX_MODES, cur_sandbox); row[0] += 1
-        _label("approval"); approval_var = _option(VALID_APPROVAL_POLICIES, cur_approval); row[0] += 1
-        _label("reasoning"); reasoning_var = _option(_REASONING_CHOICES, cur_reasoning); row[0] += 1
+        _label("new API key")
+        key_e = _entry(show="*")
+        row[0] += 1
+        _label("base URL")
+        base_e = _entry(prefill=cur_base)
+        row[0] += 1
+        _label("model")
+        model_e = _entry(prefill=cur_model)
+        row[0] += 1
+        _label("sandbox")
+        sandbox_var = _option(VALID_SANDBOX_MODES, cur_sandbox)
+        row[0] += 1
+        _label("approval")
+        approval_var = _option(VALID_APPROVAL_POLICIES, cur_approval)
+        row[0] += 1
+        _label("reasoning")
+        reasoning_var = _option(_REASONING_CHOICES, cur_reasoning)
+        row[0] += 1
 
         # Vision (VL) backend: image-bearing turns route here (e.g. DashScope
         # Qwen-VL) while text/coding stays on the main model. Leave VL model
         # blank to disable routing. base URL / key fall back to the main ones
         # when only the VL model is set (same vendor).
         tk.Label(form, text="— Vision (VL) backend for image turns —",
-                 anchor="w", bg=P["bg"], fg=P["muted"],
+                 anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9, "italic")).grid(
                      row=row[0], column=0, columnspan=2, sticky="w", pady=(12, 2))
         row[0] += 1
         _label("VL current key")
-        tk.Label(form, text=cur_vl_masked, anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(form, text=cur_vl_masked, anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Cascadia Code", 10)).grid(row=row[0], column=1,
                                                   sticky="w", pady=3)
         row[0] += 1
-        _label("VL new key"); vl_key_e = _entry(show="*"); row[0] += 1
-        _label("VL base URL"); vl_base_e = _entry(prefill=cur_vl_base); row[0] += 1
-        _label("VL model"); vl_model_e = _entry(prefill=cur_vl_model); row[0] += 1
+        _label("VL new key")
+        vl_key_e = _entry(show="*")
+        row[0] += 1
+        _label("VL base URL")
+        vl_base_e = _entry(prefill=cur_vl_base)
+        row[0] += 1
+        _label("VL model")
+        vl_model_e = _entry(prefill=cur_vl_model)
+        row[0] += 1
 
         # Volcengine ARK key for Seedance video rendering (storyboard 出片).
         # Only used when actually rendering; planning/preview never touches it.
         tk.Label(form, text="— Seedance (ARK) key for storyboard 出片 —",
-                 anchor="w", bg=P["bg"], fg=P["muted"],
+                 anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9, "italic")).grid(
                      row=row[0], column=0, columnspan=2, sticky="w", pady=(12, 2))
         row[0] += 1
         _label("ARK current key")
-        tk.Label(form, text=cur_ark_masked, anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(form, text=cur_ark_masked, anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Cascadia Code", 10)).grid(row=row[0], column=1,
                                                   sticky="w", pady=3)
         row[0] += 1
-        _label("ARK new key"); ark_key_e = _entry(show="*"); row[0] += 1
+        _label("ARK new key")
+        ark_key_e = _entry(show="*")
+        row[0] += 1
 
-        status = tk.Label(form, text="", anchor="w", bg=P["bg"], fg=P["err"],
+        status = tk.Label(form, text="", anchor="w", bg=palette["bg"], fg=palette["err"],
                           font=("Segoe UI", 9), wraplength=480, justify="left")
         status.grid(row=row[0] + 1, column=0, columnspan=2, sticky="we",
                     pady=(8, 0))
@@ -1754,7 +1779,7 @@ class NanocodexGUI:
             # worker. Refuse while busy (mirrors the model switcher).
             if self._busy:
                 status.config(text="Busy — finish the current turn first.",
-                              fg=P["err"])
+                              fg=palette["err"])
                 return
             updates = _collect_settings_updates(
                 api_key=key_e.get().strip(),
@@ -1769,12 +1794,12 @@ class NanocodexGUI:
                 ark_api_key=ark_key_e.get().strip(),
             )
             if not updates:
-                status.config(text="Nothing to save.", fg=P["muted"])
+                status.config(text="Nothing to save.", fg=palette["muted"])
                 return
             try:
                 write_nanocodex_config(updates)
             except OSError as exc:
-                status.config(text=f"Could not write config: {exc}", fg=P["err"])
+                status.config(text=f"Could not write config: {exc}", fg=palette["err"])
                 return
             # A saved model must win over any in-session override, else the old
             # override would mask it on rebuild.
@@ -1790,9 +1815,9 @@ class NanocodexGUI:
             self._init_loop()
 
         tk.Button(
-            form, text="Save", command=_do_save, bg=P["accent"],
-            fg=P["accent_fg"], activebackground=P["accent"],
-            activeforeground=P["accent_fg"], relief="flat", bd=0, padx=14,
+            form, text="Save", command=_do_save, bg=palette["accent"],
+            fg=palette["accent_fg"], activebackground=palette["accent"],
+            activeforeground=palette["accent_fg"], relief="flat", bd=0, padx=14,
             pady=4, font=("Segoe UI", 9, "bold"), cursor="hand2",
             highlightthickness=0).grid(row=row[0], column=1, sticky="e",
                                        pady=(10, 0))
@@ -1805,35 +1830,35 @@ class NanocodexGUI:
         MCP stdio session is not hot-reloaded.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         self._settings_section_header(
             parent, "MCP servers",
             "Tools run OUTSIDE the sandbox — only add servers you trust. "
             "Changes take effect on the next launch (no hot-reload).")
 
         # Scrollable list of existing servers.
-        body = tk.Frame(parent, bg=P["bg"])
+        body = tk.Frame(parent, bg=palette["bg"])
         body.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=18)
         self._plugin_list_frame = body
         self._refresh_plugin_list()
 
         # --- add-server form -------------------------------------------------
-        tk.Frame(parent, bg=P["border"], height=1).pack(side=tk.TOP, fill=tk.X,
+        tk.Frame(parent, bg=palette["border"], height=1).pack(side=tk.TOP, fill=tk.X,
                                                          pady=8, padx=18)
-        form = tk.Frame(parent, bg=P["bg"])
+        form = tk.Frame(parent, bg=palette["bg"])
         form.pack(side=tk.TOP, fill=tk.X, padx=18, pady=(0, 14))
         form.columnconfigure(1, weight=1)
-        tk.Label(form, text="Add server", anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(form, text="Add server", anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 10, "bold")).grid(row=0, column=0,
                                                      columnspan=2, sticky="w",
                                                      pady=(0, 4))
 
         def _row(label: str, r: int) -> "Any":
-            tk.Label(form, text=label, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(form, text=label, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w",
                                                 padx=(0, 8))
-            e = tk.Entry(form, bg=P["panel"], fg=P["fg"], relief="flat",
-                         insertbackground=P["fg"], font=("Cascadia Code", 10))
+            e = tk.Entry(form, bg=palette["panel"], fg=palette["fg"], relief="flat",
+                         insertbackground=palette["fg"], font=("Cascadia Code", 10))
             e.grid(row=r, column=1, sticky="we", pady=2)
             return e
 
@@ -1842,7 +1867,7 @@ class NanocodexGUI:
         args_e = _row("args (space-sep)", 3)
         env_e = _row("env (K=V, comma-sep)", 4)
 
-        status = tk.Label(form, text="", anchor="w", bg=P["bg"], fg=P["err"],
+        status = tk.Label(form, text="", anchor="w", bg=palette["bg"], fg=palette["err"],
                           font=("Segoe UI", 9), wraplength=480, justify="left")
         status.grid(row=6, column=0, columnspan=2, sticky="we", pady=(4, 0))
 
@@ -1861,16 +1886,16 @@ class NanocodexGUI:
             try:
                 McpStore().add(name, command, args, env)
             except (ValueError, OSError) as exc:
-                status.config(text=f"Error: {exc}", fg=P["err"])
+                status.config(text=f"Error: {exc}", fg=palette["err"])
                 return
-            status.config(text=f"Added {name!r}. Restart to connect it.", fg=P["ok"])
+            status.config(text=f"Added {name!r}. Restart to connect it.", fg=palette["ok"])
             for e in (name_e, cmd_e, args_e, env_e):
                 e.delete(0, "end")
             self._refresh_plugin_list()
 
         tk.Button(
-            form, text="Add", command=_do_add, bg=P["accent"], fg=P["accent_fg"],
-            activebackground=P["accent"], activeforeground=P["accent_fg"],
+            form, text="Add", command=_do_add, bg=palette["accent"], fg=palette["accent_fg"],
+            activebackground=palette["accent"], activeforeground=palette["accent_fg"],
             relief="flat", bd=0, padx=14, pady=4, font=("Segoe UI", 9, "bold"),
             cursor="hand2", highlightthickness=0).grid(row=5, column=1,
                                                        sticky="e", pady=(6, 0))
@@ -1887,26 +1912,26 @@ class NanocodexGUI:
         clicks Refresh — opening this page makes no network call.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         self._settings_section_header(
             parent, "Marketplace",
             "One-click install MCP servers. Tools run OUTSIDE the sandbox — only "
             "install servers you trust. Takes effect on the next launch.")
 
         # --- built-in catalog (no network) ----------------------------------
-        tk.Label(parent, text="Built-in", anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(parent, text="Built-in", anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 10, "bold")).pack(side=tk.TOP, fill=tk.X,
                                                      padx=18, pady=(4, 2))
-        local = tk.Frame(parent, bg=P["bg"])
+        local = tk.Frame(parent, bg=palette["bg"])
         local.pack(side=tk.TOP, fill=tk.X, padx=18)
         self._mkt_local_frame = local
 
         # --- remote catalog (fetched on demand) -----------------------------
-        tk.Frame(parent, bg=P["border"], height=1).pack(side=tk.TOP, fill=tk.X,
+        tk.Frame(parent, bg=palette["border"], height=1).pack(side=tk.TOP, fill=tk.X,
                                                          pady=8, padx=18)
-        rhead = tk.Frame(parent, bg=P["bg"])
+        rhead = tk.Frame(parent, bg=palette["bg"])
         rhead.pack(side=tk.TOP, fill=tk.X, padx=18)
-        tk.Label(rhead, text="Remote", anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(rhead, text="Remote", anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
 
         from nanocodex.tools.marketplace import MARKETPLACE_URL_ENV, marketplace_url
@@ -1914,18 +1939,18 @@ class NanocodexGUI:
         if url:
             refresh = tk.Button(
                 rhead, text="Refresh", command=self._on_marketplace_refresh,
-                bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                activeforeground=P["fg"], relief="flat", bd=0, padx=10, pady=2,
+                bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                activeforeground=palette["fg"], relief="flat", bd=0, padx=10, pady=2,
                 font=("Segoe UI", 9), cursor="hand2", highlightthickness=0)
             refresh.pack(side=tk.RIGHT)
             self._mkt_refresh_btn = refresh
 
         self._mkt_status = tk.Label(
-            parent, text="", anchor="w", bg=P["bg"], fg=P["muted"],
+            parent, text="", anchor="w", bg=palette["bg"], fg=palette["muted"],
             font=("Segoe UI", 9), wraplength=480, justify="left")
         self._mkt_status.pack(side=tk.TOP, fill=tk.X, padx=18, pady=(2, 0))
 
-        remote = tk.Frame(parent, bg=P["bg"])
+        remote = tk.Frame(parent, bg=palette["bg"])
         remote.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=18)
         self._mkt_remote_frame = remote
 
@@ -1934,7 +1959,7 @@ class NanocodexGUI:
             self._mkt_status.config(
                 text=(f"No remote source configured. Set {MARKETPLACE_URL_ENV} "
                       "to a catalog URL and reopen Settings."),
-                fg=P["muted"])
+                fg=palette["muted"])
 
     def _installed_server_names(self) -> set[str]:
         """Names already in mcp.toml (so the marketplace can mark them installed)."""
@@ -1947,29 +1972,29 @@ class NanocodexGUI:
     def _render_catalog_row(self, frame, entry, installed: set[str]) -> None:
         """Draw one catalog entry row with name/source/description + Install."""
         tk = self._tk
-        P = self._palette
-        row = tk.Frame(frame, bg=P["panel"])
+        palette = self._palette
+        row = tk.Frame(frame, bg=palette["panel"])
         row.pack(side=tk.TOP, fill=tk.X, pady=3)
         is_installed = entry.name in installed
         tag = "installed" if is_installed else entry.source
         desc = f"{entry.name}  [{tag}]"
         if entry.description:
             desc += f"\n{entry.description}"
-        tk.Label(row, text=desc, anchor="w", justify="left", bg=P["panel"],
-                 fg=P["fg"], font=("Cascadia Code", 9), wraplength=360).pack(
+        tk.Label(row, text=desc, anchor="w", justify="left", bg=palette["panel"],
+                 fg=palette["fg"], font=("Cascadia Code", 9), wraplength=360).pack(
                      side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 6), pady=4)
 
         if is_installed:
-            tk.Label(row, text="installed", bg=P["panel"], fg=P["muted"],
+            tk.Label(row, text="installed", bg=palette["panel"], fg=palette["muted"],
                      font=("Segoe UI", 9)).pack(side=tk.RIGHT, padx=(0, 10))
             return
 
         def _install(e=entry) -> None:
             self._install_marketplace_entry(e)
 
-        tk.Button(row, text="Install", command=_install, bg=P["accent"],
-                  fg=P["accent_fg"], activebackground=P["accent"],
-                  activeforeground=P["accent_fg"], relief="flat", bd=0, padx=12,
+        tk.Button(row, text="Install", command=_install, bg=palette["accent"],
+                  fg=palette["accent_fg"], activebackground=palette["accent"],
+                  activeforeground=palette["accent_fg"], relief="flat", bd=0, padx=12,
                   pady=4, font=("Segoe UI", 9, "bold"), cursor="hand2",
                   highlightthickness=0).pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -1988,7 +2013,7 @@ class NanocodexGUI:
     def _refresh_marketplace_remote(self, entries) -> None:
         """Redraw the remote catalog rows from a fetched entry list."""
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         frame = getattr(self, "_mkt_remote_frame", None)
         if frame is None:
             return
@@ -1996,7 +2021,7 @@ class NanocodexGUI:
             child.destroy()
         if not entries:
             tk.Label(frame, text="No servers in the remote catalog.", anchor="w",
-                     bg=P["bg"], fg=P["muted"], font=("Segoe UI", 10)).pack(
+                     bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 10)).pack(
                          side=tk.TOP, fill=tk.X, pady=8)
             return
         installed = self._installed_server_names()
@@ -2034,7 +2059,7 @@ class NanocodexGUI:
 
     def _marketplace_fetch_done(self, entries, error) -> None:
         """Main-thread callback after a remote fetch finishes."""
-        P = self._palette
+        palette = self._palette
         self._mkt_fetching = False
         btn = getattr(self, "_mkt_refresh_btn", None)
         if btn is not None:
@@ -2046,10 +2071,10 @@ class NanocodexGUI:
         if status is None or not status.winfo_exists():
             return
         if error is not None:
-            status.config(text=f"Fetch failed: {error}", fg=P["err"])
+            status.config(text=f"Fetch failed: {error}", fg=palette["err"])
             return
         status.config(text=f"Loaded {len(entries)} server(s) from remote catalog.",
-                      fg=P["ok"])
+                      fg=palette["ok"])
         self._refresh_marketplace_remote(entries)
 
     def _install_marketplace_entry(self, entry) -> None:
@@ -2064,15 +2089,15 @@ class NanocodexGUI:
         """Modal collecting the machine-specific path and/or env values an entry
         needs before install. Uses Entry widgets (env values masked)."""
         tk = self._tk
-        P = self._palette
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        palette = self._palette
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         dlg.title(f"Install {entry.name}")
         dlg.transient(self.root)
         dlg.geometry("520x300")
-        tk.Label(dlg, text=f"Install {entry.name}", anchor="w", bg=P["bg"],
-                 fg=P["fg"], font=("Segoe UI", 11, "bold")).pack(
+        tk.Label(dlg, text=f"Install {entry.name}", anchor="w", bg=palette["bg"],
+                 fg=palette["fg"], font=("Segoe UI", 11, "bold")).pack(
                      side=tk.TOP, fill=tk.X, padx=16, pady=(14, 2))
-        form = tk.Frame(dlg, bg=P["bg"])
+        form = tk.Frame(dlg, bg=palette["bg"])
         form.pack(side=tk.TOP, fill=tk.X, padx=16, pady=(6, 0))
         form.columnconfigure(1, weight=1)
 
@@ -2080,27 +2105,27 @@ class NanocodexGUI:
         r = 0
         if entry.path_arg_index is not None:
             tk.Label(form, text=(entry.path_label or "path"), anchor="w",
-                     bg=P["bg"], fg=P["muted"], font=("Segoe UI", 9),
+                     bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 9),
                      wraplength=480, justify="left").grid(
                          row=r, column=0, columnspan=2, sticky="w")
             r += 1
-            path_e = tk.Entry(form, bg=P["panel"], fg=P["fg"], relief="flat",
-                              insertbackground=P["fg"], font=("Cascadia Code", 10))
+            path_e = tk.Entry(form, bg=palette["panel"], fg=palette["fg"], relief="flat",
+                              insertbackground=palette["fg"], font=("Cascadia Code", 10))
             path_e.grid(row=r, column=0, columnspan=2, sticky="we", pady=(2, 8))
             r += 1
 
         env_entries: dict[str, "Any"] = {}
         for key in entry.env_keys:
-            tk.Label(form, text=key, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(form, text=key, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w",
                                                 padx=(0, 8), pady=2)
-            e = tk.Entry(form, bg=P["panel"], fg=P["fg"], relief="flat", show="*",
-                         insertbackground=P["fg"], font=("Cascadia Code", 10))
+            e = tk.Entry(form, bg=palette["panel"], fg=palette["fg"], relief="flat", show="*",
+                         insertbackground=palette["fg"], font=("Cascadia Code", 10))
             e.grid(row=r, column=1, sticky="we", pady=2)
             env_entries[key] = e
             r += 1
 
-        status = tk.Label(form, text="", anchor="w", bg=P["bg"], fg=P["err"],
+        status = tk.Label(form, text="", anchor="w", bg=palette["bg"], fg=palette["err"],
                           font=("Segoe UI", 9), wraplength=480, justify="left")
         status.grid(row=r, column=0, columnspan=2, sticky="we", pady=(6, 0))
 
@@ -2112,17 +2137,17 @@ class NanocodexGUI:
             if ok:
                 dlg.destroy()
             else:
-                status.config(text=msg, fg=P["err"])
+                status.config(text=msg, fg=palette["err"])
 
-        btns = tk.Frame(dlg, bg=P["bg"])
+        btns = tk.Frame(dlg, bg=palette["bg"])
         btns.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=12)
-        tk.Button(btns, text="Install", command=_submit, bg=P["accent"],
-                  fg=P["accent_fg"], activebackground=P["accent"],
-                  activeforeground=P["accent_fg"], relief="flat", bd=0, padx=14,
+        tk.Button(btns, text="Install", command=_submit, bg=palette["accent"],
+                  fg=palette["accent_fg"], activebackground=palette["accent"],
+                  activeforeground=palette["accent_fg"], relief="flat", bd=0, padx=14,
                   pady=4, font=("Segoe UI", 9, "bold"), cursor="hand2",
                   highlightthickness=0).pack(side=tk.RIGHT)
-        tk.Button(btns, text="Cancel", command=dlg.destroy, bg=P["panel"],
-                  fg=P["fg"], activebackground=P["border"], activeforeground=P["fg"],
+        tk.Button(btns, text="Cancel", command=dlg.destroy, bg=palette["panel"],
+                  fg=palette["fg"], activebackground=palette["border"], activeforeground=palette["fg"],
                   relief="flat", bd=0, padx=14, pady=4, font=("Segoe UI", 9),
                   cursor="hand2", highlightthickness=0).pack(side=tk.RIGHT,
                                                              padx=(0, 8))
@@ -2163,7 +2188,7 @@ class NanocodexGUI:
         warning, matching the conversational tool's guardrail.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         self._settings_section_header(
             parent, "Scheduled tasks",
             "Add/enable/disable/remove tasks that run a prompt automatically. "
@@ -2171,54 +2196,59 @@ class NanocodexGUI:
             "`nanocodex schedule run` is running).")
 
         # Scrollable list of existing tasks (rendered by _refresh_schedule_mgr).
-        body = tk.Frame(parent, bg=P["bg"])
+        body = tk.Frame(parent, bg=palette["bg"])
         body.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=18)
         self._sched_mgr_frame = body
         self._refresh_schedule_mgr()
 
         # --- add-task form ---------------------------------------------------
-        tk.Frame(parent, bg=P["border"], height=1).pack(side=tk.TOP, fill=tk.X,
+        tk.Frame(parent, bg=palette["border"], height=1).pack(side=tk.TOP, fill=tk.X,
                                                          pady=8, padx=18)
-        form = tk.Frame(parent, bg=P["bg"])
+        form = tk.Frame(parent, bg=palette["bg"])
         form.pack(side=tk.TOP, fill=tk.X, padx=18, pady=(0, 14))
         form.columnconfigure(1, weight=1)
-        tk.Label(form, text="Add task", anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(form, text="Add task", anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 10, "bold")).grid(row=0, column=0,
                                                      columnspan=2, sticky="w",
                                                      pady=(0, 4))
 
         def _label(text: str, r: int) -> None:
-            tk.Label(form, text=text, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(form, text=text, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w",
                                                 padx=(0, 8))
 
         def _entry(r: int) -> "Any":
-            e = tk.Entry(form, bg=P["panel"], fg=P["fg"], relief="flat",
-                         insertbackground=P["fg"], font=("Cascadia Code", 10))
+            e = tk.Entry(form, bg=palette["panel"], fg=palette["fg"], relief="flat",
+                         insertbackground=palette["fg"], font=("Cascadia Code", 10))
             e.grid(row=r, column=1, sticky="we", pady=2)
             return e
 
-        _label("prompt", 1); prompt_e = _entry(1)
+        _label("prompt", 1)
+        prompt_e = _entry(1)
         # kind selector drives which extra fields matter (once/interval/daily).
         _label("kind", 2)
         from nanocodex.agent.schedule import VALID_KINDS
         kind_var = tk.StringVar(value=VALID_KINDS[0])
         kind_om = tk.OptionMenu(form, kind_var, *VALID_KINDS)
-        kind_om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                       activeforeground=P["fg"], relief="flat", bd=0,
+        kind_om.config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                       activeforeground=palette["fg"], relief="flat", bd=0,
                        highlightthickness=0, font=("Segoe UI", 9), anchor="w")
-        kind_om["menu"].config(bg=P["panel"], fg=P["fg"],
-                               activebackground=P["accent"],
-                               activeforeground=P["accent_fg"])
+        kind_om["menu"].config(bg=palette["panel"], fg=palette["fg"],
+                               activebackground=palette["accent"],
+                               activeforeground=palette["accent_fg"])
         kind_om.grid(row=2, column=1, sticky="we", pady=2)
 
         # All recurrence fields shown together with hints on which kind uses
         # which — simpler and more transparent than hiding/showing rows, and the
         # store ignores the irrelevant ones per kind.
-        _label("run_at (once/interval start)", 3); run_at_e = _entry(3)
-        _label("every_seconds (interval)", 4); every_e = _entry(4)
-        _label("at_hour (daily 0-23)", 5); hour_e = _entry(5)
-        _label("at_minute (daily 0-59)", 6); minute_e = _entry(6)
+        _label("run_at (once/interval start)", 3)
+        run_at_e = _entry(3)
+        _label("every_seconds (interval)", 4)
+        every_e = _entry(4)
+        _label("at_hour (daily 0-23)", 5)
+        hour_e = _entry(5)
+        _label("at_minute (daily 0-59)", 6)
+        minute_e = _entry(6)
         hour_e.insert(0, "9")
         minute_e.insert(0, "0")
 
@@ -2227,13 +2257,13 @@ class NanocodexGUI:
         allow_var = tk.BooleanVar(value=False)
         allow_chk = tk.Checkbutton(
             form, text="allow_desktop (unattended desktop actions)",
-            variable=allow_var, bg=P["bg"], fg=P["muted"],
-            activebackground=P["bg"], activeforeground=P["fg"],
-            selectcolor=P["panel"], relief="flat", bd=0, font=("Segoe UI", 9),
+            variable=allow_var, bg=palette["bg"], fg=palette["muted"],
+            activebackground=palette["bg"], activeforeground=palette["fg"],
+            selectcolor=palette["panel"], relief="flat", bd=0, font=("Segoe UI", 9),
             cursor="hand2", highlightthickness=0, anchor="w")
         allow_chk.grid(row=7, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        status = tk.Label(form, text="", anchor="w", bg=P["bg"], fg=P["err"],
+        status = tk.Label(form, text="", anchor="w", bg=palette["bg"], fg=palette["err"],
                           font=("Segoe UI", 9), wraplength=480, justify="left")
         status.grid(row=9, column=0, columnspan=2, sticky="we", pady=(4, 0))
 
@@ -2246,12 +2276,12 @@ class NanocodexGUI:
                 allow_desktop=bool(allow_var.get()),
             )
             if not kwargs["prompt"]:
-                status.config(text="A prompt is required.", fg=P["err"])
+                status.config(text="A prompt is required.", fg=palette["err"])
                 return
             try:
                 task = ScheduleStore().add(**kwargs)
             except (ValueError, TypeError) as exc:
-                status.config(text=f"Error: {exc}", fg=P["err"])
+                status.config(text=f"Error: {exc}", fg=palette["err"])
                 return
             note = ""
             if kwargs["allow_desktop"]:
@@ -2259,7 +2289,7 @@ class NanocodexGUI:
             status.config(
                 text=(f"Added {task.id} ({task.kind}); next: "
                       f"{task.next_run or '(immediate)'}.{note}"),
-                fg=P["ok"])
+                fg=palette["ok"])
             prompt_e.delete(0, "end")
             run_at_e.delete(0, "end")
             every_e.delete(0, "end")
@@ -2268,8 +2298,8 @@ class NanocodexGUI:
             self._refresh_schedule_panel()
 
         tk.Button(
-            form, text="Add", command=_do_add, bg=P["accent"], fg=P["accent_fg"],
-            activebackground=P["accent"], activeforeground=P["accent_fg"],
+            form, text="Add", command=_do_add, bg=palette["accent"], fg=palette["accent_fg"],
+            activebackground=palette["accent"], activeforeground=palette["accent_fg"],
             relief="flat", bd=0, padx=14, pady=4, font=("Segoe UI", 9, "bold"),
             cursor="hand2", highlightthickness=0).grid(row=8, column=1,
                                                        sticky="e", pady=(6, 0))
@@ -2286,7 +2316,7 @@ class NanocodexGUI:
         if frame is None:
             return
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         for child in frame.winfo_children():
             child.destroy()
 
@@ -2294,21 +2324,21 @@ class NanocodexGUI:
             tasks = ScheduleStore().tasks
         except Exception as exc:  # noqa: BLE001
             tk.Label(frame, text=f"Could not read schedule.json: {exc}",
-                     anchor="w", bg=P["bg"], fg=P["err"],
+                     anchor="w", bg=palette["bg"], fg=palette["err"],
                      font=("Segoe UI", 9)).pack(side=tk.TOP, fill=tk.X)
             return
         if not tasks:
             tk.Label(frame, text="No scheduled tasks yet.", anchor="w",
-                     bg=P["bg"], fg=P["muted"], font=("Segoe UI", 10)).pack(
+                     bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 10)).pack(
                          side=tk.TOP, fill=tk.X, pady=8)
             return
 
         for t in tasks:
-            row = tk.Frame(frame, bg=P["panel"])
+            row = tk.Frame(frame, bg=palette["panel"])
             row.pack(side=tk.TOP, fill=tk.X, pady=3)
             state = "on" if t.enabled else "off"
-            dot = P["ok"] if t.enabled else P["muted"]
-            tk.Label(row, text="●", bg=P["panel"], fg=dot,
+            dot = palette["ok"] if t.enabled else palette["muted"]
+            tk.Label(row, text="●", bg=palette["panel"], fg=dot,
                      font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(8, 6),
                                                  pady=6)
             prompt_preview = (t.prompt[:60] + "…") if len(t.prompt) > 60 else t.prompt
@@ -2318,8 +2348,8 @@ class NanocodexGUI:
             extra = "  [desktop]" if getattr(t, "allow_desktop", False) else ""
             desc = (f"{t.id}  [{state}]  {recur}{extra}\n{prompt_preview}\n"
                     f"next: {t.next_run or '—'}  runs: {t.runs}").rstrip()
-            tk.Label(row, text=desc, anchor="w", justify="left", bg=P["panel"],
-                     fg=P["fg"], font=("Cascadia Code", 9)).pack(
+            tk.Label(row, text=desc, anchor="w", justify="left", bg=palette["panel"],
+                     fg=palette["fg"], font=("Cascadia Code", 9)).pack(
                          side=tk.LEFT, fill=tk.X, expand=True, pady=4)
 
             def _remove(task_id=t.id) -> None:
@@ -2334,14 +2364,14 @@ class NanocodexGUI:
                 self._refresh_schedule_mgr()
                 self._refresh_schedule_panel()
 
-            tk.Button(row, text="Remove", command=_remove, bg=P["panel"],
-                      fg=P["err"], activebackground=P["border"],
-                      activeforeground=P["err"], relief="flat", bd=0, padx=10,
+            tk.Button(row, text="Remove", command=_remove, bg=palette["panel"],
+                      fg=palette["err"], activebackground=palette["border"],
+                      activeforeground=palette["err"], relief="flat", bd=0, padx=10,
                       pady=4, font=("Segoe UI", 9), cursor="hand2",
                       highlightthickness=0).pack(side=tk.RIGHT, padx=(0, 8))
             tk.Button(row, text=("Disable" if t.enabled else "Enable"),
-                      command=_toggle, bg=P["panel"], fg=P["fg"],
-                      activebackground=P["border"], activeforeground=P["fg"],
+                      command=_toggle, bg=palette["panel"], fg=palette["fg"],
+                      activebackground=palette["border"], activeforeground=palette["fg"],
                       relief="flat", bd=0, padx=10, pady=4, font=("Segoe UI", 9),
                       cursor="hand2", highlightthickness=0).pack(
                           side=tk.RIGHT, padx=(0, 6))
@@ -2354,24 +2384,24 @@ class NanocodexGUI:
         status view explaining the security model — no new persisted state.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         self._settings_section_header(
             parent, "Desktop",
             "Desktop control runs through MCP tools under approval gating. "
             "The live switches stay in the top bar; this is a status view.")
-        grid = tk.Frame(parent, bg=P["bg"])
+        grid = tk.Frame(parent, bg=palette["bg"])
         grid.pack(side=tk.TOP, fill=tk.X, padx=18)
         grid.columnconfigure(1, weight=1)
 
         def _state_row(r: int, label: str, on: bool, note: str) -> None:
-            tk.Label(grid, text=label, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(grid, text=label, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w",
                                                 padx=(0, 12), pady=3)
-            tk.Label(grid, text=("ON" if on else "OFF"), anchor="w", bg=P["bg"],
-                     fg=(P["ok"] if on else P["muted"]),
+            tk.Label(grid, text=("ON" if on else "OFF"), anchor="w", bg=palette["bg"],
+                     fg=(palette["ok"] if on else palette["muted"]),
                      font=("Cascadia Code", 10, "bold")).grid(
                          row=r, column=1, sticky="w", pady=3)
-            tk.Label(grid, text=note, anchor="w", bg=P["bg"], fg=P["muted"],
+            tk.Label(grid, text=note, anchor="w", bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 8), wraplength=440, justify="left").grid(
                          row=r + 1, column=0, columnspan=2, sticky="w",
                          padx=(0, 0), pady=(0, 6))
@@ -2418,8 +2448,8 @@ class NanocodexGUI:
     def _show_approval_dialog(self, ui_req: _ApprovalRequestUI) -> None:
         req = ui_req.request
         tk = self._tk
-        P = self._palette
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        palette = self._palette
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         dlg.title("Approval required")
         dlg.transient(self.root)
         dlg.grab_set()  # modal
@@ -2432,7 +2462,7 @@ class NanocodexGUI:
         # Buttons are packed FIRST at the bottom so they always reserve their
         # space and can never be clipped by the body (same lesson as the main
         # window's bottom bars).
-        btns = tk.Frame(dlg, bg=P["bg"])
+        btns = tk.Frame(dlg, bg=palette["bg"])
         btns.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
 
         def _decide(answer: bool, always: bool = False, session_all: bool = False) -> None:
@@ -2444,11 +2474,11 @@ class NanocodexGUI:
 
         def dlg_btn(text, command, *, accent=False, danger=False):
             if accent:
-                bg, fg, abg = P["accent"], P["accent_fg"], P["accent"]
+                bg, fg, abg = palette["accent"], palette["accent_fg"], palette["accent"]
             elif danger:
-                bg, fg, abg = P["panel"], P["err"], P["border"]
+                bg, fg, abg = palette["panel"], palette["err"], palette["border"]
             else:
-                bg, fg, abg = P["panel"], P["fg"], P["border"]
+                bg, fg, abg = palette["panel"], palette["fg"], palette["border"]
             return tk.Button(btns, text=text, command=command, bg=bg, fg=fg,
                              activebackground=abg, activeforeground=fg,
                              relief="flat", bd=0, padx=12, pady=6,
@@ -2472,12 +2502,12 @@ class NanocodexGUI:
         # transient Toplevel render blank (the "blank approval popup" bug —
         # documented in HANDOFF). The context-details popup already uses Text and
         # renders fine, so mirror it here.
-        txt = tk.Text(dlg, wrap="word", bg=P["bg"], fg=P["fg"],
+        txt = tk.Text(dlg, wrap="word", bg=palette["bg"], fg=palette["fg"],
                       font=("Cascadia Code", 10), relief="flat", bd=0,
                       padx=16, pady=14, highlightthickness=0, spacing3=4)
         txt.pack(side="top", fill="both", expand=True)
-        txt.tag_config("head", font=("Segoe UI", 12, "bold"), foreground=P["fg"])
-        txt.tag_config("muted", foreground=P["muted"])
+        txt.tag_config("head", font=("Segoe UI", 12, "bold"), foreground=palette["fg"])
+        txt.tag_config("muted", foreground=palette["muted"])
         txt.insert("end", "Approval required\n\n", "head")
         txt.insert("end", f"{req.command}\n\n")
         txt.insert("end", f"Dir: {req.cwd}\n", "muted")
@@ -2752,7 +2782,7 @@ class NanocodexGUI:
         typed; 'Cancel' is the same (closes without changing anything).
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
 
         # Single-instance: drop any prior preview so repeats don't stack.
         prev = getattr(self, "_enhance_dlg", None)
@@ -2762,7 +2792,7 @@ class NanocodexGUI:
             except Exception:  # noqa: BLE001
                 pass
 
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         self._enhance_dlg = dlg
         dlg.title("Enhance prompt")
         dlg.transient(self.root)
@@ -2771,7 +2801,7 @@ class NanocodexGUI:
 
         # Buttons FIRST at the bottom so they always reserve space (same lesson
         # as the main window's bottom bars / the approval dialog).
-        btns = tk.Frame(dlg, bg=P["bg"])
+        btns = tk.Frame(dlg, bg=palette["bg"])
         btns.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
 
         def _use(text: str | None) -> None:
@@ -2782,11 +2812,11 @@ class NanocodexGUI:
             dlg.destroy()
 
         def dlg_btn(label, command, *, accent=False):
-            bg = P["accent"] if accent else P["panel"]
-            fg = P["accent_fg"] if accent else P["fg"]
+            bg = palette["accent"] if accent else palette["panel"]
+            fg = palette["accent_fg"] if accent else palette["fg"]
             return tk.Button(
                 btns, text=label, command=command, bg=bg, fg=fg,
-                activebackground=P["border"] if not accent else P["accent"],
+                activebackground=palette["border"] if not accent else palette["accent"],
                 activeforeground=fg, relief="flat", bd=0, padx=14, pady=6,
                 font=("Segoe UI", 9, "bold"), cursor="hand2", highlightthickness=0,
             )
@@ -2796,21 +2826,21 @@ class NanocodexGUI:
         dlg_btn("Cancel", lambda: _use(None)).pack(side="right", padx=(0, 8))
 
         # Body: original (muted) above, rewrite (normal) below, each scrollable.
-        body = tk.Frame(dlg, bg=P["bg"])
+        body = tk.Frame(dlg, bg=palette["bg"])
         body.pack(side="top", fill="both", expand=True, padx=16, pady=14)
 
-        tk.Label(body, text="Your input", anchor="w", bg=P["bg"], fg=P["muted"],
+        tk.Label(body, text="Your input", anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9, "bold")).pack(side="top", fill="x")
-        orig_box = tk.Text(body, height=4, wrap="word", bg=P["panel"], fg=P["muted"],
+        orig_box = tk.Text(body, height=4, wrap="word", bg=palette["panel"], fg=palette["muted"],
                            relief="flat", bd=0, padx=10, pady=8,
                            font=("Cascadia Code", 10), highlightthickness=0)
         orig_box.pack(side="top", fill="x", pady=(2, 10))
         orig_box.insert("1.0", original)
         orig_box.config(state="disabled")
 
-        tk.Label(body, text="Rewritten", anchor="w", bg=P["bg"], fg=P["accent"],
+        tk.Label(body, text="Rewritten", anchor="w", bg=palette["bg"], fg=palette["accent"],
                  font=("Segoe UI", 9, "bold")).pack(side="top", fill="x")
-        new_box = tk.Text(body, wrap="word", bg=P["panel"], fg=P["fg"],
+        new_box = tk.Text(body, wrap="word", bg=palette["panel"], fg=palette["fg"],
                           relief="flat", bd=0, padx=10, pady=8,
                           font=("Cascadia Code", 10), highlightthickness=0)
         new_box.pack(side="top", fill="both", expand=True, pady=(2, 0))
@@ -2828,13 +2858,13 @@ class NanocodexGUI:
         dialogs built outside _build_widgets (storyboard panel) get the same
         flat, palette-colored button without re-defining it each time."""
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         return tk.Button(
             parent, text=text, command=command,
-            bg=P["accent"] if accent else P["panel"],
-            fg=P["accent_fg"] if accent else P["fg"],
-            activebackground=P["accent"] if accent else P["border"],
-            activeforeground=P["accent_fg"] if accent else P["fg"],
+            bg=palette["accent"] if accent else palette["panel"],
+            fg=palette["accent_fg"] if accent else palette["fg"],
+            activebackground=palette["accent"] if accent else palette["border"],
+            activeforeground=palette["accent_fg"] if accent else palette["fg"],
             relief="flat", bd=0, padx=14, pady=6,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
         )
@@ -2859,7 +2889,7 @@ class NanocodexGUI:
         and render are two separate user-gated steps — preview never spends.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
 
         prev = getattr(self, "_sb_dlg", None)
         if prev is not None:
@@ -2880,7 +2910,7 @@ class NanocodexGUI:
         self._sb_state = None
         self._sb_busy = False
 
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         self._sb_dlg = dlg
         dlg.title("分镜 — 故事 → 章节 → 镜头 → 出片")
         dlg.resizable(True, True)
@@ -2888,50 +2918,50 @@ class NanocodexGUI:
         dlg.minsize(560, 460)
 
         # --- top: story text + controls ---
-        top = tk.Frame(dlg, bg=P["bg"])
+        top = tk.Frame(dlg, bg=palette["bg"])
         top.pack(side=tk.TOP, fill=tk.X, padx=14, pady=(12, 6))
-        tk.Label(top, text="故事文本", anchor="w", bg=P["bg"], fg=P["fg"],
+        tk.Label(top, text="故事文本", anchor="w", bg=palette["bg"], fg=palette["fg"],
                  font=("Segoe UI", 10, "bold")).pack(side=tk.TOP, fill=tk.X)
-        story_wrap = tk.Frame(top, bg=P["panel"], highlightbackground=P["border"],
+        story_wrap = tk.Frame(top, bg=palette["panel"], highlightbackground=palette["border"],
                               highlightthickness=1, bd=0)
         story_wrap.pack(side=tk.TOP, fill=tk.X, pady=(4, 8))
         self._sb_story = tk.Text(story_wrap, height=6, wrap=tk.WORD,
-                                 font=("Cascadia Code", 10), bg=P["panel"], fg=P["fg"],
-                                 insertbackground=P["fg"], relief="flat", bd=0,
+                                 font=("Cascadia Code", 10), bg=palette["panel"], fg=palette["fg"],
+                                 insertbackground=palette["fg"], relief="flat", bd=0,
                                  padx=10, pady=6, highlightthickness=0)
         self._sb_story.pack(fill=tk.X)
         if prefill_story:
             self._sb_story.insert("1.0", prefill_story)
 
-        ctrl = tk.Frame(top, bg=P["bg"])
+        ctrl = tk.Frame(top, bg=palette["bg"])
         ctrl.pack(side=tk.TOP, fill=tk.X)
         img_btn = self._flat_btn(ctrl, "选图片（可选）", self._sb_pick_images)
         img_btn.pack(side=tk.LEFT)
         self._sb_images_label = tk.Label(ctrl, text="未选图片", anchor="w",
-                                         bg=P["bg"], fg=P["muted"], font=("Segoe UI", 9))
+                                         bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 9))
         self._sb_images_label.pack(side=tk.LEFT, padx=(8, 16))
-        tk.Label(ctrl, text="比例", anchor="w", bg=P["bg"], fg=P["muted"],
+        tk.Label(ctrl, text="比例", anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9)).pack(side=tk.LEFT)
         self._sb_ratio = tk.StringVar(value="16:9")
         om = tk.OptionMenu(ctrl, self._sb_ratio, "16:9", "9:16", "1:1", "4:3")
-        om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                  activeforeground=P["fg"], relief="flat", bd=0,
+        om.config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                  activeforeground=palette["fg"], relief="flat", bd=0,
                   highlightthickness=0, font=("Segoe UI", 9), anchor="w")
-        om["menu"].config(bg=P["panel"], fg=P["fg"], activebackground=P["accent"],
-                          activeforeground=P["accent_fg"])
+        om["menu"].config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["accent"],
+                          activeforeground=palette["accent_fg"])
         om.pack(side=tk.LEFT, padx=(6, 16))
         # On-screen text language: controls what language any text rendered IN
         # the video (signs, subtitles, dialogue captions) comes out as. Distinct
         # from the (English) prompt language. 中文 / English / 无文字.
-        tk.Label(ctrl, text="字幕语言", anchor="w", bg=P["bg"], fg=P["muted"],
+        tk.Label(ctrl, text="字幕语言", anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9)).pack(side=tk.LEFT)
         self._sb_caplang = tk.StringVar(value="zh")
         cap_om = tk.OptionMenu(ctrl, self._sb_caplang, "zh", "en", "none")
-        cap_om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                      activeforeground=P["fg"], relief="flat", bd=0,
+        cap_om.config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                      activeforeground=palette["fg"], relief="flat", bd=0,
                       highlightthickness=0, font=("Segoe UI", 9), anchor="w")
-        cap_om["menu"].config(bg=P["panel"], fg=P["fg"], activebackground=P["accent"],
-                              activeforeground=P["accent_fg"])
+        cap_om["menu"].config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["accent"],
+                              activeforeground=palette["accent_fg"])
         cap_om.pack(side=tk.LEFT, padx=(6, 16))
         self._sb_preview_btn = self._flat_btn(ctrl, "生成预览", self._sb_run_preview,
                                               accent=True)
@@ -2940,36 +2970,36 @@ class NanocodexGUI:
         # --- thumbnail strip for picked reference images (filled on pick) ---
         # Always packed here (empty -> 0 height) so thumbs sit right under the
         # picker row; _sb_render_thumbs fills/clears its children.
-        self._sb_thumb_strip = tk.Frame(top, bg=P["bg"])
+        self._sb_thumb_strip = tk.Frame(top, bg=palette["bg"])
         self._sb_thumb_strip.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
         self._sb_thumb_imgs = []  # keep PhotoImage refs alive (else GC blanks them)
 
         # --- middle: two-level preview (chapters then shots) ---
-        mid = tk.Frame(dlg, bg=P["bg"])
+        mid = tk.Frame(dlg, bg=palette["bg"])
         mid.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(2, 6))
         pv_vsb = tk.Scrollbar(mid, orient=tk.VERTICAL)
         self._sb_preview = tk.Text(
             mid, wrap="word", state=tk.DISABLED, font=("Cascadia Code", 10),
-            bg=P["panel"], fg=P["fg"], relief="flat", bd=0, padx=10, pady=8,
+            bg=palette["panel"], fg=palette["fg"], relief="flat", bd=0, padx=10, pady=8,
             highlightthickness=0, yscrollcommand=pv_vsb.set, cursor="arrow",
         )
         pv_vsb.config(command=self._sb_preview.yview)
         pv_vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self._sb_preview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._sb_preview.tag_config("chapter", foreground=P["accent"],
+        self._sb_preview.tag_config("chapter", foreground=palette["accent"],
                                     font=("Cascadia Code", 11, "bold"), spacing1=6)
-        self._sb_preview.tag_config("shot", foreground=P["tool"],
+        self._sb_preview.tag_config("shot", foreground=palette["tool"],
                                     font=("Cascadia Code", 10, "bold"), spacing1=4)
-        self._sb_preview.tag_config("field", foreground=P["muted"])
-        self._sb_preview.tag_config("body", foreground=P["fg"])
+        self._sb_preview.tag_config("field", foreground=palette["muted"])
+        self._sb_preview.tag_config("body", foreground=palette["fg"])
         # Result-view status colors: success (teal) vs failure (red).
-        self._sb_preview.tag_config("ok", foreground=P["tool"],
+        self._sb_preview.tag_config("ok", foreground=palette["tool"],
                                     font=("Cascadia Code", 10, "bold"), spacing1=6)
-        self._sb_preview.tag_config("fail", foreground=P["err"],
+        self._sb_preview.tag_config("fail", foreground=palette["err"],
                                     font=("Cascadia Code", 10, "bold"), spacing1=6)
         # 一镜疑似多动作的本地告警（黄字），紧跟在被标记镜头下方。
         self._sb_preview.tag_config(
-            "warn", foreground=P.get("warn", "#d6a100"),
+            "warn", foreground=palette.get("warn", "#d6a100"),
             font=("Cascadia Code", 9, "bold"))
 
         # --- results: per-shot status + ▶播放 / ↻重试 (filled after a render) ---
@@ -2977,13 +3007,13 @@ class NanocodexGUI:
         # shot gets a row: ✓ + ▶播放 when a clip rendered, ✗/— + ↻重试 otherwise
         # (so a failed shot can be re-generated on its own without re-spending on
         # the ones that already succeeded).
-        res_outer = tk.Frame(dlg, bg=P["bg"])
+        res_outer = tk.Frame(dlg, bg=palette["bg"])
         self._sb_results_outer = res_outer
-        res_canvas = tk.Canvas(res_outer, bg=P["bg"], highlightthickness=0,
+        res_canvas = tk.Canvas(res_outer, bg=palette["bg"], highlightthickness=0,
                                height=0)
         res_vsb = tk.Scrollbar(res_outer, orient=tk.VERTICAL,
                                command=res_canvas.yview)
-        res_inner = tk.Frame(res_canvas, bg=P["bg"])
+        res_inner = tk.Frame(res_canvas, bg=palette["bg"])
         res_inner.bind(
             "<Configure>",
             lambda e: res_canvas.configure(scrollregion=res_canvas.bbox("all")))
@@ -2998,15 +3028,15 @@ class NanocodexGUI:
         # res_outer is packed lazily by _sb_render_results once rows exist.
 
         # --- bottom: cost estimate + render + progress ---
-        bot = tk.Frame(dlg, bg=P["bg"])
+        bot = tk.Frame(dlg, bg=palette["bg"])
         bot.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(0, 12))
-        self._sb_cost_label = tk.Label(bot, text="", anchor="w", bg=P["bg"],
-                                       fg=P["fg"], font=("Segoe UI", 9))
+        self._sb_cost_label = tk.Label(bot, text="", anchor="w", bg=palette["bg"],
+                                       fg=palette["fg"], font=("Segoe UI", 9))
         self._sb_cost_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._sb_render_btn = tk.Button(
             bot, text="▶ 出片", command=self._sb_run_render,
-            bg=P["panel"], fg=P["err"], activebackground=P["border"],
-            activeforeground=P["err"], relief="flat", bd=0, padx=14, pady=6,
+            bg=palette["panel"], fg=palette["err"], activebackground=palette["border"],
+            activeforeground=palette["err"], relief="flat", bd=0, padx=14, pady=6,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
             state=tk.DISABLED,
         )
@@ -3015,8 +3045,8 @@ class NanocodexGUI:
         # clips landed — see _sb_show_render_done). Disabled until then.
         self._sb_merge_btn = tk.Button(
             bot, text="⧉ 合并整片", command=self._sb_run_merge,
-            bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-            activeforeground=P["fg"], relief="flat", bd=0, padx=12, pady=6,
+            bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+            activeforeground=palette["fg"], relief="flat", bd=0, padx=12, pady=6,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
             state=tk.DISABLED,
         )
@@ -3024,13 +3054,13 @@ class NanocodexGUI:
         # History: browse past 出片 runs (reads storyboard_out/runs/index.json).
         self._sb_history_btn = tk.Button(
             bot, text="🕘 历史", command=self._sb_show_history,
-            bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-            activeforeground=P["fg"], relief="flat", bd=0, padx=12, pady=6,
+            bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+            activeforeground=palette["fg"], relief="flat", bd=0, padx=12, pady=6,
             font=("Segoe UI", 9), cursor="hand2", highlightthickness=0,
         )
         self._sb_history_btn.pack(side=tk.RIGHT, padx=(0, 8))
-        self._sb_status = tk.Label(dlg, text="", anchor="w", bg=P["bg"],
-                                   fg=P["muted"], font=("Segoe UI", 9),
+        self._sb_status = tk.Label(dlg, text="", anchor="w", bg=palette["bg"],
+                                   fg=palette["muted"], font=("Segoe UI", 9),
                                    wraplength=720, justify="left")
         self._sb_status.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=(0, 4))
 
@@ -3134,7 +3164,7 @@ class NanocodexGUI:
         missing, the strip shows a one-line hint instead of crashing.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         strip = getattr(self, "_sb_thumb_strip", None)
         if strip is None:
             return
@@ -3147,30 +3177,30 @@ class NanocodexGUI:
         try:
             from PIL import Image, ImageTk
         except Exception:  # noqa: BLE001 - Pillow missing: count-only fallback
-            tk.Label(strip, text="(装 pillow 可显示缩略图)", bg=P["bg"],
-                     fg=P["muted"], font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            tk.Label(strip, text="(装 pillow 可显示缩略图)", bg=palette["bg"],
+                     fg=palette["muted"], font=("Segoe UI", 8)).pack(side=tk.LEFT)
             return
         from pathlib import Path as _Path
         for p in paths[:8]:  # cap the strip so many images don't overflow it
-            cell = tk.Frame(strip, bg=P["bg"])
+            cell = tk.Frame(strip, bg=palette["bg"])
             cell.pack(side=tk.LEFT, padx=(0, 6))
             try:
                 im = Image.open(p)
                 im.thumbnail((96, 64))
                 photo = ImageTk.PhotoImage(im)
                 self._sb_thumb_imgs.append(photo)
-                tk.Label(cell, image=photo, bg=P["bg"]).pack(side=tk.TOP)
+                tk.Label(cell, image=photo, bg=palette["bg"]).pack(side=tk.TOP)
             except Exception:  # noqa: BLE001 - unreadable -> placeholder
-                tk.Label(cell, text="?", width=6, height=3, bg=P["panel"],
-                         fg=P["err"], font=("Segoe UI", 9)).pack(side=tk.TOP)
+                tk.Label(cell, text="?", width=6, height=3, bg=palette["panel"],
+                         fg=palette["err"], font=("Segoe UI", 9)).pack(side=tk.TOP)
             name = _Path(p).name
             if len(name) > 14:
                 name = name[:12] + "…"
-            tk.Label(cell, text=name, bg=P["bg"], fg=P["muted"],
+            tk.Label(cell, text=name, bg=palette["bg"], fg=palette["muted"],
                      font=("Segoe UI", 8)).pack(side=tk.TOP)
         if len(paths) > 8:
-            tk.Label(strip, text=f"+{len(paths) - 8}", bg=P["bg"],
-                     fg=P["muted"], font=("Segoe UI", 8)).pack(side=tk.LEFT)
+            tk.Label(strip, text=f"+{len(paths) - 8}", bg=palette["bg"],
+                     fg=palette["muted"], font=("Segoe UI", 8)).pack(side=tk.LEFT)
 
     def _sb_pick_images(self) -> None:
         """Pick reference images for the storyboard (optional)."""
@@ -3225,12 +3255,14 @@ class NanocodexGUI:
         """Wire pipeline deps from layered config (planner/chapters always;
         vision only with a VL backend + images; seedance only when rendering).
         Raises with a clear message when a needed key is missing."""
-        import os
 
         from nanocodex.config import load_config
         from nanocodex.provider.deepseek import DeepSeekProvider
         from nanocodex.storyboard.clients import (
-            ChapterPlanner, ContinuityChecker, SeedanceClient, TextPlanner,
+            ChapterPlanner,
+            ContinuityChecker,
+            SeedanceClient,
+            TextPlanner,
             VisionAnalyzer,
         )
         from nanocodex.storyboard.pipeline import PipelineDeps
@@ -3295,6 +3327,7 @@ class NanocodexGUI:
             self._sb_set_status("先生成预览再出片。", error=True)
             return
         from tkinter import messagebox
+
         from nanocodex.agent.pricing import estimate_seedance_cost_cny
         total_s = sum(float(s.duration_sec) for s in state.shots)
         est = estimate_seedance_cost_cny(total_s)
@@ -3330,7 +3363,10 @@ class NanocodexGUI:
         try:
             deps = self._sb_build_deps(want_render=True)
             from nanocodex.storyboard.pipeline import (
-                render, export, make_run_dir, write_run_index,
+                export,
+                make_run_dir,
+                render,
+                write_run_index,
             )
             base = (self._workspace / "storyboard_out").resolve()
             title = getattr(state.project, "title", "") or "Untitled"
@@ -3401,6 +3437,7 @@ class NanocodexGUI:
             self._sb_set_status("没有可重出的镜头。", error=True)
             return
         from tkinter import messagebox
+
         from nanocodex.agent.pricing import estimate_seedance_cost_cny
         shot = next((s for s in state.shots if s.shot_id == shot_id), None)
         dur = float(shot.duration_sec) if shot else 5.0
@@ -3428,7 +3465,10 @@ class NanocodexGUI:
         try:
             deps = self._sb_build_deps(want_render=True)
             from nanocodex.storyboard.pipeline import (
-                render_one, export, make_run_dir, write_run_index,
+                export,
+                make_run_dir,
+                render_one,
+                write_run_index,
             )
             base = (self._workspace / "storyboard_out").resolve()
             run_dir = getattr(self, "_sb_run_dir", None)
@@ -3579,7 +3619,7 @@ class NanocodexGUI:
         ↻重试, which re-renders just that shot (no re-spend on the good ones).
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         inner = getattr(self, "_sb_results_inner", None)
         if inner is None:
             return
@@ -3596,13 +3636,13 @@ class NanocodexGUI:
         try:
             full = out_dir / "full.mp4"
             if full.exists() and full.stat().st_size > 0:
-                frow = tk.Frame(inner, bg=P["panel"])
+                frow = tk.Frame(inner, bg=palette["panel"])
                 frow.pack(side=tk.TOP, fill=tk.X, pady=(0, 4))
-                tk.Label(frow, text="🎬", width=2, anchor="w", bg=P["panel"],
-                         fg=P["accent"], font=("Segoe UI", 10, "bold")).pack(
+                tk.Label(frow, text="🎬", width=2, anchor="w", bg=palette["panel"],
+                         fg=palette["accent"], font=("Segoe UI", 10, "bold")).pack(
                              side=tk.LEFT)
                 tk.Label(frow, text="整片  full.mp4（已合并）", anchor="w",
-                         bg=P["panel"], fg=P["fg"],
+                         bg=palette["panel"], fg=palette["fg"],
                          font=("Segoe UI", 9, "bold")).pack(
                              side=tk.LEFT, padx=(4, 8))
                 self._flat_btn(
@@ -3616,14 +3656,14 @@ class NanocodexGUI:
         for s in state.shots:
             url = str(urls.get(s.shot_id, ""))
             ok = bool(url) and not url.startswith("[failed")
-            row = tk.Frame(inner, bg=P["bg"])
+            row = tk.Frame(inner, bg=palette["bg"])
             row.pack(side=tk.TOP, fill=tk.X, pady=1)
             mark = "✓" if ok else ("✗" if url else "—")
-            tk.Label(row, text=mark, width=2, anchor="w", bg=P["bg"],
-                     fg=(P["tool"] if ok else P["err"]),
+            tk.Label(row, text=mark, width=2, anchor="w", bg=palette["bg"],
+                     fg=(palette["tool"] if ok else palette["err"]),
                      font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
             tk.Label(row, text=f"{s.shot_id}  {s.title}", anchor="w",
-                     bg=P["bg"], fg=P["fg"], font=("Segoe UI", 9)).pack(
+                     bg=palette["bg"], fg=palette["fg"], font=("Segoe UI", 9)).pack(
                          side=tk.LEFT, padx=(4, 8))
             if ok:
                 local = out_dir / f"{s.shot_id}.mp4"
@@ -3638,8 +3678,8 @@ class NanocodexGUI:
                 ).pack(side=tk.RIGHT)
                 if url:
                     short = url[8:60].replace("\n", " ")  # strip "[failed: "
-                    tk.Label(row, text=short, anchor="e", bg=P["bg"],
-                             fg=P["muted"], font=("Segoe UI", 8)).pack(
+                    tk.Label(row, text=short, anchor="e", bg=palette["bg"],
+                             fg=palette["muted"], font=("Segoe UI", 8)).pack(
                                  side=tk.RIGHT, padx=(0, 8))
 
         # Reveal the results area (packed lazily so it stays hidden pre-render)
@@ -3740,7 +3780,7 @@ class NanocodexGUI:
         dialog serves the校验 step and the合并 step with the right wording.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         try:
             from tkinter import ttk
         except Exception:  # noqa: BLE001 - no ttk: skip the dialog, thread still runs
@@ -3749,15 +3789,15 @@ class NanocodexGUI:
         dlg = tk.Toplevel(self._sb_dlg)
         self._sb_merge_progress = dlg
         dlg.title(title)
-        dlg.configure(bg=P["bg"])
+        dlg.configure(bg=palette["bg"])
         dlg.geometry("360x130")
         dlg.resizable(False, False)
         dlg.transient(self._sb_dlg)
-        tk.Label(dlg, text=label, anchor="w", bg=P["bg"],
-                 fg=P["fg"], font=("Segoe UI", 10)).pack(
+        tk.Label(dlg, text=label, anchor="w", bg=palette["bg"],
+                 fg=palette["fg"], font=("Segoe UI", 10)).pack(
                      side=tk.TOP, fill=tk.X, padx=18, pady=(20, 6))
         tk.Label(dlg, text=sub,
-                 anchor="w", bg=P["bg"], fg=P["muted"], font=("Segoe UI", 8)).pack(
+                 anchor="w", bg=palette["bg"], fg=palette["muted"], font=("Segoe UI", 8)).pack(
                      side=tk.TOP, fill=tk.X, padx=18, pady=(0, 10))
         bar = ttk.Progressbar(dlg, mode="indeterminate", length=320)
         bar.pack(side=tk.TOP, padx=18, pady=(0, 14))
@@ -3809,7 +3849,7 @@ class NanocodexGUI:
         check); False preserves it (re-opened after a 补镜 finished).
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         if fresh:
             # gap-key -> new shot_id for gaps already adopted as fill shots.
             self._sb_filled_gaps: dict = {}
@@ -3824,7 +3864,7 @@ class NanocodexGUI:
         dlg = tk.Toplevel(self._sb_dlg)
         self._sb_report_dlg = dlg
         dlg.title("连贯性校验报告")
-        dlg.configure(bg=P["bg"])
+        dlg.configure(bg=palette["bg"])
         dlg.geometry("660x560")
         dlg.transient(self._sb_dlg)
 
@@ -3835,18 +3875,18 @@ class NanocodexGUI:
                 "对应位置（真实计费），补完再合并。")
         elif not head:
             head = "未发现明显的剧情跳跃，镜头衔接连贯。"
-        tk.Label(dlg, text=head, anchor="w", justify="left", bg=P["bg"],
-                 fg=P["fg"], font=("Segoe UI", 10), wraplength=620).pack(
+        tk.Label(dlg, text=head, anchor="w", justify="left", bg=palette["bg"],
+                 fg=palette["fg"], font=("Segoe UI", 10), wraplength=620).pack(
                      side=tk.TOP, fill=tk.X, padx=16, pady=(16, 8))
 
         # Scrollable list: one block per gap, each with its own 「补这镜」button
         # (mirrors the results canvas pattern so we can pack real buttons, not
         # just text). _sb_show_preview-style field/body coloring.
-        outer = tk.Frame(dlg, bg=P["bg"])
+        outer = tk.Frame(dlg, bg=palette["bg"])
         outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
-        canvas = tk.Canvas(outer, bg=P["bg"], highlightthickness=0)
+        canvas = tk.Canvas(outer, bg=palette["bg"], highlightthickness=0)
         vsb = tk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
-        inner = tk.Frame(canvas, bg=P["bg"])
+        inner = tk.Frame(canvas, bg=palette["bg"])
         inner.bind("<Configure>",
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         win = canvas.create_window((0, 0), window=inner, anchor="nw")
@@ -3861,20 +3901,20 @@ class NanocodexGUI:
 
         if n:
             for i, g in enumerate(gaps, 1):
-                blk = tk.Frame(inner, bg=P["panel"])
+                blk = tk.Frame(inner, bg=palette["panel"])
                 blk.pack(side=tk.TOP, fill=tk.X, pady=(0, 8))
-                top = tk.Frame(blk, bg=P["panel"])
+                top = tk.Frame(blk, bg=palette["panel"])
                 top.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(6, 2))
                 sev = getattr(g, "severity", "") or "medium"
                 tk.Label(
                     top,
                     text=f"{i}. {g.after_shot_id} → {g.before_shot_id}  [{sev}]",
-                    anchor="w", bg=P["panel"], fg=P["accent"],
+                    anchor="w", bg=palette["panel"], fg=palette["accent"],
                     font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
                 key = _gap_key(g)
                 if key in filled:
                     tk.Label(top, text=f"✓ 已补 {filled[key]}", anchor="e",
-                             bg=P["panel"], fg=P["tool"],
+                             bg=palette["panel"], fg=palette["tool"],
                              font=("Segoe UI", 9, "bold")).pack(side=tk.RIGHT)
                 else:
                     self._flat_btn(
@@ -3884,13 +3924,13 @@ class NanocodexGUI:
                 def _line(lbl: str, val: str) -> None:
                     if not val:
                         return
-                    row = tk.Frame(blk, bg=P["panel"])
+                    row = tk.Frame(blk, bg=palette["panel"])
                     row.pack(side=tk.TOP, fill=tk.X, padx=8)
-                    tk.Label(row, text=lbl, anchor="nw", bg=P["panel"],
-                             fg=P["muted"], font=("Segoe UI", 8), width=10).pack(
+                    tk.Label(row, text=lbl, anchor="nw", bg=palette["panel"],
+                             fg=palette["muted"], font=("Segoe UI", 8), width=10).pack(
                                  side=tk.LEFT)
                     tk.Label(row, text=val, anchor="w", justify="left",
-                             bg=P["panel"], fg=P["fg"], font=("Segoe UI", 9),
+                             bg=palette["panel"], fg=palette["fg"], font=("Segoe UI", 9),
                              wraplength=500).pack(side=tk.LEFT, fill=tk.X,
                                                   expand=True)
 
@@ -3901,14 +3941,14 @@ class NanocodexGUI:
                 _line("时长:", f"{g.suggested_duration_sec:g}s")
                 dl = [d for d in (g.suggested_dialogue or []) if str(d).strip()]
                 _line("台词:", "  ".join(dl))
-                tk.Frame(blk, bg=P["panel"], height=6).pack(
+                tk.Frame(blk, bg=palette["panel"], height=6).pack(
                     side=tk.TOP, fill=tk.X)
         else:
-            tk.Label(inner, text="（无补镜建议）", anchor="w", bg=P["bg"],
-                     fg=P["fg"], font=("Segoe UI", 9)).pack(
+            tk.Label(inner, text="（无补镜建议）", anchor="w", bg=palette["bg"],
+                     fg=palette["fg"], font=("Segoe UI", 9)).pack(
                          side=tk.TOP, fill=tk.X)
 
-        bot = tk.Frame(dlg, bg=P["bg"])
+        bot = tk.Frame(dlg, bg=palette["bg"])
         bot.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=(0, 14))
 
         def _cancel() -> None:
@@ -3962,6 +4002,7 @@ class NanocodexGUI:
             return
         _report, state, run_dir = ctx
         from tkinter import messagebox
+
         from nanocodex.agent.pricing import estimate_seedance_cost_cny
         dur = float(getattr(gap, "suggested_duration_sec", 5) or 5)
         est = estimate_seedance_cost_cny(dur)
@@ -4007,7 +4048,9 @@ class NanocodexGUI:
         try:
             deps = self._sb_build_deps(want_render=True)
             from nanocodex.storyboard.pipeline import (
-                render_one, export, write_run_index,
+                export,
+                render_one,
+                write_run_index,
             )
 
             def _prog(sid: str, i: int, st: str) -> None:
@@ -4081,7 +4124,7 @@ class NanocodexGUI:
         history never deletes or re-renders anything on its own.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         from nanocodex.storyboard.pipeline import read_run_index
         base = (self._workspace / "storyboard_out").resolve()
         entries = read_run_index(base)
@@ -4095,25 +4138,25 @@ class NanocodexGUI:
         dlg = tk.Toplevel(self._sb_dlg)
         self._sb_history_dlg = dlg
         dlg.title("出片历史")
-        dlg.configure(bg=P["bg"])
+        dlg.configure(bg=palette["bg"])
         dlg.geometry("560x420")
 
         tk.Label(dlg, text="出片历史（点「载入」恢复到面板可重播/重出/合并，"
                             "「打开目录」查看归档）",
-                 anchor="w", bg=P["bg"], fg=P["muted"],
+                 anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9)).pack(side=tk.TOP, fill=tk.X,
                                             padx=14, pady=(12, 6))
         if not entries:
-            tk.Label(dlg, text="还没有出片记录。", anchor="w", bg=P["bg"],
-                     fg=P["fg"], font=("Segoe UI", 10)).pack(
+            tk.Label(dlg, text="还没有出片记录。", anchor="w", bg=palette["bg"],
+                     fg=palette["fg"], font=("Segoe UI", 10)).pack(
                          side=tk.TOP, fill=tk.X, padx=14, pady=8)
             return
 
-        wrap = tk.Frame(dlg, bg=P["bg"])
+        wrap = tk.Frame(dlg, bg=palette["bg"])
         wrap.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
         # newest first
         for e in reversed(entries):
-            row = tk.Frame(wrap, bg=P["panel"])
+            row = tk.Frame(wrap, bg=palette["panel"])
             row.pack(side=tk.TOP, fill=tk.X, pady=2)
             t = e.get("time", "")
             title = e.get("title", "") or "(无标题)"
@@ -4121,7 +4164,7 @@ class NanocodexGUI:
             shots = e.get("shots", 0)
             cost = e.get("cost_cny", 0.0)
             label = f"{t}  ·  {title[:24]}  ·  {ok}/{shots} 镜  ·  ¥{cost:.2f}"
-            tk.Label(row, text=label, anchor="w", bg=P["panel"], fg=P["fg"],
+            tk.Label(row, text=label, anchor="w", bg=palette["panel"], fg=palette["fg"],
                      font=("Segoe UI", 9)).pack(side=tk.LEFT, fill=tk.X,
                                                 expand=True, padx=(8, 6), pady=6)
             d = e.get("dir", "")
@@ -4145,6 +4188,7 @@ class NanocodexGUI:
         ≥2 clips landed. Read-only on disk — nothing re-renders or spends here.
         """
         from pathlib import Path as _Path
+
         from nanocodex.storyboard.pipeline import load_run_state
         if getattr(self, "_sb_busy", False):
             self._sb_set_status("忙着呢，等当前任务完成再载入。", error=True)
@@ -4228,7 +4272,7 @@ class NanocodexGUI:
         if getattr(self, "_ab_running", False):
             self._append("\n[an A/B comparison is already running]\n", "system")
             return
-        from nanocodex.agent.ab_compare import ensure_clean_git_workspace, ABGitError
+        from nanocodex.agent.ab_compare import ABGitError, ensure_clean_git_workspace
         try:
             ensure_clean_git_workspace(self._workspace)
         except ABGitError as exc:
@@ -4241,7 +4285,7 @@ class NanocodexGUI:
     def _show_ab_setup_dialog(self) -> None:
         """Two columns of config controls + a shared prompt box + Run button."""
         tk = self._tk
-        P = self._palette
+        palette = self._palette
 
         prev = getattr(self, "_ab_setup_dlg", None)
         if prev is not None:
@@ -4262,49 +4306,49 @@ class NanocodexGUI:
         if not models:
             models = [cur_model or "deepseek-v4-pro"]
 
-        from nanocodex.config import VALID_SANDBOX_MODES, VALID_APPROVAL_POLICIES
+        from nanocodex.config import VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES
 
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         self._ab_setup_dlg = dlg
         dlg.title("A/B compare")
         dlg.transient(self.root)
         dlg.resizable(True, True)
         dlg.geometry("680x560")
 
-        status = tk.Label(dlg, text="", anchor="w", bg=P["bg"], fg=P["err"],
+        status = tk.Label(dlg, text="", anchor="w", bg=palette["bg"], fg=palette["err"],
                           font=("Segoe UI", 9), wraplength=620, justify="left")
         status.pack(side="bottom", fill="x", padx=16, pady=(0, 6))
 
-        btns = tk.Frame(dlg, bg=P["bg"])
+        btns = tk.Frame(dlg, bg=palette["bg"])
         btns.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
 
         # Two side-by-side config columns.
-        cols = tk.Frame(dlg, bg=P["bg"])
+        cols = tk.Frame(dlg, bg=palette["bg"])
         cols.pack(side="top", fill="x", padx=16, pady=(14, 8))
         cols.columnconfigure(0, weight=1)
         cols.columnconfigure(1, weight=1)
 
         def _make_column(parent, title, *, col):
-            box = tk.Frame(parent, bg=P["bg"])
+            box = tk.Frame(parent, bg=palette["bg"])
             box.grid(row=0, column=col, sticky="we", padx=(0, 8) if col == 0 else (8, 0))
             box.columnconfigure(1, weight=1)
-            tk.Label(box, text=title, anchor="w", bg=P["bg"], fg=P["accent"],
+            tk.Label(box, text=title, anchor="w", bg=palette["bg"], fg=palette["accent"],
                      font=("Segoe UI", 10, "bold")).grid(
                 row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
             r = [1]
 
             def _opt(label, choices, current):
-                tk.Label(box, text=label, anchor="w", bg=P["bg"], fg=P["muted"],
+                tk.Label(box, text=label, anchor="w", bg=palette["bg"], fg=palette["muted"],
                          font=("Segoe UI", 9)).grid(row=r[0], column=0, sticky="w",
                                                     padx=(0, 8), pady=3)
                 var = tk.StringVar(value=current if current in choices else choices[0])
                 om = tk.OptionMenu(box, var, *choices)
-                om.config(bg=P["panel"], fg=P["fg"], activebackground=P["border"],
-                          activeforeground=P["fg"], relief="flat", bd=0,
+                om.config(bg=palette["panel"], fg=palette["fg"], activebackground=palette["border"],
+                          activeforeground=palette["fg"], relief="flat", bd=0,
                           highlightthickness=0, font=("Segoe UI", 9), anchor="w")
-                om["menu"].config(bg=P["panel"], fg=P["fg"],
-                                  activebackground=P["accent"],
-                                  activeforeground=P["accent_fg"])
+                om["menu"].config(bg=palette["panel"], fg=palette["fg"],
+                                  activebackground=palette["accent"],
+                                  activeforeground=palette["accent_fg"])
                 om.grid(row=r[0], column=1, sticky="we", pady=3)
                 r[0] += 1
                 return var
@@ -4321,12 +4365,12 @@ class NanocodexGUI:
 
         # Shared prompt.
         tk.Label(dlg, text="Task prompt (runs in both, in isolated worktrees)",
-                 anchor="w", bg=P["bg"], fg=P["muted"],
+                 anchor="w", bg=palette["bg"], fg=palette["muted"],
                  font=("Segoe UI", 9, "bold")).pack(side="top", fill="x", padx=16)
-        prompt_box = tk.Text(dlg, height=6, wrap="word", bg=P["panel"], fg=P["fg"],
+        prompt_box = tk.Text(dlg, height=6, wrap="word", bg=palette["panel"], fg=palette["fg"],
                              relief="flat", bd=0, padx=10, pady=8,
                              font=("Cascadia Code", 10), highlightthickness=0,
-                             insertbackground=P["fg"])
+                             insertbackground=palette["fg"])
         prompt_box.pack(side="top", fill="both", expand=True, padx=16, pady=(2, 8))
 
         def _overrides_from(v):
@@ -4340,7 +4384,7 @@ class NanocodexGUI:
         def _run() -> None:
             prompt = prompt_box.get("1.0", "end").strip()
             if not prompt:
-                status.config(text="Enter a task prompt.", fg=P["err"])
+                status.config(text="Enter a task prompt.", fg=palette["err"])
                 return
             ov_a = _overrides_from(vars_a)
             ov_b = _overrides_from(vars_b)
@@ -4348,11 +4392,11 @@ class NanocodexGUI:
             self._start_ab_run(prompt, ov_a, ov_b)
 
         def ab_btn(label, command, *, accent=False):
-            bg = P["accent"] if accent else P["panel"]
-            fg = P["accent_fg"] if accent else P["fg"]
+            bg = palette["accent"] if accent else palette["panel"]
+            fg = palette["accent_fg"] if accent else palette["fg"]
             return tk.Button(
                 btns, text=label, command=command, bg=bg, fg=fg,
-                activebackground=P["border"] if not accent else P["accent"],
+                activebackground=palette["border"] if not accent else palette["accent"],
                 activeforeground=fg, relief="flat", bd=0, padx=14, pady=6,
                 font=("Segoe UI", 9, "bold"), cursor="hand2", highlightthickness=0,
             )
@@ -4387,15 +4431,21 @@ class NanocodexGUI:
         result dialog can adopt one side's diff; cleanup happens after the user
         picks (or on a hard failure below).
         """
-        import time
-        import tempfile
         import asyncio
+        import tempfile
+        import time
         from pathlib import Path as _Path
-        from nanocodex.cli import _build_loop, _auto_approve_approver
+
         from nanocodex.agent.ab_compare import (
-            ensure_clean_git_workspace, create_worktree, collect_worktree_diff,
-            cleanup_worktree, build_result, worktree_name, ABGitError,
+            ABGitError,
+            build_result,
+            cleanup_worktree,
+            collect_worktree_diff,
+            create_worktree,
+            ensure_clean_git_workspace,
+            worktree_name,
         )
+        from nanocodex.cli import _auto_approve_approver, _build_loop
 
         got_lock = self._desktop_lock.acquire(blocking=False)
         if not got_lock:
@@ -4455,9 +4505,12 @@ class NanocodexGUI:
         nothing.
         """
         tk = self._tk
-        P = self._palette
+        palette = self._palette
         from nanocodex.agent.ab_compare import (
-            format_ab_comparison, adopt_diff, cleanup_worktree, ABGitError,
+            ABGitError,
+            adopt_diff,
+            cleanup_worktree,
+            format_ab_comparison,
         )
 
         prev = getattr(self, "_ab_result_dlg", None)
@@ -4467,7 +4520,7 @@ class NanocodexGUI:
             except Exception:  # noqa: BLE001
                 pass
 
-        dlg = tk.Toplevel(self.root, bg=P["bg"])
+        dlg = tk.Toplevel(self.root, bg=palette["bg"])
         self._ab_result_dlg = dlg
         dlg.title("A/B result")
         dlg.transient(self.root)
@@ -4499,40 +4552,40 @@ class NanocodexGUI:
             self._append("\n[A/B] discarded both sides; workspace unchanged.\n", "system")
             dlg.destroy()
 
-        btns = tk.Frame(dlg, bg=P["bg"])
+        btns = tk.Frame(dlg, bg=palette["bg"])
         btns.pack(side="bottom", fill="x", padx=16, pady=(0, 14))
 
         def rb(label, command, *, accent=False):
-            bg = P["accent"] if accent else P["panel"]
-            fg = P["accent_fg"] if accent else P["fg"]
+            bg = palette["accent"] if accent else palette["panel"]
+            fg = palette["accent_fg"] if accent else palette["fg"]
             return tk.Button(
                 btns, text=label, command=command, bg=bg, fg=fg,
-                activebackground=P["border"] if not accent else P["accent"],
+                activebackground=palette["border"] if not accent else palette["accent"],
                 activeforeground=fg, relief="flat", bd=0, padx=14, pady=6,
                 font=("Segoe UI", 9, "bold"), cursor="hand2", highlightthickness=0,
             )
 
-        rb(f"Adopt A", lambda: _adopt(res_a), accent=True).pack(side="right")
-        rb(f"Adopt B", lambda: _adopt(res_b), accent=True).pack(side="right", padx=(0, 8))
+        rb("Adopt A", lambda: _adopt(res_a), accent=True).pack(side="right")
+        rb("Adopt B", lambda: _adopt(res_b), accent=True).pack(side="right", padx=(0, 8))
         rb("Discard both", _discard).pack(side="right", padx=(0, 8))
 
         # Summary line on top.
         tk.Label(dlg, text=format_ab_comparison(res_a, res_b), anchor="w",
-                 justify="left", bg=P["bg"], fg=P["fg"], font=("Cascadia Code", 9),
+                 justify="left", bg=palette["bg"], fg=palette["fg"], font=("Cascadia Code", 9),
                  wraplength=780).pack(side="top", fill="x", padx=16, pady=(14, 8))
 
         # Two diff panes side by side.
-        panes = tk.Frame(dlg, bg=P["bg"])
+        panes = tk.Frame(dlg, bg=palette["bg"])
         panes.pack(side="top", fill="both", expand=True, padx=16, pady=(0, 8))
         panes.columnconfigure(0, weight=1)
         panes.columnconfigure(1, weight=1)
         panes.rowconfigure(1, weight=1)
 
         for col, r in ((0, res_a), (1, res_b)):
-            tk.Label(panes, text=f"Config {r.label} diff", anchor="w", bg=P["bg"],
-                     fg=P["accent"], font=("Segoe UI", 9, "bold")).grid(
+            tk.Label(panes, text=f"Config {r.label} diff", anchor="w", bg=palette["bg"],
+                     fg=palette["accent"], font=("Segoe UI", 9, "bold")).grid(
                 row=0, column=col, sticky="w", padx=(0, 6) if col == 0 else (6, 0))
-            box = tk.Text(panes, wrap="none", bg=P["panel"], fg=P["fg"], relief="flat",
+            box = tk.Text(panes, wrap="none", bg=palette["panel"], fg=palette["fg"], relief="flat",
                           bd=0, padx=10, pady=8, font=("Cascadia Code", 9),
                           highlightthickness=0)
             box.grid(row=1, column=col, sticky="nsew",
@@ -5021,7 +5074,7 @@ class NanocodexGUI:
             return
         s = self._session_entries[sel[0]]
         tk = self._tk
-        P = self._palette
+        palette = self._palette
 
         prev = getattr(self, "_session_dlg", None)
         if prev is not None:
@@ -5030,7 +5083,7 @@ class NanocodexGUI:
             except Exception:  # noqa: BLE001
                 pass
 
-        dlg = tk.Toplevel(self.root, bg=P["panel"])
+        dlg = tk.Toplevel(self.root, bg=palette["panel"])
         self._session_dlg = dlg
         dlg.title("Conversation replay")
         dlg.resizable(True, True)
@@ -5040,13 +5093,13 @@ class NanocodexGUI:
         # its space and is never clipped by the transcript above (same lesson as
         # the main window's bottom bars). "Continue" forks this conversation into
         # a NEW one seeded from its snapshot — the original is left untouched.
-        btnbar = tk.Frame(dlg, bg=P["panel"])
+        btnbar = tk.Frame(dlg, bg=palette["panel"])
         btnbar.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
         cont_btn = tk.Button(
             btnbar, text="Continue this conversation",
             command=lambda: self._continue_session(s),
-            bg=P["accent"], fg=P["accent_fg"], activebackground=P["accent"],
-            activeforeground=P["accent_fg"], relief="flat", bd=0, padx=14, pady=6,
+            bg=palette["accent"], fg=palette["accent_fg"], activebackground=palette["accent"],
+            activeforeground=palette["accent_fg"], relief="flat", bd=0, padx=14, pady=6,
             font=("Segoe UI", 9, "bold"), cursor="hand2", highlightthickness=0,
         )
         cont_btn.pack(side="right")
@@ -5054,7 +5107,7 @@ class NanocodexGUI:
         if not getattr(s, "has_snapshot", False):
             cont_btn.config(state=tk.DISABLED, text="Continue (no snapshot)")
 
-        txt = tk.Text(dlg, wrap="word", bg=P["panel"], fg=P["fg"],
+        txt = tk.Text(dlg, wrap="word", bg=palette["panel"], fg=palette["fg"],
                       font=("Segoe UI", 10), relief="flat", bd=0,
                       padx=16, pady=14, highlightthickness=0, spacing1=2, spacing3=2)
         # A scrollbar — a full transcript can be long.
@@ -5062,14 +5115,14 @@ class NanocodexGUI:
         txt.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         txt.pack(side="left", fill="both", expand=True)
-        txt.tag_config("h", foreground=P["fg"], font=("Segoe UI", 11, "bold"))
-        txt.tag_config("k", foreground=P["muted"], font=("Segoe UI", 9, "bold"))
-        txt.tag_config("v", foreground=P["fg"], font=("Segoe UI", 10))
-        txt.tag_config("role_user", foreground=P["accent"], font=("Segoe UI", 10, "bold"))
-        txt.tag_config("role_assistant", foreground=P["fg"], font=("Segoe UI", 10, "bold"))
-        txt.tag_config("role_tool", foreground=P["tool"], font=("Segoe UI", 9, "bold"))
-        txt.tag_config("msg", foreground=P["fg"], font=("Segoe UI", 10))
-        txt.tag_config("toolnote", foreground=P["muted"], font=("Segoe UI", 9, "italic"))
+        txt.tag_config("h", foreground=palette["fg"], font=("Segoe UI", 11, "bold"))
+        txt.tag_config("k", foreground=palette["muted"], font=("Segoe UI", 9, "bold"))
+        txt.tag_config("v", foreground=palette["fg"], font=("Segoe UI", 10))
+        txt.tag_config("role_user", foreground=palette["accent"], font=("Segoe UI", 10, "bold"))
+        txt.tag_config("role_assistant", foreground=palette["fg"], font=("Segoe UI", 10, "bold"))
+        txt.tag_config("role_tool", foreground=palette["tool"], font=("Segoe UI", 9, "bold"))
+        txt.tag_config("msg", foreground=palette["fg"], font=("Segoe UI", 10))
+        txt.tag_config("toolnote", foreground=palette["muted"], font=("Segoe UI", 9, "italic"))
 
         # --- summary header ---
         tools = ", ".join(s.recent_tools) if s.recent_tools else "none"

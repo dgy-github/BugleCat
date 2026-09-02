@@ -167,7 +167,7 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> (PathBuf, ToolContext) {
-        let root = std::env::temp_dir().join(format!("ncx_editor_{name}"));
+        let root = crate::test_support::unique_temp_dir(&format!("ncx_editor_{name}"));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let root = root.canonicalize().unwrap();

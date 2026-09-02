@@ -123,7 +123,7 @@ mod tests {
     use super::*;
 
     fn tmpdir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("ncx_mentions_{name}"));
+        let d = crate::test_support::unique_temp_dir(&format!("ncx_mentions_{name}"));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

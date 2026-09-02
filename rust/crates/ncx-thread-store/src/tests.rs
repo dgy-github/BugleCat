@@ -41,6 +41,18 @@ fn goal(id: &str, revision: u64, objective: &str) -> GoalSnapshot {
     }
 }
 
+fn write_epoch(store: &JsonThreadStore, id: &ThreadId) -> u64 {
+    store
+        .inspect(|persisted| {
+            persisted
+                .runtime_activation_epochs
+                .get(id.as_str())
+                .copied()
+                .unwrap_or_default()
+        })
+        .unwrap()
+}
+
 #[test]
 fn goal_compare_and_set_is_durable_and_rejects_stale_revision_without_writing() {
     let unique = SystemTime::now()
@@ -393,6 +405,238 @@ fn fork_copies_model_context_under_the_new_thread_identity() {
     let copied = store.read_model_context(&target).unwrap().unwrap();
     assert_eq!(copied.thread_id, target);
     assert_eq!(copied.messages[0]["content"], "done");
+}
+
+#[test]
+fn rollback_receipt_discards_an_unchanged_fork_and_all_of_its_side_domains() {
+    let store = temp_store("rollback-fork");
+    let source = ThreadId::new("source").unwrap();
+    let target = ThreadId::new("target").unwrap();
+    let snapshot = goal("goal", 1, "finish the migration");
+    store.create(thread("source")).unwrap();
+    store
+        .replace_model_context(
+            &source,
+            vec![serde_json::json!({"role":"assistant","content":"done"})],
+            4,
+        )
+        .unwrap();
+    store
+        .compare_and_set_goal(&source, GoalExpectation::Absent, Some(snapshot.clone()))
+        .unwrap();
+    let (_, receipt) = store
+        .fork_with_rollback(&source, target.clone(), 10, 10)
+        .unwrap();
+    assert!(store.discard_if_unchanged(&receipt).unwrap());
+    assert!(store.read(&target).unwrap().is_none());
+    assert!(store.read_model_context(&target).unwrap().is_none());
+    assert!(store.read_goal(&target).unwrap().is_none());
+    assert!(store.read(&source).unwrap().is_some());
+    assert!(store.read_model_context(&source).unwrap().is_some());
+    assert_eq!(store.read_goal(&source).unwrap(), Some(snapshot));
+
+    // A failed runtime activation must not permanently reserve the generated
+    // target ID; the same request can be retried safely.
+    assert!(store.fork(&source, target).is_ok());
+}
+
+#[test]
+fn rollback_receipt_never_discards_a_target_changed_after_provisioning() {
+    let store = temp_store("rollback-fence");
+    let target = ThreadId::new("target").unwrap();
+    let receipt = store.create_with_rollback(thread("target")).unwrap();
+    store
+        .replace_model_context(
+            &target,
+            vec![serde_json::json!({"role":"user","content":"keep me"})],
+            2,
+        )
+        .unwrap();
+
+    assert!(!store.discard_if_unchanged(&receipt).unwrap());
+    assert!(store.read(&target).unwrap().is_some());
+    assert!(store.read_model_context(&target).unwrap().is_some());
+}
+
+#[test]
+fn rollback_receipt_rejects_an_aba_write_that_restores_the_original_thread() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("ncx-rollback-aba-{unique}.json"));
+    let first = JsonThreadStore::open(&path).unwrap();
+    let target = ThreadId::new("target").unwrap();
+    let receipt = first.create_with_rollback(thread("target")).unwrap();
+    let original = first.read(&target).unwrap().unwrap();
+
+    // A second process changes the target and then restores every visible
+    // field. Equality-only rollback checks would now incorrectly delete it.
+    let second = JsonThreadStore::open(&path).unwrap();
+    let mut changed = original.metadata.clone();
+    changed.title = "temporary change".into();
+    second.update_metadata(changed).unwrap();
+    second.update_metadata(original.metadata.clone()).unwrap();
+    drop(second);
+
+    assert!(!first.discard_if_unchanged(&receipt).unwrap());
+    assert_eq!(first.read(&target).unwrap(), Some(original));
+}
+
+#[test]
+fn rollback_receipt_rejects_aba_writes_in_side_domains() {
+    let store = temp_store("rollback-aba-side-domain");
+    let source = ThreadId::new("source").unwrap();
+    let target = ThreadId::new("target").unwrap();
+    let context = vec![serde_json::json!({"role":"user","content":"same"})];
+    store.create(thread("source")).unwrap();
+    store.replace_model_context(&source, context, 2).unwrap();
+    let (_, receipt) = store
+        .fork_with_rollback(&source, target.clone(), 3, 3)
+        .unwrap();
+    let original_context = store.read_model_context(&target).unwrap().unwrap();
+    store
+        .replace_model_context(
+            &target,
+            vec![serde_json::json!({"role":"user","content":"other"})],
+            4,
+        )
+        .unwrap();
+    store
+        .replace_model_context(
+            &target,
+            original_context.messages.clone(),
+            original_context.updated_at,
+        )
+        .unwrap();
+
+    assert!(!store.discard_if_unchanged(&receipt).unwrap());
+    assert!(store.read(&target).unwrap().is_some());
+    assert_eq!(
+        store.read_model_context(&target).unwrap(),
+        Some(original_context)
+    );
+}
+
+#[test]
+fn all_successful_thread_write_apis_advance_the_durable_epoch() {
+    let store = temp_store("write-epochs");
+    let id = ThreadId::new("thread").unwrap();
+    let turn_id = TurnId::new("turn").unwrap();
+
+    store.create(thread("thread")).unwrap();
+    assert_eq!(write_epoch(&store, &id), 1);
+
+    let mut metadata = store.read(&id).unwrap().unwrap().metadata;
+    metadata.title = "renamed".into();
+    store.update_metadata(metadata).unwrap();
+    assert_eq!(write_epoch(&store, &id), 2);
+
+    assert!(store
+        .set_harness_profile_if_idle(&id, "readonly".into(), 3)
+        .unwrap()
+        .is_some());
+    assert_eq!(write_epoch(&store, &id), 3);
+
+    store
+        .replace_model_context(&id, vec![serde_json::json!({"role":"user"})], 4)
+        .unwrap();
+    assert_eq!(write_epoch(&store, &id), 4);
+
+    store
+        .compare_and_set_goal(
+            &id,
+            GoalExpectation::Absent,
+            Some(goal("goal", 1, "do work")),
+        )
+        .unwrap();
+    assert_eq!(write_epoch(&store, &id), 5);
+
+    store.claim_turn(&id, turn("turn")).unwrap();
+    assert_eq!(write_epoch(&store, &id), 6);
+
+    store
+        .append_item(
+            &id,
+            &turn_id,
+            ThreadItem::UserMessage {
+                id: ItemId::new("item").unwrap(),
+                text: "hello".into(),
+            },
+            5,
+        )
+        .unwrap();
+    assert_eq!(write_epoch(&store, &id), 7);
+
+    store
+        .finish_turn(
+            &id,
+            &turn_id,
+            TurnStatus::Completed,
+            6,
+            None,
+            TurnUsage::default(),
+        )
+        .unwrap();
+    assert_eq!(write_epoch(&store, &id), 8);
+
+    store.mark_runtime_activation(&id).unwrap();
+    assert_eq!(write_epoch(&store, &id), 9);
+}
+
+#[test]
+fn provisioning_and_goal_round_writes_initialize_or_advance_epochs() {
+    let store = temp_store("provisioning-write-epochs");
+    let first = ThreadId::new("first").unwrap();
+    let second = ThreadId::new("second").unwrap();
+    store
+        .create_many(vec![thread("first"), thread("second")])
+        .unwrap();
+    assert_eq!(write_epoch(&store, &first), 1);
+    assert_eq!(write_epoch(&store, &second), 1);
+
+    let source = ThreadId::new("source").unwrap();
+    let fork_target = ThreadId::new("fork-target").unwrap();
+    let rollback_target = ThreadId::new("rollback-target").unwrap();
+    store.create(thread("source")).unwrap();
+    store.fork(&source, fork_target.clone()).unwrap();
+    assert_eq!(write_epoch(&store, &fork_target), 1);
+    let (_, receipt) = store
+        .fork_with_rollback(&source, rollback_target.clone(), 4, 4)
+        .unwrap();
+    assert_eq!(receipt.runtime_activation_epoch, 1);
+    assert_eq!(write_epoch(&store, &rollback_target), 1);
+
+    let created_with_receipt = ThreadId::new("created-with-receipt").unwrap();
+    let receipt = store
+        .create_with_rollback(thread("created-with-receipt"))
+        .unwrap();
+    assert_eq!(receipt.runtime_activation_epoch, 1);
+    assert_eq!(write_epoch(&store, &created_with_receipt), 1);
+
+    let round_thread = ThreadId::new("round-thread").unwrap();
+    let round_goal = goal("round-goal", 1, "finish it");
+    store.create(thread("round-thread")).unwrap();
+    store
+        .compare_and_set_goal(
+            &round_thread,
+            GoalExpectation::Absent,
+            Some(round_goal.clone()),
+        )
+        .unwrap();
+    assert_eq!(write_epoch(&store, &round_thread), 2);
+    store
+        .claim_goal_round(
+            &round_thread,
+            GoalRef {
+                id: round_goal.id.clone(),
+                revision: round_goal.revision,
+            },
+            1,
+            goal_turn("round-turn", &round_goal, 1),
+        )
+        .unwrap();
+    assert_eq!(write_epoch(&store, &round_thread), 3);
 }
 
 #[test]

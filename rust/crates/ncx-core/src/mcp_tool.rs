@@ -49,6 +49,26 @@ fn mcp_call_is_read_only(name: &str, tool_is_read_only: bool, args: &Value) -> b
         )
 }
 
+fn auto_deny_message(
+    name: &str,
+    tool_is_read_only: bool,
+    approval_policy: &str,
+    args: &Value,
+) -> Option<String> {
+    (!mcp_call_is_read_only(name, tool_is_read_only, args)
+        && matches!(
+            Approver::new(approval_policy).classify(name, true),
+            Decision::AutoDeny
+        ))
+    .then(|| approval_denied_message(name, approval_policy))
+}
+
+fn approval_denied_message(name: &str, approval_policy: &str) -> String {
+    format!(
+        "Error: MCP tool '{name}' denied by approval policy '{approval_policy}' (non-read-only)."
+    )
+}
+
 /// Heuristic: tool names that look like reads/queries don't require approval.
 fn is_read_only_name(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -83,14 +103,20 @@ impl Tool for McpTool {
     }
 
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
+        if let Some(message) =
+            auto_deny_message(&self.def.name, self.read_only, &ctx.approval_policy, args)
+        {
+            return message;
+        }
         if !self.call_is_read_only(args) {
             let decision = Approver::new(&ctx.approval_policy).classify(&self.def.name, true);
             match decision {
+                // Keep the preflight check above as the normal path so denied
+                // calls never reach an approver or the MCP process. Repeating
+                // the refusal here is a fail-safe if approval policy semantics
+                // change independently of that preflight.
                 Decision::AutoDeny => {
-                    return format!(
-                        "Error: MCP tool '{}' denied by approval policy '{}' (non-read-only).",
-                        self.def.name, ctx.approval_policy
-                    );
+                    return approval_denied_message(&self.def.name, &ctx.approval_policy);
                 }
                 Decision::Ask => {
                     if let Some(approver) = &ctx.approver {
@@ -219,6 +245,28 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn never_policy_denies_side_effecting_mcp_calls_without_a_live_server() {
+        let mutation = auto_deny_message(
+            "llmwiki",
+            false,
+            "never",
+            &serde_json::json!({"action": "record_project"}),
+        )
+        .expect("side-effecting MCP call must be denied");
+        assert!(
+            mutation.contains("denied by approval policy 'never'"),
+            "{mutation}"
+        );
+        assert!(auto_deny_message(
+            "llmwiki",
+            false,
+            "never",
+            &serde_json::json!({"action": "recall_user"}),
+        )
+        .is_none());
+    }
+
     // A live round-trip (connect → list_tools → register → execute echo tool)
     // against the same Python mock server used in ncx-mcp's own tests.
     fn write_mock_server() -> std::path::PathBuf {
@@ -247,7 +295,7 @@ for line in sys.stdin:
     else:
         print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
 "#;
-        let dir = std::env::temp_dir().join(format!("ncx_mcp_tool_mock_{}", std::process::id()));
+        let dir = crate::test_support::unique_temp_dir("ncx_mcp_tool_mock");
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("mock_server.py");
         std::fs::write(&p, src).unwrap();
@@ -259,7 +307,7 @@ for line in sys.stdin:
         use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
 
         let server = write_mock_server();
-        let ws = std::env::temp_dir().join(format!("ncx_mcp_tool_ws_{}", std::process::id()));
+        let ws = crate::test_support::unique_temp_dir("ncx_mcp_tool_ws");
         std::fs::create_dir_all(&ws).unwrap();
         let ws = ws.canonicalize().unwrap();
 

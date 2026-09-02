@@ -14,11 +14,28 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from typer.core import TyperGroup
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.text import Text
+from typer.core import TyperGroup
+
+from nanocodex.agent import AgentLoop, CompactionConfig, LoopHooks, Session, build_system_prompt
+from nanocodex.agent.agents_md import discover_agents
+from nanocodex.agent.compaction import compact
+from nanocodex.agent.images import ImageError, build_user_content
+from nanocodex.agent.memory_store import render_for_prompt as render_memory
+from nanocodex.agent.mentions import expand_file_mentions
+from nanocodex.agent.orchestrator import OrchestratorLoop
+from nanocodex.agent.skills_store import discover_skills
+from nanocodex.agent.slash import SLASH_HELP, parse_slash
+from nanocodex.agent.store import AgentStateStore
+from nanocodex.config import VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES, ConfigError, load_config
+from nanocodex.provider import ToolCall
+from nanocodex.provider.deepseek import DeepSeekProvider, ProviderError
+from nanocodex.sandbox import ApprovalRequest, Approver, SandboxPolicy, make_executor
+from nanocodex.tools import ToolContext, ToolRegistry, render_plan
+from nanocodex.tools.mcp import McpManager, discover_mcp_servers
 
 # Windows consoles often default to a legacy code page (e.g. cp1252) that can't
 # encode characters rich emits. Reconfigure to UTF-8 with replacement so the
@@ -31,22 +48,6 @@ for _stream in (sys.stdout, sys.stderr):
         except (ValueError, OSError):
             pass
 
-from nanocodex.agent import AgentLoop, CompactionConfig, LoopHooks, Session, build_system_prompt
-from nanocodex.agent.agents_md import discover_agents
-from nanocodex.agent.compaction import compact
-from nanocodex.agent.memory_store import render_for_prompt as render_memory
-from nanocodex.agent.skills_store import discover_skills
-from nanocodex.agent.images import ImageError, build_user_content
-from nanocodex.agent.mentions import expand_file_mentions
-from nanocodex.agent.slash import SLASH_HELP, parse_slash
-from nanocodex.agent.orchestrator import OrchestratorLoop
-from nanocodex.agent.store import AgentStateStore
-from nanocodex.tools.mcp import McpManager, discover_mcp_servers
-from nanocodex.config import VALID_APPROVAL_POLICIES, VALID_SANDBOX_MODES, ConfigError, load_config
-from nanocodex.provider import ToolCall
-from nanocodex.provider.deepseek import DeepSeekProvider, ProviderError
-from nanocodex.sandbox import Approver, ApprovalRequest, SandboxPolicy, make_executor
-from nanocodex.tools import ToolContext, ToolRegistry, render_plan
 
 class _SubcommandFirstGroup(TyperGroup):
     """Route a leading subcommand name to the subcommand, not the ``task`` arg.
@@ -280,11 +281,16 @@ def _print_banner(loop: AgentLoop) -> None:
     cfg = loop._cfg  # type: ignore[attr-defined]
     info = cfg.redacted()
     body = Text()
-    body.append("model:    ", style="bold"); body.append(f"{info['model']}\n")
-    body.append("endpoint: ", style="bold"); body.append(f"{info['base_url']}\n")
-    body.append("sandbox:  ", style="bold"); body.append(f"{info['sandbox_mode']}\n")
-    body.append("approval: ", style="bold"); body.append(f"{info['approval_policy']}\n")
-    body.append("workspace:", style="bold"); body.append(f" {info['workspace']}")
+    body.append("model:    ", style="bold")
+    body.append(f"{info['model']}\n")
+    body.append("endpoint: ", style="bold")
+    body.append(f"{info['base_url']}\n")
+    body.append("sandbox:  ", style="bold")
+    body.append(f"{info['sandbox_mode']}\n")
+    body.append("approval: ", style="bold")
+    body.append(f"{info['approval_policy']}\n")
+    body.append("workspace:", style="bold")
+    body.append(f" {info['workspace']}")
     console.print(Panel(body, title="nanocodex", border_style="cyan"))
 
 
@@ -614,11 +620,16 @@ async def _dispatch_slash(
         return False
     if cmd == "/status":
         body = Text()
-        body.append("model:    ", style="bold"); body.append(f"{getattr(cfg, 'model', '?')}\n")
-        body.append("sandbox:  ", style="bold"); body.append(f"{getattr(cfg, 'sandbox_mode', '?')}\n")
-        body.append("approval: ", style="bold"); body.append(f"{loop.tools.ctx.approver.policy}\n")
-        body.append("workspace:", style="bold"); body.append(f" {loop.tools.ctx.workspace}\n")
-        body.append("messages: ", style="bold"); body.append(f"{len(loop.session.messages)}\n")
+        body.append("model:    ", style="bold")
+        body.append(f"{getattr(cfg, 'model', '?')}\n")
+        body.append("sandbox:  ", style="bold")
+        body.append(f"{getattr(cfg, 'sandbox_mode', '?')}\n")
+        body.append("approval: ", style="bold")
+        body.append(f"{loop.tools.ctx.approver.policy}\n")
+        body.append("workspace:", style="bold")
+        body.append(f" {loop.tools.ctx.workspace}\n")
+        body.append("messages: ", style="bold")
+        body.append(f"{len(loop.session.messages)}\n")
         pt = usage_total.get("prompt_tokens", 0)
         ct = usage_total.get("completion_tokens", 0)
         body.append("tokens:   ", style="bold")
@@ -852,9 +863,11 @@ def schedule_run(
         # drive DESKTOP (MCP) actions unattended; every other task keeps the safe
         # auto-deny behavior. Neither widens shell / out-of-sandbox file access.
         if getattr(task, "allow_desktop", False):
-            factory = lambda _p: _desktop_only_approver()
+            def factory(_p):
+                return _desktop_only_approver()
         else:
-            factory = lambda _p: _auto_deny_approver()
+            def factory(_p):
+                return _auto_deny_approver()
         loop = _build_loop(dict(overrides), workspace, resume=False,
                            approver_factory=factory)
         await _run_once(loop, task.prompt)
@@ -962,7 +975,11 @@ def storyboard_run(
 
     from nanocodex.provider.deepseek import DeepSeekProvider
     from nanocodex.storyboard.clients import (
-        ChapterPlanner, SeedanceClient, SeedanceError, TextPlanner, VisionAnalyzer,
+        ChapterPlanner,
+        SeedanceClient,
+        SeedanceError,
+        TextPlanner,
+        VisionAnalyzer,
     )
     from nanocodex.storyboard.models import StoryboardError
     from nanocodex.storyboard.pipeline import PipelineDeps, run_pipeline

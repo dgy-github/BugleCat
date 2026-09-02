@@ -32,8 +32,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
-from process_control import run_owned  # noqa: E402
 from finetune import bench_reward  # noqa: E402  (reuse the verifiable reward)
+from process_control import run_owned  # noqa: E402
 
 
 @dataclass

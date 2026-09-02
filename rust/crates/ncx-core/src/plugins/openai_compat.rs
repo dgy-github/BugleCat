@@ -135,7 +135,7 @@ pub(crate) fn discover_enabled_codex_plugins_with_home(
         .map(|home| home.join(".ncx/codex-plugins"))
         .chain(std::iter::once(workspace.join(".ncx/codex-plugins")));
     for root in roots {
-        for plugin in CodexPluginCatalog::new(root).discover()? {
+        for plugin in CodexPluginCatalog::new(root).discover_best_effort()? {
             if plugin.enabled {
                 // Workspace plugins are visited last and intentionally shadow a
                 // user-global plugin with the same stable name.
@@ -158,6 +158,14 @@ impl CodexPluginCatalog {
     }
 
     pub fn discover(&self) -> Result<Vec<CodexPluginRecord>, String> {
+        self.discover_inner(false)
+    }
+
+    fn discover_best_effort(&self) -> Result<Vec<CodexPluginRecord>, String> {
+        self.discover_inner(true)
+    }
+
+    fn discover_inner(&self, skip_invalid: bool) -> Result<Vec<CodexPluginRecord>, String> {
         if !self.root.is_dir() {
             return Ok(Vec::new());
         }
@@ -177,7 +185,13 @@ impl CodexPluginCatalog {
                 continue;
             }
             if root.join(MANIFEST).is_file() {
-                plugins.push(load_record(root)?);
+                match load_record(root.clone()) {
+                    Ok(plugin) => plugins.push(plugin),
+                    Err(error) if skip_invalid => {
+                        eprintln!("跳过损坏 Codex 插件 '{}': {error}", root.display())
+                    }
+                    Err(error) => return Err(error),
+                }
             }
         }
         plugins.sort_by(|left, right| left.manifest.name.cmp(&right.manifest.name));
@@ -327,13 +341,13 @@ pub(crate) fn discover_codex_mcp_servers_with_home(
 ) -> Result<Vec<McpServerConfig>, String> {
     let mut servers = Vec::new();
     for plugin in discover_enabled_codex_plugins_with_home(workspace, home)? {
-        let value = if let Some(value) = plugin.manifest.mcp_servers.clone() {
-            resolve_json_resource(&plugin, "mcpServers", value)?
-        } else if let Some(path) = plugin.mcp_path() {
-            serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
-                .map_err(|error| format!("无效 MCP 资源 {}: {error}", path.display()))?
-        } else {
-            continue;
+        let value = match load_mcp_server_resource(&plugin) {
+            Ok(Some(value)) => value,
+            Ok(None) => continue,
+            Err(error) => {
+                eprintln!("跳过损坏 MCP 插件 '{}': {error}", plugin.manifest.name);
+                continue;
+            }
         };
         let Some(entries) = value.get("mcpServers").unwrap_or(&value).as_object() else {
             continue;
@@ -399,6 +413,18 @@ pub(crate) fn discover_codex_mcp_servers_with_home(
         }
     }
     Ok(servers)
+}
+
+fn load_mcp_server_resource(plugin: &CodexPluginRecord) -> Result<Option<Value>, String> {
+    if let Some(value) = plugin.manifest.mcp_servers.clone() {
+        return resolve_json_resource(plugin, "mcpServers", value).map(Some);
+    }
+    let Some(path) = plugin.mcp_path() else {
+        return Ok(None);
+    };
+    serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
+        .map(Some)
+        .map_err(|error| format!("无效 MCP 资源 {}: {error}", path.display()))
 }
 
 /// Resolve executable/script arguments that are explicitly relative paths
@@ -637,10 +663,10 @@ fn validate_manifest(root: &Path, manifest: &CodexPluginManifest) -> Result<(), 
             validate_resource(root, path)?;
         }
     }
-    for value in [&manifest.mcp_servers, &manifest.hooks]
-        .into_iter()
-        .flatten()
-    {
+    // MCP resources are deliberately checked by MCP discovery rather than at
+    // plugin load time. A broken optional MCP server must not hide a plugin's
+    // other resources or every other valid server in the session.
+    for value in [&manifest.hooks].into_iter().flatten() {
         validate_json_resource_paths(root, value)?;
     }
     if let Some(interface) = manifest.interface.as_ref().and_then(Value::as_object) {

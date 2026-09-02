@@ -272,16 +272,8 @@ fn copy_dir(source: &Path, target: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     fn temp(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "ncx-plugin-{name}-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
+        crate::test_support::unique_temp_dir(&format!("ncx-plugin-{name}"))
     }
 
     fn fixture(root: &Path, version: &str, command: &str) {

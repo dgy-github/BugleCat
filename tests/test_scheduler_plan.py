@@ -24,7 +24,6 @@ from nanocodex.gui import (
     _send_button_label,
 )
 
-
 # --- _scheduler_run_plan: the security mapping ----------------------------
 
 

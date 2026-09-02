@@ -962,7 +962,7 @@ mod tests {
 
     #[test]
     fn compact_materializes_context_edit_and_rewrites_log() {
-        let dir = std::env::temp_dir().join(format!("ncx_session_compact_{}", now_stamp()));
+        let dir = crate::test_support::unique_temp_dir("ncx_session_compact");
         let path = dir.join("session.jsonl");
         let mut s = Session::with_log("sys", Some(path.clone()));
         for i in 0..8 {
@@ -1004,14 +1004,7 @@ mod tests {
 
     #[test]
     fn safe_compaction_preserves_prohibitions_and_workspace_evidence() {
-        let root = std::env::temp_dir().join(format!(
-            "ncx_safe_compact_{}_{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::test_support::unique_temp_dir("ncx_safe_compact");
         std::fs::create_dir_all(&root).unwrap();
         let mut session = Session::new("system");
         session.add_user_text("原始要求：修改 src/app.rs，但不要删除旧实现，不要提交代码");
@@ -1040,14 +1033,7 @@ mod tests {
 
     #[test]
     fn safe_compaction_validates_long_requirements_at_the_marker_boundary() {
-        let root = std::env::temp_dir().join(format!(
-            "ncx_safe_compact_long_{}_{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = crate::test_support::unique_temp_dir("ncx_safe_compact_long");
         std::fs::create_dir_all(&root).unwrap();
         let mut session = Session::new("system");
         session.add_user_text(&format!(
@@ -1077,7 +1063,7 @@ mod tests {
 
     #[test]
     fn logs_messages_as_jsonl_and_resumes_body() {
-        let dir = std::env::temp_dir().join(format!("ncx_session_log_{}", now_stamp()));
+        let dir = crate::test_support::unique_temp_dir("ncx_session_log");
         let path = dir.join("session.jsonl");
         let mut s = Session::with_log("sys", Some(path.clone()));
         s.add_user_text("hello");
@@ -1096,7 +1082,7 @@ mod tests {
 
     #[test]
     fn resume_backfills_dangling_tool_call() {
-        let dir = std::env::temp_dir().join(format!("ncx_session_resume_{}", now_stamp()));
+        let dir = crate::test_support::unique_temp_dir("ncx_session_resume");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("session.jsonl");
         std::fs::write(
@@ -1121,7 +1107,7 @@ mod tests {
 
     #[test]
     fn log_redacts_inline_image_data() {
-        let dir = std::env::temp_dir().join(format!("ncx_session_image_{}", now_stamp()));
+        let dir = crate::test_support::unique_temp_dir("ncx_session_image");
         let path = dir.join("session.jsonl");
         let mut s = Session::with_log("sys", Some(path.clone()));
         s.add_user(json!([
@@ -1136,7 +1122,7 @@ mod tests {
 
     #[test]
     fn fork_uses_seed_without_touching_source_log() {
-        let dir = std::env::temp_dir().join(format!("ncx_session_fork_{}", now_stamp()));
+        let dir = crate::test_support::unique_temp_dir("ncx_session_fork");
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("source.jsonl");
         std::fs::write(&source, "{\"role\":\"user\",\"content\":\"original\"}\n").unwrap();

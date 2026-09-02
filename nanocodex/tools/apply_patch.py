@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from nanocodex.sandbox.approval import ApprovalRequest, Decision, step_decision
+from nanocodex.sandbox.approval import ApprovalRequest, Decision
 from nanocodex.tools.base import Tool
 from nanocodex.tools.patch import PatchError, apply_patch, parse_patch
 

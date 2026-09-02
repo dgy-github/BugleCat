@@ -1,7 +1,6 @@
 def is_balanced(s):
     """Return True if all (), [], {} in s are correctly matched and nested."""
     stack = []
-    pairs = {")": "(", "]": "[", "}": "{"}
     for ch in s:
         if ch in "([{":
             stack.append(ch)

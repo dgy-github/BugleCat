@@ -157,7 +157,7 @@ mod tests {
     }
 
     fn store(name: &str) -> MemoryStore {
-        let root = std::env::temp_dir().join(format!("ncx-memory-draft-{name}"));
+        let root = crate::test_support::unique_temp_dir(&format!("ncx-memory-draft-{name}"));
         let _ = std::fs::remove_dir_all(&root);
         MemoryStore::new(root)
     }

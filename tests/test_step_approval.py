@@ -7,23 +7,17 @@ require_step_approval ON, an in-sandbox shell command / apply_patch must PROMPT
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from nanocodex.sandbox.approval import (
+    ON_REQUEST,
     Approver,
     Decision,
-    ON_REQUEST,
-    NEVER,
     step_decision,
 )
 from nanocodex.sandbox.executor import make_executor
 from nanocodex.sandbox.policy import WORKSPACE_WRITE, SandboxPolicy
+from nanocodex.tools.apply_patch import ApplyPatchTool
 from nanocodex.tools.base import ToolContext
 from nanocodex.tools.shell import ShellTool
-from nanocodex.tools.apply_patch import ApplyPatchTool
-
 
 # --- pure decision layer --------------------------------------------------
 
@@ -108,7 +102,7 @@ async def test_apply_patch_prompts_for_in_sandbox_write(tmp_path):
         "+hello\n"
         "*** End Patch"
     )
-    out = await tool.execute(patch=patch)
+    await tool.execute(patch=patch)
     assert asked["prompts"], "expected an approval prompt for the write"
     assert (tmp_path / "note.txt").exists()        # applied after approval
 
@@ -136,6 +130,6 @@ async def test_apply_patch_no_prompt_when_off(tmp_path):
         "+hello\n"
         "*** End Patch"
     )
-    out = await tool.execute(patch=patch)
+    await tool.execute(patch=patch)
     assert asked["prompts"] == []                  # auto-applied in sandbox
     assert (tmp_path / "note.txt").exists()

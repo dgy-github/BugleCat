@@ -441,16 +441,42 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_TMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn tmpdir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("ncx_patch_{name}"));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        for _ in 0..100 {
+            let d = std::env::temp_dir().join(format!(
+                "ncx_patch_{name}_{}_{}",
+                std::process::id(),
+                TEST_TMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&d) {
+                Ok(()) => return d,
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("create test directory {}: {error}", d.display()),
+            }
+        }
+        panic!("could not create a unique test directory for {name}");
     }
 
     fn allow_all(_p: &Path) -> bool {
         true
+    }
+
+    #[test]
+    fn tmpdir_creates_unique_directories() {
+        let first = tmpdir("unique");
+        let second = tmpdir("unique");
+
+        assert_ne!(first, second);
+        assert!(first.is_dir());
+        assert!(second.is_dir());
+
+        std::fs::remove_dir(first).unwrap();
+        std::fs::remove_dir(second).unwrap();
     }
 
     #[test]

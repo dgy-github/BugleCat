@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from nanocodex.sandbox.approval import (
     NEVER,
     ON_FAILURE,
@@ -20,7 +18,6 @@ from nanocodex.sandbox.policy import (
     WORKSPACE_WRITE,
     SandboxPolicy,
 )
-
 
 # --- policy ---------------------------------------------------------------
 

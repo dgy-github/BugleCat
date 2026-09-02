@@ -10,7 +10,6 @@ Everything runs with fakes — no network, no real keys, no Seedance spend:
 
 from __future__ import annotations
 
-import base64
 import json
 
 import pytest
@@ -439,8 +438,8 @@ async def test_render_one_reruns_single_failed_shot(tmp_path):
     # A failed shot can be re-rendered on its own: render_one updates only that
     # shot in place. First fail it, then retry with a good client -> success,
     # and the OTHER shot's state is untouched (no re-spend on the good one).
-    from nanocodex.storyboard.pipeline import render_one
     from nanocodex.storyboard.clients import SeedanceError
+    from nanocodex.storyboard.pipeline import render_one
 
     obj = _valid_obj()
     state = await run_planning(obj, PipelineDeps(planner=_FakePlanner()))
@@ -470,6 +469,7 @@ async def test_render_concurrent_renders_all_shots(tmp_path):
     # rendered (no lost/clobbered writes) and that wall-clock ~= one shot, not
     # the serial sum.
     import time as _time
+
     from nanocodex.storyboard.pipeline import render
 
     obj = _valid_obj()
@@ -615,8 +615,8 @@ async def test_render_chained_failed_shot_does_not_anchor_next():
     # A shot that FAILS produces no last frame, so the chain breaks there: the
     # following shot renders without a first_frame rather than inheriting a
     # stale/empty one.
-    from nanocodex.storyboard.pipeline import render
     from nanocodex.storyboard.clients import SeedanceError
+    from nanocodex.storyboard.pipeline import render
 
     obj = _valid_obj()
     state = await run_planning(obj, PipelineDeps(planner=_FakePlanner()))
