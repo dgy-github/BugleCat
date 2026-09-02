@@ -854,6 +854,12 @@ The regression suite also protects the following boundaries:
 - The Workspace Changes panel constrains the outer flex workarea and leaves
   `rp-body` as its single vertical scroll owner. File rows cannot shrink, so
   long change lists preserve readable line height instead of overlapping rows.
+- The Rust `ncx-protocol::ClientRequest` enum is the source of truth for the
+  GUI method contract. `scripts/check-protocol-version.mjs` generates
+  `rust/gui/src/lib/protocol-version.ts` (the protocol version and all 70
+  camel-case methods); the GUI build runs the drift check and TypeScript
+  type-check before Vite. This prevents a renamed Rust request from silently
+  becoming a runtime IPC failure.
 
 The current pass was verified with Rust workspace `--all-features` tests and
 strict clippy, GUI Rust tests/clippy, Vite production build, Python pytest, and
@@ -868,6 +874,9 @@ cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-fea
 cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path rust\Cargo.toml --workspace --all-features
 cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
+npm.cmd --prefix rust\gui run test:protocol
+npm.cmd --prefix rust\gui run protocol:check
+npm.cmd --prefix rust\gui run typecheck
 npm.cmd --prefix rust\gui run build
 python -m pytest -q
 python -m ruff check .
@@ -884,6 +893,14 @@ npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 The frontend listens on `http://localhost:5179/`. If that port is already
 owned by BugleCat, reuse the existing instance and let Vite hot-reload instead
 of starting a second development process.
+
+When changing `ncx-protocol::ClientRequest` or `PROTOCOL_VERSION`, regenerate
+the checked-in GUI contract before running the build:
+
+```powershell
+npm.cmd --prefix rust\gui run protocol:generate
+npm.cmd --prefix rust\gui run protocol:check
+```
 
 ## Release Packaging
 

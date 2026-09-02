@@ -358,3 +358,60 @@ scroll owner.
 Verification for this pass: Rust workspace and GUI strict clippy/fmt, full
 workspace `--all-features` tests, GUI library tests, Vite production build,
 Python pytest, and Ruff all pass without a real provider credential.
+
+## Protocol contract generation (2026-09-02)
+
+The GUI previously repeated the App Server protocol version as a literal and
+accepted any string as a request method. That made a harmless Rust enum change
+fail only after a WebView IPC call. Following the versioned app-server boundary
+used by OpenAI Codex, `ncx-protocol::ClientRequest` is now the contract owner:
+
+- `scripts/check-protocol-version.mjs` extracts `PROTOCOL_VERSION` and the
+  top-level `ClientRequest` variants from Rust and generates
+  `rust/gui/src/lib/protocol-version.ts`;
+- the generated module exports the version and the 70 serde camel-case method
+  names, and `app-server-client.ts` uses the method union for every GUI request;
+- `protocol:check` fails on a missing, duplicate, or stale declaration, while
+  `typecheck` catches call-site typos before Vite bundles the desktop app;
+- host-owned response payloads remain JSON values for now. This intentionally
+  avoids creating a second partial schema; the next protocol milestone can
+  generate payload types from the same Rust owner once those host DTOs are
+  promoted into `ncx-protocol`.
+
+When changing the Rust version or request enum, run:
+
+```powershell
+npm.cmd --prefix rust\gui run protocol:generate
+npm.cmd --prefix rust\gui run protocol:check
+npm.cmd --prefix rust\gui run typecheck
+```
+
+This is a contract guard, not a wire-version negotiation mechanism: an
+incompatible protocol still fails closed when the runtime checks the generated
+version at the client boundary.
+
+## External architecture patterns reviewed (2026-09-02)
+
+The next improvements are deliberately ordered by failure impact rather than
+by feature count. The comparison points are public implementations, not
+runtime dependencies:
+
+- [OpenAI Codex app-server](https://github.com/openai/codex/tree/main/codex-rs/app-server)
+  keeps request processors, protocol schemas, and serialization boundaries
+  explicit. BugleCat has adopted the first boundary (Rust-owned method
+  contract); typed response DTO generation remains the next protocol gate.
+- [OpenHands EventService](https://github.com/All-Hands-AI/OpenHands) uses event
+  cursors, pagination, and replay-safe merging. The planned follow-up is a
+  `threadId`/sequence cursor for reconnects before optimizing the JSON store.
+- [Continue](https://github.com/continuedev/continue) isolates optional
+  modules and retries activation. The GUI can apply that pattern to optional
+  Forge/media panels so a missing resource cannot prevent the core chat from
+  starting.
+
+The resulting backlog is intentionally small: (P1) a background MCP reader
+with request-id/oneshot routing and a per-server concurrency cap; (P1) typed
+plugin capability provenance (host version, source and digest) in diagnostics;
+(P2) replay cursors plus paged Thread Store reads; and (P2) a runtime endpoint
+health abstraction for local and future remote hosts. Each item must add a
+failure-path test and preserve the existing per-Thread ownership, workspace
+fences, approval policy, and no-paid-call default before it is enabled.

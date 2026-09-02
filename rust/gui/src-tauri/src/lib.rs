@@ -6019,9 +6019,21 @@ mod tests {
     fn frontend_rejects_stale_or_cross_version_protocol_events() {
         let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
         let protocol_client = include_str!("../../src/lib/app-server-client.ts");
+        let protocol_version = include_str!("../../src/lib/protocol-version.ts");
         assert!(runtime.contains("listen<ProtocolEventEnvelope>(\"ncx://protocol-event\""));
         assert!(runtime.contains("this.sequenceGate.accept(envelope)"));
-        assert!(protocol_client.contains("envelope.protocolVersion !== 3 || !envelope.threadId"));
+        assert!(protocol_client.contains("APP_SERVER_PROTOCOL_VERSION,"));
+        assert!(protocol_client.contains("from \"./protocol-version\";"));
+        assert!(protocol_client.contains("method: AppServerProtocolMethod;"));
+        assert!(protocol_client
+            .contains("outcome.response.protocolVersion !== APP_SERVER_PROTOCOL_VERSION"));
+        assert!(protocol_client.contains(
+            "envelope.protocolVersion !== APP_SERVER_PROTOCOL_VERSION || !envelope.threadId"
+        ));
+        assert!(protocol_version.contains("export const APP_SERVER_PROTOCOL_VERSION ="));
+        assert!(protocol_version.contains("export const APP_SERVER_PROTOCOL_METHODS = ["));
+        assert!(protocol_version.contains("  \"turnSubmit\","));
+        assert!(protocol_version.contains("export type AppServerProtocolMethod ="));
         assert!(protocol_client.contains("this.sequences.get(envelope.threadId) || 0"));
         assert!(protocol_client.contains("envelope.sequence <= previous"));
         assert!(

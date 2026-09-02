@@ -413,5 +413,6 @@
 | Rust | `TosResponse` | struct | `rust/crates/ncx-video-agent/src/tos.rs:44` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |
 | Web | `renameError` | symbol | `rust/gui/src/components/SessionSidebar.svelte:81` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |
 | Web | `reconcileError` | symbol | `rust/gui/src/lib/app-runtime-controller.svelte.ts:227` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |
-| Web | `appServerRequest` | symbol | `rust/gui/src/lib/app-server-client.ts:68` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |
+| Web | `AppServerRequest` | symbol | `rust/gui/src/lib/app-server-client.ts:79` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |
+| Web | `appServerRequest` | symbol | `rust/gui/src/lib/app-server-client.ts:83` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |
 | Web | `ModelCatalogResponse` | symbol | `rust/gui/src/lib/settings-controller.svelte.ts:27` | Read the declaration and nearby tests for the exact contract. | Extend this owner before creating a parallel interface. |

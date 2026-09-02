@@ -683,6 +683,11 @@ python -m pytest -q
   会话日志和界面错误。
 - “工作区改动”面板约束外层 flex workarea，并让 `rp-body` 成为唯一纵向滚动容器；
   文件行禁止压缩，长列表保持稳定行高，不再出现条目互相覆盖。
+- `ncx-protocol::ClientRequest` 是 GUI App Server 方法契约的唯一事实源。
+  `scripts/check-protocol-version.mjs` 会从 Rust 枚举生成
+  `rust/gui/src/lib/protocol-version.ts`，同时同步协议版本和 70 个 camelCase
+  方法名；GUI 构建会先执行漂移检查和 TypeScript 类型检查，避免方法改名后才在
+  运行时暴露 IPC 错误。
 
 本轮已用 Rust workspace `--all-features` 全量测试与严格 clippy、GUI Rust
 测试/clippy、Vite 生产构建、Python pytest 和 Ruff 验证；不需要真实 Provider
@@ -697,6 +702,9 @@ cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-fea
 cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path rust\Cargo.toml --workspace --all-features
 cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
+npm.cmd --prefix rust\gui run test:protocol
+npm.cmd --prefix rust\gui run protocol:check
+npm.cmd --prefix rust\gui run typecheck
 npm.cmd --prefix rust\gui run build
 python -m pytest -q
 python -m ruff check .
@@ -711,6 +719,14 @@ npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 ```
 
 开发前端默认监听 `http://localhost:5179/`。如果该端口已有 BugleCat 实例，优先复用并等待热更新，不要重复启动第二个实例。
+
+修改 `ncx-protocol::ClientRequest` 或 `PROTOCOL_VERSION` 后，先重新生成并检查 GUI
+契约，再启动 Tauri：
+
+```powershell
+npm.cmd --prefix rust\gui run protocol:generate
+npm.cmd --prefix rust\gui run protocol:check
+```
 
 ## Release 打包
 

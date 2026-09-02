@@ -35795,8 +35795,16 @@
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
+    "name": "AppServerProtocolMethod",
+    "line": 4,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/app-server-client.ts",
+    "kind": "symbol",
     "name": "ProtocolThreadItem",
-    "line": 2,
+    "line": 6,
     "summary": ""
   },
   {
@@ -35804,7 +35812,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "ProtocolThread",
-    "line": 12,
+    "line": 16,
     "summary": ""
   },
   {
@@ -35812,7 +35820,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "ProtocolGoalSnapshot",
-    "line": 25,
+    "line": 29,
     "summary": ""
   },
   {
@@ -35820,7 +35828,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "ProtocolGoalView",
-    "line": 37,
+    "line": 41,
     "summary": ""
   },
   {
@@ -35828,7 +35836,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "ProtocolEventEnvelope",
-    "line": 42,
+    "line": 46,
     "summary": ""
   },
   {
@@ -35836,7 +35844,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "SessionRow",
-    "line": 50,
+    "line": 54,
     "summary": ""
   },
   {
@@ -35844,14 +35852,6 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "AppServerOutcome",
-    "line": 64,
-    "summary": ""
-  },
-  {
-    "language": "Web",
-    "path": "rust/gui/src/lib/app-server-client.ts",
-    "kind": "symbol",
-    "name": "appServerRequest",
     "line": 68,
     "summary": ""
   },
@@ -35859,23 +35859,15 @@
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
-    "name": "outcome",
-    "line": 70,
+    "name": "AppServerRequest",
+    "line": 79,
     "summary": ""
   },
   {
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
-    "name": "ProtocolSequenceGate",
-    "line": 78,
-    "summary": ""
-  },
-  {
-    "language": "Web",
-    "path": "rust/gui/src/lib/app-server-client.ts",
-    "kind": "symbol",
-    "name": "previous",
+    "name": "appServerRequest",
     "line": 83,
     "summary": ""
   },
@@ -35883,23 +35875,23 @@
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
-    "name": "normalizeWorkspacePath",
-    "line": 89,
+    "name": "outcome",
+    "line": 85,
     "summary": ""
   },
   {
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
-    "name": "normalized",
-    "line": 91,
+    "name": "ProtocolSequenceGate",
+    "line": 93,
     "summary": ""
   },
   {
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
-    "name": "historicalFallbackTitle",
+    "name": "previous",
     "line": 98,
     "summary": ""
   },
@@ -35907,23 +35899,7 @@
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
-    "name": "normalized",
-    "line": 100,
-    "summary": ""
-  },
-  {
-    "language": "Web",
-    "path": "rust/gui/src/lib/app-server-client.ts",
-    "kind": "symbol",
-    "name": "withoutPrefix",
-    "line": 103,
-    "summary": ""
-  },
-  {
-    "language": "Web",
-    "path": "rust/gui/src/lib/app-server-client.ts",
-    "kind": "symbol",
-    "name": "chars",
+    "name": "normalizeWorkspacePath",
     "line": 104,
     "summary": ""
   },
@@ -35931,8 +35907,48 @@
     "language": "Web",
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
+    "name": "normalized",
+    "line": 106,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/app-server-client.ts",
+    "kind": "symbol",
+    "name": "historicalFallbackTitle",
+    "line": 113,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/app-server-client.ts",
+    "kind": "symbol",
+    "name": "normalized",
+    "line": 115,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/app-server-client.ts",
+    "kind": "symbol",
+    "name": "withoutPrefix",
+    "line": 118,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/app-server-client.ts",
+    "kind": "symbol",
+    "name": "chars",
+    "line": 119,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/app-server-client.ts",
+    "kind": "symbol",
     "name": "threadToSessionRow",
-    "line": 107,
+    "line": 122,
     "summary": ""
   },
   {
@@ -35940,7 +35956,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "userMessages",
-    "line": 109,
+    "line": 124,
     "summary": ""
   },
   {
@@ -35948,7 +35964,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "assistantMessages",
-    "line": 110,
+    "line": 125,
     "summary": ""
   },
   {
@@ -35956,7 +35972,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "toolCalls",
-    "line": 111,
+    "line": 126,
     "summary": ""
   },
   {
@@ -35964,7 +35980,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "snippet",
-    "line": 112,
+    "line": 127,
     "summary": ""
   },
   {
@@ -35972,7 +35988,7 @@
     "path": "rust/gui/src/lib/app-server-client.ts",
     "kind": "symbol",
     "name": "firstUserMessage",
-    "line": 113,
+    "line": 128,
     "summary": ""
   },
   {
@@ -37637,6 +37653,38 @@
     "kind": "symbol",
     "name": "selected",
     "line": 144,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/protocol-version.ts",
+    "kind": "module",
+    "name": "protocol-version",
+    "line": 1,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/protocol-version.ts",
+    "kind": "symbol",
+    "name": "APP_SERVER_PROTOCOL_VERSION",
+    "line": 3,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/protocol-version.ts",
+    "kind": "symbol",
+    "name": "APP_SERVER_PROTOCOL_METHODS",
+    "line": 5,
+    "summary": ""
+  },
+  {
+    "language": "Web",
+    "path": "rust/gui/src/lib/protocol-version.ts",
+    "kind": "symbol",
+    "name": "AppServerProtocolMethod",
+    "line": 78,
     "summary": ""
   },
   {

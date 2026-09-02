@@ -1,6 +1,25 @@
 # HANDOFF — nanocodex (Rust 线)
 
-## 2026-09-02：Goal/MCP/Provider 与工作区面板可靠性收口（最新现场状态）
+## 2026-09-02：App Server 协议契约生成与漂移门禁（提交前增量）
+
+- GUI 过去在 `app-server-client.ts` 中重复写死协议版本 `3`，请求 method 也只是
+  任意字符串；Rust `ncx-protocol::ClientRequest` 才是实际 wire 契约。新增
+  `scripts/check-protocol-version.mjs`，从 Rust 常量和 enum 生成
+  `rust/gui/src/lib/protocol-version.ts`，导出版本与 70 个 camelCase method 的
+  TypeScript union。
+- `appServerRequest` 现在要求生成的 `AppServerProtocolMethod`，事件/响应版本校验
+  共用生成常量；`rust/gui/src-tauri/src/lib.rs` 的前端回归断言也检查生成模块，避免
+  仅改客户端实现而测试仍锁旧字面量。
+- GUI `protocol:generate`、`protocol:check`、`test:protocol` 和 `typecheck` 已加入
+  `package.json`；`build` 先执行漂移检查与 `tsc --noEmit`，再运行 Vite。修改
+  `PROTOCOL_VERSION` 或 `ClientRequest` 后必须先 regenerate/check，再重启 Tauri
+  dev；`dev` 脚本本身也会先执行 `protocol:check`，避免 stale contract 被加载。
+- 本增量已通过 Node 协议脚本测试 5/5、`npm ... run protocol:check`、TypeScript
+  typecheck、Vite production build（150 modules）和 GUI 定向 Rust 回归；项目符号
+  记忆索引已重新生成（4,876 symbols）。尚未提交/推送，交付前需跑完整 Rust/Python
+  门禁并核对远端 HEAD。
+
+## 2026-09-02：Goal/MCP/Provider 与工作区面板可靠性收口（上一轮基线快照）
 
 - Goal App Server 的 durable phase、process-local activation 和
   `GoalRoundStart` 现在共用 transition lock；新增竞争测试证明在锁被持有时
@@ -27,7 +46,7 @@
   `refs/heads/feat/deepseek-harness-components` 已用 `git ls-remote` 与本地 `HEAD`
   对比确认一致；当前工作树 clean。最终提交号以交付时的
   `git rev-parse HEAD` 和远端核对输出为准。
-- 个人知识库索引已按当前源码重新生成（4,870 个符号）；
+- 个人知识库索引已按当前源码重新生成（4,876 个符号）；
   `python scripts/generate_project_memory.py --check` 通过。
 
 ## 2026-09-02：交付收口与真实桌面验证

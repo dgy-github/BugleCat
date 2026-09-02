@@ -1,4 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  APP_SERVER_PROTOCOL_VERSION,
+  type AppServerProtocolMethod,
+} from "./protocol-version";
 
 export type ProtocolThreadItem =
   | { type: "userMessage"; id: string; text: string }
@@ -66,9 +70,20 @@ type AppServerOutcome<T> = {
   response: { protocolVersion: number; payload: { type: string; data: T } };
 };
 
-export async function appServerRequest<T>(request: Record<string, unknown>): Promise<T> {
+/**
+ * The method name is generated from Rust's `ClientRequest` enum. Parameters
+ * remain deliberately open here because response payloads still contain a
+ * few host-owned JSON values; this closes the typo/drift gap without inventing
+ * a second, partial schema in the GUI.
+ */
+export type AppServerRequest = {
+  method: AppServerProtocolMethod;
+  params?: Record<string, unknown>;
+};
+
+export async function appServerRequest<T>(request: AppServerRequest): Promise<T> {
   const outcome = await invoke<AppServerOutcome<T>>("app_server_request", { request });
-  if (outcome.response.protocolVersion !== 3) {
+  if (outcome.response.protocolVersion !== APP_SERVER_PROTOCOL_VERSION) {
     throw new Error(`不支持的协议版本 ${outcome.response.protocolVersion}`);
   }
   return outcome.response.payload.data;
@@ -79,7 +94,7 @@ export class ProtocolSequenceGate {
   private readonly sequences = new Map<string, number>();
 
   accept(envelope: ProtocolEventEnvelope): boolean {
-    if (envelope.protocolVersion !== 3 || !envelope.threadId) return false;
+    if (envelope.protocolVersion !== APP_SERVER_PROTOCOL_VERSION || !envelope.threadId) return false;
     const previous = this.sequences.get(envelope.threadId) || 0;
     if (envelope.sequence <= previous) return false;
     this.sequences.set(envelope.threadId, envelope.sequence);
