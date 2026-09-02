@@ -403,14 +403,10 @@ for line in sys.stdin:
         )
         .await;
 
-        let n = match result {
-            Ok(n) => n,
-            Err(e) if e.starts_with("spawn python:") => {
-                eprintln!("skipping mcp_tool live test (no python?): {e}");
-                return;
-            }
-            Err(e) => panic!("MCP live server failed unexpectedly: {e}"),
-        };
+        // This is the regression guard for the real `McpTool::execute` path.
+        // Do not silently skip it when the fixture cannot start: a green test
+        // run without the live server would recreate the approval-test gap.
+        let n = result.expect("MCP live server must start for the approval regression");
         assert_eq!(n, 6);
 
         // Only a complete MCP annotation opts a tool into the read-only path.

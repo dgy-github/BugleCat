@@ -4,8 +4,8 @@
 
 - Goal App Server 的 durable phase、process-local activation 和
   `GoalRoundStart` 现在共用 transition lock；新增竞争测试证明在锁被持有时
-  `GoalPause` 不会绕过线性化边界。当前工作树尚未提交，以下状态均以现场 Git
-  和测试结果为准。
+  `GoalPause` 不会绕过线性化边界。代码已提交到 `154c1e1`，以下状态均以现场
+  Git 和测试结果为准。
 - MCP 工具只在完整 `readOnlyHint=true` + `destructiveHint=false` annotations
   下走只读路径；缺失/部分/冲突值 fail closed，`llmwiki` 写 action 仍受白名单
   约束。`approval_policy=never` 拒绝测试已独立于 compaction 守卫。
@@ -23,8 +23,11 @@
   窗口标题 `BugleCat`、Responding=True；Vite 监听 `http://localhost:5179/`。
   当前 Computer Use 环境只提供浏览器面板，无法抓取原生 Tauri 窗口截图；
   已通过进程/窗口句柄核验实例存在，并在 localhost 预览确认面板可挂载。
-- 当前工作树仍未提交、未推送；提交后应把 commit、远端分支和 `git ls-remote`
-  结果追加到本节，避免沿用旧 commit/PID 声明。
+- 已提交并推送：分支 `feat/deepseek-harness-components` 的远端
+  `refs/heads/feat/deepseek-harness-components` 已由 `git ls-remote` 确认为
+  `154c1e1a9d39f4b7353855e45a34b26cd80c3404`；当前工作树 clean。
+- 个人知识库索引已按当前源码重新生成（4,870 个符号）；
+  `python scripts/generate_project_memory.py --check` 通过。
 
 ## 2026-09-02：交付收口与真实桌面验证
 
