@@ -1,6 +1,6 @@
 # HANDOFF — nanocodex (Rust 线)
 
-## 2026-09-02：App Server 协议契约生成与漂移门禁（提交前增量）
+## 2026-09-02：App Server 协议契约生成与漂移门禁（已提交并推送）
 
 - GUI 过去在 `app-server-client.ts` 中重复写死协议版本 `3`，请求 method 也只是
   任意字符串；Rust `ncx-protocol::ClientRequest` 才是实际 wire 契约。新增
@@ -15,9 +15,23 @@
   `PROTOCOL_VERSION` 或 `ClientRequest` 后必须先 regenerate/check，再重启 Tauri
   dev；`dev` 脚本本身也会先执行 `protocol:check`，避免 stale contract 被加载。
 - 本增量已通过 Node 协议脚本测试 5/5、`npm ... run protocol:check`、TypeScript
-  typecheck、Vite production build（150 modules）和 GUI 定向 Rust 回归；项目符号
-  记忆索引已重新生成（4,876 symbols）。尚未提交/推送，交付前需跑完整 Rust/Python
-  门禁并核对远端 HEAD。
+  typecheck、Vite production build（150 modules）、GUI 140 项测试及完整 Rust/Python
+  门禁；项目符号记忆索引为 4,876 symbols。提交为 `70f83bb`，并已推送到
+  `origin/feat/deepseek-harness-components`；远端 `git ls-remote` 与本地 HEAD
+  一致。
+
+## 2026-09-02：最终现场核验
+
+- 工作树 clean；本地 HEAD `70f83bbba1557ea490b03e965d6d371d9831492d` 与
+  GitHub 分支 `feat/deepseek-harness-components` 完全一致。
+- 本地开发链路已实际重启：Tauri `beforeDevCommand` 先执行
+  `npm run protocol:check && vite`，输出 `Protocol contract v3 is in sync (70 methods)`；
+  Vite 当前唯一监听 `127.0.0.1:5179`，BugleCat 窗口标题为 `BugleCat` 且
+  `Responding=True`。当前实例为 debug 开发版，不代表正式部署包。
+- 截图对应的工作区改动面板回归由 `workspace_diff_panel_keeps_rows_intact_and_uses_the_panel_scroll`
+  覆盖；外层 workarea 与唯一 `rp-body` 滚动容器约束已生效，长列表不会再压缩重叠。
+- 本轮没有使用真实 Provider 凭据，也没有触发付费模型调用；Windows 安装包签名仍是
+  发布前独立事项。
 
 ## 2026-09-02：Goal/MCP/Provider 与工作区面板可靠性收口（上一轮基线快照）
 
