@@ -968,6 +968,14 @@ installer is emitted under
 The GUI Settings dialog also exposes the resolved `~/.nanocodex/config.toml`
 path and buttons to open the config file or its directory.
 
+The [`macOS Release`](.github/workflows/macos-release.yml) workflow builds both
+Intel (`x86_64-apple-darwin`) and Apple Silicon (`aarch64-apple-darwin`) DMGs
+and attaches them to the same GitHub Release. It runs automatically for `v*`
+tags and can also be started manually with **Actions → macOS Release → Run
+workflow**, specifying the release tag. The workflow currently produces
+unsigned packages; configure Apple Developer signing and notarization secrets
+in GitHub Actions before distributing them broadly outside the App Store.
+
 The Tauri crate deliberately keeps `crate-type = ["lib"]`; changing it to
 `cdylib` or `staticlib` previously overflowed the Windows GNU linker's export
 table, so validate the release target before changing it.

@@ -1,0 +1,94 @@
+name: macOS Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing or new release tag to publish"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-13
+            target: x86_64-apple-darwin
+          - arch: arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rust/gui/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: rust/gui
+
+      - name: Install Rust target
+        run: rustup target add "${{ matrix.target }}"
+
+      - name: Build DMG
+        run: |
+          npm exec -- tauri build --target "${{ matrix.target }}" --bundles dmg
+          mkdir -p ../../artifacts
+          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          cp "$dmg" "../../artifacts/BugleCat-${{ matrix.arch }}.dmg"
+        working-directory: rust/gui
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ matrix.arch }}
+          path: artifacts/BugleCat-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  publish:
+    name: Attach macOS packages to Release
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Download DMG artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-dmg-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish macOS assets
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: dist/*.dmg
+          fail_on_unmatched_files: true
+          overwrite_files: true

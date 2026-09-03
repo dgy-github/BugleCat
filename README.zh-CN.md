@@ -780,6 +780,13 @@ npm.cmd run tauri:installer
 GUI 的 Settings 弹窗也会展示解析后的 `~/.nanocodex/config.toml` 路径，并提供打开配置文件
 和配置目录的入口。
 
+仓库中的 [`macOS Release`](.github/workflows/macos-release.yml) workflow 会分别在 Intel
+（`x86_64-apple-darwin`）和 Apple Silicon（`aarch64-apple-darwin`）runner 上构建 DMG，
+再把两个安装包挂到同一个 GitHub Release。推送 `v*` 标签会自动触发，也可以在
+**Actions → macOS Release → Run workflow** 中手动选择 Release tag。当前 workflow 产出的是
+未签名安装包；要给外部用户正式分发，请在 GitHub Actions 中配置 Apple Developer 签名和
+notarization secrets。
+
 Tauri crate 特意保留 `crate-type = ["lib"]`；改成 `cdylib` 或 `staticlib` 曾让
 Windows GNU 链接器的 export ordinal 表溢出，修改前需重新验证目标 release。
 
