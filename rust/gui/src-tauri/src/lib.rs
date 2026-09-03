@@ -6256,8 +6256,14 @@ mod tests {
             .unwrap()
             .0;
         assert!(file_row.contains("flex: 0 0 auto;"));
-        assert!(css
-            .contains(".rightpanel .wt-list { max-height: none; overflow: visible; margin: 0; }"));
+        assert!(css.contains(
+            ".rightpanel .wt-list {\n  display: flex;\n  flex: 0 0 auto;\n  flex-direction: column;"
+        ));
+        assert!(css.contains("min-height: max-content;\n  max-height: none;\n  overflow: visible;"));
+        assert!(css.contains(".rightpanel .wt-file { flex: 0 0 auto; min-height: 2.75rem; }"));
+        assert!(css.contains(
+            ".rightpanel .wt-head { flex: 0 0 auto; height: auto; min-height: 2.75rem; }"
+        ));
         assert!(css.contains(
             "min-height: 0;\n  overflow: hidden;\n  display: flex;\n  flex-direction: row;"
         ));
@@ -6283,6 +6289,9 @@ mod tests {
         assert!(panel.contains("Object.hasOwn(diffOpenFiles, file.path)"));
         assert!(panel.contains("diffOpenFiles[file.path].text.split(\"\\n\")"));
         assert!(panel.contains("预览已截断"));
+        assert!(
+            css.contains("text-overflow: ellipsis;\n  white-space: nowrap;\n  font-size: 1rem;")
+        );
     }
 
     #[test]

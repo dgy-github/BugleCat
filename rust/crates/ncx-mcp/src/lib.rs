@@ -5,22 +5,32 @@
 //! per the MCP stdio transport), does the `initialize` handshake, then exposes
 //! `tools/list` and `tools/call`.
 //!
-//! Tool calls in the agent are sequential (one await at a time), so this uses a
-//! simple synchronous request→read-until-matching-id loop rather than a
-//! background reader + response map — much less machinery, same behavior.
+//! A background stdout reader routes responses by JSON-RPC request id. Public
+//! request methods borrow the client immutably, so one server connection can
+//! safely service several in-flight calls; the host still controls the server
+//! concurrency budget at the tool layer.
 
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex as StdMutex,
+};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, Command};
+use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
 
 const PROTOCOL: &str = "2024-11-05";
 const REQ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Maximum number of simultaneous read-only calls sent to one MCP process.
+/// A side-effecting call acquires all permits and is therefore exclusive.
+pub const MCP_SERVER_MAX_READ_CONCURRENCY: usize = 4;
 
 /// A tool advertised by an MCP server.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +63,24 @@ pub struct McpToolAnnotations {
     pub open_world_hint: Option<bool>,
 }
 
+type RequestResult = Result<Value, String>;
+type PendingRequests = Arc<StdMutex<HashMap<u64, oneshot::Sender<RequestResult>>>>;
+type SharedStdin = Arc<tokio::sync::Mutex<ChildStdin>>;
+
+/// Removes a request from the router when the waiter is cancelled or dropped.
+/// Without this guard, a cancelled tool call would leave a sender retained
+/// until the server eventually answered (or the connection closed).
+struct PendingRequestGuard {
+    pending: PendingRequests,
+    id: u64,
+}
+
+impl Drop for PendingRequestGuard {
+    fn drop(&mut self) {
+        remove_pending(&self.pending, self.id);
+    }
+}
+
 impl McpToolAnnotations {
     /// Whether this annotation pair is an explicit, non-conflicting read-only
     /// declaration. Unknown/missing values intentionally return false.
@@ -64,9 +92,10 @@ impl McpToolAnnotations {
 /// A connected MCP server (owns the child process; killed on drop).
 pub struct McpClient {
     child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    next_id: u64,
+    stdin: SharedStdin,
+    pending: PendingRequests,
+    next_id: AtomicU64,
+    call_gate: Arc<Semaphore>,
     pub server: String,
 }
 
@@ -91,18 +120,88 @@ impl McpClient {
         let mut child = cmd.spawn().map_err(|e| format!("spawn {command}: {e}"))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = BufReader::new(child.stdout.take().ok_or("no stdout")?);
-        let mut client = McpClient {
+        let stdin: SharedStdin = Arc::new(tokio::sync::Mutex::new(stdin));
+        let pending: PendingRequests = Arc::new(StdMutex::new(HashMap::new()));
+        let reader_pending = Arc::clone(&pending);
+        let reader_stdin = Arc::clone(&stdin);
+        let server_name = server.to_string();
+        tokio::spawn(async move {
+            let mut stdout = stdout;
+            loop {
+                let mut line = String::new();
+                let result = stdout.read_line(&mut line).await;
+                match result {
+                    Ok(0) => {
+                        fail_pending(
+                            &reader_pending,
+                            format!("server '{}' closed stdout", server_name),
+                        );
+                        break;
+                    }
+                    Ok(_) => {
+                        let Ok(value) = serde_json::from_str::<Value>(line.trim()) else {
+                            // Stdio servers occasionally emit blank lines. A malformed
+                            // line has no trustworthy id, so leave the request pending
+                            // and let its bounded timeout produce the diagnostic.
+                            continue;
+                        };
+
+                        if let Some(method) = value.get("method").and_then(Value::as_str) {
+                            // MCP permits a server to send a JSON-RPC request back to
+                            // the client (sampling/elicitation, for example). We do not
+                            // expose those capabilities yet, but must answer explicitly
+                            // instead of silently leaving the server blocked.
+                            let Some(id) = value.get("id") else {
+                                continue;
+                            };
+                            let response = json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "error": {
+                                    "code": -32601,
+                                    "message": format!("method '{method}' is not supported by ncx-mcp")
+                                }
+                            });
+                            if let Err(error) = write_json(&reader_stdin, &response).await {
+                                fail_pending(&reader_pending, error);
+                                break;
+                            }
+                            continue;
+                        }
+
+                        let Some(id) = value.get("id").and_then(Value::as_u64) else {
+                            // Notifications do not carry a response id.
+                            continue;
+                        };
+                        let result = if let Some(error) = value.get("error") {
+                            Err(format!("rpc error: {error}"))
+                        } else {
+                            Ok(value.get("result").cloned().unwrap_or(Value::Null))
+                        };
+                        if let Some(sender) = take_pending(&reader_pending, id) {
+                            let _ = sender.send(result);
+                        }
+                    }
+                    Err(error) => {
+                        fail_pending(&reader_pending, format!("read: {error}"));
+                        break;
+                    }
+                }
+            }
+        });
+        let client = McpClient {
             child,
             stdin,
-            stdout,
-            next_id: 0,
+            pending,
+            next_id: AtomicU64::new(0),
+            call_gate: Arc::new(Semaphore::new(MCP_SERVER_MAX_READ_CONCURRENCY)),
             server: server.to_string(),
         };
         client.initialize().await?;
         Ok(client)
     }
 
-    async fn initialize(&mut self) -> Result<(), String> {
+    async fn initialize(&self) -> Result<(), String> {
         self.request(
             "initialize",
             json!({
@@ -115,58 +214,40 @@ impl McpClient {
         self.notify("notifications/initialized", json!({})).await
     }
 
-    async fn write_msg(&mut self, msg: &Value) -> Result<(), String> {
-        let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
-        line.push('\n');
-        self.stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| format!("write: {e}"))?;
-        self.stdin.flush().await.map_err(|e| format!("flush: {e}"))
+    async fn write_msg(&self, msg: &Value) -> Result<(), String> {
+        write_json(&self.stdin, msg).await
     }
 
-    async fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
+    async fn notify(&self, method: &str, params: Value) -> Result<(), String> {
         self.write_msg(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
             .await
     }
 
-    /// Send a request and read responses until the one with the matching id
-    /// arrives (skipping notifications / other messages). Bounded by a timeout.
-    async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        self.next_id += 1;
-        let id = self.next_id;
-        self.write_msg(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
-            .await?;
-
-        let read = async {
-            loop {
-                let mut line = String::new();
-                let n = self
-                    .stdout
-                    .read_line(&mut line)
-                    .await
-                    .map_err(|e| format!("read: {e}"))?;
-                if n == 0 {
-                    return Err(format!("server '{}' closed stdout", self.server));
-                }
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                let Ok(v) = serde_json::from_str::<Value>(line) else {
-                    continue;
-                };
-                if v.get("id").and_then(|x| x.as_u64()) != Some(id) {
-                    continue; // a notification or a different response
-                }
-                if let Some(err) = v.get("error") {
-                    return Err(format!("rpc error: {err}"));
-                }
-                return Ok(v.get("result").cloned().unwrap_or(Value::Null));
-            }
+    /// Send a request and wait for the response routed by its request id.
+    /// Bounded by a timeout and removes abandoned requests from the pending map.
+    async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        let id = next_request_id(&self.next_id);
+        let (tx, rx) = oneshot::channel();
+        insert_pending(&self.pending, id, tx)?;
+        let _pending_guard = PendingRequestGuard {
+            pending: Arc::clone(&self.pending),
+            id,
         };
-        match timeout(REQ_TIMEOUT, read).await {
-            Ok(r) => r,
+        if let Err(error) = self
+            .write_msg(&json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": params
+            }))
+            .await
+        {
+            remove_pending(&self.pending, id);
+            return Err(error);
+        }
+        match timeout(REQ_TIMEOUT, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(format!("server '{}' closed stdout", self.server)),
             Err(_) => Err(format!(
                 "timeout waiting for '{method}' from '{}'",
                 self.server
@@ -175,7 +256,7 @@ impl McpClient {
     }
 
     /// List the server's tools.
-    pub async fn list_tools(&mut self) -> Result<Vec<McpToolDef>, String> {
+    pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, String> {
         let res = self.request("tools/list", json!({})).await?;
         let mut out = Vec::new();
         if let Some(tools) = res.get("tools").and_then(|t| t.as_array()) {
@@ -185,11 +266,93 @@ impl McpClient {
     }
 
     /// Call a tool and return its content as a string.
-    pub async fn call_tool(&mut self, name: &str, args: &Value) -> Result<String, String> {
+    pub async fn call_tool(&self, name: &str, args: &Value) -> Result<String, String> {
         let res = self
             .request("tools/call", json!({"name": name, "arguments": args}))
             .await?;
         Ok(format_content(&res))
+    }
+
+    /// Reserve capacity for one tool call on this server. Read-only calls use
+    /// one permit and can run in a bounded batch; side-effecting calls use the
+    /// full capacity and therefore cannot overlap with any other call.
+    pub async fn acquire_call_permit(
+        &self,
+        read_only: bool,
+    ) -> Result<OwnedSemaphorePermit, String> {
+        acquire_call_permit(&self.call_gate, &self.server, read_only).await
+    }
+}
+
+async fn acquire_call_permit(
+    gate: &Arc<Semaphore>,
+    server: &str,
+    read_only: bool,
+) -> Result<OwnedSemaphorePermit, String> {
+    let count = if read_only {
+        1
+    } else {
+        MCP_SERVER_MAX_READ_CONCURRENCY
+    };
+    gate.clone()
+        .acquire_many_owned(count as u32)
+        .await
+        .map_err(|_| format!("MCP server '{server}' call gate is closed"))
+}
+
+async fn write_json(stdin: &SharedStdin, msg: &Value) -> Result<(), String> {
+    let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+    line.push('\n');
+    let mut writer = stdin.lock().await;
+    writer
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| format!("write: {e}"))?;
+    writer.flush().await.map_err(|e| format!("flush: {e}"))
+}
+
+fn next_request_id(counter: &AtomicU64) -> u64 {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.wrapping_add(1).max(1))
+        })
+        .unwrap_or(1)
+}
+
+fn insert_pending(
+    pending: &PendingRequests,
+    id: u64,
+    sender: oneshot::Sender<RequestResult>,
+) -> Result<(), String> {
+    let mut entries = pending
+        .lock()
+        .map_err(|_| "MCP response router lock poisoned".to_string())?;
+    entries.insert(id, sender);
+    Ok(())
+}
+
+fn remove_pending(pending: &PendingRequests, id: u64) {
+    if let Ok(mut entries) = pending.lock() {
+        entries.remove(&id);
+    }
+}
+
+fn take_pending(pending: &PendingRequests, id: u64) -> Option<oneshot::Sender<RequestResult>> {
+    pending.lock().ok()?.remove(&id)
+}
+
+fn fail_pending(pending: &PendingRequests, error: String) {
+    let senders = pending
+        .lock()
+        .map(|mut entries| {
+            entries
+                .drain()
+                .map(|(_, sender)| sender)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for sender in senders {
+        let _ = sender.send(Err(error.clone()));
     }
 }
 
@@ -242,6 +405,10 @@ fn hide_child_console(_: &mut Command) {}
 
 impl Drop for McpClient {
     fn drop(&mut self) {
+        fail_pending(
+            &self.pending,
+            format!("MCP server '{}' connection dropped", self.server),
+        );
         let _ = self.child.start_kill();
     }
 }
@@ -290,8 +457,10 @@ pub fn format_content(res: &Value) -> String {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::sync::Barrier;
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -381,6 +550,85 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dropping_a_cancelled_request_removes_its_pending_sender() {
+        let pending: PendingRequests = Arc::new(StdMutex::new(HashMap::new()));
+        let (tx, _rx) = oneshot::channel();
+        insert_pending(&pending, 7, tx).expect("insert pending request");
+        {
+            let _guard = PendingRequestGuard {
+                pending: Arc::clone(&pending),
+                id: 7,
+            };
+            assert_eq!(pending.lock().unwrap().len(), 1);
+        }
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn call_gate_bounds_reads_and_excludes_writes() {
+        let gate = Arc::new(Semaphore::new(MCP_SERVER_MAX_READ_CONCURRENCY));
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let ready = Arc::new(Barrier::new(MCP_SERVER_MAX_READ_CONCURRENCY + 1));
+        let release = Arc::new(Barrier::new(MCP_SERVER_MAX_READ_CONCURRENCY + 1));
+        let writer_started = Arc::new(AtomicBool::new(false));
+
+        async fn held_read(
+            gate: Arc<Semaphore>,
+            active: Arc<AtomicUsize>,
+            peak: Arc<AtomicUsize>,
+            ready: Arc<Barrier>,
+            release: Arc<Barrier>,
+        ) {
+            let _permit = acquire_call_permit(&gate, "test", true)
+                .await
+                .expect("read permit");
+            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+            ready.wait().await;
+            release.wait().await;
+            active.fetch_sub(1, Ordering::SeqCst);
+        }
+
+        let writer = {
+            let gate = gate.clone();
+            let writer_started = writer_started.clone();
+            async move {
+                let _permit = acquire_call_permit(&gate, "test", false)
+                    .await
+                    .expect("write permit");
+                writer_started.store(true, Ordering::SeqCst);
+            }
+        };
+        let coordinator = {
+            let ready = ready.clone();
+            let release = release.clone();
+            let writer_started = writer_started.clone();
+            async move {
+                ready.wait().await;
+                assert!(!writer_started.load(Ordering::SeqCst));
+                release.wait().await;
+            }
+        };
+
+        let reads = std::array::from_fn(|_| {
+            held_read(
+                gate.clone(),
+                active.clone(),
+                peak.clone(),
+                ready.clone(),
+                release.clone(),
+            )
+        });
+        let [read_0, read_1, read_2, read_3] = reads;
+        tokio::join!(read_0, read_1, read_2, read_3, writer, coordinator);
+
+        assert_eq!(peak.load(Ordering::SeqCst), MCP_SERVER_MAX_READ_CONCURRENCY);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert!(writer_started.load(Ordering::SeqCst));
+    }
+
     // ── live end-to-end against a Python mock MCP server ──────────────────────
 
     fn write_mock_server() -> std::path::PathBuf {
@@ -411,6 +659,13 @@ for line in sys.stdin:
         p
     }
 
+    fn write_script_server(prefix: &str, source: &str) -> std::path::PathBuf {
+        let dir = unique_temp_dir(prefix);
+        let path = dir.join("server.py");
+        fs::write(&path, source).unwrap();
+        path
+    }
+
     fn python() -> &'static str {
         // Windows installs usually expose `python`; fall back is rarely needed here.
         "python"
@@ -420,7 +675,7 @@ for line in sys.stdin:
     async fn connects_lists_and_calls_against_mock_server() {
         let server = write_mock_server();
         let env = HashMap::new();
-        let mut client = match McpClient::connect(
+        let client = match McpClient::connect(
             "mock",
             python(),
             &[server.to_string_lossy().to_string()],
@@ -445,5 +700,117 @@ for line in sys.stdin:
             .await
             .expect("call_tool");
         assert_eq!(out, "echo: hi there");
+    }
+
+    #[tokio::test]
+    async fn routes_concurrent_out_of_order_responses_to_the_matching_call() {
+        let server = write_script_server(
+            "ncx_mcp_out_of_order",
+            r#"
+import json, sys
+calls = []
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
+    elif method == "notifications/initialized":
+        pass
+    elif method == "tools/call":
+        calls.append(msg)
+        if len(calls) == 2:
+            for call in reversed(calls):
+                name = call["params"]["name"]
+                print(json.dumps({"jsonrpc":"2.0","id":call["id"],"result":{"content":[{"type":"text","text":name}]}}), flush=True)
+    elif mid is not None:
+        print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
+            "#,
+        );
+        let client = McpClient::connect(
+            "out-of-order",
+            python(),
+            &[server.to_string_lossy().to_string()],
+            &HashMap::new(),
+        )
+        .await
+        .expect("mock server must start");
+
+        let empty_args = json!({});
+        let (first, second) = tokio::join!(
+            client.call_tool("first", &empty_args),
+            client.call_tool("second", &empty_args),
+        );
+        assert_eq!(first.expect("first response"), "first");
+        assert_eq!(second.expect("second response"), "second");
+    }
+
+    #[tokio::test]
+    async fn fails_pending_calls_when_server_closes_stdout() {
+        let server = write_script_server(
+            "ncx_mcp_eof",
+            r#"
+import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":msg.get("id"),"result":{}}), flush=True)
+    elif method == "notifications/initialized":
+        pass
+    elif method == "tools/call":
+        break
+            "#,
+        );
+        let client = McpClient::connect(
+            "eof",
+            python(),
+            &[server.to_string_lossy().to_string()],
+            &HashMap::new(),
+        )
+        .await
+        .expect("mock server must start");
+        let error = client
+            .call_tool("closes", &json!({}))
+            .await
+            .expect_err("closed stdout must fail the pending call");
+        assert!(error.contains("closed stdout"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn answers_unsupported_server_requests_without_blocking_the_call() {
+        let server = write_script_server(
+            "ncx_mcp_server_request",
+            r#"
+import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{}}), flush=True)
+    elif method == "notifications/initialized":
+        pass
+    elif method == "tools/call":
+        print(json.dumps({"jsonrpc":"2.0","id":99,"method":"sampling/createMessage","params":{}}), flush=True)
+        reply = json.loads(next(sys.stdin))
+        if reply.get("error", {}).get("code") != -32601:
+            raise SystemExit(2)
+        print(json.dumps({"jsonrpc":"2.0","id":mid,"result":{"content":[{"type":"text","text":"ok"}]}}), flush=True)
+            "#,
+        );
+        let client = McpClient::connect(
+            "server-request",
+            python(),
+            &[server.to_string_lossy().to_string()],
+            &HashMap::new(),
+        )
+        .await
+        .expect("mock server must start");
+        let output = client
+            .call_tool("requesting", &json!({}))
+            .await
+            .expect("normal response after unsupported request");
+        assert_eq!(output, "ok");
     }
 }

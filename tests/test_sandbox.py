@@ -45,11 +45,14 @@ def test_workspace_write_allows_inside_only(tmp_path):
 def test_workspace_write_denies_system_temp_by_default(tmp_path):
     # Tightened sandbox: workspace-write does NOT allow the system temp dir
     # unless allow_temp_write is explicitly enabled.
+    import os
     import tempfile
 
     ws = tmp_path / "ws"
     ws.mkdir()
-    tmp_file = Path(tempfile.gettempdir()) / "nanocodex_probe.txt"
+    tmp_file = Path(tempfile.gettempdir()) / (
+        f"nanocodex_probe_{os.getpid()}_{tmp_path.name}.txt"
+    )
 
     default_policy = SandboxPolicy(mode=WORKSPACE_WRITE, workspace=ws)
     assert default_policy.can_write(tmp_file) is False  # denied by default now

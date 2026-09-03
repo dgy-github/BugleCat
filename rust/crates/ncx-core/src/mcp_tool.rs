@@ -1,9 +1,9 @@
 //! McpTool — wraps an MCP server tool as a first-class ncx `Tool`.
 //!
 //! Each `McpTool` holds a reference-counted handle to the `McpClient` that owns
-//! the server process. Multiple tools from the same server share one client via
-//! `Rc<tokio::sync::Mutex<McpClient>>`, which serialises concurrent calls safely
-//! on the current-thread runtime.
+//! the server process. Multiple tools from the same server share one client and
+//! one call gate: explicitly read-only calls may run in a small bounded batch,
+//! while a side-effecting call takes the whole gate and is therefore exclusive.
 //!
 //! Non-read-only tools go through the normal `ctx.approver` approval path before
 //! calling the MCP server — same escalation model as `ShellTool`.
@@ -15,7 +15,6 @@ use async_trait::async_trait;
 use ncx_mcp::{McpClient, McpToolAnnotations, McpToolDef};
 use ncx_sandbox::{Approver, Decision};
 use serde_json::Value;
-use tokio::sync::Mutex;
 
 use crate::tools::{ApprovalRequest, Tool, ToolContext, ToolRegistry};
 
@@ -23,12 +22,14 @@ use crate::tools::{ApprovalRequest, Tool, ToolContext, ToolRegistry};
 
 pub struct McpTool {
     def: McpToolDef,
-    client: Rc<Mutex<McpClient>>,
+    client: Rc<McpClient>,
     read_only: bool,
 }
 
 impl McpTool {
-    pub fn new(def: McpToolDef, client: Rc<Mutex<McpClient>>) -> Self {
+    /// Build a tool backed by a shared MCP client. The client owns the call gate,
+    /// so every tool advertised by the same server shares the same limit.
+    pub fn new(def: McpToolDef, client: Rc<McpClient>) -> Self {
         // MCP names are model-facing labels, not a trustworthy authority
         // boundary. Only an explicit, non-conflicting protocol declaration can
         // make an arbitrary server tool eligible for the read-only path.
@@ -145,8 +146,17 @@ impl Tool for McpTool {
             }
         }
 
-        let mut client = self.client.lock().await;
-        match client.call_tool(&self.def.name, args).await {
+        let permit = match self
+            .client
+            .acquire_call_permit(self.call_is_read_only(args))
+            .await
+        {
+            Ok(permit) => permit,
+            Err(error) => return format!("Error: MCP tool '{}' failed: {error}", self.def.name),
+        };
+        let result = self.client.call_tool(&self.def.name, args).await;
+        drop(permit);
+        match result {
             Ok(out) => out,
             Err(e) => format!("Error: MCP tool '{}' failed: {e}", self.def.name),
         }
@@ -166,12 +176,11 @@ pub async fn prepare_mcp_server_tools(
     args: &[String],
     env: &HashMap<String, String>,
 ) -> Result<Vec<Box<dyn Tool>>, String> {
-    let mut client = McpClient::connect(name, command, args, env).await?;
+    let client = Rc::new(McpClient::connect(name, command, args, env).await?);
     let defs = client.list_tools().await?;
-    let shared = Rc::new(Mutex::new(client));
     Ok(defs
         .into_iter()
-        .map(|def| Box::new(McpTool::new(def, shared.clone())) as Box<dyn Tool>)
+        .map(|def| Box::new(McpTool::new(def, client.clone())) as Box<dyn Tool>)
         .collect())
 }
 
@@ -308,6 +317,10 @@ mod tests {
                 Decision::AutoDeny
             ));
         }
+        assert_eq!(
+            approval_denied_message("read_file", "never"),
+            "Error: MCP tool 'read_file' denied by approval policy 'never' (non-read-only)."
+        );
 
         let safe = ncx_mcp::McpToolAnnotations {
             read_only_hint: Some(true),
@@ -334,6 +347,10 @@ mod tests {
             Approver::new("never").classify("llmwiki", true),
             Decision::AutoDeny
         ));
+        assert_eq!(
+            approval_denied_message("llmwiki", "never"),
+            "Error: MCP tool 'llmwiki' denied by approval policy 'never' (non-read-only)."
+        );
         assert!(mcp_call_is_read_only(
             "llmwiki",
             None,
@@ -381,34 +398,32 @@ for line in sys.stdin:
         p
     }
 
-    #[tokio::test]
-    async fn register_and_execute_echo() {
+    async fn mock_registry() -> ToolRegistry {
         use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
 
         let server = write_mock_server();
         let ws = crate::test_support::unique_temp_dir("ncx_mcp_tool_ws");
         std::fs::create_dir_all(&ws).unwrap();
         let ws = ws.canonicalize().unwrap();
-
         let ctx =
             crate::tools::ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
-        let mut reg = ToolRegistry::empty(ctx);
-
-        let result = register_mcp_server(
-            &mut reg,
+        let mut registry = ToolRegistry::empty(ctx);
+        let count = register_mcp_server(
+            &mut registry,
             "mock",
             "python",
             &[server.to_string_lossy().to_string()],
             &HashMap::new(),
         )
-        .await;
+        .await
+        .expect("MCP live server must start for the regression tests");
+        assert_eq!(count, 6);
+        registry
+    }
 
-        // This is the regression guard for the real `McpTool::execute` path.
-        // Do not silently skip it when the fixture cannot start: a green test
-        // run without the live server would recreate the approval-test gap.
-        let n = result.expect("MCP live server must start for the approval regression");
-        assert_eq!(n, 6);
-
+    #[tokio::test]
+    async fn approval_policy_never_denies_mcp_mutations_before_server_execution() {
+        let mut reg = mock_registry().await;
         // Only a complete MCP annotation opts a tool into the read-only path.
         assert!(reg.get("echo").is_some());
         assert!(reg.is_read_only("read_safe"));
@@ -447,5 +462,21 @@ for line in sys.stdin:
             mutation.contains("denied by approval policy 'never'"),
             "{mutation}"
         );
+    }
+
+    #[tokio::test]
+    async fn compaction_recovery_blocks_mcp_mutations_independently_of_approval() {
+        let mut reg = mock_registry().await;
+        reg.ctx.approval_policy = "on-request".into();
+        reg.ctx.compaction_read_only_recovery.set(true);
+
+        let blocked = reg
+            .execute("write_note", &serde_json::json!({"text": "blocked"}))
+            .await;
+        assert!(
+            blocked.contains("context compaction consistency check"),
+            "{blocked}"
+        );
+        assert!(!blocked.contains("denied by approval policy"), "{blocked}");
     }
 }

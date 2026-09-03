@@ -268,13 +268,15 @@ async def test_text_turn_stays_on_main_provider_even_with_vision_configured(tmp_
 
 
 async def test_read_only_calls_run_concurrently(tmp_path):
-    # A3: a run of consecutive read-only tool calls runs in parallel, so N slow
-    # reads finish in ~one read's time, not N times it. A fake read_only tool
-    # sleeps, so wall-clock proves concurrency.
+    # A3: a run of consecutive read-only tool calls runs in parallel. Track the
+    # in-flight peak directly so this regression test does not depend on a
+    # wall-clock threshold (which is noisy on busy Windows/CI hosts).
     import asyncio
-    import time as _time
 
     from nanocodex.tools.base import Tool
+
+    active = 0
+    peak = 0
 
     class SlowReadTool(Tool):
         read_only = True
@@ -292,8 +294,14 @@ async def test_read_only_calls_run_concurrently(tmp_path):
             return {"type": "object", "properties": {"i": {"type": "integer"}}}
 
         async def execute(self, **kwargs):
-            await asyncio.sleep(0.3)
-            return f"read {kwargs.get('i')}"
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.3)
+                return f"read {kwargs.get('i')}"
+            finally:
+                active -= 1
 
     provider = ScriptedProvider([
         ModelResponse(
@@ -309,13 +317,10 @@ async def test_read_only_calls_run_concurrently(tmp_path):
     loop = _build(tmp_path, provider)
     loop.tools.register(SlowReadTool(loop.tools.ctx))
 
-    t0 = _time.monotonic()
     result = await loop.run_turn("read four things")
-    elapsed = _time.monotonic() - t0
 
     assert result.stop_reason == "completed"
-    # 4 reads x 0.3s serial would be ~1.2s; concurrent should be well under.
-    assert elapsed < 0.8
+    assert peak >= 2
     # Every read produced a result, in order (results keyed by call id).
     tool_msgs = [m for m in loop.session.messages if m.get("role") == "tool"]
     assert [m["tool_call_id"] for m in tool_msgs] == ["c0", "c1", "c2", "c3"]

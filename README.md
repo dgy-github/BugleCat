@@ -523,6 +523,15 @@ set. A failed server is skipped while the successfully prepared servers replace
 the set; if every configured server fails, or a tool-name conflict is found,
 the previous set stays active. An empty config removes all active MCP tools.
 
+Each connected server has one background stdio reader. Responses are routed by
+JSON-RPC request ID, so independent read calls can complete out of order without
+being matched to the wrong tool call; EOF, write errors, and request timeouts
+wake and clean up their pending requests. Calls for a server share a bounded
+gate: at most four explicitly read-only calls are in flight, while a
+side-effecting or unknown call takes the full gate and is exclusive. The gate is
+per server, so a slow server does not serialize unrelated servers. Approval is
+still checked before a side-effecting call acquires the gate.
+
 Each server's tools retain the name supplied by that server. Tool-name conflicts
 are rejected during the atomic reload, so choose distinct MCP tool names. A
 **marketplace** adds one-click install from a built-in curated catalog or a
@@ -860,6 +869,10 @@ The regression suite also protects the following boundaries:
   camel-case methods); the GUI build runs the drift check and TypeScript
   type-check before Vite. This prevents a renamed Rust request from silently
   becoming a runtime IPC failure.
+- The MCP transport keeps one background reader and request-ID pending map per
+  server. Its per-server call gate permits up to four read-only calls and makes
+  side-effecting/unknown calls exclusive; EOF, write failures, and timeouts
+  release pending calls instead of leaving the agent stuck.
 
 The current pass was verified with Rust workspace `--all-features` tests and
 strict clippy, GUI Rust tests/clippy, Vite production build, Python pytest, and

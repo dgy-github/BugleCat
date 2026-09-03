@@ -1,5 +1,31 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-03：MCP 传输并发与截图回归收口（本轮）
+
+- `ncx-mcp` 现在为每个 stdio server 启动后台 stdout reader，以 JSON-RPC
+  request ID 将响应路由到 pending map；乱序响应不会串 call，EOF、写入错误和
+  超时会唤醒并清理等待者。服务端发起暂不支持的 request 会收到明确的
+  `-32601`，Windows 子进程仍使用 `CREATE_NO_WINDOW`。
+- 同一 server 的工具共享一个调用闸门：最多 4 个明确只读调用同时在途；副作用
+  或未知调用占满全部 permit，与其他调用互斥。不同 server 的闸门彼此隔离，审批
+  仍在取得闸门之前执行。`McpTool` 的审批回归已把 `approval_policy=never` 的拒绝
+  文案与 compaction recovery 拦截拆成两个独立的真实执行测试。
+- 附件截图对应的工作区改动面板已修复：`.rp-body` 是唯一纵向滚动容器，文件行和
+  列表禁止 flex 压缩，窄窗口顶栏标题使用单行省略号；GUI 回归断言覆盖这些 CSS
+  约束。Python 只读并发测试改用 in-flight 峰值，Rust/Python 测试临时目录使用
+  进程级唯一命名。
+- 本轮现场验证通过：Rust fmt（workspace 与 GUI）、严格 clippy、Rust workspace
+  `--all-features`（Core 279、MCP 10、App Server 38 等）、GUI Tauri `--lib`
+  140 项、Python pytest 601 项、Ruff、协议脚本 5 项、protocol check（70
+  methods）、TypeScript typecheck 和 Vite production build（150 modules）。
+- 本地开发实例仍在运行：`cd rust\gui; npm.cmd run tauri -- dev --target
+  x86_64-pc-windows-msvc`；`ncx-gui.exe` PID 40196（Responding=True），Vite
+  PID 36268，地址 `http://127.0.0.1:5179/` 返回 HTTP 200。未使用真实 Provider
+  凭据，也未触发付费模型调用。
+- 本节写入时功能改动尚未提交；提交与推送后的最终 SHA、工作树状态和远端核对以
+  交付时 `git status --short --branch`、`git rev-parse HEAD` 与
+  `git ls-remote origin refs/heads/feat/deepseek-harness-components` 为准。
+
 ## 2026-09-02：App Server 协议契约生成与漂移门禁（已提交并推送）
 
 - GUI 过去在 `app-server-client.ts` 中重复写死协议版本 `3`，请求 method 也只是
@@ -16,13 +42,13 @@
   dev；`dev` 脚本本身也会先执行 `protocol:check`，避免 stale contract 被加载。
 - 本增量已通过 Node 协议脚本测试 5/5、`npm ... run protocol:check`、TypeScript
   typecheck、Vite production build（150 modules）、GUI 140 项测试及完整 Rust/Python
-  门禁；项目符号记忆索引为 4,876 symbols。提交为 `70f83bb`，并已推送到
+  门禁；项目符号记忆索引为 4,876 symbols。提交为 `5d7862e`，并已推送到
   `origin/feat/deepseek-harness-components`；远端 `git ls-remote` 与本地 HEAD
   一致。
 
 ## 2026-09-02：最终现场核验
 
-- 工作树 clean；本地 HEAD `70f83bbba1557ea490b03e965d6d371d9831492d` 与
+- 工作树 clean；本地 HEAD `5d7862ed10be9bdd7bb98d62dddbcddcb1acd6c8` 与
   GitHub 分支 `feat/deepseek-harness-components` 完全一致。
 - 本地开发链路已实际重启：Tauri `beforeDevCommand` 先执行
   `npm run protocol:check && vite`，输出 `Protocol contract v3 is in sync (70 methods)`；
@@ -30,6 +56,9 @@
   `Responding=True`。当前实例为 debug 开发版，不代表正式部署包。
 - 截图对应的工作区改动面板回归由 `workspace_diff_panel_keeps_rows_intact_and_uses_the_panel_scroll`
   覆盖；外层 workarea 与唯一 `rp-body` 滚动容器约束已生效，长列表不会再压缩重叠。
+- 复验附件中的旧截图后，使用真实 Tauri/WebView2 开发实例加载同一类 30+ 改动：每个
+  `.wt-file` 行高约 42.85 CSS px，`rp-body` 的 `scrollHeight` 大于可视高度，列表
+  可正常滚动；窄窗口下顶栏长标题改为单行省略号，避免逐字竖排。
 - 本轮没有使用真实 Provider 凭据，也没有触发付费模型调用；Windows 安装包签名仍是
   发布前独立事项。
 

@@ -437,6 +437,12 @@ Rust `ncx` REPL 可以不重启而应用 MCP 配置变更：
 当前工具集。若所有已配置服务都失败，或发现工具重名，则保留原有工具集；空配置会移除全部
 活动 MCP 工具。
 
+每个已连接服务都有一个后台 stdio reader，按 JSON-RPC request ID 路由响应，因此独立的
+只读调用可以乱序完成，也不会把响应配错到另一个工具调用；EOF、写入错误和请求超时都会
+唤醒并清理对应的 pending 请求。同一服务共享一个有界调用闸门：最多 4 个明确声明为只读
+的调用同时在途；副作用或未知调用会占满全部 permit，与其他调用互斥。闸门按服务隔离，
+慢服务不会串行化其他服务；副作用调用仍会先经过审批，再取得闸门。
+
 每个服务的工具保留服务端提供的名称；原子重载会拒绝工具重名，因此应为 MCP 工具选择
 互不冲突的名称。一个**市场**支持从内置精选
 目录或远程目录（`NANOCODEX_MARKETPLACE_URL`）一键安装；每个条目都走和手动添加
@@ -688,6 +694,9 @@ python -m pytest -q
   `rust/gui/src/lib/protocol-version.ts`，同时同步协议版本和 70 个 camelCase
   方法名；GUI 构建会先执行漂移检查和 TypeScript 类型检查，避免方法改名后才在
   运行时暴露 IPC 错误。
+- MCP 传输层按服务维护一个后台 reader 和 request-ID pending map；每个服务的
+  调用闸门最多允许 4 个只读调用同时在途，副作用/未知调用独占全部 permit。
+  EOF、写入错误和超时都会释放 pending 请求，不会让 Agent 永久卡住。
 
 本轮已用 Rust workspace `--all-features` 全量测试与严格 clippy、GUI Rust
 测试/clippy、Vite 生产构建、Python pytest 和 Ruff 验证；不需要真实 Provider

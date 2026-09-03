@@ -2020,7 +2020,18 @@ main.app { flex-direction: row; }
 }
 .rp-close:hover { background: var(--paper-2); color: var(--ink); }
 .rp-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--sp-3) var(--sp-4); }
-.rightpanel .wt-list { max-height: none; overflow: visible; margin: 0; }
+.rightpanel .wt-list {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: max-content;
+  max-height: none;
+  overflow: visible;
+  margin: 0;
+}
+.rightpanel .wt-file { flex: 0 0 auto; min-height: 2.75rem; }
+.rightpanel .wt-head { flex: 0 0 auto; height: auto; min-height: 2.75rem; }
 .rightpanel .wt-diff { max-height: none; overflow-x: auto; overflow-y: hidden; }
 
 /* ── Smaller, tighter sidebar (ref: Claude Code) ──────────────────────────── */
@@ -2385,7 +2396,15 @@ textarea:focus { background: var(--surface-soft); border-color: var(--accent); b
   position: relative; min-height: 5rem; padding: 0.8rem 1.8rem 1.7rem;
   border-bottom-color: var(--line); background: var(--surface); box-shadow: none;
 }
-.topbar .title { align-self: flex-start; font-size: 1rem; }
+.topbar .title {
+  align-self: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1rem;
+}
 .topbar .collapse { align-self: flex-start; }
 .topbar-actions { align-self: flex-start; }
 .conversation-tabs {
