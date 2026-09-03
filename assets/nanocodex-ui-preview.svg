@@ -37,9 +37,9 @@
     <circle cx="96" cy="82" r="7" fill="#ff5f57"/>
     <circle cx="120" cy="82" r="7" fill="#febc2e"/>
     <circle cx="144" cy="82" r="7" fill="#28c840"/>
-    <text x="180" y="88" class="mono fg" font-size="15">BugleCat desktop · D:\projects\BugleCat</text>
+    <text x="180" y="88" class="mono fg" font-size="15">BugleCat desktop · D:\github_dgy\BugleCat</text>
     <rect x="1066" y="68" width="150" height="28" rx="14" fill="#0f172a" stroke="#30363d"/>
-    <text x="1082" y="87" class="mono muted" font-size="12">model: deepseek</text>
+    <text x="1082" y="87" class="mono muted" font-size="12">provider: configured route</text>
 
     <rect x="64" y="108" width="250" height="598" fill="#0f172a"/>
     <line x1="314" y1="108" x2="314" y2="706" class="line"/>
@@ -56,18 +56,18 @@
       <text x="106" y="352" class="muted">stream open timeout</text>
       <rect x="88" y="382" width="206" height="58" rx="12" fill="#161b22" stroke="#30363d"/>
       <text x="106" y="406" class="fg">Write tests</text>
-      <text x="106" y="426" class="muted">420 offline checks</text>
+      <text x="106" y="426" class="muted">601 offline checks</text>
     </g>
 
     <rect x="314" y="108" width="902" height="598" fill="#0d1117"/>
     <rect x="340" y="132" width="850" height="58" rx="16" fill="#161b22" stroke="#30363d"/>
     <text x="364" y="157" class="sans fg" font-size="16" font-weight="700">Codex-style coding agent</text>
-    <text x="364" y="178" class="mono muted" font-size="12">DeepSeek / OpenAI-compatible · MCP · Skills · sandbox approval · compact</text>
+    <text x="364" y="178" class="mono muted" font-size="12">Provider routes · MCP · Skills · sandbox approval · durable goals</text>
     <g class="mono" font-size="12">
       <rect x="1010" y="145" width="72" height="24" rx="12" fill="#10223a" stroke="#1f6feb"/>
       <text x="1024" y="162" class="blue">MCP on</text>
       <rect x="1092" y="145" width="90" height="24" rx="12" fill="#12301e" stroke="#238636"/>
-      <text x="1108" y="162" class="green">420 passed</text>
+      <text x="1108" y="162" class="green">601 passed</text>
     </g>
 
     <g class="sans">
@@ -87,7 +87,7 @@
       <text x="364" y="526" class="mono green" font-size="14">$ python -m pytest -q</text>
       <text x="364" y="558" class="mono fg" font-size="14">........................................................................ [ 17%]</text>
       <text x="364" y="584" class="mono fg" font-size="14">........................................................................ [ 85%]</text>
-      <text x="364" y="610" class="mono green" font-size="14">420 passed in 6.68s</text>
+      <text x="364" y="610" class="mono green" font-size="14">601 passed</text>
       <text x="364" y="634" class="mono muted" font-size="12">No real API key · no network · mocked providers</text>
     </g>
 
