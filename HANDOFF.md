@@ -1,5 +1,22 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-03：最终门禁与本地开发实例复核（已验证）
+
+- 在提交 `589c50b8ccff180b0237fd9f3bb35966c1bcefc0` 上重新执行最终质量门禁：
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`、严格
+  `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`、
+  `cargo test --manifest-path rust/Cargo.toml --workspace --all-features`、
+  `python -m pytest -q`（601 passed）和
+  `python -m ruff check nanocodex tests train`，全部通过。
+- 本地开发实例已重新启动：
+  `cd rust\\gui; npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc`。
+  2026-09-03 13:41（Asia/Shanghai）核验 `ncx-gui.exe` PID 31244、
+  `Responding=True`；Vite PID 41448 监听 `127.0.0.1:5179`，首页返回 HTTP 200。
+- 上述验证基于功能代码提交 `589c50b8ccff180b0237fd9f3bb35966c1bcefc0`；本节文档
+  提交后交付时仍需以 `git status --short --branch`、`git rev-parse HEAD` 与
+  `git ls-remote origin refs/heads/feat/deepseek-harness-components` 再次核对远端
+  一致。本地实例使用测试/开发配置，未使用真实 Provider 凭据，也未触发付费模型调用。
+
 ## 2026-09-03：Codex 资源发现与 MCP 协议隔离（已验证）
 
 - 参考 OpenAI Codex 的 MCP connection manager（可选 server 逐个启动、单个失败不
