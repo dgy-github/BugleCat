@@ -1,0 +1,85 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing or new release tag to publish"
+        required: true
+        default: "v0.1.1"
+      source_ref:
+        description: "Git ref to build"
+        required: true
+        default: "main"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rust/gui/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: rust/gui
+
+      - name: Build Windows NSIS installer
+        run: npm exec -- tauri build --target x86_64-pc-windows-msvc --bundles nsis
+        working-directory: rust/gui
+
+      - name: Stage installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          $installer = Get-ChildItem -LiteralPath "rust/gui/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer was not produced" }
+          Copy-Item -LiteralPath $installer.FullName -Destination "artifacts/BugleCat-windows-x64-setup.exe"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: artifacts/BugleCat-windows-x64-setup.exe
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: dist
+
+      - name: Publish Windows installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: dist/BugleCat-windows-x64-setup.exe
+          fail_on_unmatched_files: true
+          overwrite_files: true
