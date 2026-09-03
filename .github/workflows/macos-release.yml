@@ -31,7 +31,10 @@ jobs:
       matrix:
         include:
           - arch: x64
-            runner: macos-13
+            # Build the Intel target with the current macOS runner image. The
+            # SDK ships both architectures, so this avoids relying on the
+            # retired/oversubscribed macos-13 label.
+            runner: macos-14
             target: x86_64-apple-darwin
           - arch: arm64
             runner: macos-14
