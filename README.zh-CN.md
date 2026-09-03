@@ -781,8 +781,9 @@ GUI 的 Settings 弹窗也会展示解析后的 `~/.nanocodex/config.toml` 路�
 和配置目录的入口。
 
 仓库中的 [`macOS Release`](.github/workflows/macos-release.yml) workflow 会分别在 Intel
-（`x86_64-apple-darwin`）和 Apple Silicon（`aarch64-apple-darwin`）runner 上构建 DMG，
-再把两个安装包挂到同一个 GitHub Release。推送 `v*` 标签会自动触发，也可以在
+（`x86_64-apple-darwin`）和 Apple Silicon（`aarch64-apple-darwin`）runner 上构建 macOS
+安装包，再把两个安装包挂到同一个 GitHub Release。优先生成 DMG；若 runner 无法创建磁盘
+镜像，则自动回退为 `.app.zip`。推送 `v*` 标签会自动触发，也可以在
 **Actions → macOS Release → Run workflow** 中手动选择 Release tag。当前 workflow 产出的是
 未签名安装包；要给外部用户正式分发，请在 GitHub Actions 中配置 Apple Developer 签名和
 notarization secrets。

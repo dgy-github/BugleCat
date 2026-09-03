@@ -61,20 +61,27 @@ jobs:
       - name: Install Rust target
         run: rustup target add "${{ matrix.target }}"
 
-      - name: Build DMG
+      - name: Build macOS package
         run: |
-          npm exec -- tauri build --target "${{ matrix.target }}" --bundles dmg
           mkdir -p ../../artifacts
-          dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
-          test -n "$dmg"
-          cp "$dmg" "../../artifacts/BugleCat-${{ matrix.arch }}.dmg"
+          if npm exec -- tauri build --target "${{ matrix.target }}" --bundles dmg; then
+            dmg="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+            test -n "$dmg"
+            cp "$dmg" "../../artifacts/BugleCat-${{ matrix.arch }}.dmg"
+          else
+            echo "DMG bundling is unavailable on this runner; falling back to an app zip."
+            npm exec -- tauri build --target "${{ matrix.target }}" --bundles app
+            app="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -type d -name '*.app' -print -quit)"
+            test -n "$app"
+            ditto -c -k --sequesterRsrc --keepParent "$app" "../../artifacts/BugleCat-${{ matrix.arch }}.app.zip"
+          fi
         working-directory: rust/gui
 
-      - name: Upload DMG artifact
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg-${{ matrix.arch }}
-          path: artifacts/BugleCat-${{ matrix.arch }}.dmg
+          name: macos-package-${{ matrix.arch }}
+          path: artifacts/BugleCat-${{ matrix.arch }}.*
           if-no-files-found: error
 
   publish:
@@ -87,7 +94,7 @@ jobs:
       - name: Download DMG artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: macos-dmg-*
+          pattern: macos-package-*
           path: dist
           merge-multiple: true
 

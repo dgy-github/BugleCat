@@ -969,8 +969,9 @@ The GUI Settings dialog also exposes the resolved `~/.nanocodex/config.toml`
 path and buttons to open the config file or its directory.
 
 The [`macOS Release`](.github/workflows/macos-release.yml) workflow builds both
-Intel (`x86_64-apple-darwin`) and Apple Silicon (`aarch64-apple-darwin`) DMGs
-and attaches them to the same GitHub Release. It runs automatically for `v*`
+Intel (`x86_64-apple-darwin`) and Apple Silicon (`aarch64-apple-darwin`) macOS
+packages and attaches them to the same GitHub Release. It prefers DMGs; when a
+runner cannot create disk images, it falls back to a zipped `.app`. It runs automatically for `v*`
 tags and can also be started manually with **Actions → macOS Release → Run
 workflow**, specifying the release tag. The workflow currently produces
 unsigned packages; configure Apple Developer signing and notarization secrets
