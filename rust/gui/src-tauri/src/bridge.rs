@@ -2369,7 +2369,11 @@ pub fn spawn_worker(startup: WorkerStartup) {
                 // Session "always allow" grants — fresh per session, kept across
                 // model / permission-mode rebuilds, replaced on new/resume/fork.
                 let mut grants = Rc::new(RefCell::new(SessionGrants::default()));
-                let (mut agent, mut workspace, mut session_id, _) = match build_agent(
+                let startup_session_id = startup_seed
+                    .as_ref()
+                    .map(|(id, _)| id.clone())
+                    .unwrap_or_else(new_session_id);
+                let (mut agent, mut workspace, mut session_id) = match build_agent(
                     approver.clone(),
                     questioner.clone(),
                     startup_seed,
@@ -2380,7 +2384,9 @@ pub fn spawn_worker(startup: WorkerStartup) {
                 )
                 .await
                 {
-                    Ok(v) => v,
+                    Ok((agent, workspace, session_id, _)) => {
+                        (Some(agent), workspace, session_id)
+                    }
                     Err(e) => {
                         emit(
                             &app,
@@ -2389,11 +2395,16 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                 message: e,
                             },
                         );
-                        return;
+                        // Provider configuration is needed only when a turn is
+                        // executed. Keep the coordinator alive so the user can
+                        // create a session or open Settings to fix it.
+                        (None, startup_workspace.clone(), startup_session_id)
                     }
                 };
                 set_active_session(&active_session, &session_id);
-                agent.set_event_sink(make_sink(app.clone(), session_id.clone(), None, None));
+                if let Some(agent) = agent.as_mut() {
+                    agent.set_event_sink(make_sink(app.clone(), session_id.clone(), None, None));
+                }
                 if let Err(message) = ensure_protocol_thread(&app_server, &session_id, &workspace) {
                     emit(
                         &app,
@@ -2461,6 +2472,8 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                 continue;
                             }
                             let next_grants = Rc::new(RefCell::new(SessionGrants::default()));
+                            let requested_workspace = command_workspace.clone();
+                            let requested_id = id.clone();
                             match build_agent(
                                 approver.clone(),
                                 questioner.clone(),
@@ -2480,8 +2493,8 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                     // durable Thread.
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
-                                            grants = next_grants;
-                                            agent = a;
+                                    grants = next_grants;
+                                            agent = Some(a);
                                             workspace = ws;
                                             session_id = sid;
                                             set_active_session(&active_session, &session_id);
@@ -2493,12 +2506,14 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                                 .to_string()));
                                         continue;
                                     }
-                                    agent.set_event_sink(make_sink(
+                                    if let Some(agent) = agent.as_mut() {
+                                        agent.set_event_sink(make_sink(
                                         app.clone(),
                                         session_id.clone(),
                                         None,
                                         None,
-                                    ));
+                                        ));
+                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -2510,21 +2525,36 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                     let _ = completion.send(Ok(()));
                                 }
                                 Err(e) => {
-                                    // Suppress a late build failure after the
-                                    // request has already timed out and the UI
-                                    // returned to its previous session.
-                                    let report_error =
-                                        runtime_activation.abort_if_pending(&activation);
-                                    let _ = completion.send(Err(e.clone()));
-                                    if report_error {
-                                        emit(
-                                            &app,
-                                            UiEvent::Error {
-                                                session_id: String::new(),
-                                                message: e,
-                                            },
-                                        )
+                                    // A missing Provider configuration must not
+                                    // make navigation unusable. Keep the new
+                                    // durable Thread active; the first prompt
+                                    // will report the actionable configuration
+                                    // error from its session-scoped worker.
+                                    eprintln!("new session agent deferred: {e}");
+                                    if runtime_activation
+                                        .commit_if_current(&activation, || {
+                                            grants = next_grants;
+                                            agent = None;
+                                            workspace = requested_workspace.clone();
+                                            session_id = requested_id.clone();
+                                            set_active_session(&active_session, &session_id);
+                                        })
+                                        .is_none()
+                                    {
+                                        let _ = completion.send(Err(
+                                            "新建会话初始化已被更新的运行态切换取消".to_string(),
+                                        ));
+                                        continue;
                                     }
+                                    emit_ready(&app, &workspace, &session_id);
+                                    emit(
+                                        &app,
+                                        UiEvent::Loaded {
+                                            session_id: session_id.clone(),
+                                            messages: Vec::new(),
+                                        },
+                                    );
+                                    let _ = completion.send(Ok(()));
                                 }
                             }
                         }
@@ -2648,7 +2678,7 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
                                             grants = next_grants;
-                                            agent = a;
+                                            agent = Some(a);
                                             workspace = ws;
                                             session_id = sid;
                                             set_active_session(&active_session, &session_id);
@@ -2660,12 +2690,14 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                                 .to_string()));
                                         continue;
                                     }
-                                    agent.set_event_sink(make_sink(
+                                    if let Some(agent) = agent.as_mut() {
+                                        agent.set_event_sink(make_sink(
                                         app.clone(),
                                         session_id.clone(),
                                         None,
                                         None,
-                                    ));
+                                        ));
+                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
                                         &app,
@@ -2800,7 +2832,7 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                 Ok((a, ws, sid, _)) => {
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
-                                            agent = a;
+                                            agent = Some(a);
                                             workspace = ws;
                                             session_id = sid;
                                             set_active_session(&active_session, &session_id);
@@ -2813,12 +2845,14 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                                     .to_string()));
                                         continue;
                                     }
-                                    agent.set_event_sink(make_sink(
+                                    if let Some(agent) = agent.as_mut() {
+                                        agent.set_event_sink(make_sink(
                                         app.clone(),
                                         session_id.clone(),
                                         None,
                                         None,
-                                    ));
+                                        ));
+                                    }
                                     emit_ready(&app, &workspace, &session_id);
                                     let _ = completion.send(Ok(()));
                                 }

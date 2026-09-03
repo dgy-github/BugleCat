@@ -198,7 +198,11 @@ export class ThreadLifecycleController {
       this.thread.busy = false; this.thread.stopping = false; this.thread.switching = false;
       this.thread.currentId = previousId; this.thread.title = previousTitle; this.thread.restore(previousId);
       this.thread.messages = previousMessages; this.usage.restore(this.thread.currentId);
-      this.thread.messages.push({ role: "note", text: `新建会话失败：${error}` });
+      const message = `新建会话失败：${error}`;
+      const previous = this.thread.messages.at(-1);
+      if (previous?.role !== "note" || previous.text !== message) {
+        this.thread.messages.push({ role: "note", text: message });
+      }
     }
   };
 
