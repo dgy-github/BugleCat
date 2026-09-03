@@ -1,6 +1,6 @@
 # HANDOFF — nanocodex (Rust 线)
 
-## 2026-09-03：MCP 传输并发与截图回归收口（本轮）
+## 2026-09-03：MCP 传输并发与截图回归收口（已提交并推送）
 
 - `ncx-mcp` 现在为每个 stdio server 启动后台 stdout reader，以 JSON-RPC
   request ID 将响应路由到 pending map；乱序响应不会串 call，EOF、写入错误和
@@ -15,14 +15,16 @@
   约束。Python 只读并发测试改用 in-flight 峰值，Rust/Python 测试临时目录使用
   进程级唯一命名。
 - 本轮现场验证通过：Rust fmt（workspace 与 GUI）、严格 clippy、Rust workspace
-  `--all-features`（Core 279、MCP 10、App Server 38 等）、GUI Tauri `--lib`
+  `--all-features`（Core 279、MCP 11、App Server 38 等）、GUI Tauri `--lib`
   140 项、Python pytest 601 项、Ruff、协议脚本 5 项、protocol check（70
   methods）、TypeScript typecheck 和 Vite production build（150 modules）。
 - 本地开发实例仍在运行：`cd rust\gui; npm.cmd run tauri -- dev --target
   x86_64-pc-windows-msvc`；`ncx-gui.exe` PID 40196（Responding=True），Vite
   PID 36268，地址 `http://127.0.0.1:5179/` 返回 HTTP 200。未使用真实 Provider
   凭据，也未触发付费模型调用。
-- 本节写入时功能改动尚未提交；提交与推送后的最终 SHA、工作树状态和远端核对以
+- 功能提交 `ab76265c09a5ea74edf33c9181ac2b396238ebd8` 已推送到
+  `origin/feat/deepseek-harness-components`，并已用 `git ls-remote` 核对远端
+  SHA 一致；本节交接记录随后的文档提交会继续保持该分支干净。最终 HEAD 以
   交付时 `git status --short --branch`、`git rev-parse HEAD` 与
   `git ls-remote origin refs/heads/feat/deepseek-harness-components` 为准。
 
