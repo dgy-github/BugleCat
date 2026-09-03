@@ -202,15 +202,17 @@ impl McpClient {
     }
 
     async fn initialize(&self) -> Result<(), String> {
-        self.request(
-            "initialize",
-            json!({
-                "protocolVersion": PROTOCOL,
-                "capabilities": {},
-                "clientInfo": {"name": "nanocodex", "version": "0.1"},
-            }),
-        )
-        .await?;
+        let result = self
+            .request(
+                "initialize",
+                json!({
+                    "protocolVersion": PROTOCOL,
+                    "capabilities": {},
+                    "clientInfo": {"name": "nanocodex", "version": "0.1"},
+                }),
+            )
+            .await?;
+        validate_protocol_version(&self.server, &result)?;
         self.notify("notifications/initialized", json!({})).await
     }
 
@@ -298,6 +300,24 @@ async fn acquire_call_permit(
         .acquire_many_owned(count as u32)
         .await
         .map_err(|_| format!("MCP server '{server}' call gate is closed"))
+}
+
+fn validate_protocol_version(server: &str, result: &Value) -> Result<(), String> {
+    // MCP initialization negotiates a protocol version before any tools are
+    // used. Older lightweight servers sometimes omit the field, so a missing
+    // value remains accepted for compatibility; an explicit incompatible or
+    // non-string value is rejected fail-closed instead of allowing us to speak
+    // an unknown wire contract.
+    match result.get("protocolVersion") {
+        None => Ok(()),
+        Some(Value::String(version)) if version == PROTOCOL => Ok(()),
+        Some(Value::String(version)) => Err(format!(
+            "server '{server}' negotiated unsupported MCP protocol version '{version}' (client supports '{PROTOCOL}')"
+        )),
+        Some(_) => Err(format!(
+            "server '{server}' returned a malformed MCP protocolVersion"
+        )),
+    }
 }
 
 async fn write_json(stdin: &SharedStdin, msg: &Value) -> Result<(), String> {
@@ -551,6 +571,19 @@ mod tests {
     }
 
     #[test]
+    fn protocol_version_validation_is_compatible_but_fail_closed() {
+        assert!(validate_protocol_version("test", &json!({})).is_ok());
+        assert!(validate_protocol_version("test", &json!({"protocolVersion": PROTOCOL})).is_ok());
+        let unsupported =
+            validate_protocol_version("test", &json!({"protocolVersion": "1999-01-01"}))
+                .expect_err("unsupported protocol must fail");
+        assert!(unsupported.contains("unsupported MCP protocol version"));
+        let malformed = validate_protocol_version("test", &json!({"protocolVersion": 3}))
+            .expect_err("non-string protocol must fail");
+        assert!(malformed.contains("malformed MCP protocolVersion"));
+    }
+
+    #[test]
     fn dropping_a_cancelled_request_removes_its_pending_sender() {
         let pending: PendingRequests = Arc::new(StdMutex::new(HashMap::new()));
         let (tx, _rx) = oneshot::channel();
@@ -700,6 +733,36 @@ for line in sys.stdin:
             .await
             .expect("call_tool");
         assert_eq!(out, "echo: hi there");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_explicitly_incompatible_initialize_version() {
+        let server = write_script_server(
+            "ncx_mcp_bad_protocol",
+            r#"
+import json, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") == "initialize":
+        print(json.dumps({"jsonrpc":"2.0","id":msg.get("id"),"result":{"protocolVersion":"1999-01-01"}}), flush=True)
+        break
+            "#,
+        );
+        let error = match McpClient::connect(
+            "bad-protocol",
+            python(),
+            &[server.to_string_lossy().to_string()],
+            &HashMap::new(),
+        )
+        .await
+        {
+            Ok(_) => panic!("an incompatible negotiated protocol must fail startup"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("unsupported MCP protocol version"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

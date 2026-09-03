@@ -532,6 +532,11 @@ side-effecting or unknown call takes the full gate and is exclusive. The gate is
 per server, so a slow server does not serialize unrelated servers. Approval is
 still checked before a side-effecting call acquires the gate.
 
+The initialize handshake validates an explicitly returned MCP protocol version
+before tools are registered. A server that omits the field (older compatible
+implementations) remains accepted; an explicit incompatible or malformed value
+fails only that server's startup.
+
 Each server's tools retain the name supplied by that server. Tool-name conflicts
 are rejected during the atomic reload, so choose distinct MCP tool names. A
 **marketplace** adds one-click install from a built-in curated catalog or a
@@ -567,6 +572,12 @@ directories, plus DSH Community sources such as dshfind, DeepSeek 1024 Store,
 and standard HTTPS catalogs. Install sources may be local paths, Git
 repositories, or NPM packages; each candidate is staged and validated before
 installation.
+
+Optional resources are isolated during runtime discovery. A malformed or
+unreadable plugin catalog, Hooks document, Apps document, or individual App is
+reported and skipped without hiding valid resources from another plugin. The
+explicit catalog-management command remains strict, so a maintainer can still
+inspect and fix invalid manifests instead of having errors silently rewritten.
 
 The settings UI previews requested capabilities and compatibility before
 installing. If an enabled plugin already owns an overlapping capability, the
@@ -806,6 +817,12 @@ The regression suite also protects the following boundaries:
   that plugin/server. Other valid servers still load. Explicit `./` paths resolve
   from the plugin root; escaping `../` paths are rejected, while bare arguments
   retain normal process CWD/PATH semantics.
+- Optional Codex plugin resources follow the same isolation boundary: a broken
+  Hooks/Apps document, unreadable catalog entry, or malformed individual App is
+  logged and skipped while valid plugins and resources remain available. The
+  explicit plugin catalog inspection path stays strict for maintenance.
+- MCP startup rejects an explicit protocol-version mismatch before exposing any
+  tools; legacy servers that omit the response field remain compatible.
 - Windows hook tests use a 20-second test timeout to avoid cold-start flakes,
   and read-only concurrency is asserted with an in-flight peak rather than a
   fixed wall-clock threshold.

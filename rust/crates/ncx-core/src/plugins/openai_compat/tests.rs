@@ -401,6 +401,55 @@ fn damaged_mcp_plugin_resource_is_skipped_without_hiding_valid_servers() {
 }
 
 #[test]
+fn damaged_hook_resource_is_skipped_without_hiding_valid_hooks() {
+    let workspace = temp("damaged-hook-resource");
+    let broken = workspace.join(".ncx/codex-plugins/broken");
+    fs::create_dir_all(broken.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(broken.join("hooks")).unwrap();
+    fs::write(broken.join(MANIFEST), r#"{"name":"broken"}"#).unwrap();
+    fs::write(broken.join("hooks/hooks.json"), b"{ not valid json").unwrap();
+
+    let valid = workspace.join(".ncx/codex-plugins/valid");
+    fs::create_dir_all(valid.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(valid.join("hooks")).unwrap();
+    fs::write(valid.join(MANIFEST), r#"{"name":"valid"}"#).unwrap();
+    fs::write(
+        valid.join("hooks/hooks.json"),
+        r#"{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"check"}]}]}}"#,
+    )
+    .unwrap();
+
+    let hooks = discover_codex_hooks_with_home(&workspace, None).unwrap();
+    assert_eq!(hooks.len(), 1);
+    assert_eq!(hooks[0].command, "check");
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn damaged_app_resource_and_entries_are_isolated_from_valid_apps() {
+    let workspace = temp("damaged-app-resource");
+    let broken = workspace.join(".ncx/codex-plugins/broken");
+    fs::create_dir_all(broken.join(".codex-plugin")).unwrap();
+    fs::write(broken.join(MANIFEST), r#"{"name":"broken"}"#).unwrap();
+    fs::write(broken.join(".app.json"), b"{ not valid json").unwrap();
+
+    let valid = workspace.join(".ncx/codex-plugins/valid");
+    fs::create_dir_all(valid.join(".codex-plugin")).unwrap();
+    fs::write(
+        valid.join(MANIFEST),
+        r#"{"name":"valid","apps":{"good":{"id":"connector-good"},"bad":{"id":true},"scalar":"invalid"}}"#,
+    )
+    .unwrap();
+
+    let apps = discover_codex_apps_with_home(&workspace, None).unwrap();
+    assert_eq!(apps.len(), 1);
+    assert_eq!(apps[0].plugin, "valid");
+    assert_eq!(apps[0].name, "good");
+    assert_eq!(apps[0].connector_id, "connector-good");
+    let _ = fs::remove_dir_all(workspace);
+}
+
+#[test]
 fn damaged_plugin_manifest_is_skipped_without_hiding_valid_mcp_servers() {
     let workspace = temp("damaged-plugin-manifest");
     let broken = workspace.join(".ncx/codex-plugins/broken");

@@ -135,7 +135,20 @@ pub(crate) fn discover_enabled_codex_plugins_with_home(
         .map(|home| home.join(".ncx/codex-plugins"))
         .chain(std::iter::once(workspace.join(".ncx/codex-plugins")));
     for root in roots {
-        for plugin in CodexPluginCatalog::new(root).discover_best_effort()? {
+        let catalog = CodexPluginCatalog::new(root.clone());
+        // Resource plugins are optional runtime inputs. A broken or
+        // temporarily unreadable global catalog must not prevent workspace
+        // plugins (or the built-in tools) from loading. `discover()` remains
+        // strict for explicit catalog-management commands; this runtime path
+        // deliberately isolates one catalog root as well as one plugin.
+        let discovered = match catalog.discover_best_effort() {
+            Ok(plugins) => plugins,
+            Err(error) => {
+                eprintln!("跳过无法读取 Codex 插件目录 '{}': {error}", root.display());
+                continue;
+            }
+        };
+        for plugin in discovered {
             if plugin.enabled {
                 // Workspace plugins are visited last and intentionally shadow a
                 // user-global plugin with the same stable name.
@@ -169,15 +182,41 @@ impl CodexPluginCatalog {
         if !self.root.is_dir() {
             return Ok(Vec::new());
         }
-        self.recover_interrupted_updates()?;
+        if let Err(error) = self.recover_interrupted_updates() {
+            if skip_invalid {
+                eprintln!(
+                    "跳过无法恢复的 Codex 插件目录 '{}': {error}",
+                    self.root.display()
+                );
+            } else {
+                return Err(error);
+            }
+        }
         let mut plugins = Vec::new();
         for entry in fs::read_dir(&self.root).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            if !entry
-                .file_type()
-                .map_err(|error| error.to_string())?
-                .is_dir()
-            {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if skip_invalid => {
+                    eprintln!(
+                        "跳过无法读取 Codex 插件目录条目 '{}': {error}",
+                        self.root.display()
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            let is_dir = match entry.file_type() {
+                Ok(kind) => kind.is_dir(),
+                Err(error) if skip_invalid => {
+                    eprintln!(
+                        "跳过无法读取 Codex 插件条目 '{}': {error}",
+                        entry.path().display()
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            if !is_dir {
                 continue;
             }
             let root = entry.path();
@@ -484,30 +523,30 @@ pub(crate) fn discover_codex_apps_with_home(
 ) -> Result<Vec<CodexAppResource>, String> {
     let mut apps = Vec::new();
     for plugin in discover_enabled_codex_plugins_with_home(workspace, home)? {
-        let value = match plugin.manifest.apps.clone() {
-            Some(Value::String(_)) => {
-                let path = plugin
-                    .apps_path()
-                    .ok_or_else(|| format!("插件 '{}' 的 Apps 资源不存在", plugin.manifest.name))?;
-                serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
-                    .map_err(|error| format!("无效 Apps 资源 {}: {error}", path.display()))?
+        let Some(value) = (match load_apps_resource(&plugin) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("跳过损坏 Apps 插件 '{}': {error}", plugin.manifest.name);
+                continue;
             }
-            Some(value) => value,
-            None => {
-                let Some(path) = plugin.apps_path() else {
-                    continue;
-                };
-                serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
-                    .map_err(|error| format!("无效 Apps 资源 {}: {error}", path.display()))?
-            }
+        }) else {
+            continue;
         };
         let Some(entries) = value.get("apps").unwrap_or(&value).as_object() else {
-            return Err(format!(
-                "插件 '{}' 的 Apps 资源必须是对象",
+            eprintln!(
+                "跳过损坏 Apps 插件 '{}': Apps 资源必须是对象",
                 plugin.manifest.name
-            ));
+            );
+            continue;
         };
         for (name, config) in entries {
+            let Some(config) = config.as_object() else {
+                eprintln!(
+                    "跳过插件 '{}' 的 App '{}': 配置必须是对象",
+                    plugin.manifest.name, name
+                );
+                continue;
+            };
             let connector_id = config
                 .get("id")
                 .or_else(|| config.get("connector_id"))
@@ -515,10 +554,11 @@ pub(crate) fn discover_codex_apps_with_home(
                 .unwrap_or("")
                 .trim();
             if connector_id.is_empty() {
-                return Err(format!(
-                    "插件 '{}' 的 App '{}' 缺少 id/connector_id",
+                eprintln!(
+                    "跳过插件 '{}' 的 App '{}': 缺少 id/connector_id",
                     plugin.manifest.name, name
-                ));
+                );
+                continue;
             }
             apps.push(CodexAppResource {
                 plugin: plugin.manifest.name.clone(),
@@ -540,15 +580,20 @@ pub(crate) fn discover_codex_hooks_with_home(
 ) -> Result<Vec<HookConfig>, String> {
     let mut hooks = Vec::new();
     for plugin in discover_enabled_codex_plugins_with_home(workspace, home)? {
-        let value = if let Some(value) = plugin.manifest.hooks.clone() {
-            resolve_hook_resources(&plugin, value)?
-        } else if let Some(path) = plugin.hooks_path() {
-            serde_json::from_str(&fs::read_to_string(&path).map_err(|error| error.to_string())?)
-                .map_err(|error| format!("无效 Hooks 资源 {}: {error}", path.display()))?
-        } else {
+        let Some(value) = (match load_hooks_resource(&plugin) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("跳过损坏 Hooks 插件 '{}': {error}", plugin.manifest.name);
+                continue;
+            }
+        }) else {
             continue;
         };
         let Some(events) = value.get("hooks").unwrap_or(&value).as_object() else {
+            eprintln!(
+                "跳过损坏 Hooks 插件 '{}': Hooks 资源必须是对象",
+                plugin.manifest.name
+            );
             continue;
         };
         for (event, groups) in events {
@@ -593,6 +638,33 @@ pub(crate) fn discover_codex_hooks_with_home(
         }
     }
     Ok(hooks)
+}
+
+fn load_apps_resource(plugin: &CodexPluginRecord) -> Result<Option<Value>, String> {
+    match plugin.manifest.apps.clone() {
+        Some(value @ Value::String(_)) => resolve_json_resource(plugin, "Apps", value).map(Some),
+        Some(value) => Ok(Some(value)),
+        None => plugin
+            .apps_path()
+            .map(|path| read_json_resource_file(&path, "Apps"))
+            .transpose(),
+    }
+}
+
+fn load_hooks_resource(plugin: &CodexPluginRecord) -> Result<Option<Value>, String> {
+    if let Some(value) = plugin.manifest.hooks.clone() {
+        return resolve_hook_resources(plugin, value).map(Some);
+    }
+    plugin
+        .hooks_path()
+        .map(|path| read_json_resource_file(&path, "Hooks"))
+        .transpose()
+}
+
+fn read_json_resource_file(path: &Path, field: &str) -> Result<Value, String> {
+    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&text)
+        .map_err(|error| format!("无效 {field} 资源 {}: {error}", path.display()))
 }
 
 fn map_hook_event(event: &str) -> Option<&'static str> {

@@ -1,5 +1,22 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-03：Codex 资源发现与 MCP 协议隔离（已验证）
+
+- 参考 OpenAI Codex 的 MCP connection manager（可选 server 逐个启动、单个失败不
+  影响其余 catalog），运行时的 Codex 兼容资源发现现在也按资源/插件隔离：全局
+  或工作区插件目录暂时不可读、单个目录条目读取失败、Hooks/Apps 文档损坏，或
+  单个 App 配置格式错误，都会记录诊断并跳过；其他合法插件继续装配。
+- 显式 `CodexPluginCatalog::discover()` 仍保持严格错误，便于设置页/维护命令发现
+  和修复坏清单；只有 Agent/GUI/CLI 的运行时发现路径使用 best-effort。MCP 原有的
+  server、command、arg 隔离语义保持不变。
+- MCP initialize 握手在注册工具前校验明确返回的 `protocolVersion`；省略字段的旧
+  兼容服务仍可连接，明确不兼容或非字符串版本只让当前 server 启动失败。
+- 新增回归覆盖：损坏 Hooks 文档不遮蔽合法 Hook；损坏 Apps 文档及错误单个 App
+  不遮蔽合法 App；不兼容 MCP 协议版本不会注册工具。相关 `ncx-core` OpenAI
+  兼容测试当前为 18 项，`ncx-mcp` 测试为 13 项，均通过。
+- 参考资料：<https://github.com/openai/codex/tree/main/codex-rs/codex-mcp/src/connection_manager>
+  （仅采用“可选连接逐个隔离”的行为原则，不复制其实现或存储格式）。
+
 ## 2026-09-03：MCP 传输并发与截图回归收口（已提交并推送）
 
 - `ncx-mcp` 现在为每个 stdio server 启动后台 stdout reader，以 JSON-RPC
@@ -19,8 +36,8 @@
   140 项、Python pytest 601 项、Ruff、协议脚本 5 项、protocol check（70
   methods）、TypeScript typecheck 和 Vite production build（150 modules）。
 - 本地开发实例仍在运行：`cd rust\gui; npm.cmd run tauri -- dev --target
-  x86_64-pc-windows-msvc`；`ncx-gui.exe` PID 40196（Responding=True），Vite
-  PID 36268，地址 `http://127.0.0.1:5179/` 返回 HTTP 200。未使用真实 Provider
+  x86_64-pc-windows-msvc`；`ncx-gui.exe` PID 19836（Responding=True），Vite
+  PID 4672，地址 `http://127.0.0.1:5179/` 返回 HTTP 200。未使用真实 Provider
   凭据，也未触发付费模型调用。
 - 功能提交 `ab76265c09a5ea74edf33c9181ac2b396238ebd8` 已推送到
   `origin/feat/deepseek-harness-components`，并已用 `git ls-remote` 核对远端
