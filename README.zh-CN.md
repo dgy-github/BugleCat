@@ -12,7 +12,7 @@
 
 🛡️ **[上下文压缩安全协议](docs/context-compression-safety-protocol.zh-CN.md)** —— 解释 Coding Agent 为什么会在压缩后发生任务状态漂移，以及如何用任务快照、决策溯源、Git 证据和只读恢复控制风险。
 
-[![BugleCat 桌面端预览：会话、工具调用、MCP、Skills、成本统计与测试状态](assets/nanocodex-ui-preview.svg)](nanocodex.html)
+[![BugleCat 桌面端预览：会话、工具调用、MCP、Skills、成本统计与测试状态](assets/buglecat-desktop-preview-v2.svg)](nanocodex.html)
 
 **BugleCat** 是一个面向 Windows、本地运行且可扩展的 Codex 风格编码 Agent。一个 chat-completions 模型
 提出工具调用，agent 在沙箱内执行文件/shell 工具，记录会话，并循环直到任务完成。

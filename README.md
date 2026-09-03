@@ -12,7 +12,7 @@ English | [简体中文](README.zh-CN.md)
 
 🛡️ **[Context Compression Safety Protocol（中文）](docs/context-compression-safety-protocol.zh-CN.md)** — why coding agents can drift after context compaction, and how snapshots, decision provenance, Git evidence, and read-only recovery contain the risk.
 
-[![BugleCat desktop preview: sessions, tool calls, MCP, skills, cost, and tests](assets/nanocodex-ui-preview.svg)](nanocodex.html)
+[![BugleCat desktop preview: sessions, tool calls, MCP, skills, cost, and tests](assets/buglecat-desktop-preview-v2.svg)](nanocodex.html)
 
 **BugleCat** is a local, extensible Codex-style coding agent for Windows. A
 chat-completions model proposes tool calls, the agent runs sandboxed
