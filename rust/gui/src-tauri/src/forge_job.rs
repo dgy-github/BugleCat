@@ -257,6 +257,14 @@ impl ForgeJobCoordinator {
         Ok(())
     }
 
+    #[cfg(not(windows))]
+    fn own_process(&self, _pid: u32) -> Result<(), String> {
+        // Unix-like targets isolate the child in its own process group in
+        // `configure_process_group`; `terminate_tree` can therefore stop the
+        // complete Forge process tree without a Windows Job Object.
+        Ok(())
+    }
+
     fn terminate_owned(&self, fallback_pid: u32) {
         #[cfg(windows)]
         if let Ok(mut owner) = self.owner.lock() {

@@ -10,6 +10,10 @@ on:
         description: "Existing or new release tag to publish"
         required: true
         default: "v0.1.0"
+      source_ref:
+        description: "Git ref to build (defaults to main for manual runs)"
+        required: true
+        default: "main"
 
 permissions:
   contents: write
@@ -38,7 +42,7 @@ jobs:
       - name: Check out release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
