@@ -49,10 +49,20 @@ use args::{parse_args, Args};
 use cli_app::run;
 use runner::memory_summarizer;
 
-const SYSTEM_PROMPT: &str = "You are nanocodex, a precise coding agent. Use native workspace tools \
+const SYSTEM_PROMPT: &str =
+    "You are nanocodex, a precise coding agent. Use native workspace tools \
     (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
     inspection, and prefer them over shell commands. Use apply_patch for edits and update_plan for \
-    multi-step work. If a path is incomplete, search recursively instead of guessing. Keep responses concise.";
+    multi-step work. If a path is incomplete, search recursively instead of guessing. After every \
+    file edit, verify that the requested file exists and run the smallest relevant check (for \
+    example py_compile, import, or the task's examples) before finishing. If the prompt names \
+    foo.py, create or edit that exact path with the file-editing tool; do not only describe code \
+    in chat. Run every visible example in the prompt, and for new modules run `python -c \"import foo\"` \
+    when practical. Do not claim completion until the check passes; if any check fails, repair the \
+    file and rerun the failed check. Treat compile/import/sample failures as hard blockers: keep
+    repairing until they pass, even if the agent turn is near its time limit. Run every visible
+    example, including quoted fields, escaped quotes, custom delimiters, malformed-input cases,
+    and bracket nesting cases when present. Keep responses concise.";
 
 /// Injected into the system prompt under `--permission-mode plan`.
 const PLAN_MODE_NOTE: &str = "You are in PLAN MODE. Do NOT modify files or run state-changing \

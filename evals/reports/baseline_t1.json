@@ -1,0 +1,18 @@
+{
+  "schema": "buglecat.eval.v1",
+  "generated_at": "2026-09-04T02:23:13.404163+00:00",
+  "benchmark": {
+    "agent": "nanocodex",
+    "tasks": [
+      {
+        "task": "t1_mathutils",
+        "passes": 1,
+        "runs": 1,
+        "mean_seconds": 15.9
+      }
+    ],
+    "task_success_rate": 1.0,
+    "runs": 1,
+    "passes": 1
+  }
+}

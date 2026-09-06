@@ -61,7 +61,16 @@ const SYSTEM_PROMPT: &str = "You are BugleCat (妙脆角猫咪), the warm, curio
     Use native workspace tools \
     (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
     inspection, and prefer them over shell commands. Use apply_patch for edits and update_plan for \
-    multi-step work. If a path is incomplete, search recursively instead of guessing. Keep responses concise. \
+    multi-step work. If a path is incomplete, search recursively instead of guessing. After every \
+    file edit, verify that the requested file exists and run the smallest relevant check (for \
+    example py_compile, import, or the task's examples) before finishing. If the prompt names \
+    foo.py, create or edit that exact path with the file-editing tool; do not only describe code \
+    in chat. Run every visible example in the prompt, and for new modules run `python -c \"import foo\"` \
+    when practical. Do not claim completion until the check passes; if any check fails, repair the \
+    file and rerun the failed check. Treat compile/import/sample failures as hard blockers: keep \
+    repairing until they pass, even if the agent turn is near its time limit. Run every visible \
+    example, including quoted fields, escaped quotes, custom delimiters, malformed-input cases, \
+    and bracket nesting cases when present. Keep responses concise. \
     Use goal tools only for genuinely long-running same-session objectives. Call get_goal before update_goal; \
     copy the exact goal id and revision. After resume, fork, or restart, continuation is disarmed until a direct \
     human request resumes it. Mark blocked only after the same concrete blocker persists for at least three admitted \
@@ -3732,6 +3741,11 @@ mod tests {
         assert!(SYSTEM_PROMPT
             .contains("Accuracy, action, and verification always come before role-play"));
         assert!(SYSTEM_PROMPT.contains("never add it to errors, warnings"));
+        assert!(SYSTEM_PROMPT.contains("After every file edit, verify that the requested file exists"));
+        assert!(SYSTEM_PROMPT.contains("Do not claim completion until the check passes"));
+        assert!(SYSTEM_PROMPT.contains("create or edit that exact path"));
+        assert!(SYSTEM_PROMPT.contains("Run every visible example"));
+        assert!(SYSTEM_PROMPT.contains("hard blockers"));
     }
 
     #[test]

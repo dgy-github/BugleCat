@@ -649,6 +649,39 @@ CLI 与桌面端共用 Provider、权限、预算、上下文编辑、并发和 
 
 ## 测试
 
+### 证据型评测 Harness
+
+评测脚本位于 evals/，分数来自隐藏测试、工具执行结果、验证事件和持久状态
+快照，不接受模型自报分：
+
+    # 回放 bench/tasks 中的编码任务（默认每任务 240s；可显式覆盖）
+    python -m evals.harness benchmark --agent nanocodex --repeats 3 --timeout 240
+
+    # 直接运行 benchmark；报告同时写入 Markdown/JSON 和逐 attempt 的 post-edit trace JSONL
+    python bench/run.py --agent nanocodex --repeats 1 --timeout 240
+
+    # 统计一份 JSONL trace（工具、验证、恢复、步骤、token、人工接管）
+    python -m evals.harness trace .\trace.jsonl --output .\evals\reports\trace.json
+
+    # 直接分析真实会话日志
+    python -m evals.harness session .\.nanocodex\session.jsonl
+
+    # 比较压缩前后的 Goal/Constraint/Task/Artifact 状态
+    python -m evals.harness compaction before.json after.json
+
+    # 生成可重复的 50 个 compaction 样本；--mutate 注入已知丢失/重复回归
+    python -m evals.harness generate --count 50 --mutate --output .\evals\generated
+
+报告 schema 为 buglecat.eval.v1。空证据返回 null，不会伪造 0% 或 100%；缺少状态字段
+按失败处理。Trace 事件格式与扩展方式见 evals/README.md。
+`bench/run.py` 的报告还会记录目标文件快照差异、缺失文件、Python 编译结果、timeout、
+脱敏后的 agent 输出尾部和 grader 失败轨迹；post-edit 检查默认单文件 15s，可用
+`--post-edit-timeout` 调整。
+
+Windows 下也可以直接双击 scripts/run-eval.cmd：它会自动构建 Rust Agent、回放
+benchmark、生成 50 个 compaction 样本并输出报告。已有二进制时可使用
+scripts/run-eval.ps1 -SkipBuild；追加 -OpenReport 会自动打开 JSON 报告。
+
 Rust release 线：
 
 ```powershell

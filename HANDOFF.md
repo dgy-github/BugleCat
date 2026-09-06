@@ -1,5 +1,62 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-04：Benchmark 可靠性门禁与超时证据（进行中）
+
+- `bench/run.py` 新增详细运行结果：保留原 `run_once()` 三元组兼容接口，同时在内部记录每次是否命中 timeout；Markdown/JSON 报告按任务和 Agent 单独展示 timeout 数，避免“超时但 grader 通过”和逻辑失败混为一谈。
+- Rust CLI 与 GUI 系统提示新增完成后置门禁：编辑后必须确认目标文件落盘，执行最小相关的 `py_compile`/`import`/样例检查，失败时继续修复并重跑后才能结束。
+- 回归证据：`cargo test -p ncx-cli` 37/37、GUI system-prompt 定向测试 1/1、`pytest tests/test_eval_harness.py` 3/3、Ruff、Rust fmt check 与 `git diff --check` 通过。
+- 重新构建 release 后针对 t1/t2/t5/t6/t7/t10/t17 各跑 1 次：4/7 通过，5 次命中 180s timeout；t5/t6 仍缺少目标模块，t7 仍为括号逻辑断言失败。下一步优先增加结构化 post-edit 验证/失败轨迹，再评估是否调整 timeout。
+
+## 2026-09-04：结构化 post-edit evidence 与剩余任务回归（已验证）
+
+- `bench/run.py` 现在在 agent 前后保存 workspace 文件快照（大小/SHA-256），逐次 attempt 记录
+  `created_files`、`modified_files`、`deleted_files`、prompt 中的 `expected_files`、缺失目标、
+  进程 returncode/timeout、脱敏 stdout/stderr 尾部、grader note，以及每个变更 Python 文件的
+  独立 `py_compile` 结果；`run_once()` 仍保留历史三元组接口供 `evals/harness.py` 使用。
+- 每份报告额外生成 `bench/reports/trace_<stamp>.jsonl`，JSON 报告含 `attempts` 与 trace 路径，
+  Markdown 增加 post-edit 失败摘要。日志会掩码 API key/token/Bearer/sk- 前缀并限制尾部长度。
+- agent 默认 per-task timeout 从 180s 调至 240s；post-edit Python 检查使用独立 15s timeout；
+  `evals/harness.py benchmark` 默认同步为 240s，用户显式 `--timeout` 仍优先。
+- 最新 release 定向回归：t5_roman 1/1（139.2s，文件存在且编译通过）、t6_lru 1/1（205.0s，
+  文件存在且编译通过）、t7_balanced 重试 1/1（240s timeout 但 grader/编译均通过）。首次 t7
+  失败轨迹保留为 `report_20260904_145420.*` / `trace_20260904_145420.jsonl`，明确记录
+  `IndentationError` 与 `buggy.py` 编译失败；重试证据为 `report_20260904_145856.*`。
+- 未修改 benchmark 任务答案或 hidden checker；用户原有工作树改动继续保留。
+
+## 2026-09-04：全量 benchmark 最终回归（已完成）
+
+- 使用 `python bench/run.py --agent nanocodex --repeats 1 --timeout 240` 完成 18 项一次性全量评测：
+  **15/18 runs passed、15/18 tasks fully solved、13 次 timeout**。报告记录 timeout 与 grader
+  成功的交叉状态，不将“超时但通过”误报为逻辑失败。
+- 最终报告：`bench/reports/report_20260904_160831.md`、`.json`，结构化轨迹：
+  `bench/reports/trace_20260904_160831.jsonl`。
+- 失败项及 post-edit evidence：`t12_toposort` 缺少 `toposort.py`（模型服务返回空内容，
+  无文件变更）；`t16_csv` 文件存在且编译通过但 CSV 引号解析断言失败；`t7_balanced` 文件存在
+  但 `py_compile` 报 `IndentationError`。后续若继续提升 benchmark，应针对这三项重试/优化，
+  不应修改任务答案或 hidden checker。
+
+## 2026-09-05：三项失败任务定向复测（已通过）
+
+- 使用相同 release agent、`--timeout 240` 和 post-edit evidence 重新执行
+  `t7_balanced,t12_toposort,t16_csv`：**3/3 通过、0 timeout**。
+- 耗时：`t12_toposort` 82.5s、`t16_csv` 113.5s、`t7_balanced` 111.1s；三项目标文件均存在，
+  `py_compile` 均通过，grader 均返回成功。
+- 报告：[report_20260905_123533.md](bench/reports/report_20260905_123533.md)，结构化轨迹：
+  `bench/reports/trace_20260905_123533.jsonl`。结论是三项失败具有运行间歇性，当前实现与提示词
+  在复测中均能完成；后续仍应保留空响应、语法错误和复杂样例失败的 evidence 门禁。
+
+## 2026-09-05：失败分类、空响应重试与硬验证门禁（已验证）
+
+- `bench/run.py` 新增 `failure_kind`：`empty_response`、`compile_failed`、
+  `grader_failed`、`timeout`、`missing_expected_file`；post-edit 缺文件或 Python 编译失败
+  会强制该 attempt 判定为失败，即使 grader 偶然未触发对应路径。
+- 检测到模型空响应时默认整次 attempt 最多重试 2 次，可用
+  `--empty-response-retries` 调整；timeout 仍保持 240s，不继续无限延长。
+- CLI/GUI 系统提示明确把编译、import、样例失败视为硬 blocker，并要求覆盖 quoted fields、
+  escaped quotes、custom delimiters、malformed input 和括号嵌套等可见样例。
+- Python/Rust 定向门禁通过：Ruff、`pytest tests/test_eval_harness.py`（3/3）、CLI 37/37、
+  GUI 系统提示测试 1/1、Rust fmt check、`git diff --check`。
+
 ## 2026-09-03：最终门禁与本地开发实例复核（已验证）
 
 - 在提交 `589c50b8ccff180b0237fd9f3bb35966c1bcefc0` 上重新执行最终质量门禁：

@@ -73,6 +73,17 @@ mod tests {
     }
 
     #[test]
+    fn system_prompt_requires_post_edit_verification() {
+        assert!(
+            SYSTEM_PROMPT.contains("After every file edit, verify that the requested file exists")
+        );
+        assert!(SYSTEM_PROMPT.contains("Do not claim completion until the check passes"));
+        assert!(SYSTEM_PROMPT.contains("create or edit that exact path"));
+        assert!(SYSTEM_PROMPT.contains("Run every visible example"));
+        assert!(SYSTEM_PROMPT.contains("hard blockers"));
+    }
+
+    #[test]
     fn base64_matches_known_vectors() {
         // RFC 4648 §10 test vectors.
         assert_eq!(base64_encode(b""), "");
