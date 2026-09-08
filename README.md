@@ -2,6 +2,14 @@
 
 English | [简体中文](README.zh-CN.md)
 
+## Collaboration & self-test evidence
+
+Interested in coding-agent integration and customization, evaluation and self-repair research, or joint development? Contact **[2537676793@qq.com](mailto:2537676793@qq.com)** with your team, use case, proposed scope, and timeline. Scope and delivery arrangements are discussed individually.
+
+In the **September 8, 2026** six-category source self-repair test using `deepseek-v4-pro`, BugleCat passed **5/6 tasks on the first attempt** and **6/6 with at most one feedback turn per task**. Independent checks and patch replay verified the results. This is a small, controlled fault-injection test with specified files and visible tests—not a general success-rate claim or production certification.
+
+[Read the self-test report (Chinese)](docs/reports/self_repair_20260908.md) · [Evidence and reproduction instructions](evals/self_repair/README.md) · [Collaboration overview](nanocodex.html#collaboration)
+
 ## Capability Page
 
 [Open the capability page](nanocodex.html) · [BugleCat repository](https://github.com/dgy-github/BugleCat)

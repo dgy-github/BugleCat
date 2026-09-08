@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BugleCat · 本地 Coding Agent 与可插拔 Harness</title>
+<meta name="description" content="BugleCat：本地 Coding Agent 与可插拔 Harness。查看六类源码自我修复测试报告，洽谈 Agent 集成、定制开发与评测研究合作。">
 <style>
   :root {
     --bg: #0d1117;
@@ -30,6 +31,13 @@
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  a:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 5px; }
+  .hero-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; }
+  .cta.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); }
+  .cta.secondary svg { fill: currentColor; }
+  .contact-email { overflow-wrap: anywhere; }
+  .evidence { border-left: 3px solid var(--accent-2); padding: 4px 0 4px 22px; margin: 28px 0; }
+  .evidence h2 { margin-top: 0; }
   code { font-family: var(--mono); }
 
   /* layout */
@@ -254,22 +262,48 @@
     <span class="badge">Skills</span>
     <span class="badge">sandbox approval</span>
     <span class="badge">JSONL resume</span>
-    <span class="badge">420 离线测试</span>
+    <span class="badge">六类源码自修复 · 报告公开</span>
   </div>
-  <a class="cta" href="https://github.com/dgy-github/BugleCat" target="_blank" rel="noopener">
+  <div class="hero-actions">
+  <a class="cta" href="#collaboration">洽谈合作</a>
+  <a class="cta secondary" href="#self-test">查看自测报告</a>
+  <a class="cta secondary" href="https://github.com/dgy-github/BugleCat" target="_blank" rel="noopener">
     <svg width="18" height="18" viewBox="0 0 16 16" fill="#04101f" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    github.com/dgy-github/BugleCat
+    GitHub 源码
   </a>
+  </div>
 </header>
 
 <figure class="screenshot">
   <div class="frame">
-    <img src="assets/nanocodex-ui-preview.svg" alt="BugleCat 桌面端预览：会话列表、模型工具调用、MCP、Skills、成本统计与测试结果">
+    <img src="assets/buglecat-desktop-real.png" alt="BugleCat 桌面端真实截图：Tauri 与 Svelte 桌面客户端">
   </div>
-  <figcaption>GUI 预览：会话历史、工具调用、MCP / Skills、成本统计与离线测试状态。页面重点不是炫 UI，而是说明这个 agent harness 覆盖了哪些能力。</figcaption>
+  <figcaption>BugleCat 桌面端真实截图。下方提供自我修复测试证据与合作入口。</figcaption>
 </figure>
 
 <div class="wrap">
+
+  <section class="evidence" id="self-test" aria-labelledby="self-test-title">
+    <h2 id="self-test-title">让 BugleCat 修复自己的源码</h2>
+    <p>2026 年 9 月 8 日，使用 <code>deepseek-v4-pro</code> 完成六类真实源码故障注入测试：失败分类与重试、补丁定位、预算退出码、编译门禁、文件编码、诊断脱敏。</p>
+    <p class="lead">首轮通过 5 / 6 道；每题最多一次反馈后，最终通过 6 / 6 道。</p>
+    <p>结果由独立测试验收，并从原始故障副本重放补丁复查。报告保留了首轮失败、重试、耗时与候选补丁，不只展示成功结果。</p>
+    <p><a href="https://github.com/dgy-github/BugleCat/blob/main/docs/reports/self_repair_20260908.md">阅读完整自我测试报告</a> · <a href="https://github.com/dgy-github/BugleCat/tree/main/evals/self_repair">查看评测子包、证据与复跑方法</a></p>
+    <p>测试边界：每类仅一道题，指定目标文件并提供功能约束和可见测试。这是受控开发自测，不代表普遍成功率，也不是无提示全仓库诊断或生产可靠性认证。</p>
+  </section>
+
+  <section id="collaboration" aria-labelledby="collaboration-title">
+    <h2 id="collaboration-title">合作与交流</h2>
+    <p class="lead">想把编码 Agent 接入你的工作流，或一起研究怎样可靠地修改与验证代码？欢迎带着具体场景来聊。</p>
+    <ul class="detail-list">
+      <li><strong>Agent 集成与定制：</strong>探讨模型后端、MCP 工具与现有开发流程的对接。</li>
+      <li><strong>评测与自修复研究：</strong>共建故障题目、验证门禁与可复查的评测证据。</li>
+      <li><strong>联合开发：</strong>围绕本地编码助手和可插拔 Harness 探讨功能共建。</li>
+    </ul>
+    <p>合作联系：<a class="contact-email" href="mailto:2537676793@qq.com">2537676793@qq.com</a></p>
+    <p>邮件中可以简单介绍你或团队、使用场景、希望合作的内容与时间安排。具体范围和交付方式沟通后确定。</p>
+    <a class="cta" href="mailto:2537676793@qq.com">发邮件谈合作</a>
+  </section>
 
   <h2><span class="num">01</span>这个项目到底是什么</h2>
   <div class="intro">
@@ -282,7 +316,7 @@
     <div class="stat"><div class="value">10+</div><div class="label">Codex-style 能力被拆成可测试模块</div></div>
     <div class="stat"><div class="value">8+</div><div class="label">内置工具，MCP 可继续扩展</div></div>
     <div class="stat"><div class="value">6+</div><div class="label">DeepSeek-specific 适配与稳定性修复</div></div>
-    <div class="stat"><div class="value">420</div><div class="label">离线测试，无真实 API / 网络依赖</div></div>
+    <div class="stat"><div class="value">可复查</div><div class="label">测试记录与候选补丁随报告公开</div></div>
   </div>
 
   <div class="cards">
@@ -384,7 +418,7 @@
     <li><b>安全不吹大：</b>Windows 侧是策略级沙箱，不宣称内核隔离；MCP 子进程运行在沙箱外，只应启用可信服务。</li>
     <li><b>上下文压缩可控：</b>默认 deterministic compaction，不额外花 token；需要自然摘要时才 opt-in 模型 summarizer。</li>
     <li><b>成本统计保守：</b>能拿到 cache hit / miss 就分别计费，拿不到就按未命中估算，避免给出虚假的低成本。</li>
-    <li><b>测试优先：</b>provider、时间、文件、网络都可注入 mock，420 个测试离线跑通，保证行为可回归。</li>
+    <li><b>测试优先：</b>provider、时间、文件、网络都可注入 mock；本次发布验证的数量和范围见上方自我测试报告。</li>
     <li><b>没有覆盖的能力：</b>尚未实现官方 Codex 的云端容器、GitHub PR review、完整 Computer Use、子代理编排和 OS 级强沙箱。</li>
   </ul>
 
@@ -437,6 +471,7 @@ python -m pytest -q</pre>
   <footer>
     BugleCat · Local coding agent with a pluggable Harness ·
     <a href="https://github.com/dgy-github/BugleCat" target="_blank" rel="noopener">github.com/dgy-github/BugleCat</a>
+    <p>合作联系：<a class="contact-email" href="mailto:2537676793@qq.com">2537676793@qq.com</a> · <a href="#self-test">自我测试报告</a></p>
   </footer>
 
 </div>

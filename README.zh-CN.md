@@ -2,6 +2,14 @@
 
 [English](README.md) | 简体中文
 
+## 合作与自测证据
+
+欢迎交流 **Agent 集成与定制、评测与自修复研究、联合开发**。合作联系：**[2537676793@qq.com](mailto:2537676793@qq.com)**。邮件中可介绍你或团队、使用场景、希望合作的内容与时间安排；具体范围和交付方式沟通后确定。
+
+在 **2026 年 9 月 8 日**使用 `deepseek-v4-pro` 完成的六类源码自修复测试中，BugleCat **首轮通过 5/6 道，每题最多一次反馈后最终通过 6/6 道**，结果经过独立验收与补丁重放复查。这是指定目标文件、提供可见测试的小样本故障注入自测，不代表普遍成功率或生产可靠性认证。
+
+[阅读完整自我测试报告](docs/reports/self_repair_20260908.md) · [评测证据与复跑方法](evals/self_repair/README.md) · [合作介绍](nanocodex.html#collaboration)
+
 ## 能力说明页
 
 [打开能力说明页](nanocodex.html) · [BugleCat 仓库](https://github.com/dgy-github/BugleCat)
