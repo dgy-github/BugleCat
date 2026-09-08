@@ -1,0 +1,7 @@
+{
+  "stage": "r2_before_feedback",
+  "passed": 8,
+  "total": 9,
+  "exit_code": 1,
+  "output": "\r\n=== nanocodex  (x1) ===\r\n  test_task        1/1     5.0s\r\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\r\n\r\n=== nanocodex  (x1) ===\r\n  test_task        0/1     2.0s   (failure)\r\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\r\n\r\n=== nanocodex  (x1) ===\r\n  test_task        0/1     2.0s   (failure)\r\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\r\n\r\n=== nanocodex  (x1) ===\r\n  test_task        0/1     2.0s   (failure)\r\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\r\n\r\n=== nanocodex  (x1) ===\r\n  test_task        1/1     2.0s\r\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\r\nPASS: empty response + missing file\r\nPASS: compile failure precedence\r\nPASS: success mentioning empty response\r\nPASS: recovery keeps evidence and time\r\nFAIL: AssertionError((1, 3)): retry exhaustion bounded\r\nPASS: zero disables retries\r\nPASS: ordinary failure not retried\r\nPASS: success never retried\r\nPASS: legacy tuple API\r\n"
+}

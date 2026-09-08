@@ -1,0 +1,146 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 137.86,
+    "returncode": 1,
+    "timed_out": false,
+    "grader": {
+      "status": "test_failed",
+      "passed": 16,
+      "failed": 3,
+      "checks": [
+        "patch::tests::add_file_rejects_existing",
+        "patch::tests::add_file_writes_to_disk",
+        "patch::tests::context_disambiguates_repeated_lines",
+        "patch::tests::context_only_insertion_stays_inside_function",
+        "patch::tests::delete_file",
+        "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+        "patch::tests::missing_context_rejects_insertion_without_writing",
+        "patch::tests::move_file_writes_dest_removes_source",
+        "patch::tests::parse_add_file",
+        "patch::tests::parse_rejects_add_line_without_plus",
+        "patch::tests::parse_requires_begin_and_end",
+        "patch::tests::parse_update_with_locator_and_change",
+        "patch::tests::summary_orders_a_r_m_d",
+        "patch::tests::tmpdir_creates_unique_directories",
+        "patch::tests::unwritable_path_blocks_whole_patch",
+        "patch::tests::update_failure_to_locate_is_atomic",
+        "patch::tests::update_replaces_matched_lines",
+        "patch::tests::update_uses_locator_to_disambiguate",
+        "patch::tests::update_with_whitespace_fallback"
+      ],
+      "elapsed_s": 5.14,
+      "returncode": 101,
+      "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... FAILED\ntest patch::tests::context_only_insertion_stays_inside_function ... FAILED\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... FAILED\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\nfailures:\n\n---- patch::tests::context_disambiguates_repeated_lines stdout ----\n\nthread 'patch::tests::context_disambiguates_repeated_lines' (41328) panicked at crates\\ncx-tools\\src\\patch.rs:525:9:\nassertion `left == right` failed\n  left: \"def first():\\n    return 2\\ndef second():\\n    pass\\n\"\n right: \"def first():\\n    pass\\ndef second():\\n    return 2\\n\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- patch::tests::context_only_insertion_stays_inside_function stdout ----\n\nthread 'patch::tests::context_only_insertion_stays_inside_function' (40624) panicked at crates\\ncx-tools\\src\\patch.rs:499:9:\nassertion `left == right` failed\n  left: \"    value = 1\\ndef main():\\n    pass\\n\"\n right: \"def main():\\n    value = 1\\n    pass\\n\"\n\n---- patch::tests::missing_context_rejects_insertion_without_writing stdout ----\n\nthread 'patch::tests::missing_context_rejects_insertion_without_writing' (32532) panicked at crates\\ncx-tools\\src\\patch.rs:509:9:\nassertion failed: apply_patch(\"*** Begin Patch\\n*** Update File: a.py\\n@@\\n def absent():\\n+    value = 1\\n     pass\\n*** End Patch\",\n        &root, allow_all).is_err()\n\n\nfailures:\n    patch::tests::context_disambiguates_repeated_lines\n    patch::tests::context_only_insertion_stays_inside_function\n    patch::tests::missing_context_rejects_insertion_without_writing\n\ntest result: FAILED. 16 passed; 3 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.03s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s2_patch\\rust\\crates\\ncx-tools)\n    Finished `test` profile [optimized + debuginfo] target(s) in 3.08s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\nerror: test failed, to rerun pass `-p ncx-tools --lib`\n",
+      "cache_invalidation_s": 0.31
+    },
+    "integrity_issues": [],
+    "patch": "s2_patch_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4041,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 12552,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "stream_error",
+        "http_status": 200,
+        "elapsed_ms": 120009,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "stream_error",
+        "http_status": 200,
+        "elapsed_ms": 120009,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  },
+  {
+    "attempt": 2,
+    "elapsed_s": 154.11,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 19,
+      "failed": 0,
+      "checks": [
+        "patch::tests::add_file_rejects_existing",
+        "patch::tests::add_file_writes_to_disk",
+        "patch::tests::context_disambiguates_repeated_lines",
+        "patch::tests::context_only_insertion_stays_inside_function",
+        "patch::tests::delete_file",
+        "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+        "patch::tests::missing_context_rejects_insertion_without_writing",
+        "patch::tests::move_file_writes_dest_removes_source",
+        "patch::tests::parse_add_file",
+        "patch::tests::parse_rejects_add_line_without_plus",
+        "patch::tests::parse_requires_begin_and_end",
+        "patch::tests::parse_update_with_locator_and_change",
+        "patch::tests::summary_orders_a_r_m_d",
+        "patch::tests::tmpdir_creates_unique_directories",
+        "patch::tests::unwritable_path_blocks_whole_patch",
+        "patch::tests::update_failure_to_locate_is_atomic",
+        "patch::tests::update_replaces_matched_lines",
+        "patch::tests::update_uses_locator_to_disambiguate",
+        "patch::tests::update_with_whitespace_fallback"
+      ],
+      "elapsed_s": 5.46,
+      "returncode": 0,
+      "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... ok\ntest patch::tests::context_only_insertion_stays_inside_function ... ok\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... ok\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\ntest result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s2_patch\\rust\\crates\\ncx-tools)\nwarning: value assigned to `changed` is never read\n   --> crates\\ncx-tools\\src\\patch.rs:187:13\n    |\n187 |             changed = false;\n    |             ^^^^^^^^^^^^^^^\n...\n246 |     flush!();\n    |     -------- in this macro invocation\n    |\n    = help: maybe it is overwritten before being read?\n    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default\n    = note: this warning originates in the macro `flush` (in Nightly builds, run with -Z macro-backtrace for more info)\n\nwarning: `ncx-tools` (lib test) generated 1 warning\n    Finished `test` profile [optimized + debuginfo] target(s) in 3.97s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\n",
+      "cache_invalidation_s": 0.31
+    },
+    "integrity_issues": [],
+    "patch": "s2_patch_attempt2.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 7007,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 117593,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 8523,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 16679,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

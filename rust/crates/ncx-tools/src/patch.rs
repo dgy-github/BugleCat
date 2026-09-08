@@ -44,6 +44,8 @@ pub struct Chunk {
     pub ins_lines: Vec<String>,
     /// Locator (`@@`) lines that must precede this chunk, outermost first.
     pub locators: Vec<String>,
+    /// (new index, old index) of unchanged lines, preserved under fuzzy matching.
+    pub context_lines: Vec<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,12 +174,13 @@ fn parse_update_body(
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut pending_locators: Vec<String> = Vec::new();
     let mut current: Option<Chunk> = None;
+    let mut changed = false;
 
     // flush: commit current chunk if it has any change lines.
     macro_rules! flush {
         () => {{
             if let Some(c) = current.take() {
-                if !c.del_lines.is_empty() || !c.ins_lines.is_empty() {
+                if changed {
                     chunks.push(c);
                 }
             }
@@ -188,6 +191,7 @@ fn parse_update_body(
         let raw = body[i];
         if let Some(rest) = raw.strip_prefix(HUNK_AT) {
             flush!();
+            changed = false;
             let locator = rest.trim();
             if !locator.is_empty() {
                 pending_locators.push(locator.to_string());
@@ -202,10 +206,19 @@ fn parse_update_body(
         };
         match marker {
             ' ' => {
-                flush!();
+                // Context belongs to both sides of the hunk. Dropping it loses
+                // insertion anchors and can silently modify the wrong function.
+                let c = current.get_or_insert_with(|| Chunk {
+                    locators: std::mem::take(&mut pending_locators),
+                    ..Default::default()
+                });
+                c.context_lines.push((c.ins_lines.len(), c.del_lines.len()));
+                c.del_lines.push(content.to_string());
+                c.ins_lines.push(content.to_string());
                 i += 1;
             }
             '+' | '-' => {
+                changed = true;
                 if current.is_none() {
                     current = Some(Chunk {
                         locators: std::mem::take(&mut pending_locators),
@@ -294,10 +307,11 @@ fn apply_update(original: &str, action: &FileAction) -> Result<String, PatchErro
                     chunk.del_lines.join("\n")
                 ));
             };
-            result.splice(
-                idx..idx + chunk.del_lines.len(),
-                chunk.ins_lines.iter().cloned(),
-            );
+            let mut replacement = chunk.ins_lines.clone();
+            for &(new_index, old_index) in &chunk.context_lines {
+                replacement[new_index] = result[idx + old_index].clone();
+            }
+            result.splice(idx..idx + chunk.del_lines.len(), replacement);
             cursor = idx + chunk.ins_lines.len();
         } else {
             let insert_at = search_from;
@@ -483,6 +497,54 @@ mod tests {
     fn parse_requires_begin_and_end() {
         assert!(parse_patch("nope").is_err());
         assert!(parse_patch("*** Begin Patch\n*** Add File: a\n+x").is_err()); // no end
+    }
+
+    #[test]
+    fn context_only_insertion_stays_inside_function() {
+        let root = tmpdir("context_insert");
+        std::fs::write(root.join("a.py"), "def main():\n    pass\n").unwrap();
+        apply_patch("*** Begin Patch\n*** Update File: a.py\n@@\n def main():\n+    value = 1\n     pass\n*** End Patch", &root, allow_all).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.py")).unwrap(),
+            "def main():\n    value = 1\n    pass\n"
+        );
+    }
+
+    #[test]
+    fn missing_context_rejects_insertion_without_writing() {
+        let root = tmpdir("missing_context");
+        std::fs::write(root.join("a.py"), "def main():\n    pass\n").unwrap();
+        assert!(apply_patch("*** Begin Patch\n*** Update File: a.py\n@@\n def absent():\n+    value = 1\n     pass\n*** End Patch", &root, allow_all).is_err());
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.py")).unwrap(),
+            "def main():\n    pass\n"
+        );
+    }
+
+    #[test]
+    fn context_disambiguates_repeated_lines() {
+        let root = tmpdir("repeated_context");
+        std::fs::write(
+            root.join("a.py"),
+            "def first():\n    pass\ndef second():\n    pass\n",
+        )
+        .unwrap();
+        apply_patch("*** Begin Patch\n*** Update File: a.py\n@@\n def second():\n-    pass\n+    return 2\n*** End Patch", &root, allow_all).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.py")).unwrap(),
+            "def first():\n    pass\ndef second():\n    return 2\n"
+        );
+    }
+
+    #[test]
+    fn fuzzy_matching_does_not_rewrite_context_indentation() {
+        let root = tmpdir("fuzzy_context");
+        std::fs::write(root.join("a.py"), "if False:\n    pass\n    x = 1\nz = 0\n").unwrap();
+        apply_patch("*** Begin Patch\n*** Update File: a.py\n@@\n if False:\n     pass\n x = 1\n-z = 0\n+z = 2\n*** End Patch", &root, allow_all).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.py")).unwrap(),
+            "if False:\n    pass\n    x = 1\nz = 2\n"
+        );
     }
 
     #[test]

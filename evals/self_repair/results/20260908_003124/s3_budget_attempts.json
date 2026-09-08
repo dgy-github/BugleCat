@@ -1,0 +1,127 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 58.45,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 1,
+      "failed": 0,
+      "checks": [
+        "cli_app::exit_tests::incomplete_turns_return_failure"
+      ],
+      "elapsed_s": 0.4,
+      "returncode": 0,
+      "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n"
+    },
+    "integrity_issues": [],
+    "patch": "s3_budget_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5675,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 2504,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3481,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 2108,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4806,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 2768,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3043,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3229,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5227,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4958,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4333,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 6604,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4558,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

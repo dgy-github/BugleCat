@@ -93,6 +93,8 @@ pub struct AgentLoop {
     pub tools: ToolRegistry,
     pub session: Session,
     pub max_iterations: usize,
+    /// Wall-clock execution budget; cancellation drains tool results before returning.
+    pub turn_timeout: std::time::Duration,
     pub task_budget: TaskBudget,
     pub context_edit: ContextEditPolicy,
     pub reasoning_effort: Option<String>,
@@ -136,6 +138,13 @@ impl AgentLoop {
             tools,
             session,
             max_iterations: 60,
+            turn_timeout: std::time::Duration::from_secs(
+                std::env::var("NANOCODEX_TURN_TIMEOUT_S")
+                    .ok()
+                    .and_then(|raw| raw.parse::<u64>().ok())
+                    .unwrap_or(600)
+                    .clamp(1, 3600),
+            ),
             task_budget: TaskBudget::default(),
             context_edit: ContextEditPolicy::default(),
             reasoning_effort: None,

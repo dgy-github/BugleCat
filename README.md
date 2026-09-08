@@ -8,6 +8,8 @@ English | [简体中文](README.zh-CN.md)
 
 [Design brief PDF](docs/ai-coding-agent-design-brief.pdf) · [Design brief HTML](docs/ai-coding-agent-design-brief.html)
 
+[Six-category self-repair report (Chinese)](docs/reports/self_repair_20260908.md) · [Evaluation package](evals/self_repair/README.md)
+
 📖 **[设计理念手册（中文）](docs/design-philosophy.zh-CN.md)** — why the tiered orchestrator, recursive decomposition, tool-less reasoning nodes, progressive disclosure, vision routing, and the benchmark methodology are built the way they are.
 
 🛡️ **[Context Compression Safety Protocol（中文）](docs/context-compression-safety-protocol.zh-CN.md)** — why coding agents can drift after context compaction, and how snapshots, decision provenance, Git evidence, and read-only recovery contain the risk.

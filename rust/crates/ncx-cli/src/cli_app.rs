@@ -291,5 +291,27 @@ async fn run_prompt(
     }
     println!("{}", result.final_text);
     emit_usage_line(&result.usage);
-    i32::from(result.stop_reason == "error")
+    turn_exit_code(&result.stop_reason)
+}
+
+fn turn_exit_code(reason: &str) -> i32 {
+    i32::from(reason != "completed")
+}
+
+#[cfg(test)]
+mod exit_tests {
+    #[test]
+    fn incomplete_turns_return_failure() {
+        for reason in [
+            "task_budget",
+            "compile_failed",
+            "verification_failed",
+            "cancelled",
+            "error",
+            "timeout",
+        ] {
+            assert_eq!(super::turn_exit_code(reason), 1, "{reason}");
+        }
+        assert_eq!(super::turn_exit_code("completed"), 0);
+    }
 }

@@ -1,0 +1,104 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 115.72,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 9,
+      "failed": 0,
+      "elapsed_s": 0.13,
+      "returncode": 0,
+      "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        1/1     5.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     6.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nPASS: empty response + missing file\nPASS: compile failure precedence\nPASS: success mentioning empty response\nPASS: recovery keeps evidence and time\nPASS: retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+    },
+    "integrity_issues": [],
+    "patch": "s1_retry_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 5149,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 2960,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 3777,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 44912,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 6164,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 4050,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 19760,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 5670,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 4428,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 3996,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 3634,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 5215,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

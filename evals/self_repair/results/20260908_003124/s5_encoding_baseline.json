@@ -1,0 +1,2886 @@
+{
+  ".gitignore": {
+    "sha256": "69c2bed777823a0dca301325cd76df99a43a04b343e4d22fa2d1da5914308420",
+    "inline_tests": null
+  },
+  "config.example.toml": {
+    "sha256": "d6524f17f736ceb1bd01ca68db81afa0c6809ee941b4058cd6e0764b0917cd3b",
+    "inline_tests": null
+  },
+  "LICENSE": {
+    "sha256": "749434daea7fbdbaaa60e2fd4eb9fbd6a284d8110242eb247644a4a6108aa4bf",
+    "inline_tests": null
+  },
+  "mcp.example.toml": {
+    "sha256": "1f0aa18f8d78d9cad5aa26c0ce3d50c14730cf5fa46fc7303ff41bda8e9cc7cd",
+    "inline_tests": null
+  },
+  "nanocodex-gui.cmd": {
+    "sha256": "a859076adb8f670f703f8d060b5bfa30d6b5ea50f239e2c68f1b57906fdfc757",
+    "inline_tests": null
+  },
+  "nanocodex.html": {
+    "sha256": "d20fde9d1ee0112e2967dbeb251e7375de15dde5be53e6b39d8f51e847d5f632",
+    "inline_tests": null
+  },
+  "pyproject.toml": {
+    "sha256": "ab13449001fb33d466cedb5400e10d29a3c7aef4086efea15e048618dfdd25c0",
+    "inline_tests": null
+  },
+  "README.md": {
+    "sha256": "47d8f5822c7dab5a450052358b34ac0929c217aad481e3020b596aa2c96c7173",
+    "inline_tests": null
+  },
+  "README.zh-CN.md": {
+    "sha256": "5fd7d3c6ef2c02f9e83e2fef4a9472a825a3286baf7c5f7d1155e61b07425717",
+    "inline_tests": null
+  },
+  "RELEASE_TASK.md": {
+    "sha256": "1efce7ab9f25e7def5e73eb6af14e5813775025cae45c05ee597474972787a22",
+    "inline_tests": null
+  },
+  "self_repair_check.py": {
+    "sha256": "6117aef7c55bcebc2761db673c5b04d8151e62367ca22741788a1fc508164edc",
+    "inline_tests": null
+  },
+  "assets/buglecat-desktop-preview-v2.svg": {
+    "sha256": "8e30f0ececfe75c378e37ab6f185b3258410e47d87eadf3183d5ab334f7ed92d",
+    "inline_tests": null
+  },
+  "assets/buglecat-desktop-real.png": {
+    "sha256": "270a09b8998f9f0ef98a992b31a99d9466c3ce3c1ba65accc335c5e2d2907548",
+    "inline_tests": null
+  },
+  "bench/run.py": {
+    "sha256": "9f2e5a0a64ee11409563e6bd5038e3e5fb618d71bd7e511e8850dccecac579bf",
+    "inline_tests": null
+  },
+  "bench/tasks/t10_intervals/check.py": {
+    "sha256": "32be3d8a1db488fe2e28e468801f56686104c6361a07d8607cc245bfd3b6431b",
+    "inline_tests": null
+  },
+  "bench/tasks/t10_intervals/prompt.txt": {
+    "sha256": "9901e04ae7917f231a8e428a5b7fc7606ff0f899e912cd6b955b16592147edb9",
+    "inline_tests": null
+  },
+  "bench/tasks/t11_wildcard/check.py": {
+    "sha256": "3c6744a8e654a1eb08ce3d9ac0eb6a95db6fcc9cea469d4323064b02a98fd015",
+    "inline_tests": null
+  },
+  "bench/tasks/t11_wildcard/prompt.txt": {
+    "sha256": "13d6343fb4efd7e585962fced73cb3b1dcad9c06d614d89c4810230b01d07a92",
+    "inline_tests": null
+  },
+  "bench/tasks/t12_toposort/check.py": {
+    "sha256": "b547e28c247b668e82f49bf37be89aff87d84aba8de6a429b1129acf959c3489",
+    "inline_tests": null
+  },
+  "bench/tasks/t12_toposort/prompt.txt": {
+    "sha256": "838872150047813fd71d5b41de34d8716169be26335600e8d318d4b6234c6ea8",
+    "inline_tests": null
+  },
+  "bench/tasks/t13_jsonpath/check.py": {
+    "sha256": "020166d04a91bd7dcd3330d48b754ea4f621ab64e385e71e804b522f6c7d411f",
+    "inline_tests": null
+  },
+  "bench/tasks/t13_jsonpath/prompt.txt": {
+    "sha256": "466fbf779134792eb680b779fc8393e800d1bd814dc1bdc4e23c6b7684b0c818",
+    "inline_tests": null
+  },
+  "bench/tasks/t14_overlap/check.py": {
+    "sha256": "75fddb51f7c939e33664eee3c9f96663164cc917bd73ee3a154b2c04d4534476",
+    "inline_tests": null
+  },
+  "bench/tasks/t14_overlap/overlap.py": {
+    "sha256": "d6681214df1d15c00e308dfdb6060040eceac43fb9fd674f8bfd4b4968fe83f1",
+    "inline_tests": null
+  },
+  "bench/tasks/t14_overlap/prompt.txt": {
+    "sha256": "ab300a568644901ab2cca5fac129dcf10757e8c454d53e66e2922c28404efec0",
+    "inline_tests": null
+  },
+  "bench/tasks/t15_base_n/check.py": {
+    "sha256": "6edfef6949d53a887717119136cacaac5d99d2b8ff588d6784c60e11137447c2",
+    "inline_tests": null
+  },
+  "bench/tasks/t15_base_n/prompt.txt": {
+    "sha256": "1909d4178d878ac8161075ec8c4f4fa7ea2a5aca97f10a272c3f3793f65c92c5",
+    "inline_tests": null
+  },
+  "bench/tasks/t16_csv/check.py": {
+    "sha256": "443e058877a8efaf89d69638ca2cab820830bd72627d25c6ffd391511a6c0ad5",
+    "inline_tests": null
+  },
+  "bench/tasks/t16_csv/lineparser.py": {
+    "sha256": "7699eeecaf0bb65f88905ac873ff490adafc69eda9f88110fccbd8fad31d7f0c",
+    "inline_tests": null
+  },
+  "bench/tasks/t16_csv/prompt.txt": {
+    "sha256": "5d86dbe891d5aa5b32afd6e589946326affc4a0c276d323f5cf822df3f865644",
+    "inline_tests": null
+  },
+  "bench/tasks/t17_running_stats/check.py": {
+    "sha256": "e01300152b1f9b6dc7b0f11050bc41b60f65d6403953ce84ae3c3d3a93f8ed89",
+    "inline_tests": null
+  },
+  "bench/tasks/t17_running_stats/prompt.txt": {
+    "sha256": "b7b89144a40678ad551cb54076db7003d8c5dadf09102a7b709fd3ce1cb5e77b",
+    "inline_tests": null
+  },
+  "bench/tasks/t18_rank_purity/check.py": {
+    "sha256": "0cb36a91a1a9ed41a23699a39136e3cee08e39d9979b4d1c444dd7381b13a383",
+    "inline_tests": null
+  },
+  "bench/tasks/t18_rank_purity/prompt.txt": {
+    "sha256": "69293bf6b70c8f0f8c55e369630c78c79c971776154a3c95e806bf34aa4a2e55",
+    "inline_tests": null
+  },
+  "bench/tasks/t1_mathutils/check.py": {
+    "sha256": "af84ffc3e65c97bf5e442594c9832f59c63cb9002e8a0728dec5419292527705",
+    "inline_tests": null
+  },
+  "bench/tasks/t1_mathutils/prompt.txt": {
+    "sha256": "4f2df810d893b510e12c96ea38b47900c4154e62d8ab7d301d61c89a9709baa8",
+    "inline_tests": null
+  },
+  "bench/tasks/t2_median/buggy.py": {
+    "sha256": "604ab34cc230105578debbcd01fb16ff3abbd932ce49a031d56ed2a43b99563a",
+    "inline_tests": null
+  },
+  "bench/tasks/t2_median/check.py": {
+    "sha256": "90ee68b5fd6f3310c78152b1cd594e93efc147938bf6b2e3cc3493e5f6075d22",
+    "inline_tests": null
+  },
+  "bench/tasks/t2_median/prompt.txt": {
+    "sha256": "fdfc38dd89dc9ca4102a679849c8e51b9c1cc971343b78ce19e6ed7f47a32bc4",
+    "inline_tests": null
+  },
+  "bench/tasks/t3_fizzbuzz/check.py": {
+    "sha256": "23457f86b2a7037ce494c921728bf601be849a75821ea927d50320681ee6a487",
+    "inline_tests": null
+  },
+  "bench/tasks/t3_fizzbuzz/prompt.txt": {
+    "sha256": "b7af02867c8c04f84bb3888af16bccf5c0569b24d6cbb0c5faf5f8e084fa20fb",
+    "inline_tests": null
+  },
+  "bench/tasks/t4_stack/check.py": {
+    "sha256": "ae6cb138e31ae515196bfb478bc4d22e9da3c3e1ab166f880738e119168b4745",
+    "inline_tests": null
+  },
+  "bench/tasks/t4_stack/prompt.txt": {
+    "sha256": "2adc5adb6c2086d638f3b78f09a27b5c0c8ae80c1a6c1edd8a0f09750e503ba3",
+    "inline_tests": null
+  },
+  "bench/tasks/t5_roman/check.py": {
+    "sha256": "9134646192deee5ab397eebcdd0f42bf8190a093a71f29c7cf643d45c565f1f2",
+    "inline_tests": null
+  },
+  "bench/tasks/t5_roman/prompt.txt": {
+    "sha256": "edf13504edcfee2118c6a06a2a4601e95b3c1a89198ae30856d44e222af9120e",
+    "inline_tests": null
+  },
+  "bench/tasks/t6_lru/check.py": {
+    "sha256": "4c19b0fab83b4d17689e126e77079f6ddda221f128e75c585ce67c9c5699f468",
+    "inline_tests": null
+  },
+  "bench/tasks/t6_lru/prompt.txt": {
+    "sha256": "9265bc89183e9acde2926961bf9eb7b509e6599dc01648c4cb23ea46feeb3bf6",
+    "inline_tests": null
+  },
+  "bench/tasks/t7_balanced/buggy.py": {
+    "sha256": "b5fcf2d8e89ad673f05d3090803e92527a4d35e33fe5a12e29e54389795e973f",
+    "inline_tests": null
+  },
+  "bench/tasks/t7_balanced/check.py": {
+    "sha256": "29eb1ff16c7728d736e1ff4cf4d1215976e74e625704f07f9a881c89ea862909",
+    "inline_tests": null
+  },
+  "bench/tasks/t7_balanced/prompt.txt": {
+    "sha256": "5c8f0616bfeab0023e1a80229ac24e429cb4eaab24526f6f28e3b8866fe6f65e",
+    "inline_tests": null
+  },
+  "bench/tasks/t8_wordfreq/check.py": {
+    "sha256": "b6f7aeb41afa80012b029175b7906d9983dd260afae0324c96667c2242d6cb7e",
+    "inline_tests": null
+  },
+  "bench/tasks/t8_wordfreq/prompt.txt": {
+    "sha256": "b1b01c5d7a4bbf8a61604d77160e7d69b00c3b600b4d81a1a5490f41f11e3d27",
+    "inline_tests": null
+  },
+  "bench/tasks/t9_expr_eval/check.py": {
+    "sha256": "8b27c98264f50736d385a870f2a38af9fd849bad01d4708b98d303c2d3e114d6",
+    "inline_tests": null
+  },
+  "bench/tasks/t9_expr_eval/prompt.txt": {
+    "sha256": "3b24cff3f39359ee795ac9e41cebc009e0e5f5e76b0861c4808b4c7d5859fa8d",
+    "inline_tests": null
+  },
+  "docs/aftersales-multiagent-design.zh.md": {
+    "sha256": "19819c434d74d8e1efcd29843bcbe0c9ee8f2103548180a9c5a4fa94c6e87bbe",
+    "inline_tests": null
+  },
+  "docs/ai-coding-agent-design-brief.html": {
+    "sha256": "3125ecf1e88d53658c04584e284926ac8627cf9fda363d7667bdb9b52184ade1",
+    "inline_tests": null
+  },
+  "docs/ai-coding-agent-design-brief.pdf": {
+    "sha256": "0496c815cf23f742eb995afc5997913334359c99e6cb2e4284e054f8bae23378",
+    "inline_tests": null
+  },
+  "docs/build_design_doc.py": {
+    "sha256": "f69e870b5739d1596d879bb8bb83c0339a681072afd2867f13be962e93d8e71d",
+    "inline_tests": null
+  },
+  "docs/build_question_pack.py": {
+    "sha256": "2072b7472d04158e2ac003e6ffc1bd628f6e4d25e308cfbe9b47f981412cf5a5",
+    "inline_tests": null
+  },
+  "docs/claude-code-commands-guide.zh-CN.html": {
+    "sha256": "a8a0003966a7f15b18c7ca79793c1f7111d453d7e2a897ba533c572de9637cdb",
+    "inline_tests": null
+  },
+  "docs/context-compression-safety-protocol.zh-CN.md": {
+    "sha256": "e4c0194d448aa92a204603c256fbc94a2044d4a8e239d553645ff83b736abb83",
+    "inline_tests": null
+  },
+  "docs/deepseek-harness-adoption-development-plan.zh-CN.md": {
+    "sha256": "ff9ebf98106a6c4ebb6ee38a9e06ba090c3f910599f8e64d757a541b4800b8b5",
+    "inline_tests": null
+  },
+  "docs/deepseek-harness-adoption.md": {
+    "sha256": "0a76a98c36e9a0ac2f2e03155f84531309da10ededd624d91eb4a62ca0d27a18",
+    "inline_tests": null
+  },
+  "docs/deepseek-harness-integration-plan.zh-CN.md": {
+    "sha256": "e0b8ea3ddee4269c11c9b40f58b964317cdd1073ce8d3a542b177fd32e2d612f",
+    "inline_tests": null
+  },
+  "docs/design-philosophy-illustrated.zh-CN.html": {
+    "sha256": "a67abf16c3756934d69353e7f11acb28c01b167da33f2ac9e62debacdb825b4f",
+    "inline_tests": null
+  },
+  "docs/design-philosophy.zh-CN.md": {
+    "sha256": "8702cec1f7b9990ed769b431643a166fa8020e85cc84c3c17d0f67a54c0c1bc4",
+    "inline_tests": null
+  },
+  "docs/design_data.json": {
+    "sha256": "5249086d855455da799440b9f706de9af72f1d3f3ce1a643270998ed37086d44",
+    "inline_tests": null
+  },
+  "docs/design_data.zh.json": {
+    "sha256": "8339b2031802e16ba8d3993953492b4fc92227fe40dc814153dd00a75bd03579",
+    "inline_tests": null
+  },
+  "docs/nanocodex-design.html": {
+    "sha256": "d9157be81f119eb292d98ba6e82bb254b979864df3be8e85af17d490a76ebfe4",
+    "inline_tests": null
+  },
+  "docs/promo-video-pipeline-handoff.zh.md": {
+    "sha256": "19b7cfdf7867b908b72b68b250077512577760a8f222021f7933fe9276ba7efd",
+    "inline_tests": null
+  },
+  "docs/video-agent-p1-acceptance-status.md": {
+    "sha256": "d7e6a75260ada2cce8f328175912010bea40c0480a0b6d1d8ed25a747c404589",
+    "inline_tests": null
+  },
+  "docs/video-agent-temporal-rust-sdk-readiness.md": {
+    "sha256": "319dc77a9cc30a96a601d1cbea55fb0ce780e48f8f6e32d52e22dcc3df999de4",
+    "inline_tests": null
+  },
+  "docs/design-assets/nanocodex-agent-loop.svg": {
+    "sha256": "d9adb9a22e4b1ad452a5a1c2fd9505c238d5d68bce8e4bae9c001c0ccf78a7bd",
+    "inline_tests": null
+  },
+  "docs/design-assets/nanocodex-platform-adapter.svg": {
+    "sha256": "e07bad3a4fbdd65a96aecb5608e4f3966fbcc02462811725fd5417e38a69c8e1",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent-compaction-flowchart.zh-CN.html": {
+    "sha256": "6f0660e7b025db022a7cb35103ced5afeb2184d7e2dc57b35b4ccfc290e2d66e",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent-engineering-interview-topics.zh.md": {
+    "sha256": "146416e85a111252d421a2d5db79f884a20b8988d566dbbca1e279a83a744d5b",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent-frameworks-comparison.zh-CN.html": {
+    "sha256": "c2852542f925ceb5946a8abc7503c5ffd7c3f87ed000182c53bdf9553668346f",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent-mechanism-flowcharts.zh-CN.html": {
+    "sha256": "3f87dea71fff97621eaf1fdb04796346d45bd7b4f7bf815f69cad5b131f72e90",
+    "inline_tests": null
+  },
+  "docs/interview-prep/campaign-flowcharts.zh-CN.html": {
+    "sha256": "16e8a14bc1ee37835095c6fb3bb0652ba4bcb2baaabf4c9fa9dc58dad9c7014c",
+    "inline_tests": null
+  },
+  "docs/interview-prep/campaign-interview-drills.zh.md": {
+    "sha256": "4bcf6618041ff34188f35a49eca119d35f7aba8eb885186a5586d590b1b338f6",
+    "inline_tests": null
+  },
+  "docs/interview-prep/INTERVIEW-MASTER-MAP.zh-CN.html": {
+    "sha256": "55c771c5eae22b0a5bdc407ec2b9ad8cf09c0745ac209f2e183712ca44a985ec",
+    "inline_tests": null
+  },
+  "docs/interview-prep/model-selection-rag-visuals.zh-CN.html": {
+    "sha256": "c6a95a96300a3e7431534c680cdd6db678892480390cdd1bc126f2659d98fd90",
+    "inline_tests": null
+  },
+  "docs/interview-prep/model-selection-serving-drills.zh.md": {
+    "sha256": "fe55aee7823b515b543ee133fefcc902f72c130d25426e265d96d79579bff621",
+    "inline_tests": null
+  },
+  "docs/interview-prep/multi-agent-design-deepdive.zh-CN.html": {
+    "sha256": "5c680f1298d39c7507b2142a333ea77ae4e0a2deb2b6148835dc0d228fe887a1",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-codex-permission-evolution.zh-CN.html": {
+    "sha256": "a5f335aa200eeca7559b1995610a8d84e280744ab76a8ab7c4917012604c4bb4",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-drive-engineering-interview-drills.zh-CN.html": {
+    "sha256": "041a0b7c5b0563e284ebc231520f57da3c0e020aa430ddf90201d79fe3c05fa3",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-drive-engineering-interview-drills.zh.md": {
+    "sha256": "45a759fc7ba422e1582dac305eceea22243725972607f87400a0659f2edfeea9",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-final-map.zh-CN.html": {
+    "sha256": "93850b25759571fe799d6f1fa2b42daabd1ef3bcc29bf3a11723d18943c8dc0d",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-final.zh-CN.html": {
+    "sha256": "45f0fbd6b4f7cf87c1011db96169b80b83896c61cb9e4a0640d1c4c1a36fac02",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-final.zh.md": {
+    "sha256": "d4abe1d5bf3b6ca2081051f6cd00790d3970973f99a1804e00d5580b4cb10f3a",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-pack.zh-CN.html": {
+    "sha256": "dad15a23e40326e868b59e1f81fe546314cc86192bc86e97aa69d9ffbe74b769",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-pack.zh.md": {
+    "sha256": "4ba98e1dd423e70a31a3bcd9a705ec945487638d8ce9813bf68274e93ed01c4d",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-project-intro.zh-CN.html": {
+    "sha256": "8182ddfe08fc6a8e65b904266472c0973bd396de99872004b58f30f43a6802af",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-project-intro.zh-CN.md": {
+    "sha256": "9713fe66983e89477bc515870b1f3033d35389443c0634a8e754d6ee6f3d1dff",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-video-script.zh-CN.html": {
+    "sha256": "583f7afbc40242d722d85641a844c99f024a6088731870dcb4c316bbc5b0eadb",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-interview-video-script.zh-CN.md": {
+    "sha256": "a88f6c0fbf884d0780e766517386736695682ca5b3643a488a78a0ecc42eddde",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-module-followups.zh-CN.html": {
+    "sha256": "6b39cb208321557fd5466087db75a8caed2b7c44c8e900a8eaca4f8cc2cee953",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-module-followups.zh.md": {
+    "sha256": "a160ab18f5be7c34faddb1964ee51e041a43bfdeb39e94e1087b49905231e2a0",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-portrait-cram.zh-CN.html": {
+    "sha256": "61a15481753016534fec5be2d6abf5b916abc41b4ee6cd7c077b5d27803a79ec",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-portrait-cram.zh.md": {
+    "sha256": "62dd88aee8f83056515d4566fc2e75306f0391f03ddf0538dfcf62be6347ca25",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-portrait.zh-CN.html": {
+    "sha256": "f434a7834770e218e465793c671bd5a2021a1ac0e18c64743899fd5a7d6f9526",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-portrait.zh.md": {
+    "sha256": "4a9b1d9e007bd2170417c5986193de1f203d0ec10b87b830452a71e346ab1f81",
+    "inline_tests": null
+  },
+  "docs/interview-prep/nanocodex-scheduler-design.zh-CN.html": {
+    "sha256": "b60dd7ee9a06a2d0c30bc588b153ee9cab4002684388d9653b0e55b486e25454",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portfolio-strengths-map.zh-CN.html": {
+    "sha256": "2694a5e1c061e706e10ee16b1659f163523236c86e363217c86f01e4823126e5",
+    "inline_tests": null
+  },
+  "docs/interview-prep/privacy-gateway-flowcharts.zh-CN.html": {
+    "sha256": "cc99204feeef6406bd438c83c9a3734b160011d8ed2ddc547e65dac0ccc541d5",
+    "inline_tests": null
+  },
+  "docs/interview-prep/privacy-gateway-interview-drills.zh.md": {
+    "sha256": "d7ada188e03a2fa0a37ce5bdbe2b6f3a3e6ca494c102aedc3502ec7b886d32e9",
+    "inline_tests": null
+  },
+  "docs/interview-prep/rag-optimization-drills.zh.md": {
+    "sha256": "1332db41f427c56ed4de31f3865d41b945fd9f279c32c11fc3c304542fd263e9",
+    "inline_tests": null
+  },
+  "docs/interview-prep/render_nanocodex_docs_html.py": {
+    "sha256": "b8d18e3d57813fa4070429322dbc67e2de25217fb91a7d1a6a01368ef2bbe394",
+    "inline_tests": null
+  },
+  "docs/interview-prep/render_portrait_html.py": {
+    "sha256": "9951fb78e0e0de7615ce89824114e1073e3703b86299fabcd79fd989789059f9",
+    "inline_tests": null
+  },
+  "docs/interview-prep/tool-engineering-react-drills.zh.md": {
+    "sha256": "3b4524ad668fa0adf98266eb2b2f7111a7e187597ec29dd6f47e5b0d03488fc2",
+    "inline_tests": null
+  },
+  "docs/interview-prep/tool-engineering-react-flowcharts.zh-CN.html": {
+    "sha256": "b309928c300d2249907bfd01ced1a572a2498095d11e37bc3d81bd2530bfb5ba",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/architecture.json": {
+    "sha256": "e35ac58d208e5d13b4080431361bd93f7bbefdb91da6f7ddee6fcdec542c1599",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/context-memory.json": {
+    "sha256": "b1f988532e5e930551c4b104accfa3f3d38e527c5f51a25795737bff7072094d",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/eval-observability.json": {
+    "sha256": "110425baea202f14cd5be0bf3b64675332aff98b939294030a7983fe3156e33b",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/multi-agent-comm.json": {
+    "sha256": "83ff417ef1c2cd09f7c261d595c1cba2b235a5356aee2704665cfac626dfcf79",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/reliability-cost.json": {
+    "sha256": "22c48063efcc086d27d9b531605237a4dfaa3ced8d73a7ae80156b600291f1b3",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/safety-guardrails.json": {
+    "sha256": "17e6f393021ce19cd09a6951529d99052c8dadd57be97ba9814cc5b8dafe9b19",
+    "inline_tests": null
+  },
+  "docs/interview-prep/agent_topics_parts/tool-use.json": {
+    "sha256": "8492f07f98eed581e0f24d94064c9db56bbd048280af8ede881b0ab9acabb995",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/00_connection_map.md": {
+    "sha256": "405b7c89706f91dd9072a0c161b81036cdf7a6e1e3846503c0d470cac393dcd6",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/01_harness.md": {
+    "sha256": "7dcb6307dd81c634e26aa5b04f629d75c2664c0da42a42bc9a47da3d04dcfd00",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/02_context_compression.md": {
+    "sha256": "baa209609b43428f3e38512c5def2c3c398ad9a4b31dca6825bcaf3e9ec6a05e",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/03_tools.md": {
+    "sha256": "572757077c778b3f373bbbf81c9e37a7267c77656e664908687126d2a13fd966",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/04_sandbox.md": {
+    "sha256": "c415dd59b910f0565023f8bed13993cae0d2d3a361e538c4d9c49fa8c155c551",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/05_orchestrator_comm.md": {
+    "sha256": "c1c93a480fd39a250845e4bab2d1c802a059cf194400e646bb5b1fe0e0726a46",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/06_memory.md": {
+    "sha256": "070542d2675feee767eb5a1b910b4ce3df8b308ec1f493c79b72b8edc0bd1d86",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/07_skills.md": {
+    "sha256": "9d9e98693846ebf95d8e877d8cef492dd35f9f4b23f6ff20712b2ae83adfbb00",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/08_ncx_forge.md": {
+    "sha256": "a4d472abf5d1b46e9d358b59eaee5d8002345d82a44742b1ef2d8b5841346192",
+    "inline_tests": null
+  },
+  "docs/interview-prep/portrait_parts/09_scheduler.md": {
+    "sha256": "1f8013b93363e717772c14b60c5de389e7e7bff11f6b0f41a61bad271bb5fd81",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/agent-case-compliance-vs-scheduling.zh.md": {
+    "sha256": "7773b3ae1054c8437e16b72da631fc93e5c9da15957efe88ddd877814893938c",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/index.html": {
+    "sha256": "a6966161a9ce9393947a9f3be0cb57625b722f891fc0642df1d5ed26623bb612",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-deep-dive.zh-CN.html": {
+    "sha256": "2de57f48eee9a2190f48f8690a41130f419331ae6ebd5bd35673b8d152232aca",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-deploy-deepdive.zh-CN.html": {
+    "sha256": "81484f9e4827abd6c5853e08bd1a67e6a94694786f99cf0ac654ab5c7b2f78b6",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-eval-deep-dive.zh-CN.html": {
+    "sha256": "f63fb473743615b328103a40d29e0854c4e48bd47614b90110d97130b3dd1b7f",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-interview-final-map.zh-CN.html": {
+    "sha256": "4ab77222e9307b30ba3b0339b52be9414f7d3101d2bbcbfbc2b35cb53ef771e0",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-interview-final.zh-CN.html": {
+    "sha256": "d5e2218140e3ff5e5377df8ddf659440ff3917c2c1b8362ba01b0177ac9d6031",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-interview-final.zh.md": {
+    "sha256": "2aa0c0a7c386d7057a225c14719aad20fb9c889e148b84656bb40a86eb2315f0",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-interview-plan.zh-CN.html": {
+    "sha256": "eb6e448a94daaf62b5d5bd90a02b20a299aefd6332ff70f5b3da34e4805ecf7f",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/schedule-agent-number-drills.zh-CN.html": {
+    "sha256": "4bc081d1f166f3223ba7904d67629c330fe4c351f6235f70e8696e7b12b80cdc",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/_archive/schedule-agent-full-review.zh-CN.html": {
+    "sha256": "4d832d719954f6016111558dba8f3e236359e4f12f06781fe0081e5413abcfdf",
+    "inline_tests": null
+  },
+  "docs/interview-prep/schedule-agent/_archive/schedule-agent-interview-drills.zh.md": {
+    "sha256": "077d53c3e3771747d0f544820e56f59ad5af8e6afc97ad262041e15743c53c79",
+    "inline_tests": null
+  },
+  "docs/project-memory/CAPABILITY_MAP.md": {
+    "sha256": "589624e0c0ca23af2efacad7c37a41d14542f8ebf7591061eb255bce7751dc08",
+    "inline_tests": null
+  },
+  "docs/project-memory/INTERFACE_CATALOG.md": {
+    "sha256": "217bb72186be9078ecd4d41618a897145527dc3e5366d33d9f476c68682cb193",
+    "inline_tests": null
+  },
+  "docs/project-memory/MODULE_CATALOG.md": {
+    "sha256": "cac351ad784eec4ee20603dcacd041614e03c5a9790bd99164e5e63c82716ad1",
+    "inline_tests": null
+  },
+  "docs/project-memory/README.md": {
+    "sha256": "1b6f39ba4563341021ce5186efe2bbef152cd97f48c4ee9a07d2527b08ce95cd",
+    "inline_tests": null
+  },
+  "docs/project-memory/SYMBOL_INDEX.json": {
+    "sha256": "b20dc66ea35864e98cb7b517031b8f08bf672e960b488288815b0767cd546f46",
+    "inline_tests": null
+  },
+  "docs/project-memory/SYMBOL_INDEX.md": {
+    "sha256": "656f9c458492fc8d9efe5f371f4d3be262fcd3c57fa1ce1045ef0be9ff1619f8",
+    "inline_tests": null
+  },
+  "docs/superpowers/plans/2026-08-17-gui-api-key-recovery.md": {
+    "sha256": "77dca5d563354ff2956a7dc058d64ce4a579ac6de1626cc161097bc1db0d351b",
+    "inline_tests": null
+  },
+  "docs/superpowers/plans/2026-08-17-model-provider-catalog.md": {
+    "sha256": "291ac4c06c1009aeee78931317fe0e43d24eca6f3ed82489f185d12696f8be76",
+    "inline_tests": null
+  },
+  "docs/superpowers/plans/2026-08-17-official-provider-catalog-audit.md": {
+    "sha256": "0ccd2ee01225bb04705b6d28c3ab8c33514c173ef0c316046a7d8275f812bc0d",
+    "inline_tests": null
+  },
+  "docs/superpowers/specs/2026-08-17-gui-missing-api-key-recovery-design.md": {
+    "sha256": "e4cb4c245e635f72f8340481ecb8bcf9ec3fa22b578224c814e19970026ef215",
+    "inline_tests": null
+  },
+  "docs/superpowers/specs/2026-08-17-model-provider-catalog-design.md": {
+    "sha256": "e99d7005109e071e0dfdc92acf4397f8d1a3ee2754fb36ed83618c744d2cee4a",
+    "inline_tests": null
+  },
+  "evals/harness.py": {
+    "sha256": "95f7f6543c7faa88e6cfaee6bb0f610734980f6eb0e3000bda85a18cbe883a74",
+    "inline_tests": null
+  },
+  "evals/metrics.py": {
+    "sha256": "ea7026e400cdf1e55f3d88882e2cbd0e4a3ac26b7fd3d7c0767f7082d6163ebe",
+    "inline_tests": null
+  },
+  "evals/README.md": {
+    "sha256": "871412e1307444dfae3ba4745506572b36a8bfb5e8593f8b19b1123cccae2b6e",
+    "inline_tests": null
+  },
+  "evals/reports/baseline_t1.json": {
+    "sha256": "f9bb0f74d6aabe99b7acc57263a28455f3b4f01f226112aa96ea0a234b33da2b",
+    "inline_tests": null
+  },
+  "nanocodex/cli.py": {
+    "sha256": "15ce55c7303980d45c2dfbb84c2c225f8cad7b039865f728fb45f40079ae6c0d",
+    "inline_tests": null
+  },
+  "nanocodex/config.py": {
+    "sha256": "8be2e33f8a98f7a1d5f99e51cab19c6fa959c57d42c98956565dc77d5cc9fd50",
+    "inline_tests": null
+  },
+  "nanocodex/gui.py": {
+    "sha256": "df81959d78281a04e1b8de646712575e5d675c0dca4a2186f03a6ea95eb82422",
+    "inline_tests": null
+  },
+  "nanocodex/__init__.py": {
+    "sha256": "d2af0cd4815c7aa94a6e7e8595551fc97b80f3622ced8dae76552a353ab5f60e",
+    "inline_tests": null
+  },
+  "nanocodex/__main__.py": {
+    "sha256": "f88f6df9f357565bd22054546a4466cef2ab462ac1de80678c5aac2af8cad1c4",
+    "inline_tests": null
+  },
+  "nanocodex/agent/ab_compare.py": {
+    "sha256": "41ad72b8677e285691f9f6db08d30ff193d95177724fdd00fda882a8376507d2",
+    "inline_tests": null
+  },
+  "nanocodex/agent/agents_md.py": {
+    "sha256": "933b8d01f8fbff2fbbd422184a5aec1c7a1c1400046c636fad6b452d889d4365",
+    "inline_tests": null
+  },
+  "nanocodex/agent/auto_reasoning.py": {
+    "sha256": "a87cbc16ac567f5662578aa4221514d8dfaf732a5a1ad833275e294a9014e8f5",
+    "inline_tests": null
+  },
+  "nanocodex/agent/compaction.py": {
+    "sha256": "a231c1f20d364d88d4c5c4fae9068a1ab734e5326f73c9955870bd8a2e744558",
+    "inline_tests": null
+  },
+  "nanocodex/agent/enhance_prompt.py": {
+    "sha256": "70438ded7cd3f4c181adf0d3b86aefb5875e3dbf31d51072577c6c874196ca41",
+    "inline_tests": null
+  },
+  "nanocodex/agent/fact_merge.py": {
+    "sha256": "4e6d6aba9ac5f452eee7d707ec86454e9d977b45a3900243e7d31abd7931180f",
+    "inline_tests": null
+  },
+  "nanocodex/agent/images.py": {
+    "sha256": "3034aed204891fc49eb80afc1e2b795a18b29012774c3dab30ffe9c2d9eeb8e2",
+    "inline_tests": null
+  },
+  "nanocodex/agent/loop.py": {
+    "sha256": "79b32cd87c701de700fd1ae569008e0b1cb7c5419024bbeba292120232c34c18",
+    "inline_tests": null
+  },
+  "nanocodex/agent/memory_store.py": {
+    "sha256": "641b8406fb0c5761e3c7a1ba96d9755c248b9d86c7d4c4bd9cac95558129332e",
+    "inline_tests": null
+  },
+  "nanocodex/agent/mentions.py": {
+    "sha256": "c0b520df8905a0b53bb719071a742eb0ca5937fb2259606c798eccfe833ffeae",
+    "inline_tests": null
+  },
+  "nanocodex/agent/orchestrator.py": {
+    "sha256": "dfa03a15046297e1126a0e312e9949ad91e52a83e78819c0075f20cab457454a",
+    "inline_tests": null
+  },
+  "nanocodex/agent/orch_prompts.py": {
+    "sha256": "e427f77ba55be46b2ba6b118534b7840136980d28f8b3bcff671e9ee3a402777",
+    "inline_tests": null
+  },
+  "nanocodex/agent/pricing.py": {
+    "sha256": "c1bb3d0301842aeaf652da310b45510ef6ed1f5fa7f2d4b10df6d09353e3e137",
+    "inline_tests": null
+  },
+  "nanocodex/agent/prompt.py": {
+    "sha256": "ff9d0d3f58f9da13cdf68f035819b6c5fa55ddef3087d1415fdb34ce0270437d",
+    "inline_tests": null
+  },
+  "nanocodex/agent/roles.py": {
+    "sha256": "2858e458c2843b5bf147ec6ff754b1d5c523851ec27adfde54fa24eea651a5d6",
+    "inline_tests": null
+  },
+  "nanocodex/agent/schedule.py": {
+    "sha256": "2dbe0c48d5bd01f8dd0770dcccae4ece87cba2b679cb023448e00b88c9e34698",
+    "inline_tests": null
+  },
+  "nanocodex/agent/schedule_runner.py": {
+    "sha256": "b1b215b4656e40fbbdc0dacb19efa0840a47dad5ec42fdae5f5cc1b2e90a1629",
+    "inline_tests": null
+  },
+  "nanocodex/agent/session.py": {
+    "sha256": "43ed0c4bbfeceb5a0c3ac171572665fc57a0d011fbf137ad5e5f2272f7eb5c53",
+    "inline_tests": null
+  },
+  "nanocodex/agent/session_index.py": {
+    "sha256": "cf2a6657492c285ed8010dc22277f94c98fd6da334637f7d37c7bb6c4454b943",
+    "inline_tests": null
+  },
+  "nanocodex/agent/skills_store.py": {
+    "sha256": "eda5efbc35045735cc952d4c49a01e787a3bdc6405d4c2ff0bc7c565e308075b",
+    "inline_tests": null
+  },
+  "nanocodex/agent/slash.py": {
+    "sha256": "47776fef47609d7a56c5807b37c3e1199715cc00250865294a5ba6bbe9cd4167",
+    "inline_tests": null
+  },
+  "nanocodex/agent/state.py": {
+    "sha256": "00eaa37cdaa04cbd355a933525c2f3a1d99877a5f93f8ff610317c6708a59f9b",
+    "inline_tests": null
+  },
+  "nanocodex/agent/store.py": {
+    "sha256": "5c90caaff5bc8e77439d296a3083b909873064d56237b4d1cb6b3e8d6c47f446",
+    "inline_tests": null
+  },
+  "nanocodex/agent/task_graph.py": {
+    "sha256": "bfc6a54cb56eabaf868aafcb419e23dd8a8395f45b06e7b253e7b5d6cc68e9fd",
+    "inline_tests": null
+  },
+  "nanocodex/agent/trace.py": {
+    "sha256": "2a6558fe69dd5b7ebf4e7ffbbd8c74c1180178a7945d2ed775748b2982a4a201",
+    "inline_tests": null
+  },
+  "nanocodex/agent/verifier.py": {
+    "sha256": "6e2493a3bded325f967dc5f6cf90de672455b94ede8d0a200fd6334fb8a310f7",
+    "inline_tests": null
+  },
+  "nanocodex/agent/__init__.py": {
+    "sha256": "37e2f31b89fca107d40f38a7629b9762008fb1cce5627f3695d0ca1bf0d3b403",
+    "inline_tests": null
+  },
+  "nanocodex/builtin_skills/code-review/SKILL.md": {
+    "sha256": "e23553d5a9242b095faf1d9c18fd6f6d1c4adaf38330d2b419f9a66cd58db1db",
+    "inline_tests": null
+  },
+  "nanocodex/builtin_skills/debug/SKILL.md": {
+    "sha256": "6281ab2881cefa37612255f45b4d819defe70086b0fa1b52ba1453ac3cd8b19c",
+    "inline_tests": null
+  },
+  "nanocodex/builtin_skills/write-tests/SKILL.md": {
+    "sha256": "cd59dfa22642ee8c9e4dd8e9aa7e7429d2c78dffb4bab75481007c4e166ff2cf",
+    "inline_tests": null
+  },
+  "nanocodex/provider/base.py": {
+    "sha256": "642cbab9d6a59d6301ea8c6571dca50eccb599452ad8cf1b3770f4058daedf93",
+    "inline_tests": null
+  },
+  "nanocodex/provider/deepseek.py": {
+    "sha256": "4551caf8ace6dc495430e6f39b048a7fbdc64119d5daae3b5519671040872076",
+    "inline_tests": null
+  },
+  "nanocodex/provider/__init__.py": {
+    "sha256": "07cee73b82a8298808dd4d03ebd4f56a094cc5db08f56a9b66f2e69abe5d5741",
+    "inline_tests": null
+  },
+  "nanocodex/sandbox/approval.py": {
+    "sha256": "e0d85cac276a1b34cd4ad0fa442723db1952a6db0543f0b8226f0470a6e2c01b",
+    "inline_tests": null
+  },
+  "nanocodex/sandbox/executor.py": {
+    "sha256": "00a751ce9ca8d0e5c665dbcebf2067c1d537e3e24d2061d7234af9b6c56861c8",
+    "inline_tests": null
+  },
+  "nanocodex/sandbox/policy.py": {
+    "sha256": "c236158a971edb061cb7f19ea22aee13cdf23025f7ee494d05079d88789f3859",
+    "inline_tests": null
+  },
+  "nanocodex/sandbox/__init__.py": {
+    "sha256": "150e482256d9755eb2cc5c0ffd9d41e038c00ee1424cc73bfded93849cc5ef8a",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/clients.py": {
+    "sha256": "4f9f27a6aceb5ff1280c89cbbd911e4a987c620d3813bb378eb5d072964fb631",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/models.py": {
+    "sha256": "1c5c79514db3c29e469b4abab8df48374a1210ab48e788a2b9934571c2fb0fc5",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/pipeline.py": {
+    "sha256": "14ef599fa081040ccaa1c7181195ec544f70a4bb77ae7084e43fdf4614930f2c",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/__init__.py": {
+    "sha256": "b11492387a9b04566fd494f1b49f0a1bd802b3178405164a8d852511b9767695",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/prompts/analyze_image.txt": {
+    "sha256": "775b1775cc9302b2c43054ee0a8c7173110ef265fcf672064ff80d74d0d9f064",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/prompts/check_continuity.txt": {
+    "sha256": "2e8d22c8441b9f55a6fd9c13185a1c357668dae8bc9f3b098d0a0539fe684fab",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/prompts/plan_chapters.txt": {
+    "sha256": "dec1f40c4c3eacd19ecfa14eae2dd63c9e5e71feb055633182cf87b0e06da56b",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/prompts/plan_storyboard.txt": {
+    "sha256": "c9537ac8b2937cab050ff0e62ba84c24493b40b44f1eeb2e97815efbe96857d4",
+    "inline_tests": null
+  },
+  "nanocodex/storyboard/schemas/project.schema.json": {
+    "sha256": "caa0dc7b2e080ca968b346f247947f1b5adef11b7c9a3a7450700fff5d24d2bb",
+    "inline_tests": null
+  },
+  "nanocodex/tools/apply_patch.py": {
+    "sha256": "4b688c61afeb056683068a09bd62fac77a2cb75975e4b91f85d2fcb5d528f2ac",
+    "inline_tests": null
+  },
+  "nanocodex/tools/base.py": {
+    "sha256": "fc0ebc7963109e137e9fb5a945b3f034cf2a8242388c34c0cc6a29227fb8789a",
+    "inline_tests": null
+  },
+  "nanocodex/tools/marketplace.py": {
+    "sha256": "060c239f01145ed4cd80945dc09daa358cc0ba7d0f77429021bd3dbc76b91df5",
+    "inline_tests": null
+  },
+  "nanocodex/tools/mcp.py": {
+    "sha256": "c0fee14b74a5c547af45d78325cae41712773b1c3c403b504db341a9eb6dd3f1",
+    "inline_tests": null
+  },
+  "nanocodex/tools/mcp_store.py": {
+    "sha256": "ec4312e18481dac8c2c6ef5e2839d87b010c55603f333eb1c918e1fa027a5c6d",
+    "inline_tests": null
+  },
+  "nanocodex/tools/patch.py": {
+    "sha256": "559a9e21ab1d49a451e0351f1d9ddc118c3a8f928ce0c297e219a2518787e716",
+    "inline_tests": null
+  },
+  "nanocodex/tools/read_file.py": {
+    "sha256": "02579788d70504931d38cc63022d9e68db9ff104cb297e4a1eb6aab52ce63bbc",
+    "inline_tests": null
+  },
+  "nanocodex/tools/record_fact.py": {
+    "sha256": "9c88f5c29a43163d2fe3cfde4b73339f18b2b22d7a0e99c2ee00aac9e3a641a4",
+    "inline_tests": null
+  },
+  "nanocodex/tools/remember_tool.py": {
+    "sha256": "56e82afa5b67b28b22e18c629c72d38c33064e294d0755d83d0192fa2f6cc02c",
+    "inline_tests": null
+  },
+  "nanocodex/tools/request_verification.py": {
+    "sha256": "b2f5b25df4eaed9f65a5af062b1f38d782b92bf7a703a524ded78a657fc0161c",
+    "inline_tests": null
+  },
+  "nanocodex/tools/schedule_tool.py": {
+    "sha256": "ccecdc3448b7cdbd5355877741743fecbf85793806682b0a5d7f9d396459d006",
+    "inline_tests": null
+  },
+  "nanocodex/tools/shell.py": {
+    "sha256": "430c5900cec5110a8e07b0ca3cdf49f32aed858be6eb411ab45dbfa8e5655032",
+    "inline_tests": null
+  },
+  "nanocodex/tools/skills_tool.py": {
+    "sha256": "2f92e652326f85173d3a9029a1cbe9a4a831a0bf137923aef1481e076f89ef3c",
+    "inline_tests": null
+  },
+  "nanocodex/tools/storyboard_tool.py": {
+    "sha256": "84111c2f4dee1acc37d88fc3c91e4e3407ba1a748e9e3eb21ddb2e5ae0d643df",
+    "inline_tests": null
+  },
+  "nanocodex/tools/update_plan.py": {
+    "sha256": "1a5743e90c9da891ef3276a0c6b68347e322114aa31acb810345a6ac346f5fa7",
+    "inline_tests": null
+  },
+  "nanocodex/tools/web_search.py": {
+    "sha256": "fea0fb3dd79cf918e49ea871e547a1e9c809b7ca642e1ba4e50764d8934ce91c",
+    "inline_tests": null
+  },
+  "nanocodex/tools/write_checkpoint.py": {
+    "sha256": "3bf548929e6aef411507715cbe2ba315aa7e56488ae07345ccba702e5ec2f46a",
+    "inline_tests": null
+  },
+  "nanocodex/tools/__init__.py": {
+    "sha256": "066db6cdf3f7565dcb0536678f71087f00d16c09549646d619e133f163726c10",
+    "inline_tests": null
+  },
+  "releases/.gitkeep": {
+    "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "inline_tests": null
+  },
+  "releases/alibaba-media-generation-0.1.0.zip": {
+    "sha256": "fe85134b0fcbf76a4110424fbb64f1bc5baca97453d3322562c40016c5721a11",
+    "inline_tests": null
+  },
+  "releases/BugleCat-0.1.0-windows-x64-portable.exe": {
+    "sha256": "934d2d7467ba84b89d696bac169d73d9e652cfe8bc57c36185b68b52b6e75a22",
+    "inline_tests": null
+  },
+  "releases/BugleCat-0.1.0-windows-x64-portable.zip": {
+    "sha256": "5c3608b76b73fdcf95700517e842747bf90c6779dd2821b68f9545aa5f818e41",
+    "inline_tests": null
+  },
+  "releases/BugleCat-0.1.0-windows-x64-setup.exe": {
+    "sha256": "0408da2cb7548ee203383d3487498be17d64ff77da2e7342dfc943ddead37362",
+    "inline_tests": null
+  },
+  "releases/nanocodex-0.1.0-x64-setup.exe": {
+    "sha256": "de85282b9294bfdc6f04e03db630bde69268db07457fcf6c8afeadda35c889b8",
+    "inline_tests": null
+  },
+  "releases/SHA256SUMS-BugleCat-0.1.0.txt": {
+    "sha256": "192a69a312acf9184ade6bf308caa3beffc9f0aa081f9b508bac24bc3f1401cf",
+    "inline_tests": null
+  },
+  "rust/.gitignore": {
+    "sha256": "2ab533b44059527e7b2174f27ba1725677836e58565291a13918b0352df62650",
+    "inline_tests": null
+  },
+  "rust/Cargo.lock": {
+    "sha256": "1f93267b9a9efd8fc7b4fc722fb3bc157ced3985006bf911f862f0c57c6c23c3",
+    "inline_tests": null
+  },
+  "rust/Cargo.toml": {
+    "sha256": "ce0eaa37f8a6766ebf259ec445771b331115873c6105797bbd6f613453e5899b",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/Cargo.toml": {
+    "sha256": "1f08a892c5c154ae650148652a3565f6a97a583c6816d50c1726a9bf7ddeece2",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/adapter.rs": {
+    "sha256": "a983b88f67f813da9a554c4875e602fd7bb4738c08f196c42f788ed2c7b93df1",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/goal_driver.rs": {
+    "sha256": "1a3dca912ee7ace6a48f2845bd772acdd20401d41324a62a0875b348b02c81a4",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/goal_driver_tests.rs": {
+    "sha256": "b905fa23539690ad2710ed43dc6db196b6b3debdb046aea0d53c7c549bd322fc",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/goal_operations.rs": {
+    "sha256": "4b0ab9581a650bfe5e78ebbe197197c7c9a25ca211fb2b6ddd89f7f6e8d853c9",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/lib.rs": {
+    "sha256": "e2f62835acca067c873f2d9fc86a2679d80c13fc2dc0a154b6304205679b295d",
+    "inline_tests": "6379c6cab1350dd6a8b20d7ac1fc02a6c880c940dedb1b1fbd668e9d3c5fc86f"
+  },
+  "rust/crates/ncx-app-server/src/outcome.rs": {
+    "sha256": "f540c58d210c793a3f3d1538e08db9697e203429e5d2a8534afca7a42a5d8eaa",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/profile_race_tests.rs": {
+    "sha256": "8ce54f7fb6c65749435631bce9f5ef1435dc0afd4e6c799f658b81ed9292d1cb",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/runtime_memory_tests.rs": {
+    "sha256": "e82c18ae446e9a319b26324c3fd2ba09f2a3d887dca3b08de3f881baed31bd36",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/runtime_operations.rs": {
+    "sha256": "abdb42f6cdde4bc25d1d1469f98f0bdcd7792581632a930a684cdfa9f1b04e24",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/runtime_tests.rs": {
+    "sha256": "6a12094bfdb4962cab48fa28ce611f1b1bf060a535371476513bdd71763e8749",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/tests.rs": {
+    "sha256": "f62432cc14b4ba381e14514872b11008776fd8bceb3acb46f899da547d335f8c",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/thread_operations.rs": {
+    "sha256": "8a203e7eedfdd50cd4553105cf5774b658b7c3dae4fa9b9df8a94bd648a83044",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-app-server/src/thread_tests.rs": {
+    "sha256": "0895526c12d00460566bd0010189c9c5d27687f6965ba8ef2a76156c595b78f0",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-cli/Cargo.toml": {
+    "sha256": "6155f29bf97668ddc662043b041ffe13c672cf75f8662b2ccd1496e62e6c6dc8",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-cli/src/args.rs": {
+    "sha256": "906783e03f0b6ba32179dc2cce835e454ea11b85a7bc552c2f4316699e54708c",
+    "inline_tests": "ab384cda529aada81ee727d7f9a73dc1b35dd4c02925375a794a836f141ddb22"
+  },
+  "rust/crates/ncx-cli/src/cli_app.rs": {
+    "sha256": "b4cf242bd5539bee00f007f9a0f11501362e245b804bd09deb0787255d077fd6",
+    "inline_tests": "71bb49bcdf3e42f3545e92cda82a5ea3273457799ee3c8d51fc2947366ec60dd"
+  },
+  "rust/crates/ncx-cli/src/command_support.rs": {
+    "sha256": "127808976d327b667c04b111817b103b66cd50d9978b13b6b758dc0d7d7e7894",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-cli/src/main.rs": {
+    "sha256": "d01d552222ac5ce32a320ab78dfd0b08051a40fe0c872050c27e484823119155",
+    "inline_tests": "d08793de9b895426a7b342e847ebf5c79f8d5272aede4282c64f2819987a121e"
+  },
+  "rust/crates/ncx-cli/src/main_tests.rs": {
+    "sha256": "66fee1d2556bcd40ca3c4d7c83f3b1f3f7475ec9fcd1bd9ab8434891ad03a33c",
+    "inline_tests": "60584653f57326869c303ffe9840e8b8306330947d39219e8fcb5f5927e958c9"
+  },
+  "rust/crates/ncx-cli/src/runner.rs": {
+    "sha256": "fb45da14aa6cfed8b2a86c703e2b0123511cc94c47928c7d9394b544c6299a3c",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-cli/src/runtime_support.rs": {
+    "sha256": "23a6979e44cb0a1297c8d00071b897800f8cfccc6728002a47133cc80cd4576f",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-cli/src/session_recorder.rs": {
+    "sha256": "2b0de1613f0027564fe7ec1791648b16c3774079e9a5a7b06793f9d4d995e5c6",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-cli/src/usage.rs": {
+    "sha256": "012324df2967e4db4219f352f5220600eb57badff146018ed306922b9154de49",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-config/Cargo.toml": {
+    "sha256": "bbfd4c3c2fc09192ac9a24a983d38365d3bf5b6cc6f8c960a7e57b4383316731",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-config/src/config.rs": {
+    "sha256": "4c12efb92277cb3bbba3ef78390d49c0899946a01e63c20e830006e0607f2e51",
+    "inline_tests": "8014a347eb0bf5c85aa3d89165753a365733dcd552593267d26ca8d7ee43af61"
+  },
+  "rust/crates/ncx-config/src/lib.rs": {
+    "sha256": "e2406fa6be038e1a91b99e0731c54b30f893c157469f5cc9d67c1795ad836b4c",
+    "inline_tests": "0b11f454b989012eab4a00ee9835d0b781648ecfb165aea2b20c4314a22cfdc3"
+  },
+  "rust/crates/ncx-config/src/loader.rs": {
+    "sha256": "14b7504b1a4997cc8254c1bf07ac98f6da8a120674cbc9020d5fa45cae9088c9",
+    "inline_tests": "89de45fa28c4a71e2efa117eb8678373f78c8495402d6e4d6298b337c22c15af"
+  },
+  "rust/crates/ncx-config/src/provider_directory.rs": {
+    "sha256": "0522724b2fc7146fe1cd1d561113a0d78768644fd65f613abac057ce785ef3d7",
+    "inline_tests": "a75dc73db211eb781756c2360ea614e6623273738caa56dda69468ddc7b35367"
+  },
+  "rust/crates/ncx-config/src/test_support.rs": {
+    "sha256": "8a48a3573541c11ad6856084f7628f3a23f5a88db7c3091fb61884ed1a989689",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-config/src/writer.rs": {
+    "sha256": "4da3271532f2a3ec24dd5367380ac6de330da578d4ffaa3e896eb05f7f786aff",
+    "inline_tests": "0d1c9ca20a8893470886db8f634bfe72a7d1771548d24caf871ddd6dfe5e6161"
+  },
+  "rust/crates/ncx-config/src/loader/sources.rs": {
+    "sha256": "24cd54985d5b9cc83e5ffe19eb5cf05aa5c2c454ac8892c2dfc48fe8cfa629c4",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-config/src/loader/tests.rs": {
+    "sha256": "401a112321ce524a410bb54cc97b7e531a4688507807e620541770ab8fc68527",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-context/Cargo.toml": {
+    "sha256": "45c7216f9458cea442ad862d36f599c3e81beb2cab07f24aeeaf6a3c7968905a",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-context/src/lib.rs": {
+    "sha256": "5f78a490b24551b65b46451e92abcc12925f91124d8733b915ce7da7569c7691",
+    "inline_tests": "32e015a6fab9aedf07ebffc9139e50546b896dfb00cb4ec762eac3264ce0439e"
+  },
+  "rust/crates/ncx-core/Cargo.toml": {
+    "sha256": "e64657e9756d213a2c11505c657ba23bc41a593c9869de6f1d939a8c53181b63",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/builtin_skills/commit-message/SKILL.md": {
+    "sha256": "cf4f2d7098859cea5c30977313cc020e18eacc85277f483b3b9f7fa4d6a78bbd",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/builtin_skills/dashscope-image/SKILL.md": {
+    "sha256": "3557c3c94be78de8b78549d0ca2b1b18c7d4829e3502bdfefe2fe8fbef16c38c",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/builtin_skills/dashscope-video/SKILL.md": {
+    "sha256": "afa233c55d62283b2239c8450466211b3a5d05712709416b6fadb4dc2f2d5adb",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/examples/dashscope_media_smoke.rs": {
+    "sha256": "550fdb5742c5ed8c01c2cf4723fc4435dc206220a8554acde6bb561a7bab0ca4",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/examples/live_agent_soak.rs": {
+    "sha256": "fd54faee3c33342bb44b6b7719c4c01b1984911084a70e57c66dec1c6b8135af",
+    "inline_tests": "5ef62ddc256bad903ddf768a591f42037413df9f80da1cffd48719b01ee1e9fe"
+  },
+  "rust/crates/ncx-core/examples/live_agent_tool_soak.rs": {
+    "sha256": "0e3e53372a95d30f9c68602e5e1819b8f00f314875128cf779a26a422786b171",
+    "inline_tests": "a042708dfdcecd5945df8d8c33d56d80d433665b18790c021fec2ae49d0e22ab"
+  },
+  "rust/crates/ncx-core/examples/live_lsp.rs": {
+    "sha256": "9ecbdb391e40fbaee990a5a201ad98c08ae428ccf756be1eaace089b0283656a",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/examples/live_web_tools.rs": {
+    "sha256": "8e0f086f7265498588bfd66dafbe11aadf07f1269cca70c44e1b3036d2655480",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/agent_loop.rs": {
+    "sha256": "b1501856fbc6960c37117a19a87902337ad16dfb0209e427c81fd449a2cbce36",
+    "inline_tests": "ed6a6ed2629a5e28fec619c5e7f030309b98af77d33e77afa1fd47782e131c5f"
+  },
+  "rust/crates/ncx-core/src/checkpoint.rs": {
+    "sha256": "37b88d85476db41f5df9384754f7609dde2a245a2e7246b25cfba8ec2b3b176c",
+    "inline_tests": "c8b24385d2d019e89d7cee4673316576c207a100b34faabec8343cc148ae83a8"
+  },
+  "rust/crates/ncx-core/src/custom_commands.rs": {
+    "sha256": "d90e175bc4c6f86ee8948e93f9768fdacb38211913d213c28f5619d12c9141bc",
+    "inline_tests": "794d2ecca9054ded2b506d1b9404a4cf92a4429ae645f1f3412319c670297916"
+  },
+  "rust/crates/ncx-core/src/editor_tool.rs": {
+    "sha256": "f2cabe1b3accac82aaf935c5b39a59fd984f38efee3fae809b7ebd233d776619",
+    "inline_tests": "8e407001d5b336409dbc8f8c56349ee32970750cbfe5c7e6d634448cc1949286"
+  },
+  "rust/crates/ncx-core/src/genome.rs": {
+    "sha256": "b11815884b0924c8f75c752130a5833c72089ee71c6b1f4e76dc251d627cc097",
+    "inline_tests": "82f43699fb7fd28d0df5e59fe2f381d2114042a3e9b1b79c77cdd0a46c7a6a1f"
+  },
+  "rust/crates/ncx-core/src/goal_tools.rs": {
+    "sha256": "e9c30069a737f8572fa9ddf3506d5f266f025c6f278933ece827f46331fa5161",
+    "inline_tests": "d827f406e281f2270dd111de480b649ac3103b5ab54bcc3f7cdbbaad7b1cd4d3"
+  },
+  "rust/crates/ncx-core/src/goal_tools_tests.rs": {
+    "sha256": "b4814d3c8f1241ef8bec44612b981855f3fb1cf1bd98ad78a759c113866ef299",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/hooks.rs": {
+    "sha256": "97d63ac4c0809cf82c56d9f4089266028591a12973d752648660626ac933ecc5",
+    "inline_tests": "dc2935b9b7f7f3f03f91354a2f7e5dfb86559ec8f15757c67fe15c36c6c72a4e"
+  },
+  "rust/crates/ncx-core/src/isolate.rs": {
+    "sha256": "b8593b61a8a934e3730a12bf0e06a6f94bd483e82cebb07c0f4784f639d5189c",
+    "inline_tests": "b9d275839a6421ba759717a69ab3f1d79bddc74693df8bc655f9dc5d65fd4afd"
+  },
+  "rust/crates/ncx-core/src/lib.rs": {
+    "sha256": "f573660aacc5579138a102a77c213d95ac3fab3756fe797ea13c449ccfeb77e9",
+    "inline_tests": "4ec56d0290820bb951bb9aed8ea3662df63a84449add7b818033363bb6d90852"
+  },
+  "rust/crates/ncx-core/src/lsp_tool.rs": {
+    "sha256": "f1efa053b305577c8c618c51af7a0793cf3ea87a055b74fe9410576c92fa1ed9",
+    "inline_tests": "ac047c435edeab8ee7dd880017e9d0f2108d07dfe2d6098b4c767be44b2f8710"
+  },
+  "rust/crates/ncx-core/src/mcp_tool.rs": {
+    "sha256": "d8825d0e14af7f39d12d5dd1a428dd62f7f2e5b4df2be5d886f76926c2921838",
+    "inline_tests": "14c69dfaa563f00c584870b0949305be76b02949be15cf4fffbab82c503edefa"
+  },
+  "rust/crates/ncx-core/src/media_tools.rs": {
+    "sha256": "2cf9c10727c51e08394d9114c420c5860a534334f568c8032708ff506bc92b92",
+    "inline_tests": "ad8d3a3c13f73d19d94ec4966506b0f4404086c2bd5fdceb526bd43c2f9a1cff"
+  },
+  "rust/crates/ncx-core/src/memory.rs": {
+    "sha256": "1e3c5f75cc5500c15ae42be90f1b9ab3dff85ae4d51985a1e133d7cad8b96f83",
+    "inline_tests": "047a61c20be8aa3778539625c8126a70e865b96cf4466ceadfb3e1e848872fb1"
+  },
+  "rust/crates/ncx-core/src/memory_merge.rs": {
+    "sha256": "3ddb06f435289e6cb5576ab89aad6baac388c27a9d7ba6e8dc94770e6a2217e3",
+    "inline_tests": "fc2c14829eef712eb7e002f9e673459a17122d366cdffa0a54a550b015f03a64"
+  },
+  "rust/crates/ncx-core/src/memory_summarizer.rs": {
+    "sha256": "1d5b45b112ac7dcac20a61b27b360bd9399d0d3a8a8e78af7925b9d211abea0f",
+    "inline_tests": "1416d635ffc4094758dadf77d6b7f44a33fbf8b430bffa7e12adb9eed9a59c8a"
+  },
+  "rust/crates/ncx-core/src/mentions.rs": {
+    "sha256": "993315d948f530eb1dac0b6bd832fd748ad183949c56bc0b05a8f7244c5d82aa",
+    "inline_tests": "f26f757377715159155be12a8e941df018ed378b2075a23462fd1213c47f551e"
+  },
+  "rust/crates/ncx-core/src/model_provider.rs": {
+    "sha256": "db721f9fc64fa58292422b5ad48393ffb42d7d7f51e8a407de27df2ce45adc4f",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/orchestrator.rs": {
+    "sha256": "ffce650fb40a668e63a8f724dde944b0312c8b991c0ff30d9c1fea86b3686c64",
+    "inline_tests": "b759126bfc14a71893c3509ee50043ddbf19658a467dd673d1efd6af14b48db6"
+  },
+  "rust/crates/ncx-core/src/orchestrator_runner.rs": {
+    "sha256": "ca048e5cdaef818b1bc86828779a0c2580f972137b7362ecbe38f6f45cb5c66f",
+    "inline_tests": "a3ae0eca6015711dbf18250f7e84a0a64bb49945ee5b9e0d1eb922bd297c4e30"
+  },
+  "rust/crates/ncx-core/src/plugins.rs": {
+    "sha256": "8f8b44758e2608268e3fb63f34b637e27fadc45aae0a7af0a90a500279c29263",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/process_tools.rs": {
+    "sha256": "5ca65ce120410bb4757d6ef92578863b8fa3bf367aee7c5cdfdffccf6eca8822",
+    "inline_tests": "eb7b146b5efaf16634c41c4ac43859b9601f512474b716d3048a71f8020f4e7a"
+  },
+  "rust/crates/ncx-core/src/project_instructions.rs": {
+    "sha256": "ecca8ead43a860a8292de4008bac70051c0155d97296c7ba35670c9bf15d1d9a",
+    "inline_tests": "b3d34ec07d500e8de0e8f3e6a5be8a0e81c4ad871501f9a51d10dfe698ed95a1"
+  },
+  "rust/crates/ncx-core/src/prompt.rs": {
+    "sha256": "e914914ca0fbb3afcecce84966227e98fa15998a03cbca6c5708ec749391c80b",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/runtime_assembly.rs": {
+    "sha256": "6bb5869b4ab31c4f8f2c1390a346f4e30357489f7aaaab56175f556eaaa5bff3",
+    "inline_tests": "8eaddb6e84d5f652c2e2608b35c27dd2c31a7d36a8600cccf803b9cbb4f38705"
+  },
+  "rust/crates/ncx-core/src/runtime_profile.rs": {
+    "sha256": "b216fec7a035551e8ddf3794595e6b2ff2fbd2d469db01d623854a0ac98b828d",
+    "inline_tests": "69261d7f2a6154506427e5404bb7b63d68dd753f3d958165069bfb86fe1ee2dc"
+  },
+  "rust/crates/ncx-core/src/rust_analyzer.rs": {
+    "sha256": "0a1e586a3fe8fb5008601cf784f5ff83f500e52fa4a76afd978b2f7010a4d459",
+    "inline_tests": "6c59b920fb69b170f8b8b43e9a169d0711c642ce16e308e27fd2ca12f5c4745c"
+  },
+  "rust/crates/ncx-core/src/search.rs": {
+    "sha256": "b9cabacd3db64fccfea0fc0c9f1f69314604cfedd996ef72b6138383df5103e0",
+    "inline_tests": "8fc33a10471e3fa8787eef6e89497b7ff7158df97c6bbcc510d19f69b5d4e4bb"
+  },
+  "rust/crates/ncx-core/src/search_tests.rs": {
+    "sha256": "36e543096f56dfed0c14ff982f4d8a1b2698561a04d055f5c887b5e602633160",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/session.rs": {
+    "sha256": "039475575b00e77703a94bf5e1a5f95b561b6b674ec621c021307168c4df4c01",
+    "inline_tests": "6708b63e319c8afaabbd96771b0aa4abc9e1478d9f35733ebec9234de919e5d2"
+  },
+  "rust/crates/ncx-core/src/session_index.rs": {
+    "sha256": "8bd763874d8448a08cbcb58762d84fd8b0b7470bf788b5bc7d9198b4d8c846dd",
+    "inline_tests": "584e249878923ad36173a33233e3aa874c6b7b1b35d48d86658d91710d2767af"
+  },
+  "rust/crates/ncx-core/src/session_index_tests.rs": {
+    "sha256": "c4e97af47ac62dc1d42f73783e5adc373391cba320c2a8e28233436cea223e13",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/session_query_tools.rs": {
+    "sha256": "df30b78798bcd7c90e80d801964e052b44684da0e67cb6e958c8d89fdf871742",
+    "inline_tests": "4964c0acdaf859afb9784d27e1ca64636ebee363eac8864c6154c0e660e4cb9c"
+  },
+  "rust/crates/ncx-core/src/skills.rs": {
+    "sha256": "d19df6f23a4f666db657a5615800d7770e4e6a7318a768317eb4913767fa01d1",
+    "inline_tests": "4a70c54f90901c6a74734441e8fc04c358b5403e40a2f2a344ef1c7b40120e4f"
+  },
+  "rust/crates/ncx-core/src/slash.rs": {
+    "sha256": "00aed527200e90b955f93227b254420bf78464f00629d8ddcc7938588d84345f",
+    "inline_tests": "26f35f68a787ba8432006268ffc3a2de1085d5d311dd8a7847b12a217ac71c86"
+  },
+  "rust/crates/ncx-core/src/terminal_tools.rs": {
+    "sha256": "067a55228792ee12d4b99919884439bd47632c85b29d66d5b76e44b445c07dcc",
+    "inline_tests": "d23723e7a424877cddb8ea5d0e96486758e5d1fc584965722ad55527b53932c1"
+  },
+  "rust/crates/ncx-core/src/test_support.rs": {
+    "sha256": "88497b9d02ed7eabd6f3417ed83cb5c244d529265e05e98552f4c7d19bb577a4",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools.rs": {
+    "sha256": "0f3ff990a0de572faf64d8876fd4a1108a2a5b71d7c8de04359b92af936cb03e",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tool_middleware.rs": {
+    "sha256": "cba7768d19f53a4c177f31a325eae1a6041f3cd61dc62128941b936bedee5838",
+    "inline_tests": "58959805698abdb418cf9d6e3b7d6b718b4e7fc6f7e005dae74eeb8e4cb23dd2"
+  },
+  "rust/crates/ncx-core/src/tool_recovery.rs": {
+    "sha256": "c5e77786db32d59a5770329902de9f16926742b026c0feaf3f24058451faf907",
+    "inline_tests": "6eafcd24bfdfb37f383bc2d6f0271b7f3c759ec4a845861a86b984819e073eac"
+  },
+  "rust/crates/ncx-core/src/tool_scheduler.rs": {
+    "sha256": "23509a547f2eb713b8d8802d1aea0c18bb7d6181108893e89a9f24e8dd111f6f",
+    "inline_tests": "fdc4911a91a9977fecb3110bd92f0fc8d46fb3977eae56e338c6b135dbc34a49"
+  },
+  "rust/crates/ncx-core/src/turn_context.rs": {
+    "sha256": "213588e666598fc1425dc79fbbd4170728c5105b91c993b1e4e11645bb97ddab",
+    "inline_tests": "d20bcbd99d65a16d565159fbc59f641bf9efd1bfed6aa036d383c2cfe27352e9"
+  },
+  "rust/crates/ncx-core/src/user_question.rs": {
+    "sha256": "cbf47e709bb44a55ccc430eec122b779ddfa3ac2c86a33c950ceda5655c1a25b",
+    "inline_tests": "8565a367dc8c94e8d52c8b59080f762f3ea2cf5e22a6bb044db5902d283a693b"
+  },
+  "rust/crates/ncx-core/src/workspace_promotion.rs": {
+    "sha256": "87abce82721ced8a6ca06fcf9d88644de749aee28d6788f57d2e17d04ab4ed39",
+    "inline_tests": "acabda3124b11355da19d9651f35772aca382bfd27e46df898bfa19cb2389e12"
+  },
+  "rust/crates/ncx-core/src/workspace_tools.rs": {
+    "sha256": "538a6510224b11bb8dbad8b56bafb5eaf1eacc018254dd832db68b889db68854",
+    "inline_tests": "13aa884dbeca4e68863db83bc588c0a807be09405001794484bba280219d5770"
+  },
+  "rust/crates/ncx-core/src/agent_loop/deliverable.rs": {
+    "sha256": "9e5d11bb01c0ec6cec3080c171fbafaf0c2ca77b7665b92b8317d2496a3cb8b3",
+    "inline_tests": "9c712a8d9ef40103151b98ba2044f25c9fa41fdf45d3bb717ba2cf55703a41ad"
+  },
+  "rust/crates/ncx-core/src/agent_loop/tests.rs": {
+    "sha256": "6d05d971f23fa0159a7fca7f34fbdb9a35c5ccb97044d891228f94259fab4109",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs": {
+    "sha256": "f5b72d5d172381e5a5d7f0bd02f7052c5ea1ecb3f201950fbf2f45e595c82606",
+    "inline_tests": "69c9ab3abeeeee822e2274fdd8a6e1c5f33234db47a65f26c3b63048f7468963"
+  },
+  "rust/crates/ncx-core/src/agent_loop/trace.rs": {
+    "sha256": "52a497dce9fcd9de4a974388015d493ef9562c551b45f5f8c6a91cbf9e41f083",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/agent_loop/turn.rs": {
+    "sha256": "b3dc7a8b61e08905b51cf042c2a45257630038128ec5147d9f594cbce5c0586e",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/agent_loop/tests/basic_tests.rs": {
+    "sha256": "352d447db06a3a3c28d42243330ad768729937085794d99c2951dbfa30e58f79",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/agent_loop/tests/runtime_tests.rs": {
+    "sha256": "b3c2ea6b03fee473e4a7ab69f10b4ae8c5b4f3ea0725968faed67ff0c793d04a",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/orchestrator/control_tests.rs": {
+    "sha256": "2ee3ea80be230a4ffbe4e03f12756b7ac12c482c50a03a3a0602aa36692c877e",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/orchestrator/support.rs": {
+    "sha256": "def57c5c70e3983e877c6c0ab486b17b2ea07a53c1fe30ab01985b32924c7a1b",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/orchestrator/tests.rs": {
+    "sha256": "fb0c7808776c45b850aa5520072f5dc835127022109bf1d1784beb723fc884d8",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/orchestrator/types.rs": {
+    "sha256": "ba2fe330950db63d38a333c37ec5b9665621e5bbc2caa521b10308800ee54a5a",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/plugins/api.rs": {
+    "sha256": "20fb82306ddf42c9b588c4e9f8b8cef1af8dbce2fed18c556fdeb2c6bb52c163",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/plugins/builtin.rs": {
+    "sha256": "19ba2c3696b7d13db53c70d2b54c839af309eb77dad1c086b93f99b8b66fd4f6",
+    "inline_tests": "4d0fff12bb90ccdb2f382071157c6b3f401c0cc00fedf611a7836e61f8bb9195"
+  },
+  "rust/crates/ncx-core/src/plugins/composition.rs": {
+    "sha256": "5c0e707f01900d1cb38ece82e6eba225ed3c890419857ae191e2f517d7ada997",
+    "inline_tests": "ef7af915f325baadc3c438d781b58bcbd3da3de98cc9e2801b14aa6b0d2bb14d"
+  },
+  "rust/crates/ncx-core/src/plugins/external.rs": {
+    "sha256": "718a849027589416f78fecc7392c655211a68e3534193cd267908b4ae2488c10",
+    "inline_tests": "4203a8d74db820b94e9112124f659340732bc31716e7829b88d896327831f49e"
+  },
+  "rust/crates/ncx-core/src/plugins/manifest.rs": {
+    "sha256": "38bc5f8dedb61936fb9723e697b002529f50d42bbbbf86b4548b43b7b6ac29cb",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/plugins/openai_compat.rs": {
+    "sha256": "b30cfcb9f169a1703560a82a3339f6764f850b6e234c25f85c7f49157e1ecc98",
+    "inline_tests": "1d80475674f471550d2e624d795ec899ccea2e42cab1957ba5db59b9fb0593e0"
+  },
+  "rust/crates/ncx-core/src/plugins/registry.rs": {
+    "sha256": "1e6fed4868244daf5a974be973c429f9640ff6d649fca06c62fad3ad5f60e548",
+    "inline_tests": "368b2952011741b9c5a29cc3c332bfbf073c4b032302062843ac85f1dd25c64a"
+  },
+  "rust/crates/ncx-core/src/plugins/runtime.rs": {
+    "sha256": "f9fa91d6bb67973f025a2888db228d2c1a798f4955452c32f9599ef9f3fafcea",
+    "inline_tests": "787406e517fa75dc57de6793dc03fe13a5f4d717d34786650108a685e23d19ea"
+  },
+  "rust/crates/ncx-core/src/plugins/services.rs": {
+    "sha256": "20ba9a9f7c62c6922d9857387e4ccef99852418c909723e4602f3ed4f88a27c3",
+    "inline_tests": "5d07c1b2e6be0d9e42af7a89bbd4db384eb422293ece5d7e6140a139c959d0e8"
+  },
+  "rust/crates/ncx-core/src/plugins/external/protocol.rs": {
+    "sha256": "a6b3c0911e8e737c5420966155a1255df6cd1a979d9a33bcaf2f30863ee7c7df",
+    "inline_tests": "59bc6abb7e215aefef5c6d0ed2fe2d4908da598843d1148019854f156457df45"
+  },
+  "rust/crates/ncx-core/src/plugins/openai_compat/marketplace.rs": {
+    "sha256": "40193ea613ffea14b2ab15001ac5cd1632beeabb96163c5f4b4b904f16c5f048",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/plugins/openai_compat/tests.rs": {
+    "sha256": "013a99d02c7c25d53c06868717dc331b66185f13b99e934e9e7bbdc66a551e29",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools/builtins.rs": {
+    "sha256": "fc135f35e2cbceffb6bede1fa37ae519a70a700351514400e0450869adf80cbe",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools/catalog.rs": {
+    "sha256": "8b1c68dd0780c055bd27fc605d03ab6f99471f1e690b787a31c7f542540ad980",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools/execution.rs": {
+    "sha256": "1a3fc6b593ac86b30e8d6f6c495dd0819e1bef3f61af174d444e5e5e8d24df31",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools/file.rs": {
+    "sha256": "8173002cf3dccef325fbbc0ffdf1d6a35c04b160f79a12451915be38ca708d55",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools/python_check.rs": {
+    "sha256": "cd837d74507ccbae64c31317b1c52e47f345eea13cc99eeb6a4799e2c446672d",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-core/src/tools/tests.rs": {
+    "sha256": "be504b4da486970e4d9d11cecb85d80f14c1ec8c952e55f821a6eb967c102d3f",
+    "inline_tests": "be504b4da486970e4d9d11cecb85d80f14c1ec8c952e55f821a6eb967c102d3f"
+  },
+  "rust/crates/ncx-dreamina-gateway/Cargo.toml": {
+    "sha256": "47fb55cb9c8321ede7a460e779fdb1b91f3d5f83d711e2f493158b05a1e5d03f",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-dreamina-gateway/README.md": {
+    "sha256": "84834df7ffceece1d8bfc5fdecda2e901866673201b5819cfbaa5059e0d69dd6",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-dreamina-gateway/src/lib.rs": {
+    "sha256": "370193f2f5f9059ff41b0ff6319887005c5ac8d4369baa0f1bccf034f6095f34",
+    "inline_tests": "3c3099df8b4f054605f4a8a86d42198b96d16a0a2aead29cd1ca92ed33bb1d5a"
+  },
+  "rust/crates/ncx-dreamina-gateway/src/main.rs": {
+    "sha256": "f1248c34eff641e17a0f5f5b2e756fcc4d9950a648dd7703826a9c1db6097d15",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-mcp/Cargo.toml": {
+    "sha256": "6178e743555cb5a3f3d1ce2af7643c06a18f92ba6be5d9e1908dfc4418a14fa7",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-mcp/src/lib.rs": {
+    "sha256": "3e15d376e883b113b66d9e73734e4fdb3d52fbcbfe997a64b212c9d881f993ac",
+    "inline_tests": "1eb65ec450b780ac8ada834bfcd027c4154cc6394fe35dedc2772c08800ff558"
+  },
+  "rust/crates/ncx-protocol/Cargo.toml": {
+    "sha256": "1a586c4bfae21a8869e9bd91c902df2e109c45d9e6a26398dda95c759022c859",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-protocol/src/lib.rs": {
+    "sha256": "1b61ac0241a78afb84f977e8d354b14f3ac30b94489f07f2e6608931a2e1adb6",
+    "inline_tests": "6379c6cab1350dd6a8b20d7ac1fc02a6c880c940dedb1b1fbd668e9d3c5fc86f"
+  },
+  "rust/crates/ncx-protocol/src/tests.rs": {
+    "sha256": "e613a5d056ba5fc5d3e69637bde78599194c0d7e47ab7f6fb23fc9f863369f80",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-provider/Cargo.toml": {
+    "sha256": "aa719fb6fce8ec6132bd06b1acb6b5261aed3274a5eac251b4bfa46a6cd0898d",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-provider/src/anthropic.rs": {
+    "sha256": "a79b34c241a447a960c961fc8c28736ad062008b2229bde0b7112be4abf29607",
+    "inline_tests": "552cda0a4db3ba36f15f545be4c5052bba2a8c6be1fbeffcd0d7fdb23d362cc2"
+  },
+  "rust/crates/ncx-provider/src/api.rs": {
+    "sha256": "6967b8b66e7848fb90e791cb83424fdbafa535abe26596d8ce02be357c087199",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-provider/src/chat_probe.rs": {
+    "sha256": "56c5901ffe62c96a71b37d67f117a8a01c6bcebe55f9ac476483bfc1bf3b0cda",
+    "inline_tests": "310d495286521816c3aeff47196bc0a6474ca9837a927822a491653069c74d83"
+  },
+  "rust/crates/ncx-provider/src/dashscope_media.rs": {
+    "sha256": "32b6e609bb9f7ab41c8cb669df367361d7a9114466e3e50597e9fa4d34a99956",
+    "inline_tests": "750748f3528198294ad2c14eaae8e70148addf81b7ea7e138294a577ae07dc94"
+  },
+  "rust/crates/ncx-provider/src/lib.rs": {
+    "sha256": "fc9857d60bb47204a476641990b1b00d2fc5b53dc4081afdd7eeee452e0a880c",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-provider/src/model_catalog.rs": {
+    "sha256": "081f0eedcf41e8031532a7d6a098751ca62173cc23b5a43beb33177595048f08",
+    "inline_tests": "83c5549f5bfe2901f10e96c0ce0f7716988631c863b85eaccc9866ea1585656a"
+  },
+  "rust/crates/ncx-provider/src/provider.rs": {
+    "sha256": "7dcd94316ec23b1bde44bfa6751ee85f50b9c1af853924f4716c69767b8fbe4e",
+    "inline_tests": "39b3023fb61516c8d87c116693001d7567759fdbbf0bd50c1f92341f01c14c67"
+  },
+  "rust/crates/ncx-provider/src/request.rs": {
+    "sha256": "30f23d5b47430ded7a7064822b028411cd17d1929e7bab9d5fdb274b78a431c5",
+    "inline_tests": "eed3bb00f89cd3f1da9c6138f616c6fd8b7b1b7dfec020c7a54eb6a2c372a624"
+  },
+  "rust/crates/ncx-provider/src/response.rs": {
+    "sha256": "8c0ddcdae2982d1ff03fb11f9a1c12377ae9a29202a249b73c8b4fa27a3872ef",
+    "inline_tests": "23e63c3054d2cd9119d610809b82cab5eb3a93675b2c466fe1b4b73c2ca836a7"
+  },
+  "rust/crates/ncx-provider/src/types.rs": {
+    "sha256": "3f756b44dbf482cf19e1449e682589cdd2d10888a3c4a70d47948de0b2ad581f",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-provider/src/web.rs": {
+    "sha256": "b08940fb5267aee7d0052d6ee56d981856b749d1541d9f80a62cf04a00a79238",
+    "inline_tests": "9519109d963668339bfb00787d5556d21a0dd12c174553665b0bd7a71b751617"
+  },
+  "rust/crates/ncx-provider/src/provider/diagnostics.rs": {
+    "sha256": "95cdfff30b5fa9d74c3833a203c63fc77424caacf9626a1d3fde5d95f5fbbb9b",
+    "inline_tests": "1bd9162c0fa222ead5bf1d1ac6bcc04997cb590abef42db29ed19abc95cce649"
+  },
+  "rust/crates/ncx-sandbox/Cargo.toml": {
+    "sha256": "671d7c35fe1565d246f564700742ed6315d410d4e6116655a2d719c98dfee30d",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-sandbox/src/approval.rs": {
+    "sha256": "a79182b727d5bc9631afcdd9da35e93565288e06a21988f463dd578e0850a744",
+    "inline_tests": "34847645809eba012bf39a160a26158e6c082977573d91bae8da868376e1a07f"
+  },
+  "rust/crates/ncx-sandbox/src/lib.rs": {
+    "sha256": "e749a8492f3341ba327cf85ced105f5ae13f8c7b58dffe1d871ce26344aa248c",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-sandbox/src/policy.rs": {
+    "sha256": "64e04a4258af6f67fd601b20075dec431f9d7c8858a28dae7c50a668301f48ee",
+    "inline_tests": "9ce2933fe31848eb8918c3c548e69ee4a80bb4d659032cecd8f6ff959cb163c0"
+  },
+  "rust/crates/ncx-thread-store/Cargo.toml": {
+    "sha256": "540619d8571d48e565b4950f7ecfbe2572670744ae01ffd542c0dd88bb10cce6",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-thread-store/src/lib.rs": {
+    "sha256": "4ecf659f0532831f8a35a94935da8210ee75375a6a77d1db244b1cad90ab138b",
+    "inline_tests": "6379c6cab1350dd6a8b20d7ac1fc02a6c880c940dedb1b1fbd668e9d3c5fc86f"
+  },
+  "rust/crates/ncx-thread-store/src/storage.rs": {
+    "sha256": "86d17d6474a1886e434a4822f8a8bf1ad4064d8f0d55566b3fd26c53c18ad451",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-thread-store/src/tests.rs": {
+    "sha256": "63668be6369988f47afb1c1c3089ac4a8250a449e37355f0b2af6f046e9575a9",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-tools/Cargo.toml": {
+    "sha256": "398084bc06d8004a1f3939d45c09c5d67947dda9c646a42b06668a74bcccbfe7",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-tools/src/detect.rs": {
+    "sha256": "dbdb66e545f87773216f4f1d1b2c19772d1985974fbdbaec8c535360fdef76f5",
+    "inline_tests": "fffdb0a7b9964afc915242515e16dfa448f578cd487c477dc88d97921a23ba29"
+  },
+  "rust/crates/ncx-tools/src/executor.rs": {
+    "sha256": "5cc4a512652de1f09c52865a5d45dd360164940d54bcfa082a025edf7d2ae1c5",
+    "inline_tests": "b14f2f1a271988077a61960101d228e9c625412504c2d8cc21fe5c24d2507266"
+  },
+  "rust/crates/ncx-tools/src/lib.rs": {
+    "sha256": "542f9ac9027df80ae82cd405ba19f5c1e7f16e70887fe07d9bbc1b9f36081fa5",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-tools/src/managed.rs": {
+    "sha256": "5d697086a5fb6b764ad85ebbb7d4cab3fd5475960e6ecdd991879b41c363eb2e",
+    "inline_tests": "1d1cd3cc03ddf30e4a15343d7be0808b7201a6519b3e9c43c47ca2c18cf0159a"
+  },
+  "rust/crates/ncx-tools/src/patch.rs": {
+    "sha256": "3becd9050317ae966808d04ab25e33824fc76d97a19974f94dc8f10ecd9e7039",
+    "inline_tests": "ff80d739a5f562c9ca7221f659d915a4c51126a4a2ef42d8c58cd261b3c85fca"
+  },
+  "rust/crates/ncx-tools/src/pty.rs": {
+    "sha256": "83f3538fca6727b53902d69fdda36672cea9fe9db52af83969208cd3aa0102ba",
+    "inline_tests": "02d7190dc83594048c7246ef9b70a15722482606fe9de1b8f4b227123f65a567"
+  },
+  "rust/crates/ncx-tools/src/read_file.rs": {
+    "sha256": "77a1af51af9d4f0b264a48fbbc57b938e3e9503f6cc5e240997fc706f59eed49",
+    "inline_tests": "ddbab4d07b825d17631d5c9b247c257aac814177ecf161e1fd0390fffcb29ebc"
+  },
+  "rust/crates/ncx-tools/src/text_encoding.rs": {
+    "sha256": "3e66c62fba82400c8bf482d1d7fec3fd0975b546d4dec058e7df7c87c5edc3e3",
+    "inline_tests": "cef69b3ebc1b68da95c03d0cd8279e78c6e8ec164d11ce1281e78e8381a914e4"
+  },
+  "rust/crates/ncx-video-agent/Cargo.toml": {
+    "sha256": "3004b1417244fea17b427e19afaf17a7428df5c4a789d5ff39e365532d7e9cca",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_acceptance.ps1": {
+    "sha256": "c42a88966577430f0b7111f28916165754d4a20260f5e4c05b95c0891da53d68",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_fetch_fasttext_lid.ps1": {
+    "sha256": "76b2a51e62157d328fd1ac5e22b7618467ed3734d37e296472d4921e98bbc437",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_live_readiness.ps1": {
+    "sha256": "d598de48635d46990629e2e27555c1e37a63d2658c9858dea47558fb185b2166",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_paid_preflight_selftest.ps1": {
+    "sha256": "c2f9b811820828a7f9d78b4c37ea29149f333dba88ebeba43d5ccec7d4e81fdf",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_temporal_crash_recovery_smoke.ps1": {
+    "sha256": "ea8d4ad6a0246010b14fd24e4f13da41c9c7623e2cd8e046cfbf1a9417b12604",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_temporal_dry_run_recovery_smoke.ps1": {
+    "sha256": "1663f2e0d9d79ed564437f2c5f06389f5f06db97b1cec4ff1a455650d6f90b2f",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_temporal_live_seedance_recovery_smoke.ps1": {
+    "sha256": "9fa7cc9bd576cc340389e6fb2095ad3b14bb065c01ecc0851ad41ef25799a75b",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_verify_rough_cut_trace.ps1": {
+    "sha256": "f4f84fef186d56d970772bb5363c7cbd6295544ec1a66a4c9fd7d1d04db5faef",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/scripts/p1_verify_rough_cut_trace_selftest.ps1": {
+    "sha256": "a25ce660b67002513da75a439b5530c3a756fc7916fa5ecc3eaf139aa6df4bd4",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/src/ark.rs": {
+    "sha256": "481afbe6b0f9557ad542fc55417488bed0e5fbbe9a4045451e699edf35d0e8b0",
+    "inline_tests": "a1a4d2700cf977c6cf2f3e415ed2767aef4c8e1eff77b940825d2c136b8636d4"
+  },
+  "rust/crates/ncx-video-agent/src/db.rs": {
+    "sha256": "1947de1a51f2e5cfe2359b196e3617feb3d2872de5aa3d4da6c8fbdd824a9f4a",
+    "inline_tests": "2dee04e82aeb775631a3d061e35d03cea707361166e02de1e2febde13d360d83"
+  },
+  "rust/crates/ncx-video-agent/src/dry_run.rs": {
+    "sha256": "5bf70c36a7d9a2055b2b0e21781b62089718945769dc434c16d110b842748a7a",
+    "inline_tests": "6b03bca88f1fde7fe4fce67350b7c9e389e4163afd75b645c230356382ea1d8e"
+  },
+  "rust/crates/ncx-video-agent/src/edit.rs": {
+    "sha256": "9cd2d66a24b68b8116c0a1d325c4b3819d2d98ca4eae6ffb7f485ad4665c2f3e",
+    "inline_tests": "3ca9b806c674c5b21213bb5e1ded4cc0be93a815e55df239c5fc6c93b4069e52"
+  },
+  "rust/crates/ncx-video-agent/src/jobs.rs": {
+    "sha256": "b8163c9c85461c7402571bf694bfab3b44ac7d05be0777eb5c9250a119ac021d",
+    "inline_tests": "43406363721e1b65e6d6fed676acb6297af93967d1479e8f1169fec464f6ab2b"
+  },
+  "rust/crates/ncx-video-agent/src/l0.rs": {
+    "sha256": "4ef866b2fc8e9e4ca485367544603f24c164aad081af9a5cdc97485962817040",
+    "inline_tests": "9af5b7c912328d49e1723a1b866113c4cd0e46623aa4e61aeffebfd957b17f54"
+  },
+  "rust/crates/ncx-video-agent/src/lib.rs": {
+    "sha256": "1488d7c8f65d8948a8fd2dcc52da73ac96e39e8a150fc9c26fe8849ff4be9f0a",
+    "inline_tests": "04b4ed0e3414aea4f96fb04c36e564695cce2bce98b0343131893a52fc3452a4"
+  },
+  "rust/crates/ncx-video-agent/src/media.rs": {
+    "sha256": "5c65995759b77b46dbf3f16512710c1fe8b3acf8a2d4e49afcf59fd179481317",
+    "inline_tests": "3bebef4b2fa6e36d5d49828abd4f3a58a73e25f2b887474800d09af72c977495"
+  },
+  "rust/crates/ncx-video-agent/src/node.rs": {
+    "sha256": "6046c50c281653d9fc637d671b3290cccf79a9b4fb878f965e6743de0f9668e4",
+    "inline_tests": "52e180d0f31bb56ed695e65a8bf14b8608bc4cbec929b7aa10eae91cad85ce90"
+  },
+  "rust/crates/ncx-video-agent/src/preflight.rs": {
+    "sha256": "e1a16f29e1248e42ed251365f55dd44df9f1e3b7a1befde7dc49c4de4720fc60",
+    "inline_tests": "45e79a3784e43ed9bcd7493e3e799ab54a1d9091be01b06338b3a10f72077d0d"
+  },
+  "rust/crates/ncx-video-agent/src/pricing.rs": {
+    "sha256": "25e58d3437a86fcad27182a34fd7d6eb781a8c291cc09df89ab862ddac0a5cbf",
+    "inline_tests": "3f7fe3ee6f12ec0b44119307da3799e9f94c25fba873446d9bcf27a84121fb70"
+  },
+  "rust/crates/ncx-video-agent/src/render.rs": {
+    "sha256": "90c04cd82fca8abf08b85d30cd6b4f2523df23a3b4847aa65ef7f4ff12dfd9bf",
+    "inline_tests": "4eb250296339d2c5af2a10cd442a835244f95b01bd842b4187a042a968a5e7e5"
+  },
+  "rust/crates/ncx-video-agent/src/runtime_config.rs": {
+    "sha256": "0e6a20f1d41489e10efbb65e86c8abc28ef7a60a538e10dc1968725985dc943c",
+    "inline_tests": "4c03d897f7ffc9b6ebc20e281c3ef7485970b42e8d76b58957b7288fd125f77f"
+  },
+  "rust/crates/ncx-video-agent/src/structured.rs": {
+    "sha256": "aa4de3c0c2a7cd556e4cc44e2bc77faf888e3518cfe8994e0d876eba393b52fc",
+    "inline_tests": "dcacef61c68c681bc1bd7805e040a7bfd5657305d90b8dd0be23ae20cdbbca6b"
+  },
+  "rust/crates/ncx-video-agent/src/text_separation.rs": {
+    "sha256": "9c73cd4554c0371ea29e25a4505e866d0e29f8477d6d7893cd47ebf6fa319f34",
+    "inline_tests": "33b9a3e31ca0cad545626a9fc77348aaf47018c90e62c9e89953a707c94ec61a"
+  },
+  "rust/crates/ncx-video-agent/src/tos.rs": {
+    "sha256": "7d05b076af5a54a206fd87438f10a609c435e4efa9c1db0e52d0f36763607c0b",
+    "inline_tests": "1362f421ac43725a12883b924dcb0a23083346a39b053f60ad7dbe9a2416cc46"
+  },
+  "rust/crates/ncx-video-agent/src/trace.rs": {
+    "sha256": "628083331286baa146094bfc3dd40a99553d04f2bd9e7460eb7d9d60b5e8936e",
+    "inline_tests": "0ed10058b6d2a7e667cf543d21223825dfe00dc62b481f628305de2a4647aef4"
+  },
+  "rust/crates/ncx-video-agent/src/validation.rs": {
+    "sha256": "c15fc4ba221bb924b26d0116c8d40f01bf4cdbeb0c6e1e819c4e68958190c252",
+    "inline_tests": "8d230549dec2b5a48e4324ee311c0cd6422808e8594eda41e8ad72c9ed7bb6fe"
+  },
+  "rust/crates/ncx-video-agent/src/bin/p1_dry_run.rs": {
+    "sha256": "072ffa2028993a42a116e23a716ae7ee98e26dc33246b8a216e6ce1eb5712abc",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/src/bin/p1_seedance_tos_smoke.rs": {
+    "sha256": "78cc48e0b3b2f8fb557cf2ca1a61102ed99393cbdeb796ada62ea76173785ee0",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/src/bin/p1_smoke.rs": {
+    "sha256": "b4686a6780201bb7acc933ec1652638a611ea20facec70f3fd77a3cc822dcf99",
+    "inline_tests": null
+  },
+  "rust/crates/ncx-video-agent/src/bin/p1_temporal_probe.rs": {
+    "sha256": "d5ecb90e6d4bbd5ff7508e2ab1d88dc2b22f373feb1024fade444732634dd9d4",
+    "inline_tests": null
+  },
+  "rust/gui/.gitignore": {
+    "sha256": "8722286f17e932c2d5e9c42a308c6b91e19940d0f9662186ba3c10a801a97fe7",
+    "inline_tests": null
+  },
+  "rust/gui/GUI_FEATURES_PLAN.md": {
+    "sha256": "306d8cb4990c4ce8a80a33521220c69df2cd177dd6d0ee3ede9b74acf2346eed",
+    "inline_tests": null
+  },
+  "rust/gui/index.html": {
+    "sha256": "206bb579398d48240f93606b34449c8a783ab5ec1ba514a7f2fed1da9a70f587",
+    "inline_tests": null
+  },
+  "rust/gui/package-lock.json": {
+    "sha256": "a4f652b82afc6bfa1fd3dc3107378fb9466bace7c11cdd40c0227a0d74300f8c",
+    "inline_tests": null
+  },
+  "rust/gui/package.json": {
+    "sha256": "7a965fdc61b505f2ace2732a675905a5c9bfb89c14cc7855ed51dd65e5911ad1",
+    "inline_tests": null
+  },
+  "rust/gui/svelte.config.js": {
+    "sha256": "4e2863144e05fb29c6b4965de78fef7d703154259436bc09583b66ff439babf8",
+    "inline_tests": null
+  },
+  "rust/gui/tsconfig.json": {
+    "sha256": "6c4c8b41f823de1cafd340f512dd0abea81d1c9441af4bb8311e17330ed784d8",
+    "inline_tests": null
+  },
+  "rust/gui/vite.config.ts": {
+    "sha256": "f7ce84f4b8a920b10b4d81501673ead60afb932479e7273a7ba6f35e5eedc55e",
+    "inline_tests": null
+  },
+  "rust/gui/e2e/goal-worker.mjs": {
+    "sha256": "03ffb3a28215aa6be023942e531b48c5dddd82c5b0f44ce77f2f2b090c3332af",
+    "inline_tests": null
+  },
+  "rust/gui/e2e/orchestrator.mjs": {
+    "sha256": "3ba4701770e66dfdc0af0d494bb0ec1b485da9c0b0271b989dd21bd62a046160",
+    "inline_tests": null
+  },
+  "rust/gui/e2e/protocol.mjs": {
+    "sha256": "dfa913d4bc27ce30abaf6c0125b4b95ba81b2ddac467c9d4758f78cf43c5e0b5",
+    "inline_tests": null
+  },
+  "rust/gui/e2e/provider-switch.mjs": {
+    "sha256": "edf3dfa98305821b4491cd8c0decb5c0191db98434b0ce1eb26ca54b504de476",
+    "inline_tests": null
+  },
+  "rust/gui/e2e/question.mjs": {
+    "sha256": "0bcdff4dd5294f6f163e0b0e66bc7716a94537e32c62981460e0640a2252f3f9",
+    "inline_tests": null
+  },
+  "rust/gui/e2e/slash.mjs": {
+    "sha256": "bd061c2bef53011e53c7dfc1689aff48263300aae1ff64bfaf7404829a730dda",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/manifest.json": {
+    "sha256": "f54f0add3f6b3ac33933db742a137762fa06557a9aaa94177d877e0c305d2286",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/archive.png": {
+    "sha256": "a0d13fa7aebbb8c0857d4290680f4639324f2d48b37febd96a9cac01ce48d48f",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/avatar.png": {
+    "sha256": "16ff7a7fac7d1fa9d83a65633f413e2e1b919b6f3565c64958ac7909a3914421",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/coding.png": {
+    "sha256": "9cc39d4fdf7260b51d3f77da8c4befd894f39fead3554a2b4c1786cc8b449687",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/download.png": {
+    "sha256": "99b3eacf448cd9650bc043f60d1fc27d560d24ed984f5ab79b1dd97fb571c469",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/empty.png": {
+    "sha256": "5631eacef1a76d234071d3dd5beb7326e8408aa23d198cc63162bd1381e724b4",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/error.png": {
+    "sha256": "6576b326305e9798c333e1f1f1f0aeafd9e1b617f9cf77e01b7886dd8f85fb95",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/new-chat.png": {
+    "sha256": "32fa5386355f249aeffbcb62ad365d92c2b99cf40453e601b8b88922a02a2714",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/processing.png": {
+    "sha256": "ef2362c198e6d30b0329a4482a1133f9076aa657fbb93d082f93370727c7e784",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/project.png": {
+    "sha256": "1a4a560b91ec6d09d53d2e85a6abe9231d7bd196759fdd80660b070005f36156",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/search.png": {
+    "sha256": "f5a4127ecfa7fdc91dc3c504001f192ec33e4f9bb33212b685a811e2608a5bb3",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/security.png": {
+    "sha256": "f65d4dfa74efda953eb60269c98ac36f919e60067ccff7fd982bd2b2b984839e",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/sleeping.png": {
+    "sha256": "114efd43c76658e73f769ce2057af0f12fd5c2e8dffd9cd122c0d02c31cca883",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/success.png": {
+    "sha256": "2825c0b71645273277119f283627a9307a1b3f7e9c5638aa7a9aead84e60bb5f",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/thinking.png": {
+    "sha256": "46e6a91c6ca1ca08fe6c9507a654010eec0960521580ed323222973110200dd5",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/upload.png": {
+    "sha256": "10f85d57dcf38b6f45f8316f481b6d72ec340f1fd1a9ed8e9aa466438c66d447",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/24/waiting.png": {
+    "sha256": "6a6fbe7457c45915e872dcb10674f0b408c4a53fce8d1a3bd3b1e45c218fd398",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/archive.png": {
+    "sha256": "caa3bb9482113551d4f3fe44542301ab56d8478ebc10d951569e4ccfcedf4a04",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/avatar.png": {
+    "sha256": "943062c507892331648c079444e0a43bd7b5a435e9dda036dd52c6aa769b423c",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/coding.png": {
+    "sha256": "a703bb8ecf2deb8887c65e45d55ec1638095be5969d0a19a095fa8714914447e",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/download.png": {
+    "sha256": "7cd20d17814b68cfb45eef9ef80af3d57194ce2dbecccd5a94e8ba93bbfcdf7f",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/empty.png": {
+    "sha256": "1fd25b2cc32931aa8191281887540fb522cff6c1450681c65d86ef7cfe165069",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/error.png": {
+    "sha256": "3921022b8dd67a431c3bdf5334e98b211b474a8d427fcbc4e512d9d987795247",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/new-chat.png": {
+    "sha256": "5750b9641f23a63036bda5756ce913f033636c955e13b249161f0b9e5bf8ae73",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/processing.png": {
+    "sha256": "f743488feee88e819251e38fb51317dc8142c441375f2cafb8fcd60ca2c12b80",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/project.png": {
+    "sha256": "e6015fce7d815bd2549c684b6966d68ab086fd864d4eecf7d96e09f3bb769193",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/search.png": {
+    "sha256": "b6a91b3f852b2ec2191bd655d79f48a21e1d4fbf0e3af64e40214df623840cc1",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/security.png": {
+    "sha256": "6645351edf373d02f1caeedac0e07db0111747151c992e83fcda7382f4cd84db",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/sleeping.png": {
+    "sha256": "574b13f05e931625d93d6abd66d31ac00b96c2a1e56a870d790e0ad14d60b0cd",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/success.png": {
+    "sha256": "e8910c4c57183d79311b65d01d11f965113974391c2040b69f500fa5c7d3d9b6",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/thinking.png": {
+    "sha256": "e8fd6e8c54ff1856273c26b4500034ef8e3a8c7ff5a49d8b4d6652182d84070a",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/upload.png": {
+    "sha256": "7777359d414bb31a2ac0ef3e00e753723d362759fe2a684a7cc0115284f72b1d",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/32/waiting.png": {
+    "sha256": "5ebd2bb5a78baac17fc770cd1f7a379d680a47aa121aa1e61c05276351951cad",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/archive.png": {
+    "sha256": "5ba536f1c1a9e710183d865c0ac3c2d5c04321c7314078564947172912e6d373",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/avatar.png": {
+    "sha256": "220f2b6c7add681664da2275cebaed4b57e7fc4818435c9851f1fdc0f5c6d5a3",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/coding.png": {
+    "sha256": "7e3340dcc83fd04681702efc5b0230d4b28fff6161f60d5c0781a73d0ff4278e",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/download.png": {
+    "sha256": "61810b233917df63ef7a7379fbd3706aefcd8864b39bbf5bfaffd01968f89b53",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/empty.png": {
+    "sha256": "3c882c2edb749142a722a4eafc8c9ee2d9d6bdd21640444fa5463a759b4edbf8",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/error.png": {
+    "sha256": "bf397aa18ff5aaf731b80df17f61e210d2f5e8d600b8613026e019e6551accd0",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/new-chat.png": {
+    "sha256": "0be29efb3647c0faeb8773283e53ab2cbcd6ad8923a39f4410d3a097eb392b4e",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/processing.png": {
+    "sha256": "ed190c1a99fa274e7399bd10ae90e9207ee9e098fa0c44f91b649ee378201670",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/project.png": {
+    "sha256": "d41f9ded5bfd16bfdd7a6a1d438ff4a25207a8843baa2edfab89d5e1ca75448d",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/search.png": {
+    "sha256": "7052d0639dce9fcd10a953c8f1459b4889ff2ce114cd30402a91ee230f771884",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/security.png": {
+    "sha256": "2949bc28fe96c3c6a5eb125e62198635259a992d0f1d6f1065e40a54f6611942",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/sleeping.png": {
+    "sha256": "e660751213978e0e8180b1ed9c42e0f7c02037db342ce7d5eeec425cf2ae76b6",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/success.png": {
+    "sha256": "26db48321d4982614c154d7d1917721baeb275975e2c779229cf3826d890f4e3",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/thinking.png": {
+    "sha256": "ce92f40f39cd9c7b66ae77e009be2fc43d3056c81c58485410fde72b5c04a00f",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/upload.png": {
+    "sha256": "ca5b268c1b49060bc78d550d95cf40e089e8f8726c2ed782ad9caba63532ff82",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/48/waiting.png": {
+    "sha256": "3c5fb81722d8a897bc743ac2162ae4d377cce34a0f491fc4dae62d33ee76ca23",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/archive.png": {
+    "sha256": "da755449127205959d65c5181d0771df6a192dba2f1c244d42b9a9e69e8871fb",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/avatar.png": {
+    "sha256": "4c8d2ded493fa40e8b7adea0aca77f1c9bba02707651953b8e1b94121a26ffd8",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/coding.png": {
+    "sha256": "265011af112449858f2b324617c404193489b62274ffb196d6828b9b05ecd0a3",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/download.png": {
+    "sha256": "5ae272abf5b719bec962127639ff58131c705fa44bcf2ddddf12060abb8dc3f1",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/empty.png": {
+    "sha256": "acd3106474f2f620979feb71d69737390f30395503875873e530a569d7873f80",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/error.png": {
+    "sha256": "7cbf82ecaebb2b80ee15dbeef0d80c65665fa3f0ef811525b69114c4781ccce9",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/new-chat.png": {
+    "sha256": "0ba0b8ffdf888dfe54f4d81dfb705514bb3aa5800055c6644e43ed39c47cd8b2",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/processing.png": {
+    "sha256": "43c28dc716f186b1bf33d2bd1710135861fbea92d0a354c1738edd7a6936badc",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/project.png": {
+    "sha256": "a28dfb27a5b08bf3603e9350e01d52ef206683c18ceb87b49dc2833ebd837b8f",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/search.png": {
+    "sha256": "e0f58e7b2cc688108a420ae693b0ff31a6f3897f919c08b294e08b088b739697",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/security.png": {
+    "sha256": "10587432e1b2318e7e3ccc1a04d52e6b6eed91bfd71f8a85dc9e20500abdbff1",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/sleeping.png": {
+    "sha256": "eb7e38a7171561edec6196210aa388ca2b83bab5eff4edbf645ec9b953389852",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/success.png": {
+    "sha256": "016f5b106bfb86d9d39bc4780424c34f02821f6541f3e71fd0e4bdef6942001e",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/thinking.png": {
+    "sha256": "9d87bfd8815a3cd7996f76fc99821e1cea8ea495bbd50bb5f39157c68b7c5ffe",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/upload.png": {
+    "sha256": "d4f81fcaf4876d6f1dbf68ac2528ae4bd92635975a3b1328ac0572577689748d",
+    "inline_tests": null
+  },
+  "rust/gui/public/assets/buglecat/64/waiting.png": {
+    "sha256": "32a90aff365b69be5dabab96749d7cfe2e45e0fcbdd0cfc2fcbc86d32fa04a7e",
+    "inline_tests": null
+  },
+  "rust/gui/scripts/stage-forge-runtime.ps1": {
+    "sha256": "2fb1ac2773c53191c861de1f7fcd45af39dcaccf3fc7b86b1699132441f88f36",
+    "inline_tests": null
+  },
+  "rust/gui/src/app.css": {
+    "sha256": "1146c89869172e32c3af789c65482770baa8b4174e8796785ba075d785dbf07f",
+    "inline_tests": null
+  },
+  "rust/gui/src/App.svelte": {
+    "sha256": "46a508c0c9e16280026f289df44b04b1b3b4d327be251e82a17ae5996e7fd801",
+    "inline_tests": null
+  },
+  "rust/gui/src/main.ts": {
+    "sha256": "e89b02cd8555a4013d3aca8a4809f1f59951ae47023ef699a84650ecd63e2aec",
+    "inline_tests": null
+  },
+  "rust/gui/src/assets/nanocodex-cat-icon-source.png": {
+    "sha256": "a52d4507c764c2e28626d0bdfffc18b64e8f4f5c0d2620b9dd1338e53384ef43",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/AppUtilityPanels.svelte": {
+    "sha256": "80f5622d93daedd2128eb6b54aaa1731205ea3f9b2046e2830765ac899574e9f",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/Composer.svelte": {
+    "sha256": "564fa605c168d2c4a639f220a559346f65060fec0867086d106cf349a3dc330c",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/ConversationView.svelte": {
+    "sha256": "bb644ce5c1bc6ac2d260cea556ade342dd7eed21a6aa1528485cf3c4318026a1",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/CustomProvidersSettings.svelte": {
+    "sha256": "6615dc459e1a3a7cd228f110e43e9c54e8b632e176fc7be8d98d4123e9ab8195",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/DshSlotOverlay.svelte": {
+    "sha256": "fb305782b829b2de6fe0c9fcac078cb000f9e88c36ace7ad752ba0c6428219d9",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/ForgeControls.svelte": {
+    "sha256": "9067872274e61b1bb800bac0a7b7f14955e047b183f6403f7de2096d2e3b6aa9",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/InteractionDialogs.svelte": {
+    "sha256": "553164d9c6c3c4c5085d79c61db28ef6f809fc3548598df175c37676609e86c3",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/ModelCatalogSettings.svelte": {
+    "sha256": "2c32682f77b0c7f5f5eabab049881b60ba2e7bc315f8d5260871aa5497d44817",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/PluginSettings.svelte": {
+    "sha256": "9c766b45bea7fbc43ed591ae9f3ccdb6f7cb3f4a7ebbb4fb8cf5c1abba1e500d",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/SessionSidebar.svelte": {
+    "sha256": "096ec37bad7b9cc8a6ab220215ced60429d8aa8ab9218b1e52235ac0d02fcd3a",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/SettingsModal.svelte": {
+    "sha256": "685e14fe1f08cc9522e91dd09395036badf94b32aac01c4b537f5b09f17a7b81",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/TopBar.svelte": {
+    "sha256": "b7645605a0edd1124288e971e66815787d759829e65fdff5bbda84e3f64ca6be",
+    "inline_tests": null
+  },
+  "rust/gui/src/components/WorkspacePanels.svelte": {
+    "sha256": "8a0bcecf5e79a1db81c9648187e4e0ae2df927275b318b01148b453b44dcf433",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/app-runtime-controller.svelte.ts": {
+    "sha256": "875885f1584dcda668da4e2e102fa97492c2410fe19d61adc79929227fca5a4a",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/app-server-client.ts": {
+    "sha256": "9099aba9dbfbffd1c2ed3519b5b687178f2401d5888bc9b66ee19827044598e0",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/buglecat-assets.ts": {
+    "sha256": "edb3401e9ba4ae5427c5b95a8520fbe463659138864c8e7e19c38883823e7f91",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/checkpoint-controller.svelte.ts": {
+    "sha256": "838df17b1e000b8fc5dc891857c31e68c3f2b19662250681f3f745d9d412e491",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/composer-controller.svelte.ts": {
+    "sha256": "a89c955f3e9f0ca7a2b177b3491d1213a04bb1cf5f9c9b2b37b2fc7a97f67481",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/conversation-model.ts": {
+    "sha256": "b1913bed0e322e005189447c8da89bea29394a06801e6fa421cff719cd66b407",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/dsh-slot-controller.svelte.ts": {
+    "sha256": "25658154f4eb72c154f839f20785f3a8c0cab02e7a4a2c8881bd34615e9580e2",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/file-browser-controller.svelte.ts": {
+    "sha256": "191a5855de3c6b7190e8d13f1f4448ca3fff6c9d28b6cda8f2fd6250f3648271",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/forge-controller.svelte.ts": {
+    "sha256": "bf3cf9a055dcfb31d8809396c0073e6de5dafc4454685f5a337481127d3b0a33",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/git-workspace-controller.svelte.ts": {
+    "sha256": "4c8546efc3ca2b9acb094e34574216c197ca3c0d967da41db0dbb8c39be53b09",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/goal-controller.svelte.ts": {
+    "sha256": "bddcd07e9c11123774af5df2206270c92a6fd0ef71c21132fbf022a36ba23825",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/memory-controller.svelte.ts": {
+    "sha256": "87440cdf7311415e497b4c0ddf6c9f9a49233f5cfe94f25cf1ff2fee8f91dca5",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/model-controls-controller.svelte.ts": {
+    "sha256": "c567d1b1ac038dd8a557b9dfc702a3a554749e5a520c757e4402f5177b6f47ce",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/panel-controller.svelte.ts": {
+    "sha256": "6eeb46244b1cbc40e8b8eeb9ece2a90ccb5f75e30fc6be191ce7df5a2ee40c37",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/plugin-controller.svelte.ts": {
+    "sha256": "431521020273b7c70681486d878765abc29e8db10ac97280cbeafb2db18f74b3",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/protocol-version.ts": {
+    "sha256": "d374a453e4f69ba803c39014e749e3d0463372058d4a94f42a8e4a2681ccf94a",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/settings-controller.svelte.ts": {
+    "sha256": "2116707d32fdea7e10faac1db9b669a82cb60ba670b9a015d216b03ad5500f56",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/sidebar-controller.svelte.ts": {
+    "sha256": "feee6a44ceeee66c7cf94a67c516f240d52f37cfd0ac39bc4478baa8157043d3",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/slash-controller.svelte.ts": {
+    "sha256": "ef80ee25ad513221852e0ed8fde77e24cad86eec15c832de4b765b64638eac26",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/thread-controller.svelte.ts": {
+    "sha256": "019a5cf0de92caef957af5f4a28a44995c1233e0539e8434b3dd6a57983e204d",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/thread-lifecycle-controller.svelte.ts": {
+    "sha256": "9f9c86dae54914ec7e34e008be87158cf046cb843b4807b36be0831df3c85271",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/ui-format.ts": {
+    "sha256": "5e5320f385cc2627962dd5b7f8b169bff7c804563c892f6c18c5d80dc98de10a",
+    "inline_tests": null
+  },
+  "rust/gui/src/lib/usage-controller.svelte.ts": {
+    "sha256": "8f3e917feb45e764e04faf113f1f1e883311c442e17126e4c00a2f99b4309b1c",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/build.rs": {
+    "sha256": "4ae2333b11623039cc115e29b696e7ff5cdfcd5b7d628280ddf48fa733e6418d",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/Cargo.lock": {
+    "sha256": "247681fdce74db2ae5c44e735dfd756c5bcd1f5ccc448da6b3d6cb868f18a2b0",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/Cargo.toml": {
+    "sha256": "0b5f67ac1bc509bab108218f4eddfba952bd8f05546d91dac41f0100ad798484",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/tauri.conf.json": {
+    "sha256": "9d2a55d70165bbe0b025951e9b540cfeba856c687769e404b533ece59326886e",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/tauri.forge.conf.json": {
+    "sha256": "9a44d59e0f49eea6d1f6bdc015b8a01df781beaa8f047115def009783352d7b7",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/capabilities/default.json": {
+    "sha256": "b53d6a61245b72cc787d05f75a1d62ecbe4779e72d1b70f8d7cc55093cc682f1",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/128x128.png": {
+    "sha256": "a72baafcacf6391307c6f8e988a0c4466cbaffcfbb8ae7ae0243a18a3132dcd7",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/128x128@2x.png": {
+    "sha256": "82a376496051777a4e6282f2f530f40d1ae4d40b674e828c821179ccbdc11d76",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/256x256.png": {
+    "sha256": "09072b57fa249e628b495aaf0229ae54d98519a6577000e76c5c660b9885d339",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/32x32.png": {
+    "sha256": "9e4e985f3bcc8e160fff75d608fa441a444edc0a94a944f2ca22d237e5a7d91a",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/64x64.png": {
+    "sha256": "9d3d889ae6b751e99be7d9dc1a236e11bd3505e7e4b7187350529a4df5c03b16",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/buglecat-app-icon.png": {
+    "sha256": "e1f2643527920c303373d3faf7166164b5a7b939bb34c94c72f1662d953b5278",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/icon.icns": {
+    "sha256": "6acc677d51c23c103369e633676bdc97df5b092987ca209f226f95957514aaa4",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/icon.ico": {
+    "sha256": "48793ce725e34f60f71cfd24470ff703b58c357196d5d722794d7d4d97599665",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/icon.png": {
+    "sha256": "cb827687e3aa05058d2e426a31babae07683c072c44b1414a4ced0952977daee",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square107x107Logo.png": {
+    "sha256": "90399ba4226b5c80b44a8e2283a685f9c54b76c58e2e7708a8ac75631ff76c19",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square142x142Logo.png": {
+    "sha256": "36340b6844e131f6cd0449522b0266f63de4e4dbf18a7d8e1cf74750408cc2d5",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square150x150Logo.png": {
+    "sha256": "e02096d6d435a761111d9d5d26676280cf2693b4c9ff2a71292db51e59af8241",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square284x284Logo.png": {
+    "sha256": "c097281f46d18e42c92e8d524a913def7836df203b1b561ef52376718dfb8ac6",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square30x30Logo.png": {
+    "sha256": "6c025e355ae6e626d46c4c22f5d3bb9d45150be926f6e6c7dc61b0841c36321a",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square310x310Logo.png": {
+    "sha256": "4d0fde51b39e61527a58d34c5d546b9fa26ebd85e9435b31567cd4fcd6f4e697",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square44x44Logo.png": {
+    "sha256": "816c833139902c5110d9183f1e04ab1afb34ae685e5bbb4371b3bd766c903744",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square71x71Logo.png": {
+    "sha256": "07709ec66d53600139dd713829ca4327c95afdc71daa5a013bbb0d08bd964adf",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/Square89x89Logo.png": {
+    "sha256": "9943b5f5e3b7f54908e1bf3cefc13e85b65e72996e3ee46f8486ab2d36e478fd",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/StoreLogo.png": {
+    "sha256": "03d213573ff81fa08256b203cd3d3804f8fe748148cf1ea420566d1f642b8de0",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-hdpi/ic_launcher.png": {
+    "sha256": "134f7603f14a590374159198d5551c65b69af7c16d82d7a941751cb3a31dd03a",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png": {
+    "sha256": "6a3e86dbeaf5489fa24fcf83d012521d7b55e16654774abe586a0920112cf4fc",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png": {
+    "sha256": "134f7603f14a590374159198d5551c65b69af7c16d82d7a941751cb3a31dd03a",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-mdpi/ic_launcher.png": {
+    "sha256": "f208c60552781cc76d6b38f3d37cb9e9f5c565d2198ecc44138c55dbe87d8812",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png": {
+    "sha256": "d22862da3c2634f5ea210b2970e2a5202efd76bb57f35ef5f9c3a52e170732d5",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png": {
+    "sha256": "f208c60552781cc76d6b38f3d37cb9e9f5c565d2198ecc44138c55dbe87d8812",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png": {
+    "sha256": "53bf2ccc474f5092ac6dbcf33fe5bbfb5b8837434457559b9b42dd954c98e07b",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png": {
+    "sha256": "2a89de59fe8943a27582d592a83601c15ef025b9171d4af7185ca21b9a745af3",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png": {
+    "sha256": "53bf2ccc474f5092ac6dbcf33fe5bbfb5b8837434457559b9b42dd954c98e07b",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png": {
+    "sha256": "4eee012f3c3f14f3c202566f2701d474d8e5b31ff03985c2e3045a1781b191a0",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png": {
+    "sha256": "274958cde1aa5048462d990cb79e39fc5fdcff0e7dc4ebeb1c890c17b2cf4a17",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png": {
+    "sha256": "4eee012f3c3f14f3c202566f2701d474d8e5b31ff03985c2e3045a1781b191a0",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png": {
+    "sha256": "d1ee4f1f8a8600d7dd6ff6723d2b9b1c47e10d0119126446f35d3792c43834bb",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png": {
+    "sha256": "2a7b674f8c361cfdbb6bb020976f2a4206ab7052bcec719f76b9b31069ca6ae1",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png": {
+    "sha256": "d1ee4f1f8a8600d7dd6ff6723d2b9b1c47e10d0119126446f35d3792c43834bb",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-20x20@1x.png": {
+    "sha256": "34edbbd18242e1ff4ba57963e0e9ce30281cbbd32bf3d2e6eaae5876a1463fcd",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-20x20@2x-1.png": {
+    "sha256": "31b2e2235a3a7528ce4e8b3b35eb6c740b2d42b5b2b83927efbd7a9e284b8071",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-20x20@2x.png": {
+    "sha256": "31b2e2235a3a7528ce4e8b3b35eb6c740b2d42b5b2b83927efbd7a9e284b8071",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-20x20@3x.png": {
+    "sha256": "698c58d989fafcd315cd67a3dd285066fb4bcfe047854b500d032eeebdae110f",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-29x29@1x.png": {
+    "sha256": "defd6cdeaead4117e877d75c57efe63cc98d716a36c22dfd2ef6de50ea6fac29",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-29x29@2x-1.png": {
+    "sha256": "61959657ab7676fea1718d9b885dde7a3c803ac5f9dfd63697003726371a6604",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-29x29@2x.png": {
+    "sha256": "61959657ab7676fea1718d9b885dde7a3c803ac5f9dfd63697003726371a6604",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-29x29@3x.png": {
+    "sha256": "11d85abce93ca6a10be3d3724b2d02bf46607d2d0378a25971a760b8bb3270ea",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-40x40@1x.png": {
+    "sha256": "31b2e2235a3a7528ce4e8b3b35eb6c740b2d42b5b2b83927efbd7a9e284b8071",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-40x40@2x-1.png": {
+    "sha256": "2072faabc8ed77be779bfe0cdd9a6b6a1e016a7755a745033b23ed8963135745",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-40x40@2x.png": {
+    "sha256": "2072faabc8ed77be779bfe0cdd9a6b6a1e016a7755a745033b23ed8963135745",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-40x40@3x.png": {
+    "sha256": "1abef4a96ebb8c92cd355659359a0742ba867f387c981fd8021d3106267c2d94",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-512@2x.png": {
+    "sha256": "b610069eb385a0088228b932d4713b5646d24caa7d83419fee0ec86a5eaa21d1",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-60x60@2x.png": {
+    "sha256": "1abef4a96ebb8c92cd355659359a0742ba867f387c981fd8021d3106267c2d94",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-60x60@3x.png": {
+    "sha256": "d2f0d1604f69111fea88c7487b8d7f64f3f03372b4b456b282415a6bae68462f",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-76x76@1x.png": {
+    "sha256": "94424648055be32539579f6a4e795beee4eff718a97d0777a6aac56a9e49774d",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-76x76@2x.png": {
+    "sha256": "afc3f259694875c692053d086264e8cae37baec543e94156244d38035c9c0717",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png": {
+    "sha256": "deea68b335c3b126492a6052439d10ddec36e87043d9fdf978d4f892193bdab2",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/src/bridge.rs": {
+    "sha256": "d9e3759367ced6824529877c2ea73b45fccad460030ecb1b281c1d01f2b8bdae",
+    "inline_tests": "b7f58dece793632835e08b038d1a97d63940d8a9e2d2d07e58451b11b2186495"
+  },
+  "rust/gui/src-tauri/src/forge_job.rs": {
+    "sha256": "d715c3350459ca3f18a3c1fc7566b466beea4693adcd4f609e590eed68e074ac",
+    "inline_tests": "8523e0bd4570901f13b780ae3f178359b797e699b1c0806cf58424f0dfb8b072"
+  },
+  "rust/gui/src-tauri/src/forge_runtime.rs": {
+    "sha256": "7759e6b47fedff237d873db0243c408e5804c7b787c1e0bdfb4bc00cbb8f4a8f",
+    "inline_tests": "88c5b35f8b0419ca3e836181322fc06dd4260752a29d5f5e5ab05ca7eb77cfa9"
+  },
+  "rust/gui/src-tauri/src/lib.rs": {
+    "sha256": "eedcf4d1b93e55290d05fb831a4aed614fe63555ff9f43f3dcd6403b7dc9a181",
+    "inline_tests": "000c31e81567b31ca521baa9eb67c91b60b73964ec3123c8fec87cb91c6667d5"
+  },
+  "rust/gui/src-tauri/src/main.rs": {
+    "sha256": "2b49a21a1347824fcc007ddb3317ffc171a5135aae5f34c64fa80b3d9ec4afa6",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/src/memory_merge_job.rs": {
+    "sha256": "2571d7496363b26fc749214c6dcd157162f737b153afd3ef9234ce764e5de478",
+    "inline_tests": "0f7fcbb3229b0555288ae3d5c6c2603cdfcac2b8f6d4888dedbb2dc2a9dabd7a"
+  },
+  "rust/gui/src-tauri/src/model_catalog.rs": {
+    "sha256": "0536050ec3b6b2c6039ef555dd8e6a0f9c592ee921eff5720e62d33d1190bee2",
+    "inline_tests": "44bbd3dd665357cce32a205cc734c9418ddf89749242ca06b2de2ad63f2d16c4"
+  },
+  "rust/gui/src-tauri/src/bridge/goal_turn.rs": {
+    "sha256": "63f5406cc194d005eb3097b658c2a5f37fccde8b1161deab7597bee51a1ab6b6",
+    "inline_tests": null
+  },
+  "rust/gui/src-tauri/src/bridge/orchestrated_turn.rs": {
+    "sha256": "a44c5ae044e6a47850f9ccc2a5598aa199d9e79db400a17b1557f563bac466f2",
+    "inline_tests": null
+  },
+  "rust/harness/README.md": {
+    "sha256": "041c9232e0759a23e9c8d5b5eb08f293afca341f169e8f5bfcee1683eb6eb6da",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/base.toml": {
+    "sha256": "b1c1850f90934069e46e9e5e5cea6af15c6f1ff6e8738832398c4cd4dc3a77d0",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/external.toml": {
+    "sha256": "a3b082d5ff20db152b802bd1715e70bf89d8c833a9176738d4235215cc378f0a",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/media.toml": {
+    "sha256": "0845f5ed7e8aa27dbd0fd465c116ed3de7baa2beaa64af0b9941d4388ddee2ec",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/process.toml": {
+    "sha256": "39c36eb34441874db8af99520c44ce26dc914885d6e931503a029ef022cd0ac8",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/search.toml": {
+    "sha256": "ff47edf7f657469d94b0a5a3d11af147149229a948d460f79ab3ec4dce12556f",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/session.toml": {
+    "sha256": "d09df91a6b1a7365309d2d480df4e4b5ced58aa5a197398f22e1b8a35ed3f3bc",
+    "inline_tests": null
+  },
+  "rust/harness/bundles/workspace.toml": {
+    "sha256": "7e47d775d8770637911c66130878214fb61b6629b47ee9a50dd72d493cff8067",
+    "inline_tests": null
+  },
+  "rust/harness/profiles/coding.toml": {
+    "sha256": "7ce3aa9b0a987b61b11b6d206e191692c9d8fa3d0e87c1e4a88d5ce483f49c5f",
+    "inline_tests": null
+  },
+  "rust/harness/profiles/full.toml": {
+    "sha256": "da51ab7898eeedca10f7030462b28cc035bf313adda3f258fa7501baf78778a6",
+    "inline_tests": null
+  },
+  "rust/harness/profiles/headless.toml": {
+    "sha256": "e3004c26e9bd8d3d0328bd90adad2b37bdf5195c8b8813ad2da0509091a0dbc4",
+    "inline_tests": null
+  },
+  "rust/harness/profiles/minimal.toml": {
+    "sha256": "07375564f1459038b7e0549df3476aa460a9b4a7c6d2b356b354c625cc787099",
+    "inline_tests": null
+  },
+  "rust/harness/profiles/readonly.toml": {
+    "sha256": "c2b12048132e555b3558df4a064199af18681fca99876dc61bb119a040eefcc9",
+    "inline_tests": null
+  },
+  "scripts/build-rust-release.ps1": {
+    "sha256": "29e85986e1baa79ccd9041f3843de97927dce7ea7e3cc53eb6b90e198d5767e5",
+    "inline_tests": null
+  },
+  "scripts/check-protocol-version.mjs": {
+    "sha256": "cf8774c2c9f69951f7db2bc4cccf07cd893db05c554482993be822e894ec521f",
+    "inline_tests": null
+  },
+  "scripts/check-protocol-version.test.mjs": {
+    "sha256": "6c37f10985d180bb496c495eff21eefee7f02a1d219f4e67c1f55df1230403e2",
+    "inline_tests": null
+  },
+  "scripts/check-rust.ps1": {
+    "sha256": "e7bc368ad155be9fc9b12da2acfd27254192db5ebe7164b3efb3ae57558ddfcc",
+    "inline_tests": null
+  },
+  "scripts/check_code_structure.py": {
+    "sha256": "b3e97144dcba97bfb20a0b119fb493045efef92a13c3fbdb968f62d2911c7dc3",
+    "inline_tests": null
+  },
+  "scripts/generate_project_memory.py": {
+    "sha256": "5adcfdff84e71cb90051c7e16ac3b7fd44d100c6fe406751d3774a8e3f5b860d",
+    "inline_tests": null
+  },
+  "scripts/make-shortcut.ps1": {
+    "sha256": "1f375616e8c143efe1270a6f5d18e856b3d4cadd8b05f9c73dced22eabcee918",
+    "inline_tests": null
+  },
+  "scripts/run-eval.cmd": {
+    "sha256": "992303967f24f6216e78ef36334c6e95d8bb649f43d0546f981cebb5d094c8af",
+    "inline_tests": null
+  },
+  "scripts/run-eval.ps1": {
+    "sha256": "d3a3b6c0ec3b7dba68fbbff8b65dbfe02c63c0b32d2fe1756feeb43d67485984",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/README.md": {
+    "sha256": "dadeb7a6e7f95076e513bb46e796b32f895b00e27646980747369adb2d229620",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/commands/analyze-candidates.md": {
+    "sha256": "1050191790b0deb44c5b23d3b338a7188599aa643f5cef2b50be4401860d3e1e",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/commands/daily-eval-refresh.md": {
+    "sha256": "0df05db891608aa525786182b25113d7bcbebdbc58422f97ee2cb47227fa9605",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/commands/daily-report.md": {
+    "sha256": "46afbc6fb24bd532ac0f7fb700714790f27de3dbc2ba04521e127a96f3c6ba2d",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/commands/promote-proposals.md": {
+    "sha256": "0bf977dca25b5d58d2e70f29a7344f6a80d3daadb5476966e9ade2cef7b5376a",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/commands/pull-snapshot.md": {
+    "sha256": "08228ea123f6fc07adcdb738958cafe1aa36ef6905ff6fea996fa2a8d1537d94",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/commands/run-eval.md": {
+    "sha256": "1ec215e8024437673e4088c51d781d1f9d64663111196234b5f6c47f3d42a2fc",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/example/.gitignore": {
+    "sha256": "f476c8376da828d46146778a2a96a190d92753e4aad35bd3a682d5e9545c39c9",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/example/eval.py": {
+    "sha256": "509d80999466244d3c0e68e8bb10b883d42543527b9dbf1ed2d45e8467dc451b",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/example/README.md": {
+    "sha256": "0a6a0e515333dce6d59a528017d09df5dba3798f18bf394bb7c3e715fb309ca3",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/example/run_pipeline.py": {
+    "sha256": "9eb4a2629542a862184bbb6c9b67c5da6d56a157e977e9b44a7a3bd5def48ca8",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/example/eval/online_hard_cases.json": {
+    "sha256": "e23b03cbad8b868f585fecdde82e7dbf93e9ec4d7e03b1ee5742b28c6c2751e8",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/example/fixtures/prod_snapshot/audit_log.jsonl": {
+    "sha256": "6a9d7de00e6e8b57d2e32b0f9b5123e1ac4956bc1b2214f9c0755778a28d9fb0",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/reports/schedule_health.template.md": {
+    "sha256": "419244cc10ba604ffad0f65e777d52bd4b2652118e78fc1f6535d014dac379b0",
+    "inline_tests": null
+  },
+  "templates/eval-data-pipeline/skills/eval-triage/SKILL.md": {
+    "sha256": "5f516d9cafe3aad4eaae90844d53f29076834b14f2e4fc9e60b93adbb3c9a206",
+    "inline_tests": null
+  },
+  "tests/test_ab_compare.py": {
+    "sha256": "2e9f73c4f1a19d214477d9c29bed5566d478a19b3a7f426311eede5a80e080bf",
+    "inline_tests": null
+  },
+  "tests/test_agents_md.py": {
+    "sha256": "24182d30fdd5ffa2fb00fb3f6f6ff7130698464ac9f8ac7b7201ad57037c1514",
+    "inline_tests": null
+  },
+  "tests/test_apply_patch_approval.py": {
+    "sha256": "bc478d431978d2a5cfeb77423b15d92cb516e14b007b38d1eb94f97a5381badd",
+    "inline_tests": null
+  },
+  "tests/test_auto_reasoning.py": {
+    "sha256": "eb5cd70258ac7479c42e789930f9a34dc64f5e90dcbb61ee1d8016884ba73210",
+    "inline_tests": null
+  },
+  "tests/test_bench_run.py": {
+    "sha256": "b9c7cfe433aafaefef913463b6d1a97a45f963048f7c36032cca17903e4edef7",
+    "inline_tests": null
+  },
+  "tests/test_cli_schedule.py": {
+    "sha256": "df229f30f41e765d2a0aa5e3914e5eb82e732e5e8aade8c71716b022446fc1e1",
+    "inline_tests": null
+  },
+  "tests/test_cli_slash.py": {
+    "sha256": "ec015a8edf6019d9e44454f41f74e77cc68c75d33710e26130d9a1ddc50d1b30",
+    "inline_tests": null
+  },
+  "tests/test_compaction.py": {
+    "sha256": "049e6f41bbac4a3fed484262ce1c1158345959f6255a26c86a9eeaf346d03a96",
+    "inline_tests": null
+  },
+  "tests/test_config.py": {
+    "sha256": "e5b5db47c4d16d2d87bcf9d0b0b05d3fdd6368a29abd4750a5c2ef7c749381c3",
+    "inline_tests": null
+  },
+  "tests/test_deepseek_provider.py": {
+    "sha256": "ebc5063acea9ce682574003a70c290e3eeb5fb3896fa620fc8d896cc099acba9",
+    "inline_tests": null
+  },
+  "tests/test_desktop_approver.py": {
+    "sha256": "dc5654986017d2279d1bce83478452b61f6df7f9f4d4010e7c5c94cdb2f3b827",
+    "inline_tests": null
+  },
+  "tests/test_enhance_prompt.py": {
+    "sha256": "e2ad801763ccfde22c18fe153bceb7515be8d431edefe533a8d699994d464f41",
+    "inline_tests": null
+  },
+  "tests/test_eval_harness.py": {
+    "sha256": "4576bd7090f03d8570e61a1390ae9385b0a72fda2de0bfebe693ebedf76f7c4f",
+    "inline_tests": null
+  },
+  "tests/test_fact_merge.py": {
+    "sha256": "f6960195caf7011c254d446ca207843b0bfaf0d3d9f79406923fbc3fe1f733f1",
+    "inline_tests": null
+  },
+  "tests/test_gui_file_panel.py": {
+    "sha256": "454a002a2bf700cb6f5cb7b5c9309c90efb744245f3582e402a9a037a90e2c5d",
+    "inline_tests": null
+  },
+  "tests/test_gui_settings.py": {
+    "sha256": "1aa5108145187bd9611802f28d9b332d7e2413d51fa15ec8c905e7823cd7a66c",
+    "inline_tests": null
+  },
+  "tests/test_gui_status.py": {
+    "sha256": "552780b0336812f3c5b4558488c7d0f4f45389ea78fa9d599c4d4abf09194a0a",
+    "inline_tests": null
+  },
+  "tests/test_images.py": {
+    "sha256": "d8ede0cb160360443fc7e1ade7b36df14d9ad35f8a4560a8ae8321585cd6026b",
+    "inline_tests": null
+  },
+  "tests/test_loop.py": {
+    "sha256": "a4cf4fc76db2546b08c53b91af8f4f6a2b2c655d25204b910af4a7dadcfe9ad3",
+    "inline_tests": null
+  },
+  "tests/test_marketplace.py": {
+    "sha256": "aeae5e04d92214219910b100ad270a2816466e149d505ea306c5eba237d9baaa",
+    "inline_tests": null
+  },
+  "tests/test_mcp.py": {
+    "sha256": "92ad99dc2a5208df92e11385b55798e7c3947bfde0112f6001eeaae6dd875e83",
+    "inline_tests": null
+  },
+  "tests/test_mcp_store.py": {
+    "sha256": "31f82f02de9d978958fd00d52853076c1f45fd3f8659ba1e83bd0b005ca268cf",
+    "inline_tests": null
+  },
+  "tests/test_memory.py": {
+    "sha256": "f35ca40af4d44f8ecd5bc96d83ca61f9eaee7c5b7ab58dfee98b35509cf274c7",
+    "inline_tests": null
+  },
+  "tests/test_mentions.py": {
+    "sha256": "ada6c4e18edb6c1354c2e27b163924e881947550ac29e127c92267cd68530640",
+    "inline_tests": null
+  },
+  "tests/test_orchestrator.py": {
+    "sha256": "9b5be8d6771ba0fedf3abcffac06dea7466279775d399213f07054efbbeb144f",
+    "inline_tests": null
+  },
+  "tests/test_orchestrator_concurrency.py": {
+    "sha256": "0164d58b69f60e13f66fffc33a4bd25a3b191df5b1737a59bdf689b14e21551e",
+    "inline_tests": null
+  },
+  "tests/test_patch.py": {
+    "sha256": "4ba5eda5d87822de4b1e3c0ca36ed4ea7815856928deb0f860c1ab5674878643",
+    "inline_tests": null
+  },
+  "tests/test_pricing.py": {
+    "sha256": "8e79adc3bfef01a5f106264732954b4509ea9aa4b1ab516dc4ca2b13d6594b32",
+    "inline_tests": null
+  },
+  "tests/test_resume.py": {
+    "sha256": "4ee6346a26868b92680b8c6eb5e489507af6b3388f5d63d3df34fa2a938bcac7",
+    "inline_tests": null
+  },
+  "tests/test_roles.py": {
+    "sha256": "668418a56d0ae2853ed89f4ae896ff38e0d7ef8205fccc1e7f5f2d0da15c6299",
+    "inline_tests": null
+  },
+  "tests/test_sandbox.py": {
+    "sha256": "733581a1a9ba865aaa3a1848284bc7e42c9ed4f82c85bf9b092fea67baee5641",
+    "inline_tests": null
+  },
+  "tests/test_schedule.py": {
+    "sha256": "0f631eb9b7d34f5c626a971c7e7bed2d389e8733420282cf2a4c723362c011ab",
+    "inline_tests": null
+  },
+  "tests/test_scheduler_plan.py": {
+    "sha256": "6d5d35ae7c34e0401a3426a99f61bc14fc11ead32ce8b3900c3df3b6f4eae374",
+    "inline_tests": null
+  },
+  "tests/test_schedule_runner.py": {
+    "sha256": "238492027a9e65b5867d906664ac99ed3d9a5eec98901703bd726818827b85fb",
+    "inline_tests": null
+  },
+  "tests/test_schedule_tool.py": {
+    "sha256": "63f5be9897ec9a00fb23fa1c983c18cd895605e55d439c0fc66ab35bcb32d35d",
+    "inline_tests": null
+  },
+  "tests/test_session_fork.py": {
+    "sha256": "eadcc31dab3be1d29585b4f9f8e16ef6c0ec5cc6d74ef6dc326baeb50ebf11d9",
+    "inline_tests": null
+  },
+  "tests/test_session_index.py": {
+    "sha256": "7f90934b276a16f5a255a8a0e6a0935f9c98745f6ea04443f844282409fbe48d",
+    "inline_tests": null
+  },
+  "tests/test_shell_readonly.py": {
+    "sha256": "7df7586245327e484ab6f83614cec67fd3d9734ecac113e900b65795dd3925d5",
+    "inline_tests": null
+  },
+  "tests/test_skills.py": {
+    "sha256": "b6f25f06c5580ea495f66ed1b4581aab7f0882d3e171ecba0baf508967cba609",
+    "inline_tests": null
+  },
+  "tests/test_slash.py": {
+    "sha256": "f3b8b7b20008871845c63dd5f6e9b8ec771ebd2f6ce4b2ae8adcd2be120c2999",
+    "inline_tests": null
+  },
+  "tests/test_state_store.py": {
+    "sha256": "72a508b85882239a8bb625c3b9501fbbf80b8541d967c59086d832d3dc528f1d",
+    "inline_tests": null
+  },
+  "tests/test_step_approval.py": {
+    "sha256": "1cc93bb79aca862481cfd3660995a92f10dad640e6f7f890982fd6d53ced1fe3",
+    "inline_tests": null
+  },
+  "tests/test_storyboard.py": {
+    "sha256": "660166e9de1796667ba76aa5a8860392d1ed382d1fb9f121253ec2c69d24b196",
+    "inline_tests": null
+  },
+  "tests/test_streaming.py": {
+    "sha256": "5118fdbb8a53e0cb8e92c8855583bc8f542d4496b5c244130487a12617915ab3",
+    "inline_tests": null
+  },
+  "tests/test_task_graph.py": {
+    "sha256": "002d5afc5bc86a9fea47faeb57b46e77c7bf010c5c822771ce7b22ef0acf1348",
+    "inline_tests": null
+  },
+  "tests/test_trace.py": {
+    "sha256": "b66c34b20cf03b7ca82df818cd977802e1df8cf32ac6c8eb29ae726eb1226312",
+    "inline_tests": null
+  },
+  "tests/test_verifier_tools.py": {
+    "sha256": "e3d9a785e8fe4be9f266cb49f87730afa33d48d4ac076491a8b24f25e4999bf7",
+    "inline_tests": null
+  },
+  "tests/test_web_search.py": {
+    "sha256": "a39d20c66c08c2ac389b017774d8f277a476dcae758667a9057b450cc2b5292d",
+    "inline_tests": null
+  },
+  "tests/test_windows_job.py": {
+    "sha256": "834f5363ae45ed1af75a0c3acfa843ee4a1585354f3bfea52527081b5c41bcef",
+    "inline_tests": null
+  },
+  "tests/__init__.py": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "inline_tests": null
+  },
+  "train/admit_batch.py": {
+    "sha256": "099e57b58d7d3f4be9f352b2135664a5cca5090a678ca5b92926992b0c88c28b",
+    "inline_tests": null
+  },
+  "train/DESIGN.md": {
+    "sha256": "4e910a00567fb0f4a64c66c221142c8c208add6ba309af89158124df18a83765",
+    "inline_tests": null
+  },
+  "train/evaluator.py": {
+    "sha256": "f7fddd23603f4381b2ac8e89e75077668943fe164b9b5e58897c18640b94f4f6",
+    "inline_tests": null
+  },
+  "train/export.py": {
+    "sha256": "7523f6686992b0baf097ffd78bc067f1e9c7da2ec16ded588bc2955b0eacdd58",
+    "inline_tests": null
+  },
+  "train/finetune.py": {
+    "sha256": "0b475c5928105e278cd1b5f8e0372c0a422c562688277e6cb3a0f25075bb2391",
+    "inline_tests": null
+  },
+  "train/forge.py": {
+    "sha256": "d6b9ae24c3086666b6019f881088b62ff4f7295fc4d71670e2ebd79adf95c499",
+    "inline_tests": null
+  },
+  "train/genome.py": {
+    "sha256": "c2bc842d8b19ba0b40c5a37f0b15f1521c25cce8c5b45ca5cf223f05146ecb33",
+    "inline_tests": null
+  },
+  "train/INVENTORY.md": {
+    "sha256": "d35e4b07c66756a95325af876a094e70d67ec85274b440292c061c17ffac478d",
+    "inline_tests": null
+  },
+  "train/pareto.py": {
+    "sha256": "4d45402c63b9ac4602f1a5b5f4057e704aab6efdec9d6e7d53bcdd39b51d32dd",
+    "inline_tests": null
+  },
+  "train/process_control.py": {
+    "sha256": "fd1fd6489c76481c3026e8199db80a31602d558787fc3623cc7bb05297283656",
+    "inline_tests": null
+  },
+  "train/rollout.py": {
+    "sha256": "9d695a597403d8b2370dace2feecea329bf96ba7bb1901d99247743dfff595a0",
+    "inline_tests": null
+  },
+  "train/splits.py": {
+    "sha256": "6a85c6611c442325c1e8eeaa1d2cb97b5c5b3ef59a3644cf12e2b29249cae40c",
+    "inline_tests": null
+  },
+  "train/taskgen.py": {
+    "sha256": "4a1fc3f54c8a91fac6cc1c49b920891af3b86281bb8456818dd1aa00c1e66c23",
+    "inline_tests": null
+  },
+  "train/teacher.py": {
+    "sha256": "e615c1a7b15fd362f68c3fddd77ccb138a25e2d5c7868b5275f4d769fc4ae7d5",
+    "inline_tests": null
+  },
+  "train/test_evaluator.py": {
+    "sha256": "d6d209ede023df15627e840f033e36b2b3331783e135160ae335965196a201b0",
+    "inline_tests": null
+  },
+  "train/test_export.py": {
+    "sha256": "7ad370fa7140a88b6b82078ac486c51be69d24f92379bbeb4c6d911e4cda6695",
+    "inline_tests": null
+  },
+  "train/test_finetune.py": {
+    "sha256": "9c82abd0afc46b9cb73d94b59dd8c709357f28a1cf9d6560251884563f7913e0",
+    "inline_tests": null
+  },
+  "train/test_forge.py": {
+    "sha256": "46cb829d7dc68bdcc3d70562456af1191d9ab4aab14a85b583f0754bb8a28cb3",
+    "inline_tests": null
+  },
+  "train/test_pareto.py": {
+    "sha256": "42d5a1ba74464d9477bf444ee3edb9585c2a5e8eca6faca17dca51cec588111f",
+    "inline_tests": null
+  },
+  "train/test_population.py": {
+    "sha256": "a576db7d9ea83e179351ca6c0ec68f626480356f4edc545c12d99b350c846ccd",
+    "inline_tests": null
+  },
+  "train/test_process_control.py": {
+    "sha256": "a0d643111af06481bb17a460890540fa5bc5204ebaacc2d35cc98f9ce3faccf5",
+    "inline_tests": null
+  },
+  "train/test_rollout.py": {
+    "sha256": "05df23afc474d56e072237a85bb89717291163876b5863646eaf64ae23ca43d6",
+    "inline_tests": null
+  },
+  "train/test_taskgen.py": {
+    "sha256": "fffe4f3a418753739813cb70703c1b15fbba1d6b613b6eaabe2478d5f173c250",
+    "inline_tests": null
+  },
+  "train/viz.py": {
+    "sha256": "a44e6311c39e0f4aaef7712eac40521dc86e6dd142bf4310640a9732bf485053",
+    "inline_tests": null
+  }
+}

@@ -1,0 +1,43 @@
+diff --git a/bench/run.py b/bench/run.py
+index fec069b..6972281 100644
+--- a/bench/run.py
++++ b/bench/run.py
+@@ -140,8 +140,6 @@ def _post_edit_checks(ws: Path, baseline: dict[str, tuple[int, str]],
+ 
+ 
+ def _failure_kind(evidence: dict) -> str | None:
+-    if evidence.get("missing_expected_files"):
+-        return "missing_expected_file"
+     compiles = evidence.get("python_compile") or []
+     if any(not item.get("ok") for item in compiles):
+         return "compile_failed"
+@@ -156,9 +154,7 @@ def _failure_kind(evidence: dict) -> str | None:
+         return "missing_expected_file"
+     if evidence.get("timed_out"):
+         return "timeout"
+-    if not evidence.get("passed"):
+-        return "grader_failed"
+-    return None
++    return "grader_failed"
+ 
+ 
+ def grade(task: Path, ws: Path) -> tuple[bool, str]:
+@@ -273,8 +269,7 @@ def run_agent(agent: str, timeout: int, repeats: int, filt: str = "",
+                 evidence["attempt"] = attempt_no
+                 evidence["retry"] = retry_no
+                 run_attempts.append(evidence)
+-                if retry_no == 0:
+-                    attempts.append(evidence)
++                attempts.append(evidence)
+                 total_elapsed += evidence.get("elapsed_s", 0.0)
+                 timeouts += int(evidence.get("timed_out", False))
+                 final_evidence = evidence
+@@ -294,7 +289,7 @@ def run_agent(agent: str, timeout: int, repeats: int, filt: str = "",
+             for item in run_attempts:
+                 item["empty_response_retries"] = retry_no
+             passes += int(final_evidence.get("passed", False))
+-            times.append(final_evidence.get("elapsed_s", 0.0))
++            times.append(total_elapsed)
+             if not final_evidence.get("passed") and not note:
+                 note = final_evidence.get("grader_note", "")
+         mean_s = round(sum(times) / len(times), 1) if times else 0.0

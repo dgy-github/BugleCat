@@ -140,13 +140,18 @@ def _post_edit_checks(ws: Path, baseline: dict[str, tuple[int, str]],
 
 
 def _failure_kind(evidence: dict) -> str | None:
-    if evidence.get("missing_expected_files"):
-        return "missing_expected_file"
-    if any(not item.get("ok") for item in evidence.get("python_compile", [])):
+    compiles = evidence.get("python_compile") or []
+    if any(not item.get("ok") for item in compiles):
         return "compile_failed"
-    output = "\n".join(evidence.get("stdout_tail", []) + evidence.get("stderr_tail", []))
+    if evidence.get("passed"):
+        return None
+    stdout_tail = evidence.get("stdout_tail") or []
+    stderr_tail = evidence.get("stderr_tail") or []
+    output = "\n".join(stdout_tail + stderr_tail)
     if "空内容" in output or "empty response" in output.lower():
         return "empty_response"
+    if evidence.get("missing_expected_files"):
+        return "missing_expected_file"
     if evidence.get("timed_out"):
         return "timeout"
     if not evidence.get("passed"):
@@ -259,17 +264,36 @@ def run_agent(agent: str, timeout: int, repeats: int, filt: str = "",
                 print(f"  {agent} not installed — skipping the rest")
                 return results
             retry_no = 0
-            while evidence.get("failure_kind") == "empty_response" and retry_no < empty_response_retries:
-                retry_no += 1
-                evidence = _run_once_detailed(agent, task, timeout, post_edit_timeout)
-            evidence["attempt"] = attempt_no
-            evidence["empty_response_retries"] = retry_no
-            attempts.append(evidence)
-            passes += int(evidence["passed"])
-            times.append(evidence["elapsed_s"])
-            timeouts += int(evidence["timed_out"])
-            if not evidence["passed"] and not note:
-                note = evidence["grader_note"]
+            total_elapsed = 0.0
+            final_evidence = evidence
+            run_attempts: list[dict] = []
+            while True:
+                evidence["attempt"] = attempt_no
+                evidence["retry"] = retry_no
+                run_attempts.append(evidence)
+                attempts.append(evidence)
+                total_elapsed += evidence.get("elapsed_s", 0.0)
+                timeouts += int(evidence.get("timed_out", False))
+                final_evidence = evidence
+                if (
+                    evidence.get("failure_kind") == "empty_response"
+                    and not evidence.get("passed")
+                    and retry_no < empty_response_retries
+                ):
+                    retry_no += 1
+                    try:
+                        evidence = _run_once_detailed(agent, task, timeout, post_edit_timeout)
+                    except FileNotFoundError:
+                        print(f"  {agent} not installed — skipping the rest")
+                        return results
+                    continue
+                break
+            for item in run_attempts:
+                item["empty_response_retries"] = retry_no
+            passes += int(final_evidence.get("passed", False))
+            times.append(total_elapsed)
+            if not final_evidence.get("passed") and not note:
+                note = final_evidence.get("grader_note", "")
         mean_s = round(sum(times) / len(times), 1) if times else 0.0
         rate = f"{passes}/{repeats}"
         details = []

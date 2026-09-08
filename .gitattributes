@@ -1,0 +1,3 @@
+# Unified diffs are replayable evidence; preserve bytes and context-only spaces.
+evals/self_repair/*.patch -text -whitespace
+evals/self_repair/results/**/*.patch -text -whitespace

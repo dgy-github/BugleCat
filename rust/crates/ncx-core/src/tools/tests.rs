@@ -34,6 +34,79 @@ mod tests {
     const ESCAPING: &str = "*** Begin Patch\n*** Add File: ../escape.txt\n+x\n*** End Patch";
 
     #[tokio::test]
+    async fn self_repair_unicode_path_reads_utf16_without_mojibake() {
+        let ws = tmp_ws("unicode_encoding");
+        std::fs::create_dir(ws.join("资料")).unwrap();
+        let mut bytes = vec![0xff, 0xfe];
+        bytes.extend("猫与 BOM\n".encode_utf16().flat_map(u16::to_le_bytes));
+        std::fs::write(ws.join("资料/含 空格.txt"), bytes).unwrap();
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let output = ReadFileTool
+            .execute(&ctx, &json!({"path":"./资料/../资料/含 空格.txt"}))
+            .await;
+        assert!(output.contains("猫与 BOM"), "{output}");
+        assert!(output.contains("UTF-16 LE"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn self_repair_unicode_path_still_rejects_binary() {
+        let ws = tmp_ws("unicode_binary");
+        std::fs::write(ws.join("二进制.dat"), [0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let output = ReadFileTool
+            .execute(&ctx, &json!({"path":"二进制.dat"}))
+            .await;
+        assert!(output.starts_with("Error:"), "{output}");
+    }
+
+    #[tokio::test]
+    async fn python_patch_reports_compile_failure_then_recovery() {
+        let ws = tmp_ws("compile_gate");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let result = ApplyPatchTool.execute(&ctx, &json!({"patch": "*** Begin Patch\n*** Add File: bad.py\n+    value = 1\n*** End Patch"})).await;
+        assert!(result.contains("compile_failed"), "{result}");
+        let result = ApplyPatchTool.execute(&ctx, &json!({"patch": "*** Begin Patch\n*** Update File: bad.py\n-    value = 1\n+value = 1\n*** End Patch"})).await;
+        assert!(result.contains("compile_passed"), "{result}");
+    }
+
+    #[tokio::test]
+    async fn python_patch_registers_all_written_files_before_cancellation() {
+        let ws = tmp_ws("compile_cancel");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let args = json!({"patch": "*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** Add File: b.py\n+    x = 1\n*** End Patch"});
+        let future = ApplyPatchTool.execute(&ctx, &args);
+        tokio::pin!(future);
+        // One poll commits the whole patch, then yields to the compiler I/O.
+        let _ = futures_util::poll!(&mut future);
+        assert!(ws.join("b.py").exists());
+        assert_eq!(ctx.python_checks.borrow().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn python_delete_alias_clears_failed_validation() {
+        let ws = tmp_ws("compile_alias");
+        std::fs::create_dir(ws.join("sub")).unwrap();
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let added = ApplyPatchTool
+            .execute(
+                &ctx,
+                &json!({"patch":"*** Begin Patch\n*** Add File: bad.py\n+    x=1\n*** End Patch"}),
+            )
+            .await;
+        assert!(added.contains("compile_failed"), "{added}");
+        assert_eq!(ctx.python_checks.borrow().len(), 1);
+        let deleted = ApplyPatchTool
+            .execute(
+                &ctx,
+                &json!({"patch":"*** Begin Patch\n*** Delete File: sub/../bad.py\n*** End Patch"}),
+            )
+            .await;
+        assert!(deleted.contains("successfully"), "{deleted}");
+        assert!(!ws.join("bad.py").exists());
+        assert!(ctx.python_checks.borrow().is_empty());
+    }
+
+    #[tokio::test]
     async fn denied_escaping_patch_is_blocked() {
         let ws = tmp_ws("deny");
         let ctx = ToolContext::new(
@@ -423,7 +496,7 @@ mod tests {
     }
 
     #[tokio::test]
-async fn skill_tool_registered_only_when_skills_present() {
+    async fn skill_tool_registered_only_when_skills_present() {
         use crate::skills::Skill;
         let ws = tmp_ws("skill_reg");
         let bare = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
@@ -488,9 +561,16 @@ async fn skill_tool_registered_only_when_skills_present() {
         let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
         ctx.compaction_read_only_recovery.set(true);
         let registry = ToolRegistry::new(ctx);
-        let blocked = registry.execute("apply_patch", &json!({"patch": "invalid"})).await;
-        assert!(blocked.contains("context compaction consistency check"), "{blocked}");
-        let read = registry.execute("read_file", &json!({"path": "evidence.txt"})).await;
+        let blocked = registry
+            .execute("apply_patch", &json!({"patch": "invalid"}))
+            .await;
+        assert!(
+            blocked.contains("context compaction consistency check"),
+            "{blocked}"
+        );
+        let read = registry
+            .execute("read_file", &json!({"path": "evidence.txt"}))
+            .await;
         assert!(read.contains("workspace fact"), "{read}");
     }
 }

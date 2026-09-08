@@ -1,0 +1,163 @@
+{
+  "id": "s3_budget",
+  "title": "超时预算与退出码",
+  "target": "rust/crates/ncx-cli/src/cli_app.rs",
+  "attempts": [
+    {
+      "attempt": 1,
+      "elapsed_s": 58.45,
+      "returncode": 0,
+      "timed_out": false,
+      "grader": {
+        "status": "passed",
+        "passed": 1,
+        "failed": 0,
+        "checks": [
+          "cli_app::exit_tests::incomplete_turns_return_failure"
+        ],
+        "elapsed_s": 0.4,
+        "returncode": 0,
+        "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n"
+      },
+      "integrity_issues": [],
+      "patch": "s3_budget_attempt1.patch",
+      "provider_diagnostics": [
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 5675,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2504,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3481,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2108,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4806,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2768,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3043,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3229,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 5227,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4958,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4333,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 6604,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4558,
+          "attempts": 1,
+          "retries": 0
+        }
+      ]
+    }
+  ],
+  "status": "passed",
+  "healthy": {
+    "status": "passed",
+    "passed": 1,
+    "failed": 0,
+    "checks": [
+      "cli_app::exit_tests::incomplete_turns_return_failure"
+    ],
+    "elapsed_s": 0.4,
+    "returncode": 0,
+    "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.27s\n     Running unittests src\\main.rs (rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n"
+  },
+  "agent_shell_preflight": {
+    "passed": true,
+    "elapsed_s": 0.44,
+    "returncode": 0
+  },
+  "healthy_target_sha256": "b4cf242bd5539bee00f007f9a0f11501362e245b804bd09deb0787255d077fd6",
+  "seed_head": "727275fffa572879ffe9291f970afb92f0e91996",
+  "baseline_sha256": "d25e9bd48b0e0749bfe60d5bc928a52568d4457f78b540b9c06bb32471cc44e2",
+  "seed": {
+    "status": "test_failed",
+    "passed": 0,
+    "failed": 1,
+    "checks": [
+      "cli_app::exit_tests::incomplete_turns_return_failure"
+    ],
+    "elapsed_s": 6.84,
+    "returncode": 101,
+    "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... FAILED\n\nfailures:\n\n---- cli_app::exit_tests::incomplete_turns_return_failure stdout ----\n\nthread 'cli_app::exit_tests::incomplete_turns_return_failure' (34700) panicked at crates\\ncx-cli\\src\\cli_app.rs:313:13:\nassertion `left == right` failed: task_budget\n  left: 0\n right: 1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    cli_app::exit_tests::incomplete_turns_return_failure\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n   Compiling ncx-cli v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s3_budget\\rust\\crates\\ncx-cli)\n    Finished `test` profile [optimized + debuginfo] target(s) in 5.72s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\nerror: test failed, to rerun pass `-p ncx-cli --bin ncx`\n"
+  }
+}

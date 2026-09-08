@@ -1,0 +1,13 @@
+diff --git a/rust/crates/ncx-tools/src/text_encoding.rs b/rust/crates/ncx-tools/src/text_encoding.rs
+index 9db28fb..e3506a3 100644
+--- a/rust/crates/ncx-tools/src/text_encoding.rs
++++ b/rust/crates/ncx-tools/src/text_encoding.rs
+@@ -48,7 +48,7 @@ pub fn decode_text(bytes: &[u8]) -> Result<DecodedText, &'static str> {
+         return Ok(decoded(text, TextEncoding::Utf8Bom));
+     }
+     if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+-        return decode_with(UTF_16BE, rest, TextEncoding::Utf16Le);
++        return decode_with(UTF_16LE, rest, TextEncoding::Utf16Le);
+     }
+     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+         return decode_with(UTF_16BE, rest, TextEncoding::Utf16Be);

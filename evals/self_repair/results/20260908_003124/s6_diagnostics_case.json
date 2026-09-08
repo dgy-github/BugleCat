@@ -1,0 +1,145 @@
+{
+  "id": "s6_diagnostics",
+  "title": "连接诊断与日志脱敏",
+  "target": "rust/crates/ncx-provider/src/provider/diagnostics.rs",
+  "attempts": [
+    {
+      "attempt": 1,
+      "elapsed_s": 73.79,
+      "returncode": 0,
+      "timed_out": false,
+      "grader": {
+        "status": "passed",
+        "passed": 3,
+        "failed": 0,
+        "checks": [
+          "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+          "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+          "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+        ],
+        "elapsed_s": 0.34,
+        "returncode": 0,
+        "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.22s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\n"
+      },
+      "integrity_issues": [],
+      "patch": "s6_diagnostics_attempt1.patch",
+      "provider_diagnostics": [
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4013,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2043,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 12711,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2613,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2273,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 26514,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4935,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3835,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4297,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 6504,
+          "attempts": 1,
+          "retries": 0
+        }
+      ]
+    }
+  ],
+  "status": "passed",
+  "healthy": {
+    "status": "passed",
+    "passed": 3,
+    "failed": 0,
+    "checks": [
+      "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+      "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+      "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+    ],
+    "elapsed_s": 0.36,
+    "returncode": 0,
+    "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.22s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\n"
+  },
+  "agent_shell_preflight": {
+    "passed": true,
+    "elapsed_s": 0.51,
+    "returncode": 0
+  },
+  "healthy_target_sha256": "95cdfff30b5fa9d74c3833a203c63fc77424caacf9626a1d3fde5d95f5fbbb9b",
+  "seed_head": "7e6757ea2afd69b2908bb6afb7a9d30672939747",
+  "baseline_sha256": "e5f89689acbbbe4d68730348476dc2434a169dbe9c52f48c6d441408b357c671",
+  "seed": {
+    "status": "test_failed",
+    "passed": 1,
+    "failed": 2,
+    "checks": [
+      "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+      "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+      "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+    ],
+    "elapsed_s": 8.39,
+    "returncode": 101,
+    "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... FAILED\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... FAILED\n\nfailures:\n\n---- provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries stdout ----\n\nthread 'provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries' (37752) panicked at crates\\ncx-provider\\src\\provider\\diagnostics.rs:75:9:\nassertion `left == right` failed\n  left: Number(1)\n right: 0\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model stdout ----\n\nthread 'provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model' (42236) panicked at crates\\ncx-provider\\src\\provider\\diagnostics.rs:62:9:\nassertion failed: !text.contains(\"fixture-credential\")\n\n\nfailures:\n    provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries\n    provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model\n\ntest result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s6_diagnostics\\rust\\crates\\ncx-provider)\n    Finished `test` profile [optimized + debuginfo] target(s) in 7.39s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\nerror: test failed, to rerun pass `-p ncx-provider --lib`\n"
+  }
+}

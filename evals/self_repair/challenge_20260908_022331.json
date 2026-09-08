@@ -1,0 +1,73 @@
+{
+  "model": "deepseek-v4-pro",
+  "baseline": "805261ec4fd8ae961fd1bec2589dc95295043433",
+  "workspace": "D:\\github_dgy\\BugleCat-self-repair-20260908-r2",
+  "binary_sha256": "321c8cb2a5a699da3bba2db71a3416c08454ce3fa770dfb1e9af309e206ceda1",
+  "elapsed_s": 43.18,
+  "returncode": 0,
+  "provider_diagnostics": [
+    {
+      "attempts": 1,
+      "elapsed_ms": 3728,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    },
+    {
+      "attempts": 1,
+      "elapsed_ms": 2553,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    },
+    {
+      "attempts": 1,
+      "elapsed_ms": 13323,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    },
+    {
+      "attempts": 1,
+      "elapsed_ms": 9700,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    },
+    {
+      "attempts": 1,
+      "elapsed_ms": 2746,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    },
+    {
+      "attempts": 1,
+      "elapsed_ms": 3349,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    },
+    {
+      "attempts": 1,
+      "elapsed_ms": 5580,
+      "event": "provider_request",
+      "http_status": 200,
+      "kind": "success",
+      "model": "deepseek-v4-pro",
+      "retries": 0
+    }
+  ]
+}

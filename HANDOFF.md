@@ -1,5 +1,36 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-08：六类自我修复题库与正式报告
+
+- 已按用户授权完成一次性六类源码故障注入套件：失败分类/重试、补丁上下文/缩进、预算/退出码、编译门禁、路径/编码、诊断/脱敏。入口 `python -m evals.self_repair.suite --work-root <新的仓库外目录>`，无定时任务。
+- DeepSeek Pro 正式运行 `20260908_003124`：首轮 5/6，最多一次反馈后 6/6，最终全部退出 0；7 次 CLI 启动累计 659.65 秒。补丁题首轮无补丁且 stream_error，反馈后 19 项验收通过；失败轨迹与空补丁保留。
+- 逐题先验证健康通过、注入失败；不导出健康 Git 历史、旧答案或本套验收器。冻结既有文件/测试，校验原测试身份；每次尝试持久化证据、逐字段脱敏。合作式自测不是强制读隔离/防作弊沙箱。
+- 已处理试运行发现的 Agent shell 编译环境差异与共享 Cargo 陈旧产物：冻结可见测试入口恢复允许的构建环境；外部验收仅清理四个可变包的 dev 产物，保留源码/依赖缓存/release。旧试运行 001556 单独存档；正式批次第二题的零模型调用预检失败保留在 preflight_history 后补跑，未重置实际模型失败。
+- 最终冷复验全部一致：6 个健康基线通过、6 个原始故障种子失败、7 份逐次补丁重放与原记录一致，最终 40/40 检查通过、无完整性违规。报告生成器拒绝缺失/不一致的复验证据。
+- 此前 r2 模型生成的 bench/run.py 修复及 tests/test_bench_run.py（12 项测试）已正式整合到本次工作区；本轮合成故障候选不自动合并。旧失败副本和历史证据均保留。
+- 发布前验证：Python 629/629、进程回收 4/4、Rust 全 workspace/all-features 640/640（不重复计跨进程辅助子测试）、严格全工作区 Clippy、fmt、GUI Rust lib 系统提示定向测试 1/1 通过；凭据扫描无命中、健康目标 SHA 一致。
+- 报告：docs/reports/self_repair_20260908.md；结构化证据：evals/self_repair/results/20260908_003124/{summary,independent_recheck}.json。未重跑 18 题全量 benchmark 或完整 GUI E2E；用户原有修改保留，按已授权的提交/推送流程交付。
+
+## 2026-09-08：补丁上下文与强制编译门禁
+
+- 已复现并修复 Rust V4A 解析器丢弃普通上下文的问题：整段定位，匹配失败不写入；容错匹配保留原始上下文缩进。
+- CLI 仅 `completed` 计为 Completed/退出 0；预算耗尽及所有未完成状态返回失败。
+- 原生 Python 编辑自动执行隔离语法编译，逐文件记录 post_edit_compile；多文件先全部登记，再检查。结束前复检、持久化最新证据；验证失败阻止完成，允许继续修复。
+- 检查限时 15s，不执行目标代码或产生 pycache；Python 缺失也失败关闭。登记范围是 apply_patch 与 str_replace_editor，尚不覆盖任意 shell/MCP 新建文件的自动发现。
+- 定向红绿回归与完整验证：Rust 425/425（38 CLI + 289 core + 51 provider + 47 tools）、严格 Clippy、fmt、Ruff、eval harness 3/3 通过。只读复核发现的缩进保留、取消漏登记、复检证据与删除别名问题已处理。
+- release 已重建，在干净隔离副本 BugleCat-self-repair-20260908-r2 用 DeepSeek Pro 重跑相同挑战：基线 3/9 → 首次 8/9（413.78s）→ 一次反例反馈后 9/9（43.18s）。补丁与新增的 12 个测试均由 BugleCat 生成；外部复验完整 Python 测试 616/616、Ruff、py_compile、diff check 通过。
+- 最终候选和证据保存在 evals/self_repair/pro_candidate_r2_final.patch、acceptance_r2_final.json 与 README.md；旧失败副本和反馈前快照保留。候选未自动合入主项目，未改题目/checker，尚未提交/推送；未重跑全量 benchmark 或 GUI 构建。
+
+## 2026-09-08：连接诊断、等待预算与自修复挑战
+
+- Provider 新增脱敏 JSON 诊断（模型、状态、耗时、尝试/重试次数、超时类型），不记录 URL、凭据或错误正文。
+- 单模型调用的全部重试/退避共用 timeout_s（默认 120s）；避免 Agent 再次放大 Provider 已耗尽的重试。连接上限 15s，默认 HTTP 重试最多 3 次。
+- Agent 增加 NANOCODEX_TURN_TIMEOUT_S（默认 600s），协作取消后保留会话和工具轨迹；CLI timeout 退出非零。同步工作/停止 Hook 清理可能略超期限。
+- Pro 与实验模型短请求、工具调用对照 4/4 成功；只证明本次低上下文非流式探针可用。未修改全局模型配置。
+- 隔离副本上的 Pro 自修复耗时 313.76s，30 次请求均 HTTP 200，但候选 bench/run.py 第 1 行 IndentationError，独立行为验收无法启动，未新增测试。不得将退出码 0 记为修复成功，失败补丁未合入主项目。
+- 证据和复现入口：evals/self_repair/README.md、deepseek_probe_20260908.json、challenge_20260908_020133.json、pro_candidate_failed.patch。
+- 验证：CLI/core/provider 共 371 个测试通过，相关三 crate 严格 Clippy、Rust fmt、Ruff 通过；未跑全量 benchmark 或 GUI 构建。未提交/推送。
+
 ## 2026-09-04：Benchmark 可靠性门禁与超时证据（进行中）
 
 - `bench/run.py` 新增详细运行结果：保留原 `run_once()` 三元组兼容接口，同时在内部记录每次是否命中 timeout；Markdown/JSON 报告按任务和 Agent 单独展示 timeout 数，避免“超时但 grader 通过”和逻辑失败混为一谈。

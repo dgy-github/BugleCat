@@ -1,0 +1,68 @@
+diff --git a/bench/run.py b/bench/run.py
+index d05f760..37eea62 100644
+--- a/bench/run.py
++++ b/bench/run.py
+@@ -1,3 +1,4 @@
++            logical_attempts = [evidence]
+ #!/usr/bin/env python3
+ """Three-way coding-agent benchmark: nanocodex / opencode / Claude Code.
+ 
+@@ -140,18 +141,18 @@ def _post_edit_checks(ws: Path, baseline: dict[str, tuple[int, str]],
+ 
+ 
+ def _failure_kind(evidence: dict) -> str | None:
+-    if evidence.get("missing_expected_files"):
+-        return "missing_expected_file"
++    if evidence.get("passed"):
++        return None
+     if any(not item.get("ok") for item in evidence.get("python_compile", [])):
+         return "compile_failed"
++    if evidence.get("timed_out"):
++        return "timeout"
+     output = "\n".join(evidence.get("stdout_tail", []) + evidence.get("stderr_tail", []))
+     if "空内容" in output or "empty response" in output.lower():
+         return "empty_response"
+-    if evidence.get("timed_out"):
+-        return "timeout"
+-    if not evidence.get("passed"):
+-        return "grader_failed"
+-    return None
++    if evidence.get("missing_expected_files"):
++        return "missing_expected_file"
++    return "grader_failed"
+ 
+ 
+ def grade(task: Path, ws: Path) -> tuple[bool, str]:
+@@ -259,17 +260,23 @@ def run_agent(agent: str, timeout: int, repeats: int, filt: str = "",
+                 print(f"  {agent} not installed — skipping the rest")
+                 return results
+             retry_no = 0
+-            while evidence.get("failure_kind") == "empty_response" and retry_no < empty_response_retries:
++            while (evidence.get("failure_kind") == "empty_response"
++                   and not evidence.get("passed")
++                   and retry_no < empty_response_retries):
+                 retry_no += 1
+                 evidence = _run_once_detailed(agent, task, timeout, post_edit_timeout)
+-            evidence["attempt"] = attempt_no
+-            evidence["empty_response_retries"] = retry_no
+-            attempts.append(evidence)
+-            passes += int(evidence["passed"])
+-            times.append(evidence["elapsed_s"])
+-            timeouts += int(evidence["timed_out"])
+-            if not evidence["passed"] and not note:
+-                note = evidence["grader_note"]
++                logical_attempts.append(evidence)
++            for retry_index, attempt in enumerate(logical_attempts):
++                attempt["attempt"] = attempt_no
++                attempt["retry"] = retry_index
++                attempt["empty_response_retries"] = retry_no
++            attempts.extend(logical_attempts)
++            final_attempt = logical_attempts[-1]
++            passes += int(final_attempt["passed"])
++            times.append(sum(attempt["elapsed_s"] for attempt in logical_attempts))
++            timeouts += sum(int(attempt["timed_out"]) for attempt in logical_attempts)
++            if not final_attempt["passed"] and not note:
++                note = final_attempt["grader_note"]
+         mean_s = round(sum(times) / len(times), 1) if times else 0.0
+         rate = f"{passes}/{repeats}"
+         details = []

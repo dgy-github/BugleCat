@@ -1,0 +1,38 @@
+[
+  {
+    "model": "deepseek-v4-pro",
+    "case": "short_text",
+    "retries": 0,
+    "http_status": 200,
+    "ok": true,
+    "kind": "success",
+    "elapsed_s": 1.97
+  },
+  {
+    "model": "deepseek-v4-pro",
+    "case": "tool_call",
+    "retries": 0,
+    "http_status": 200,
+    "ok": true,
+    "kind": "success",
+    "elapsed_s": 2.32
+  },
+  {
+    "model": "deepseek-v4-flash-vision-exp",
+    "case": "short_text",
+    "retries": 0,
+    "http_status": 200,
+    "ok": true,
+    "kind": "success",
+    "elapsed_s": 1.6
+  },
+  {
+    "model": "deepseek-v4-flash-vision-exp",
+    "case": "tool_call",
+    "retries": 0,
+    "http_status": 200,
+    "ok": true,
+    "kind": "success",
+    "elapsed_s": 2.06
+  }
+]

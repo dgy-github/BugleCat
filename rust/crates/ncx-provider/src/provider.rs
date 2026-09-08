@@ -18,6 +18,8 @@ use tokio::time::{timeout, timeout_at, Instant};
 use crate::request::{build_body, to_request_json};
 use crate::response::{extract_reasoning, extract_usage, parse_args, parse_completion};
 use crate::types::{ModelResponse, ProviderError, ToolCall};
+mod diagnostics;
+use diagnostics::{transport_kind, RequestDiagnostic};
 
 const DEFAULT_STREAM_OPEN_TIMEOUT_S: u64 = 45;
 const STREAM_OPEN_TIMEOUT_MIN_S: u64 = 5;
@@ -80,6 +82,7 @@ pub struct DeepSeekProvider {
     pub model: String,
     pub max_retries: u32,
     confirmed_model: RefCell<Option<String>>,
+    request_timeout: Duration,
 }
 
 impl DeepSeekProvider {
@@ -99,6 +102,7 @@ impl DeepSeekProvider {
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_s))
+            .connect_timeout(Duration::from_secs(timeout_s.clamp(1, 15)))
             .build()
             .expect("reqwest client builds with default (rustls) config");
         let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -109,6 +113,7 @@ impl DeepSeekProvider {
             model: model.into(),
             max_retries,
             confirmed_model: RefCell::new(None),
+            request_timeout: Duration::from_secs(timeout_s.max(1)),
         }
     }
 
@@ -143,13 +148,73 @@ impl DeepSeekProvider {
         max_tokens: Option<i64>,
         reasoning_effort: Option<&str>,
     ) -> Result<ModelResponse, ProviderError> {
+        let started = Instant::now();
+        let diagnostic = RefCell::new(RequestDiagnostic::default());
+        let result = timeout(
+            self.request_timeout,
+            self.chat_inner(
+                messages,
+                tools,
+                temperature,
+                max_tokens,
+                reasoning_effort,
+                &diagnostic,
+            ),
+        )
+        .await;
+        self.finish_request(result, &diagnostic, started)
+    }
+
+    fn finish_request(
+        &self,
+        result: Result<Result<ModelResponse, ProviderError>, tokio::time::error::Elapsed>,
+        diagnostic: &RefCell<RequestDiagnostic>,
+        started: Instant,
+    ) -> Result<ModelResponse, ProviderError> {
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => {
+                diagnostic.borrow_mut().kind = "request_deadline";
+                Err(ProviderError("TimeoutError: request_deadline".into()))
+            }
+        };
+        if result.is_ok() {
+            diagnostic.borrow_mut().kind = "success";
+        }
+        let details = diagnostic
+            .borrow()
+            .render(&self.model, &self.api_key, started.elapsed());
+        eprintln!("[ncx-provider] {details}");
+        result.map_err(|error| ProviderError(format!("{} | {details}", error.0)))
+    }
+
+    fn log_attempt(&self, diagnostic: &RefCell<RequestDiagnostic>, started: Instant) {
+        eprintln!(
+            "[ncx-provider] {}",
+            diagnostic
+                .borrow()
+                .render(&self.model, &self.api_key, started.elapsed())
+        );
+    }
+
+    async fn chat_inner(
+        &self,
+        messages: &[Value],
+        tools: Option<&[Value]>,
+        temperature: Option<f64>,
+        max_tokens: Option<i64>,
+        reasoning_effort: Option<&str>,
+        diagnostic: &RefCell<RequestDiagnostic>,
+    ) -> Result<ModelResponse, ProviderError> {
         *self.confirmed_model.borrow_mut() = None;
         let kwargs = self.body(messages, tools, temperature, max_tokens, reasoning_effort);
         let payload = to_request_json(&kwargs);
 
         let mut attempt = 0u32;
         loop {
-            match self.post(&payload).await {
+            diagnostic.borrow_mut().begin();
+            let started = Instant::now();
+            match self.post(&payload, diagnostic).await {
                 Ok(json) => {
                     *self.confirmed_model.borrow_mut() = json
                         .get("model")
@@ -159,18 +224,29 @@ impl DeepSeekProvider {
                     return Ok(parse_completion(&json));
                 }
                 Err(e) if e.transient && attempt < self.max_retries => {
+                    diagnostic.borrow_mut().kind = e.kind;
+                    diagnostic.borrow_mut().status = e.status;
+                    self.log_attempt(diagnostic, started);
                     attempt += 1;
                     // Exponential backoff: 0.5s, 1s, 2s, … (the SDK honors
                     // Retry-After; we approximate with a capped doubling).
                     let backoff = Duration::from_millis(500u64 << (attempt - 1).min(5));
                     tokio::time::sleep(backoff).await;
                 }
-                Err(e) => return Err(ProviderError(e.message)),
+                Err(e) => {
+                    diagnostic.borrow_mut().kind = e.kind;
+                    diagnostic.borrow_mut().status = e.status;
+                    return Err(ProviderError(e.message));
+                }
             }
         }
     }
 
-    async fn post(&self, payload: &Value) -> Result<Value, HttpErr> {
+    async fn post(
+        &self,
+        payload: &Value,
+        diagnostic: &RefCell<RequestDiagnostic>,
+    ) -> Result<Value, HttpErr> {
         let resp = self
             .client
             .post(&self.endpoint)
@@ -181,10 +257,13 @@ impl DeepSeekProvider {
             .map_err(HttpErr::from_reqwest)?;
 
         let status = resp.status();
+        diagnostic.borrow_mut().status = Some(status.as_u16());
         if status.is_success() {
             return resp.json::<Value>().await.map_err(|e| HttpErr {
-                message: format!("decode error: {e}"),
+                message: format!("RequestError: {}", transport_kind(&e)),
                 transient: false,
+                kind: transport_kind(&e),
+                status: Some(status.as_u16()),
             });
         }
         // 408/409/429/5xx are transient; other 4xx are permanent.
@@ -197,6 +276,8 @@ impl DeepSeekProvider {
         Err(HttpErr {
             message: format!("HTTP {code}"),
             transient,
+            kind: "http_error",
+            status: Some(code),
         })
     }
 
@@ -211,13 +292,44 @@ impl DeepSeekProvider {
         temperature: Option<f64>,
         max_tokens: Option<i64>,
         reasoning_effort: Option<&str>,
-        mut on_content: C,
-        mut on_reasoning: R,
+        on_content: C,
+        on_reasoning: R,
     ) -> Result<ModelResponse, ProviderError>
     where
         C: FnMut(&str),
         R: FnMut(&str),
     {
+        let started = Instant::now();
+        let diagnostic = RefCell::new(RequestDiagnostic::default());
+        let result = timeout(
+            self.request_timeout,
+            self.chat_stream_inner(
+                messages,
+                tools,
+                temperature,
+                max_tokens,
+                reasoning_effort,
+                on_content,
+                on_reasoning,
+                &diagnostic,
+            ),
+        )
+        .await;
+        self.finish_request(result, &diagnostic, started)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn chat_stream_inner<C: FnMut(&str), R: FnMut(&str)>(
+        &self,
+        messages: &[Value],
+        tools: Option<&[Value]>,
+        temperature: Option<f64>,
+        max_tokens: Option<i64>,
+        reasoning_effort: Option<&str>,
+        mut on_content: C,
+        mut on_reasoning: R,
+        diagnostic: &RefCell<RequestDiagnostic>,
+    ) -> Result<ModelResponse, ProviderError> {
         *self.confirmed_model.borrow_mut() = None;
         let mut kwargs = self.body(messages, tools, temperature, max_tokens, reasoning_effort);
         kwargs.insert("stream".into(), json!(true));
@@ -231,6 +343,8 @@ impl DeepSeekProvider {
         // was emitted would duplicate the visible output, so we don't).
         let mut attempt = 0u32;
         loop {
+            diagnostic.borrow_mut().begin();
+            let started = Instant::now();
             let send_fut = self
                 .client
                 .post(&self.endpoint)
@@ -241,14 +355,21 @@ impl DeepSeekProvider {
             let resp = match timeout(open_to, send_fut).await {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
-                    if attempt < self.max_retries {
+                    diagnostic.borrow_mut().kind = transport_kind(&e);
+                    self.log_attempt(diagnostic, started);
+                    if (e.is_connect() || e.is_timeout()) && attempt < self.max_retries {
                         attempt += 1;
                         backoff_sleep(attempt).await;
                         continue;
                     }
-                    return Err(ProviderError(format!("RequestError: {e}")));
+                    return Err(ProviderError(format!(
+                        "RequestError: {}",
+                        transport_kind(&e)
+                    )));
                 }
                 Err(_) => {
+                    diagnostic.borrow_mut().kind = "headers_timeout";
+                    self.log_attempt(diagnostic, started);
                     if attempt < self.max_retries {
                         attempt += 1;
                         backoff_sleep(attempt).await;
@@ -263,8 +384,12 @@ impl DeepSeekProvider {
                 }
             };
 
+            diagnostic.borrow_mut().status = Some(resp.status().as_u16());
+
             if !resp.status().is_success() {
                 let code = resp.status().as_u16();
+                diagnostic.borrow_mut().kind = "http_error";
+                self.log_attempt(diagnostic, started);
                 let transient = matches!(code, 408 | 409 | 429) || (500..600).contains(&code);
                 if transient && attempt < self.max_retries {
                     attempt += 1;
@@ -284,12 +409,22 @@ impl DeepSeekProvider {
             {
                 Ok(r) => return Ok(r),
                 Err(e) => {
+                    diagnostic.borrow_mut().kind =
+                        if e.0.contains("TimeoutError") || e.0.contains("没有实际输出") {
+                            "read_timeout"
+                        } else {
+                            "stream_error"
+                        };
+                    self.log_attempt(diagnostic, started);
                     if !emitted && attempt < self.max_retries {
                         attempt += 1;
                         backoff_sleep(attempt).await;
                         continue;
                     }
-                    return Err(e);
+                    return Err(ProviderError(format!(
+                        "StreamError: {}",
+                        diagnostic.borrow().kind
+                    )));
                 }
             }
         }
@@ -339,7 +474,10 @@ impl DeepSeekProvider {
                     // it only retries a stream that emitted nothing (otherwise a
                     // retry would duplicate the visible output).
                     *emitted = agg.has_progress();
-                    return Err(ProviderError(format!("StreamError: {e}")));
+                    return Err(ProviderError(format!(
+                        "StreamError: {}",
+                        transport_kind(&e)
+                    )));
                 }
             };
             let before = agg.progress_marker();
@@ -568,15 +706,19 @@ impl StreamAgg {
 struct HttpErr {
     message: String,
     transient: bool,
+    kind: &'static str,
+    status: Option<u16>,
 }
 
 impl HttpErr {
     fn from_reqwest(e: reqwest::Error) -> Self {
         // Connection / timeout errors are transient and worth retrying.
-        let transient = e.is_timeout() || e.is_connect() || e.is_request();
+        let transient = e.is_timeout() || e.is_connect();
         HttpErr {
-            message: format!("RequestError: {e}"),
+            message: format!("RequestError: {}", transport_kind(&e)),
             transient,
+            kind: transport_kind(&e),
+            status: None,
         }
     }
 }
@@ -624,9 +766,48 @@ mod tests {
         assert_eq!(stream_open_timeout_from(Some("")), 45);
     }
 
+    #[tokio::test]
+    async fn request_budget_includes_retry_backoff_and_keeps_safe_diagnostics() {
+        let (base_url, request) = serve_once("503 Service Unavailable", "private-body".into());
+        let provider = DeepSeekProvider::with_opts("private-key", &base_url, "test-model", 1, 100);
+        let started = Instant::now();
+        let error = timeout(
+            Duration::from_secs(3),
+            provider.chat(&[], None, None, None, None),
+        )
+        .await
+        .expect("request budget must bound retries")
+        .unwrap_err()
+        .to_string();
+        request.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(error.contains("request_deadline"), "{error}");
+        assert!(error.contains("test-model"), "{error}");
+        assert!(!error.contains("private-key"));
+        assert!(!error.contains("private-body"));
+    }
+
     #[test]
     fn stream_open_timeout_honors_env_within_bounds() {
         assert_eq!(stream_open_timeout_from(Some("90")), 90);
+    }
+
+    #[tokio::test]
+    async fn stream_request_budget_also_bounds_backoff() {
+        let (base_url, request) = serve_once("503 Service Unavailable", "private-body".into());
+        let provider = DeepSeekProvider::with_opts("private-key", &base_url, "test-model", 1, 100);
+        let error = timeout(
+            Duration::from_secs(3),
+            provider.chat_stream(&[], None, None, None, None, |_| {}, |_| {}),
+        )
+        .await
+        .expect("stream budget must bound retries")
+        .unwrap_err()
+        .to_string();
+        request.join().unwrap();
+        assert!(error.contains("request_deadline"), "{error}");
+        assert!(!error.contains("private-key"));
+        assert!(!error.contains("private-body"));
     }
 
     #[test]
@@ -702,7 +883,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert_eq!(error, "HTTP 403");
+        assert!(error.starts_with("HTTP 403 | "), "{error}");
         assert!(!error.contains(private_body));
         assert!(!error.contains("client-secret"));
         assert!(request
@@ -724,7 +905,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert_eq!(error, "HTTP 502");
+        assert!(error.starts_with("HTTP 502 | "), "{error}");
         assert!(!error.contains(private_body));
         assert!(!error.contains("client-secret"));
     }

@@ -10,6 +10,7 @@ use super::deliverable::DeliverableRequirement;
 use super::tool_dispatch::{self, DispatchStop};
 use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent, TurnResult};
 use crate::hooks::{run_matching_hooks, HookEvent};
+use crate::tools::python_check;
 use crate::turn_context::TurnContextRequest;
 
 const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
@@ -54,7 +55,18 @@ pub(super) async fn run(
     cancel: Option<&dyn Fn() -> bool>,
     sink: &mut Option<EventSink>,
 ) -> TurnResult {
-    let mut prompt = match prepare_prompt(agent, &user_input).await {
+    let deadline = tokio::time::Instant::now() + agent.turn_timeout;
+    let cancelled = || is_cancelled(cancel) || tokio::time::Instant::now() >= deadline;
+    let cancel: Option<&dyn Fn() -> bool> = Some(&cancelled);
+    let prepared = tokio::time::timeout_at(deadline, prepare_prompt(agent, &user_input)).await;
+    let prepared = match prepared {
+        Ok(prepared) => prepared,
+        Err(_) => {
+            agent.session.add_user(user_input);
+            return interrupted_result(agent, 0, TurnState::default(), true);
+        }
+    };
+    let mut prompt = match prepared {
         Ok(prompt) => prompt,
         Err(result) => return result,
     };
@@ -67,7 +79,12 @@ pub(super) async fn run(
 
     for iteration in 0..max_model_calls {
         if is_cancelled(cancel) {
-            return cancelled_result(agent, iteration + 1, state);
+            return interrupted_result(
+                agent,
+                iteration + 1,
+                state,
+                tokio::time::Instant::now() >= deadline,
+            );
         }
 
         if agent
@@ -135,8 +152,41 @@ pub(super) async fn run(
                 .await
             {
                 Some(response) => response,
-                None => return cancelled_result(agent, iteration + 1, state),
+                None => {
+                    return interrupted_result(
+                        agent,
+                        iteration + 1,
+                        state,
+                        tokio::time::Instant::now() >= deadline,
+                    )
+                }
             };
+        if !response.has_tool_calls()
+            && response.finish_reason != "error"
+            && !response.content.trim().is_empty()
+        {
+            let evidence =
+                match tokio::time::timeout_at(deadline, python_check::recheck(&agent.tools.ctx))
+                    .await
+                {
+                    Ok(evidence) => evidence,
+                    Err(_) => return interrupted_result(agent, iteration + 1, state, true),
+                };
+            if !evidence.is_empty() {
+                agent.session.add_assistant(
+                    &format!("[Runtime syntax verification]\n{}", evidence.join("\n")),
+                    None,
+                    "",
+                );
+            }
+            if let Some(reason) = python_check::failure(&agent.tools.ctx) {
+                let note = format!("Completion rejected: {reason}. Repair edited Python files and pass syntax validation before finishing. The latest runtime syntax verification contains the current path/error evidence.");
+                if !prompt.runtime_notes.contains(&note) {
+                    prompt.runtime_notes.push(note);
+                }
+                continue;
+            }
+        }
         if let Some((text, reason)) = finish_response(agent, &prompt, &response, &mut state, sink) {
             return state.finish(text, iteration + 1, reason);
         }
@@ -155,6 +205,12 @@ pub(super) async fn run(
         )
         .await
         {
+            if tokio::time::Instant::now() >= deadline {
+                agent
+                    .session
+                    .backfill_unanswered_tool_calls("[interrupted: turn deadline]");
+                return interrupted_result(agent, iteration + 1, state, true);
+            }
             return stop_turn(agent, stop, iteration, state);
         }
     }
@@ -184,11 +240,29 @@ async fn request_model_cancellable(
     }
 }
 
-fn cancelled_result(agent: &mut AgentLoop, iterations: usize, state: TurnState) -> TurnResult {
+fn interrupted_result(
+    agent: &mut AgentLoop,
+    iterations: usize,
+    state: TurnState,
+    timed_out: bool,
+) -> TurnResult {
     retire_active_plan(agent);
-    let text = "Stopped by user.".to_string();
+    let mut text = if timed_out {
+        "本轮已达到时间上限；会话和已完成的工具轨迹已保留，可继续处理。"
+    } else {
+        "Stopped by user."
+    }
+    .to_string();
+    let validation_failure = python_check::failure(&agent.tools.ctx);
+    if let Some(reason) = validation_failure {
+        text.push_str(&format!(" [{reason}]"));
+    }
     agent.session.add_assistant(&text, None, "");
-    state.finish(text, iterations, "cancelled")
+    state.finish(
+        text,
+        iterations,
+        validation_failure.unwrap_or(if timed_out { "timeout" } else { "cancelled" }),
+    )
 }
 
 async fn prepare_prompt(
@@ -327,7 +401,10 @@ fn finish_response(
     state: &mut TurnState,
     sink: &mut Option<EventSink>,
 ) -> Option<(String, &'static str)> {
-    if response.finish_reason == "error" && is_retryable_transport_error(&response.content) {
+    if response.finish_reason == "error"
+        && is_retryable_transport_error(&response.content)
+        && !response.content.contains("\"event\":\"provider_request\"")
+    {
         state.consecutive_transport_errors += 1;
         if state.consecutive_transport_errors < MAX_CONSECUTIVE_TRANSPORT_ERRORS {
             return None;
@@ -486,7 +563,11 @@ fn tool_budget_result(agent: &mut AgentLoop, iteration: usize, state: TurnState)
         agent.task_budget.max_tool_calls,
     );
     agent.session.add_assistant(&text, None, "");
-    state.finish(text, iteration + 1, "task_budget")
+    state.finish(
+        text,
+        iteration + 1,
+        python_check::failure(&agent.tools.ctx).unwrap_or("task_budget"),
+    )
 }
 
 fn model_budget_result(
@@ -499,7 +580,11 @@ fn model_budget_result(
         max_model_calls
     );
     agent.session.add_assistant(&text, None, "");
-    state.finish(text, max_model_calls, "task_budget")
+    state.finish(
+        text,
+        max_model_calls,
+        python_check::failure(&agent.tools.ctx).unwrap_or("task_budget"),
+    )
 }
 
 fn budget_note(agent: &AgentLoop, model_call: usize, tool_calls_used: usize) -> String {

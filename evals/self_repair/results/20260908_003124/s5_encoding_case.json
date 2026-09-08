@@ -1,0 +1,118 @@
+{
+  "id": "s5_encoding",
+  "title": "文件路径与编码兼容",
+  "target": "rust/crates/ncx-tools/src/text_encoding.rs",
+  "attempts": [
+    {
+      "attempt": 1,
+      "elapsed_s": 33.97,
+      "returncode": 0,
+      "timed_out": false,
+      "grader": {
+        "status": "passed",
+        "passed": 2,
+        "failed": 0,
+        "checks": [
+          "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+          "tools::tests::self_repair_unicode_path_still_rejects_binary"
+        ],
+        "elapsed_s": 0.38,
+        "returncode": 0,
+        "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... ok\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+      },
+      "integrity_issues": [],
+      "patch": "s5_encoding_attempt1.patch",
+      "provider_diagnostics": [
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3436,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3459,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3701,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2231,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4090,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2664,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 6916,
+          "attempts": 1,
+          "retries": 0
+        }
+      ]
+    }
+  ],
+  "status": "passed",
+  "healthy": {
+    "status": "passed",
+    "passed": 2,
+    "failed": 0,
+    "checks": [
+      "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+      "tools::tests::self_repair_unicode_path_still_rejects_binary"
+    ],
+    "elapsed_s": 0.38,
+    "returncode": 0,
+    "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... ok\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.26s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+  },
+  "agent_shell_preflight": {
+    "passed": true,
+    "elapsed_s": 0.44,
+    "returncode": 0
+  },
+  "healthy_target_sha256": "3c05e10bbbdb8b0dfff495b4d3d8987d040217158b5c3938d3ad4b7eac7c96e4",
+  "seed_head": "fea1f17e1d784fd7094d2acd68fcbba64dc63ea5",
+  "baseline_sha256": "7e4cf0790dec3597a81c291297f9d8736272687cdaebfbae22d18a53a9b2d754",
+  "seed": {
+    "status": "test_failed",
+    "passed": 1,
+    "failed": 1,
+    "checks": [
+      "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+      "tools::tests::self_repair_unicode_path_still_rejects_binary"
+    ],
+    "elapsed_s": 33.37,
+    "returncode": 101,
+    "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... FAILED\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\nfailures:\n\n---- tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake stdout ----\n\nthread 'tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake' (44620) panicked at crates\\ncx-core\\src\\tools/tests.rs:47:9:\n[decoded as UTF-16 LE]\n1| ⭳๎ 䈀伀䴀਀\n\n(end of file — 1 lines)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.01s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s5_encoding\\rust\\crates\\ncx-tools)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s5_encoding\\rust\\crates\\ncx-core)\n    Finished `test` profile [optimized + debuginfo] target(s) in 31.58s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\nerror: test failed, to rerun pass `-p ncx-core --lib`\n"
+  }
+}

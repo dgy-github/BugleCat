@@ -1,0 +1,17 @@
+diff --git a/rust/crates/ncx-provider/src/provider/diagnostics.rs b/rust/crates/ncx-provider/src/provider/diagnostics.rs
+index ad5b4d5..8e12a14 100644
+--- a/rust/crates/ncx-provider/src/provider/diagnostics.rs
++++ b/rust/crates/ncx-provider/src/provider/diagnostics.rs
+@@ -19,10 +19,10 @@ impl RequestDiagnostic {
+         let model = if key.is_empty() {
+             model.to_string()
+         } else {
+-            model.to_string()
++            model.replace(key, "[REDACTED]")
+         };
+         json!({"event":"provider_request", "model":model.chars().take(120).collect::<String>(),
+-            "attempts":self.attempts, "retries":self.attempts,
++            "attempts":self.attempts, "retries":self.attempts.saturating_sub(1),
+             "http_status":self.status, "kind":self.kind,
+             "elapsed_ms":elapsed.as_millis()})
+         .to_string()

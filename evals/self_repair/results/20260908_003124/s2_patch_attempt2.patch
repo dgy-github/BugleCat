@@ -1,0 +1,49 @@
+diff --git a/rust/crates/ncx-tools/src/patch.rs b/rust/crates/ncx-tools/src/patch.rs
+index e31785d..7eb7316 100644
+--- a/rust/crates/ncx-tools/src/patch.rs
++++ b/rust/crates/ncx-tools/src/patch.rs
+@@ -176,7 +176,7 @@ fn parse_update_body(
+     let mut current: Option<Chunk> = None;
+     let mut changed = false;
+ 
+-    // flush: commit current chunk if it has any change lines.
++    // flush: commit the current chunk if it has any change lines.
+     macro_rules! flush {
+         () => {{
+             if let Some(c) = current.take() {
+@@ -184,6 +184,7 @@ fn parse_update_body(
+                     chunks.push(c);
+                 }
+             }
++            changed = false;
+         }};
+     }
+ 
+@@ -191,7 +192,6 @@ fn parse_update_body(
+         let raw = body[i];
+         if let Some(rest) = raw.strip_prefix(HUNK_AT) {
+             flush!();
+-            changed = false;
+             let locator = rest.trim();
+             if !locator.is_empty() {
+                 pending_locators.push(locator.to_string());
+@@ -206,7 +206,18 @@ fn parse_update_body(
+         };
+         match marker {
+             ' ' => {
+-                flush!();
++                if current.is_none() {
++                    current = Some(Chunk {
++                        locators: std::mem::take(&mut pending_locators),
++                        ..Default::default()
++                    });
++                }
++                let c = current.as_mut().unwrap();
++                let new_index = c.ins_lines.len();
++                let old_index = c.del_lines.len();
++                c.del_lines.push(content.to_string());
++                c.ins_lines.push(content.to_string());
++                c.context_lines.push((new_index, old_index));
+                 i += 1;
+             }
+             '+' | '-' => {

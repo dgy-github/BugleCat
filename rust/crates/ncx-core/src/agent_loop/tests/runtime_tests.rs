@@ -544,3 +544,38 @@ async fn stop_interrupts_a_hanging_model_request() {
     assert_eq!(result.stop_reason, "cancelled");
     assert_eq!(result.final_text, "Stopped by user.");
 }
+
+#[tokio::test]
+async fn turn_deadline_preserves_user_message_and_clears_authority() {
+    struct Hanging;
+    #[async_trait(?Send)]
+    impl Provider for Hanging {
+        fn model(&self) -> &str {
+            "hanging"
+        }
+        async fn chat(&self, _: &[Value], _: &[Value], _: Option<&str>) -> ModelResponse {
+            std::future::pending().await
+        }
+    }
+    let ws = tmpdir("turn_deadline");
+    let mut agent = build(&ws, Box::new(Hanging));
+    agent.turn_timeout = Duration::from_millis(60);
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        agent.run_turn(json!("keep this task"), None),
+    )
+    .await
+    .expect("turn must terminate");
+    assert_eq!(result.stop_reason, "timeout");
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["content"] == "keep this task"));
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["content"] == result.final_text));
+    assert!(agent.tools.ctx.active_turn_id.get().is_none());
+}

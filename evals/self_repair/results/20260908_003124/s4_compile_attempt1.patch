@@ -1,0 +1,16 @@
+diff --git a/rust/crates/ncx-core/src/tools/python_check.rs b/rust/crates/ncx-core/src/tools/python_check.rs
+index a8bf3b5..da51f11 100644
+--- a/rust/crates/ncx-core/src/tools/python_check.rs
++++ b/rust/crates/ncx-core/src/tools/python_check.rs
+@@ -77,9 +77,9 @@ pub(crate) fn failure(ctx: &ToolContext) -> Option<&'static str> {
+         .flatten()
+         .any(|e| e.starts_with("compile_failed"))
+     {
+-        None // lost failure status
++        Some("compile_failed")
+     } else if checks.values().any(Option::is_some) {
+-        None // lost pending status
++        Some("verification_failed")
+     } else {
+         None
+     }

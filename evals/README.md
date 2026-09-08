@@ -1,5 +1,8 @@
 # Evidence-based evaluation Harness
 
+[Six-category real-source self-repair suite](self_repair/README.md) ·
+[Chinese self-test report](../docs/reports/self_repair_20260908.md)
+
 This Harness produces scores from observable artifacts, never from an agent's
 self-reported score. It has three offline entry points:
 

@@ -102,6 +102,8 @@ pub trait ApprovalHandler {
 /// Everything a tool needs, shared (cheaply cloned) across tools.
 #[derive(Clone)]
 pub struct ToolContext {
+    /// Python files edited through the native editors; errors block completion.
+    pub(crate) python_checks: Rc<RefCell<std::collections::BTreeMap<PathBuf, Option<String>>>>,
     pub workspace: PathBuf,
     pub policy: SandboxPolicy,
     /// Approval policy name (`on-request` etc.) Ã¢â‚¬â€ drives the `shell` tool's
@@ -168,6 +170,7 @@ pub struct ToolContext {
 impl ToolContext {
     pub fn new(workspace: PathBuf, policy: SandboxPolicy) -> Self {
         ToolContext {
+            python_checks: Rc::new(RefCell::new(std::collections::BTreeMap::new())),
             workspace,
             policy,
             approval_policy: "on-request".to_string(),
@@ -622,5 +625,6 @@ impl ToolRegistry {
 include!("tools/catalog.rs");
 include!("tools/execution.rs");
 include!("tools/file.rs");
+pub(crate) mod python_check;
 include!("tools/builtins.rs");
 include!("tools/tests.rs");

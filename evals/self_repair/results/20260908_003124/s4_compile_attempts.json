@@ -1,0 +1,108 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 92.7,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "checks": [
+        "agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success",
+        "agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence",
+        "agent_loop::tests::basic_tests::repaired_python_compile_allows_completion",
+        "tools::tests::python_delete_alias_clears_failed_validation",
+        "tools::tests::python_patch_registers_all_written_files_before_cancellation",
+        "tools::tests::python_patch_reports_compile_failure_then_recovery"
+      ],
+      "elapsed_s": 0.82,
+      "returncode": 0,
+      "output_tail": "\nrunning 6 tests\ntest agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success ... ok\ntest agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence ... ok\ntest agent_loop::tests::basic_tests::repaired_python_compile_allows_completion ... ok\ntest tools::tests::python_delete_alias_clears_failed_validation ... ok\ntest tools::tests::python_patch_registers_all_written_files_before_cancellation ... ok\ntest tools::tests::python_patch_reports_compile_failure_then_recovery ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.45s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+    },
+    "integrity_issues": [],
+    "patch": "s4_compile_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5867,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3061,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3730,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5909,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4775,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 19417,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 23849,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 6984,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3964,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5646,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

@@ -134,9 +134,53 @@ impl Tool for ApplyPatchTool {
 
         let policy = ctx.policy.clone();
         let can_write = move |p: &Path| policy.can_write(p) || approved.contains(p);
+        // Resolve identities before deletion/move makes canonicalization impossible.
+        let removed_keys: Vec<_> = actions
+            .iter()
+            .filter(|a| a.action == ncx_tools::ActionType::Delete || a.move_to.is_some())
+            .map(|a| {
+                let p = ctx.workspace.join(&a.path);
+                p.canonicalize().unwrap_or(p)
+            })
+            .collect();
         match apply_patch(patch, &ctx.workspace, can_write) {
             Ok(outcome) => {
                 let summary = outcome.summary();
+                for removed in removed_keys {
+                    ctx.python_checks.borrow_mut().remove(&removed);
+                }
+                let mut checks = Vec::new();
+                let mut paths = Vec::new();
+                for target in outcome
+                    .added
+                    .iter()
+                    .chain(&outcome.updated)
+                    .chain(outcome.moved.iter().map(|(_, dst)| dst))
+                {
+                    let path = ctx.workspace.join(target);
+                    if path
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+                    {
+                        let path = path.canonicalize().unwrap_or(path);
+                        ctx.python_checks.borrow_mut().insert(
+                            path.clone(),
+                            Some("verification_failed: not checked yet".into()),
+                        );
+                        paths.push(path);
+                    }
+                }
+                for path in paths {
+                    checks.push(python_check::check(ctx, &path).await);
+                }
+                if !checks.is_empty() {
+                    let prefix = if python_check::failure(ctx).is_some() {
+                        "Error: patch saved but verification failed; repair before finishing"
+                    } else {
+                        "Patch applied successfully"
+                    };
+                    return format!("{prefix}:\n{summary}\n{}", checks.join("\n"));
+                }
                 if summary.is_empty() {
                     "Patch applied (no changes).".into()
                 } else {

@@ -1,0 +1,987 @@
+{
+  "schema_version": 1,
+  "run_id": "20260908_003124",
+  "model": "deepseek-v4-pro",
+  "validate_only": false,
+  "source_head": "805261ec4fd8ae961fd1bec2589dc95295043433",
+  "binary_sha256": "321c8cb2a5a699da3bba2db71a3416c08454ce3fa770dfb1e9af309e206ceda1",
+  "cases": [
+    {
+      "id": "s1_retry",
+      "title": "失败分类与重试边界",
+      "target": "bench/run.py",
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_s": 108.77,
+          "returncode": 0,
+          "timed_out": false,
+          "grader": {
+            "status": "passed",
+            "passed": 9,
+            "failed": 0,
+            "checks": [
+              "compile failure precedence",
+              "empty response + missing file",
+              "legacy tuple API",
+              "ordinary failure not retried",
+              "recovery keeps evidence and time",
+              "retry exhaustion bounded",
+              "success mentioning empty response",
+              "success never retried",
+              "zero disables retries"
+            ],
+            "elapsed_s": 0.12,
+            "returncode": 0,
+            "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        1/1     5.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     6.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nPASS: empty response + missing file\nPASS: compile failure precedence\nPASS: success mentioning empty response\nPASS: recovery keeps evidence and time\nPASS: retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+          },
+          "integrity_issues": [],
+          "patch": "s1_retry_attempt1.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3740,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2495,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3722,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2473,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 81224,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 5288,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 6498,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        }
+      ],
+      "status": "passed",
+      "healthy": {
+        "status": "passed",
+        "passed": 9,
+        "failed": 0,
+        "checks": [
+          "compile failure precedence",
+          "empty response + missing file",
+          "legacy tuple API",
+          "ordinary failure not retried",
+          "recovery keeps evidence and time",
+          "retry exhaustion bounded",
+          "success mentioning empty response",
+          "success never retried",
+          "zero disables retries"
+        ],
+        "elapsed_s": 0.11,
+        "returncode": 0,
+        "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        1/1     5.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     6.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nPASS: empty response + missing file\nPASS: compile failure precedence\nPASS: success mentioning empty response\nPASS: recovery keeps evidence and time\nPASS: retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+      },
+      "agent_shell_preflight": {
+        "passed": true,
+        "elapsed_s": 1.11,
+        "returncode": 0
+      },
+      "healthy_target_sha256": "9f2e5a0a64ee11409563e6bd5038e3e5fb618d71bd7e511e8850dccecac579bf",
+      "seed_head": "dd4fd1bc8a094f34eeff3eec9094cbc53253bebd",
+      "baseline_sha256": "bf8fdaa7cdb4939b8b099965c6448b03e8a794cafaa5aa51fb822a80e1cf0d15",
+      "seed": {
+        "status": "test_failed",
+        "passed": 5,
+        "failed": 4,
+        "checks": [
+          "AssertionError(('missing_expected_file', 'compile_failed')): compile failure precedence",
+          "AssertionError(('missing_expected_file', 'empty_response')): empty response + missing file",
+          "AssertionError((1, 2)): recovery keeps evidence and time",
+          "AssertionError((2.0, 6)): retry exhaustion bounded",
+          "legacy tuple API",
+          "ordinary failure not retried",
+          "success mentioning empty response",
+          "success never retried",
+          "zero disables retries"
+        ],
+        "elapsed_s": 0.12,
+        "returncode": 1,
+        "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nFAIL: AssertionError(('missing_expected_file', 'empty_response')): empty response + missing file\nFAIL: AssertionError(('missing_expected_file', 'compile_failed')): compile failure precedence\nPASS: success mentioning empty response\nFAIL: AssertionError((1, 2)): recovery keeps evidence and time\nFAIL: AssertionError((2.0, 6)): retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+      }
+    },
+    {
+      "id": "s2_patch",
+      "title": "补丁定位与缩进保留",
+      "target": "rust/crates/ncx-tools/src/patch.rs",
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_s": 137.86,
+          "returncode": 1,
+          "timed_out": false,
+          "grader": {
+            "status": "test_failed",
+            "passed": 16,
+            "failed": 3,
+            "checks": [
+              "patch::tests::add_file_rejects_existing",
+              "patch::tests::add_file_writes_to_disk",
+              "patch::tests::context_disambiguates_repeated_lines",
+              "patch::tests::context_only_insertion_stays_inside_function",
+              "patch::tests::delete_file",
+              "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+              "patch::tests::missing_context_rejects_insertion_without_writing",
+              "patch::tests::move_file_writes_dest_removes_source",
+              "patch::tests::parse_add_file",
+              "patch::tests::parse_rejects_add_line_without_plus",
+              "patch::tests::parse_requires_begin_and_end",
+              "patch::tests::parse_update_with_locator_and_change",
+              "patch::tests::summary_orders_a_r_m_d",
+              "patch::tests::tmpdir_creates_unique_directories",
+              "patch::tests::unwritable_path_blocks_whole_patch",
+              "patch::tests::update_failure_to_locate_is_atomic",
+              "patch::tests::update_replaces_matched_lines",
+              "patch::tests::update_uses_locator_to_disambiguate",
+              "patch::tests::update_with_whitespace_fallback"
+            ],
+            "elapsed_s": 5.14,
+            "returncode": 101,
+            "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... FAILED\ntest patch::tests::context_only_insertion_stays_inside_function ... FAILED\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... FAILED\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\nfailures:\n\n---- patch::tests::context_disambiguates_repeated_lines stdout ----\n\nthread 'patch::tests::context_disambiguates_repeated_lines' (41328) panicked at crates\\ncx-tools\\src\\patch.rs:525:9:\nassertion `left == right` failed\n  left: \"def first():\\n    return 2\\ndef second():\\n    pass\\n\"\n right: \"def first():\\n    pass\\ndef second():\\n    return 2\\n\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- patch::tests::context_only_insertion_stays_inside_function stdout ----\n\nthread 'patch::tests::context_only_insertion_stays_inside_function' (40624) panicked at crates\\ncx-tools\\src\\patch.rs:499:9:\nassertion `left == right` failed\n  left: \"    value = 1\\ndef main():\\n    pass\\n\"\n right: \"def main():\\n    value = 1\\n    pass\\n\"\n\n---- patch::tests::missing_context_rejects_insertion_without_writing stdout ----\n\nthread 'patch::tests::missing_context_rejects_insertion_without_writing' (32532) panicked at crates\\ncx-tools\\src\\patch.rs:509:9:\nassertion failed: apply_patch(\"*** Begin Patch\\n*** Update File: a.py\\n@@\\n def absent():\\n+    value = 1\\n     pass\\n*** End Patch\",\n        &root, allow_all).is_err()\n\n\nfailures:\n    patch::tests::context_disambiguates_repeated_lines\n    patch::tests::context_only_insertion_stays_inside_function\n    patch::tests::missing_context_rejects_insertion_without_writing\n\ntest result: FAILED. 16 passed; 3 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.03s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s2_patch\\rust\\crates\\ncx-tools)\n    Finished `test` profile [optimized + debuginfo] target(s) in 3.08s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\nerror: test failed, to rerun pass `-p ncx-tools --lib`\n",
+            "cache_invalidation_s": 0.31
+          },
+          "integrity_issues": [],
+          "patch": "s2_patch_attempt1.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4041,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 12552,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "stream_error",
+              "http_status": 200,
+              "elapsed_ms": 120009,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "stream_error",
+              "http_status": 200,
+              "elapsed_ms": 120009,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        },
+        {
+          "attempt": 2,
+          "elapsed_s": 154.11,
+          "returncode": 0,
+          "timed_out": false,
+          "grader": {
+            "status": "passed",
+            "passed": 19,
+            "failed": 0,
+            "checks": [
+              "patch::tests::add_file_rejects_existing",
+              "patch::tests::add_file_writes_to_disk",
+              "patch::tests::context_disambiguates_repeated_lines",
+              "patch::tests::context_only_insertion_stays_inside_function",
+              "patch::tests::delete_file",
+              "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+              "patch::tests::missing_context_rejects_insertion_without_writing",
+              "patch::tests::move_file_writes_dest_removes_source",
+              "patch::tests::parse_add_file",
+              "patch::tests::parse_rejects_add_line_without_plus",
+              "patch::tests::parse_requires_begin_and_end",
+              "patch::tests::parse_update_with_locator_and_change",
+              "patch::tests::summary_orders_a_r_m_d",
+              "patch::tests::tmpdir_creates_unique_directories",
+              "patch::tests::unwritable_path_blocks_whole_patch",
+              "patch::tests::update_failure_to_locate_is_atomic",
+              "patch::tests::update_replaces_matched_lines",
+              "patch::tests::update_uses_locator_to_disambiguate",
+              "patch::tests::update_with_whitespace_fallback"
+            ],
+            "elapsed_s": 5.46,
+            "returncode": 0,
+            "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... ok\ntest patch::tests::context_only_insertion_stays_inside_function ... ok\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... ok\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\ntest result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s2_patch\\rust\\crates\\ncx-tools)\nwarning: value assigned to `changed` is never read\n   --> crates\\ncx-tools\\src\\patch.rs:187:13\n    |\n187 |             changed = false;\n    |             ^^^^^^^^^^^^^^^\n...\n246 |     flush!();\n    |     -------- in this macro invocation\n    |\n    = help: maybe it is overwritten before being read?\n    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default\n    = note: this warning originates in the macro `flush` (in Nightly builds, run with -Z macro-backtrace for more info)\n\nwarning: `ncx-tools` (lib test) generated 1 warning\n    Finished `test` profile [optimized + debuginfo] target(s) in 3.97s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\n",
+            "cache_invalidation_s": 0.31
+          },
+          "integrity_issues": [],
+          "patch": "s2_patch_attempt2.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 7007,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 117593,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 8523,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 16679,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        }
+      ],
+      "status": "passed",
+      "healthy": {
+        "status": "passed",
+        "passed": 19,
+        "failed": 0,
+        "checks": [
+          "patch::tests::add_file_rejects_existing",
+          "patch::tests::add_file_writes_to_disk",
+          "patch::tests::context_disambiguates_repeated_lines",
+          "patch::tests::context_only_insertion_stays_inside_function",
+          "patch::tests::delete_file",
+          "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+          "patch::tests::missing_context_rejects_insertion_without_writing",
+          "patch::tests::move_file_writes_dest_removes_source",
+          "patch::tests::parse_add_file",
+          "patch::tests::parse_rejects_add_line_without_plus",
+          "patch::tests::parse_requires_begin_and_end",
+          "patch::tests::parse_update_with_locator_and_change",
+          "patch::tests::summary_orders_a_r_m_d",
+          "patch::tests::tmpdir_creates_unique_directories",
+          "patch::tests::unwritable_path_blocks_whole_patch",
+          "patch::tests::update_failure_to_locate_is_atomic",
+          "patch::tests::update_replaces_matched_lines",
+          "patch::tests::update_uses_locator_to_disambiguate",
+          "patch::tests::update_with_whitespace_fallback"
+        ],
+        "elapsed_s": 15.7,
+        "returncode": 0,
+        "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... ok\ntest patch::tests::context_only_insertion_stays_inside_function ... ok\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... ok\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\ntest result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-tools)\n    Finished `test` profile [optimized + debuginfo] target(s) in 8.13s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\n",
+        "cache_invalidation_s": 6.33
+      },
+      "agent_shell_preflight": {
+        "passed": true,
+        "elapsed_s": 5.33,
+        "returncode": 0
+      },
+      "healthy_target_sha256": "3becd9050317ae966808d04ab25e33824fc76d97a19974f94dc8f10ecd9e7039",
+      "seed_head": "8292f33483ce6c66c60af57688899d47e54c63a7",
+      "baseline_sha256": "309b7fa1b6eef3f9ece78e107bc668c1b3ab9f84f1e00506fa9e0c39e0490e58",
+      "seed": {
+        "status": "test_failed",
+        "passed": 16,
+        "failed": 3,
+        "checks": [
+          "patch::tests::add_file_rejects_existing",
+          "patch::tests::add_file_writes_to_disk",
+          "patch::tests::context_disambiguates_repeated_lines",
+          "patch::tests::context_only_insertion_stays_inside_function",
+          "patch::tests::delete_file",
+          "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+          "patch::tests::missing_context_rejects_insertion_without_writing",
+          "patch::tests::move_file_writes_dest_removes_source",
+          "patch::tests::parse_add_file",
+          "patch::tests::parse_rejects_add_line_without_plus",
+          "patch::tests::parse_requires_begin_and_end",
+          "patch::tests::parse_update_with_locator_and_change",
+          "patch::tests::summary_orders_a_r_m_d",
+          "patch::tests::tmpdir_creates_unique_directories",
+          "patch::tests::unwritable_path_blocks_whole_patch",
+          "patch::tests::update_failure_to_locate_is_atomic",
+          "patch::tests::update_replaces_matched_lines",
+          "patch::tests::update_uses_locator_to_disambiguate",
+          "patch::tests::update_with_whitespace_fallback"
+        ],
+        "elapsed_s": 5.36,
+        "returncode": 101,
+        "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... FAILED\ntest patch::tests::context_only_insertion_stays_inside_function ... FAILED\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... FAILED\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\nfailures:\n\n---- patch::tests::context_disambiguates_repeated_lines stdout ----\n\nthread 'patch::tests::context_disambiguates_repeated_lines' (39944) panicked at crates\\ncx-tools\\src\\patch.rs:525:9:\nassertion `left == right` failed\n  left: \"def first():\\n    return 2\\ndef second():\\n    pass\\n\"\n right: \"def first():\\n    pass\\ndef second():\\n    return 2\\n\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- patch::tests::context_only_insertion_stays_inside_function stdout ----\n\nthread 'patch::tests::context_only_insertion_stays_inside_function' (50896) panicked at crates\\ncx-tools\\src\\patch.rs:499:9:\nassertion `left == right` failed\n  left: \"    value = 1\\ndef main():\\n    pass\\n\"\n right: \"def main():\\n    value = 1\\n    pass\\n\"\n\n---- patch::tests::missing_context_rejects_insertion_without_writing stdout ----\n\nthread 'patch::tests::missing_context_rejects_insertion_without_writing' (48380) panicked at crates\\ncx-tools\\src\\patch.rs:509:9:\nassertion failed: apply_patch(\"*** Begin Patch\\n*** Update File: a.py\\n@@\\n def absent():\\n+    value = 1\\n     pass\\n*** End Patch\",\n        &root, allow_all).is_err()\n\n\nfailures:\n    patch::tests::context_disambiguates_repeated_lines\n    patch::tests::context_only_insertion_stays_inside_function\n    patch::tests::missing_context_rejects_insertion_without_writing\n\ntest result: FAILED. 16 passed; 3 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s2_patch\\rust\\crates\\ncx-tools)\n    Finished `test` profile [optimized + debuginfo] target(s) in 3.76s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\nerror: test failed, to rerun pass `-p ncx-tools --lib`\n",
+        "cache_invalidation_s": 0.33
+      }
+    },
+    {
+      "id": "s3_budget",
+      "title": "超时预算与退出码",
+      "target": "rust/crates/ncx-cli/src/cli_app.rs",
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_s": 58.45,
+          "returncode": 0,
+          "timed_out": false,
+          "grader": {
+            "status": "passed",
+            "passed": 1,
+            "failed": 0,
+            "checks": [
+              "cli_app::exit_tests::incomplete_turns_return_failure"
+            ],
+            "elapsed_s": 0.4,
+            "returncode": 0,
+            "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n"
+          },
+          "integrity_issues": [],
+          "patch": "s3_budget_attempt1.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 5675,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2504,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3481,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2108,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4806,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2768,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3043,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3229,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 5227,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4958,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4333,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 6604,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4558,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        }
+      ],
+      "status": "passed",
+      "healthy": {
+        "status": "passed",
+        "passed": 1,
+        "failed": 0,
+        "checks": [
+          "cli_app::exit_tests::incomplete_turns_return_failure"
+        ],
+        "elapsed_s": 0.4,
+        "returncode": 0,
+        "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.27s\n     Running unittests src\\main.rs (rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n"
+      },
+      "agent_shell_preflight": {
+        "passed": true,
+        "elapsed_s": 0.44,
+        "returncode": 0
+      },
+      "healthy_target_sha256": "b4cf242bd5539bee00f007f9a0f11501362e245b804bd09deb0787255d077fd6",
+      "seed_head": "727275fffa572879ffe9291f970afb92f0e91996",
+      "baseline_sha256": "d25e9bd48b0e0749bfe60d5bc928a52568d4457f78b540b9c06bb32471cc44e2",
+      "seed": {
+        "status": "test_failed",
+        "passed": 0,
+        "failed": 1,
+        "checks": [
+          "cli_app::exit_tests::incomplete_turns_return_failure"
+        ],
+        "elapsed_s": 6.84,
+        "returncode": 101,
+        "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... FAILED\n\nfailures:\n\n---- cli_app::exit_tests::incomplete_turns_return_failure stdout ----\n\nthread 'cli_app::exit_tests::incomplete_turns_return_failure' (34700) panicked at crates\\ncx-cli\\src\\cli_app.rs:313:13:\nassertion `left == right` failed: task_budget\n  left: 0\n right: 1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    cli_app::exit_tests::incomplete_turns_return_failure\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n   Compiling ncx-cli v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s3_budget\\rust\\crates\\ncx-cli)\n    Finished `test` profile [optimized + debuginfo] target(s) in 5.72s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\nerror: test failed, to rerun pass `-p ncx-cli --bin ncx`\n"
+      }
+    },
+    {
+      "id": "s4_compile",
+      "title": "编译门禁与中断恢复",
+      "target": "rust/crates/ncx-core/src/tools/python_check.rs",
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_s": 92.7,
+          "returncode": 0,
+          "timed_out": false,
+          "grader": {
+            "status": "passed",
+            "passed": 6,
+            "failed": 0,
+            "checks": [
+              "agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success",
+              "agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence",
+              "agent_loop::tests::basic_tests::repaired_python_compile_allows_completion",
+              "tools::tests::python_delete_alias_clears_failed_validation",
+              "tools::tests::python_patch_registers_all_written_files_before_cancellation",
+              "tools::tests::python_patch_reports_compile_failure_then_recovery"
+            ],
+            "elapsed_s": 0.82,
+            "returncode": 0,
+            "output_tail": "\nrunning 6 tests\ntest agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success ... ok\ntest agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence ... ok\ntest agent_loop::tests::basic_tests::repaired_python_compile_allows_completion ... ok\ntest tools::tests::python_delete_alias_clears_failed_validation ... ok\ntest tools::tests::python_patch_registers_all_written_files_before_cancellation ... ok\ntest tools::tests::python_patch_reports_compile_failure_then_recovery ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.45s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+          },
+          "integrity_issues": [],
+          "patch": "s4_compile_attempt1.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 5867,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3061,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3730,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 5909,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4775,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 19417,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 23849,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 6984,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3964,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 5646,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        }
+      ],
+      "status": "passed",
+      "healthy": {
+        "status": "passed",
+        "passed": 6,
+        "failed": 0,
+        "checks": [
+          "agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success",
+          "agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence",
+          "agent_loop::tests::basic_tests::repaired_python_compile_allows_completion",
+          "tools::tests::python_delete_alias_clears_failed_validation",
+          "tools::tests::python_patch_registers_all_written_files_before_cancellation",
+          "tools::tests::python_patch_reports_compile_failure_then_recovery"
+        ],
+        "elapsed_s": 0.87,
+        "returncode": 0,
+        "output_tail": "\nrunning 6 tests\ntest agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success ... ok\ntest agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence ... ok\ntest agent_loop::tests::basic_tests::repaired_python_compile_allows_completion ... ok\ntest tools::tests::python_delete_alias_clears_failed_validation ... ok\ntest tools::tests::python_patch_registers_all_written_files_before_cancellation ... ok\ntest tools::tests::python_patch_reports_compile_failure_then_recovery ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.47s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+      },
+      "agent_shell_preflight": {
+        "passed": true,
+        "elapsed_s": 0.76,
+        "returncode": 0
+      },
+      "healthy_target_sha256": "cd837d74507ccbae64c31317b1c52e47f345eea13cc99eeb6a4799e2c446672d",
+      "seed_head": "37fd993807b3e82039942836afa9838d46261071",
+      "baseline_sha256": "7eb18b1f772dfafe09c9b9c2e2365761efa121198149ebdae01491bcb3fb8471",
+      "seed": {
+        "status": "test_failed",
+        "passed": 3,
+        "failed": 3,
+        "checks": [
+          "agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success",
+          "agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence",
+          "agent_loop::tests::basic_tests::repaired_python_compile_allows_completion",
+          "tools::tests::python_delete_alias_clears_failed_validation",
+          "tools::tests::python_patch_registers_all_written_files_before_cancellation",
+          "tools::tests::python_patch_reports_compile_failure_then_recovery"
+        ],
+        "elapsed_s": 29.65,
+        "returncode": 101,
+        "output_tail": "\nrunning 6 tests\ntest agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success ... FAILED\ntest agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence ... FAILED\ntest agent_loop::tests::basic_tests::repaired_python_compile_allows_completion ... FAILED\ntest tools::tests::python_delete_alias_clears_failed_validation ... ok\ntest tools::tests::python_patch_registers_all_written_files_before_cancellation ... ok\ntest tools::tests::python_patch_reports_compile_failure_then_recovery ... ok\n\nfailures:\n\n---- agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success stdout ----\n\nthread 'agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success' (3924) panicked at crates\\ncx-core\\src\\agent_loop\\tests\\basic_tests.rs:60:5:\nassertion `left == right` failed\n  left: \"completed\"\n right: \"compile_failed\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence stdout ----\n\nthread 'agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence' (32268) panicked at crates\\ncx-core\\src\\agent_loop\\tests\\basic_tests.rs:38:5:\nassertion `left == right` failed\n  left: \"completed\"\n right: \"compile_failed\"\n\n---- agent_loop::tests::basic_tests::repaired_python_compile_allows_completion stdout ----\n\nthread 'agent_loop::tests::basic_tests::repaired_python_compile_allows_completion' (42008) panicked at crates\\ncx-core\\src\\agent_loop\\tests\\basic_tests.rs:92:5:\nassertion `left == right` failed\n  left: 2\n right: 4\n\n\nfailures:\n    agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success\n    agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence\n    agent_loop::tests::basic_tests::repaired_python_compile_allows_completion\n\ntest result: FAILED. 3 passed; 3 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.24s\n\n\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s4_compile\\rust\\crates\\ncx-core)\n    Finished `test` profile [optimized + debuginfo] target(s) in 27.83s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\nerror: test failed, to rerun pass `-p ncx-core --lib`\n"
+      }
+    },
+    {
+      "id": "s5_encoding",
+      "title": "文件路径与编码兼容",
+      "target": "rust/crates/ncx-tools/src/text_encoding.rs",
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_s": 33.97,
+          "returncode": 0,
+          "timed_out": false,
+          "grader": {
+            "status": "passed",
+            "passed": 2,
+            "failed": 0,
+            "checks": [
+              "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+              "tools::tests::self_repair_unicode_path_still_rejects_binary"
+            ],
+            "elapsed_s": 0.38,
+            "returncode": 0,
+            "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... ok\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.25s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+          },
+          "integrity_issues": [],
+          "patch": "s5_encoding_attempt1.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3436,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3459,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3701,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2231,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4090,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2664,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 6916,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        }
+      ],
+      "status": "passed",
+      "healthy": {
+        "status": "passed",
+        "passed": 2,
+        "failed": 0,
+        "checks": [
+          "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+          "tools::tests::self_repair_unicode_path_still_rejects_binary"
+        ],
+        "elapsed_s": 0.38,
+        "returncode": 0,
+        "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... ok\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.26s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n"
+      },
+      "agent_shell_preflight": {
+        "passed": true,
+        "elapsed_s": 0.44,
+        "returncode": 0
+      },
+      "healthy_target_sha256": "3c05e10bbbdb8b0dfff495b4d3d8987d040217158b5c3938d3ad4b7eac7c96e4",
+      "seed_head": "fea1f17e1d784fd7094d2acd68fcbba64dc63ea5",
+      "baseline_sha256": "7e4cf0790dec3597a81c291297f9d8736272687cdaebfbae22d18a53a9b2d754",
+      "seed": {
+        "status": "test_failed",
+        "passed": 1,
+        "failed": 1,
+        "checks": [
+          "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+          "tools::tests::self_repair_unicode_path_still_rejects_binary"
+        ],
+        "elapsed_s": 33.37,
+        "returncode": 101,
+        "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... FAILED\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\nfailures:\n\n---- tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake stdout ----\n\nthread 'tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake' (44620) panicked at crates\\ncx-core\\src\\tools/tests.rs:47:9:\n[decoded as UTF-16 LE]\n1| ⭳๎ 䈀伀䴀਀\n\n(end of file — 1 lines)\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake\n\ntest result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.01s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s5_encoding\\rust\\crates\\ncx-tools)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s5_encoding\\rust\\crates\\ncx-core)\n    Finished `test` profile [optimized + debuginfo] target(s) in 31.58s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\nerror: test failed, to rerun pass `-p ncx-core --lib`\n"
+      }
+    },
+    {
+      "id": "s6_diagnostics",
+      "title": "连接诊断与日志脱敏",
+      "target": "rust/crates/ncx-provider/src/provider/diagnostics.rs",
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_s": 73.79,
+          "returncode": 0,
+          "timed_out": false,
+          "grader": {
+            "status": "passed",
+            "passed": 3,
+            "failed": 0,
+            "checks": [
+              "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+              "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+              "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+            ],
+            "elapsed_s": 0.34,
+            "returncode": 0,
+            "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.22s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\n"
+          },
+          "integrity_issues": [],
+          "patch": "s6_diagnostics_attempt1.patch",
+          "provider_diagnostics": [
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4013,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2043,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 12711,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2613,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 2273,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 26514,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4935,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 3835,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 4297,
+              "attempts": 1,
+              "retries": 0
+            },
+            {
+              "model": "deepseek-v4-pro",
+              "kind": "success",
+              "http_status": 200,
+              "elapsed_ms": 6504,
+              "attempts": 1,
+              "retries": 0
+            }
+          ]
+        }
+      ],
+      "status": "passed",
+      "healthy": {
+        "status": "passed",
+        "passed": 3,
+        "failed": 0,
+        "checks": [
+          "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+          "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+          "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+        ],
+        "elapsed_s": 0.36,
+        "returncode": 0,
+        "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.22s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\n"
+      },
+      "agent_shell_preflight": {
+        "passed": true,
+        "elapsed_s": 0.51,
+        "returncode": 0
+      },
+      "healthy_target_sha256": "95cdfff30b5fa9d74c3833a203c63fc77424caacf9626a1d3fde5d95f5fbbb9b",
+      "seed_head": "7e6757ea2afd69b2908bb6afb7a9d30672939747",
+      "baseline_sha256": "e5f89689acbbbe4d68730348476dc2434a169dbe9c52f48c6d441408b357c671",
+      "seed": {
+        "status": "test_failed",
+        "passed": 1,
+        "failed": 2,
+        "checks": [
+          "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+          "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+          "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+        ],
+        "elapsed_s": 8.39,
+        "returncode": 101,
+        "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... FAILED\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... FAILED\n\nfailures:\n\n---- provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries stdout ----\n\nthread 'provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries' (37752) panicked at crates\\ncx-provider\\src\\provider\\diagnostics.rs:75:9:\nassertion `left == right` failed\n  left: Number(1)\n right: 0\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model stdout ----\n\nthread 'provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model' (42236) panicked at crates\\ncx-provider\\src\\provider\\diagnostics.rs:62:9:\nassertion failed: !text.contains(\"fixture-credential\")\n\n\nfailures:\n    provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries\n    provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model\n\ntest result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-final\\s6_diagnostics\\rust\\crates\\ncx-provider)\n    Finished `test` profile [optimized + debuginfo] target(s) in 7.39s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\nerror: test failed, to rerun pass `-p ncx-provider --lib`\n"
+      }
+    }
+  ],
+  "preflight_history": [
+    {
+      "id": "s2_patch",
+      "title": "补丁定位与缩进保留",
+      "target": "rust/crates/ncx-tools/src/patch.rs",
+      "attempts": [],
+      "status": "invalid_healthy_baseline",
+      "healthy": {
+        "status": "test_failed",
+        "passed": 16,
+        "failed": 3,
+        "checks": [
+          "patch::tests::add_file_rejects_existing",
+          "patch::tests::add_file_writes_to_disk",
+          "patch::tests::context_disambiguates_repeated_lines",
+          "patch::tests::context_only_insertion_stays_inside_function",
+          "patch::tests::delete_file",
+          "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+          "patch::tests::missing_context_rejects_insertion_without_writing",
+          "patch::tests::move_file_writes_dest_removes_source",
+          "patch::tests::parse_add_file",
+          "patch::tests::parse_rejects_add_line_without_plus",
+          "patch::tests::parse_requires_begin_and_end",
+          "patch::tests::parse_update_with_locator_and_change",
+          "patch::tests::summary_orders_a_r_m_d",
+          "patch::tests::tmpdir_creates_unique_directories",
+          "patch::tests::unwritable_path_blocks_whole_patch",
+          "patch::tests::update_failure_to_locate_is_atomic",
+          "patch::tests::update_replaces_matched_lines",
+          "patch::tests::update_uses_locator_to_disambiguate",
+          "patch::tests::update_with_whitespace_fallback"
+        ],
+        "elapsed_s": 0.34,
+        "returncode": 101,
+        "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... FAILED\ntest patch::tests::context_only_insertion_stays_inside_function ... FAILED\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... FAILED\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\nfailures:\n\n---- patch::tests::context_disambiguates_repeated_lines stdout ----\n\nthread 'patch::tests::context_disambiguates_repeated_lines' (38104) panicked at crates\\ncx-tools\\src\\patch.rs:525:9:\nassertion `left == right` failed\n  left: \"def first():\\n    return 2\\ndef second():\\n    pass\\n\"\n right: \"def first():\\n    pass\\ndef second():\\n    return 2\\n\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- patch::tests::context_only_insertion_stays_inside_function stdout ----\n\nthread 'patch::tests::context_only_insertion_stays_inside_function' (46656) panicked at crates\\ncx-tools\\src\\patch.rs:499:9:\nassertion `left == right` failed\n  left: \"    value = 1\\ndef main():\\n    pass\\n\"\n right: \"def main():\\n    value = 1\\n    pass\\n\"\n\n---- patch::tests::missing_context_rejects_insertion_without_writing stdout ----\n\nthread 'patch::tests::missing_context_rejects_insertion_without_writing' (28364) panicked at crates\\ncx-tools\\src\\patch.rs:509:9:\nassertion failed: apply_patch(\"*** Begin Patch\\n*** Update File: a.py\\n@@\\n def absent():\\n+    value = 1\\n     pass\\n*** End Patch\",\n        &root, allow_all).is_err()\n\n\nfailures:\n    patch::tests::context_disambiguates_repeated_lines\n    patch::tests::context_only_insertion_stays_inside_function\n    patch::tests::missing_context_rejects_insertion_without_writing\n\ntest result: FAILED. 16 passed; 3 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.17s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\nerror: test failed, to rerun pass `-p ncx-tools --lib`\n"
+      }
+    }
+  ]
+}

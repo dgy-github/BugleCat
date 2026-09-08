@@ -1,6 +1,98 @@
 use super::*;
 
 #[tokio::test]
+async fn python_recheck_persists_new_failure_evidence() {
+    struct BreakPython;
+    #[async_trait(?Send)]
+    impl Tool for BreakPython {
+        fn name(&self) -> &str {
+            "break_python"
+        }
+        fn description(&self) -> &str {
+            "Test external file change"
+        }
+        fn parameters(&self) -> Value {
+            json!({"type":"object"})
+        }
+        async fn execute(&self, ctx: &ToolContext, _: &Value) -> String {
+            std::fs::write(ctx.workspace.join("a.py"), "    x = 1\n").unwrap();
+            "file changed".into()
+        }
+    }
+    let ws = tmpdir("fresh_compile_evidence");
+    let p = ScriptedProvider::new(vec![
+        assistant_toolcall(vec![tc(
+            "edit",
+            "apply_patch",
+            json!({"patch":"*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch"}),
+        )]),
+        assistant_toolcall(vec![tc("break", "break_python", json!({}))]),
+        ModelResponse {
+            content: "done".into(),
+            ..Default::default()
+        },
+    ]);
+    let mut agent = build(&ws, Box::new(p)).with_max_iterations(3);
+    agent.tools.register(Box::new(BreakPython));
+    let result = agent.run_turn(json!("change file"), None).await;
+    assert_eq!(result.stop_reason, "compile_failed");
+    assert!(serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("IndentationError"));
+}
+
+#[tokio::test]
+async fn failed_python_compile_blocks_completion_and_budget_success() {
+    let ws = tmpdir("compile_blocks_finish");
+    let p = ScriptedProvider::new(vec![
+        assistant_toolcall(vec![tc(
+            "edit",
+            "apply_patch",
+            json!({"patch":"*** Begin Patch\n*** Add File: bad.py\n+    x = 1\n*** End Patch"}),
+        )]),
+        ModelResponse {
+            content: "All done".into(),
+            ..Default::default()
+        },
+    ]);
+    let mut agent = build(&ws, Box::new(p)).with_max_iterations(2);
+    let result = agent.run_turn(json!("Edit the Python file"), None).await;
+    assert_eq!(result.stop_reason, "compile_failed");
+    assert!(serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("compile_failed"));
+}
+
+#[tokio::test]
+async fn repaired_python_compile_allows_completion() {
+    let ws = tmpdir("compile_repaired_finish");
+    let p = ScriptedProvider::new(vec![
+        assistant_toolcall(vec![tc(
+            "edit",
+            "apply_patch",
+            json!({"patch":"*** Begin Patch\n*** Add File: bad.py\n+    x = 1\n*** End Patch"}),
+        )]),
+        ModelResponse {
+            content: "All done".into(),
+            ..Default::default()
+        },
+        assistant_toolcall(vec![tc(
+            "fix",
+            "apply_patch",
+            json!({"patch":"*** Begin Patch\n*** Update File: bad.py\n-    x = 1\n+x = 1\n*** End Patch"}),
+        )]),
+        ModelResponse {
+            content: "Repaired".into(),
+            ..Default::default()
+        },
+    ]);
+    let mut agent = build(&ws, Box::new(p));
+    let result = agent.run_turn(json!("Edit the Python file"), None).await;
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.iterations, 4);
+}
+
+#[tokio::test]
 async fn returns_final_text_without_tools() {
     let p = ScriptedProvider::new(vec![ModelResponse {
         content: "All done.".into(),
@@ -522,6 +614,33 @@ async fn stops_with_an_error_after_three_empty_responses() {
     assert_eq!(r.stop_reason, "error");
     assert_eq!(r.iterations, 3);
     assert!(!r.final_text.trim().is_empty());
+}
+
+#[tokio::test]
+async fn exhausted_provider_budget_is_not_retried_by_agent_and_keeps_diagnostics() {
+    let diagnostic = "RequestError: read_timeout | {\"event\":\"provider_request\",\"attempts\":3}";
+    let p = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: diagnostic.into(),
+            finish_reason: "error".into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: "unexpected retry".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("provider_budget_no_outer_retry");
+    let mut agent = build(&ws, Box::new(p));
+    let result = agent.run_turn(json!("diagnose"), None).await;
+    assert_eq!(result.iterations, 1);
+    assert_eq!(result.stop_reason, "error");
+    assert_eq!(result.final_text, diagnostic);
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["content"] == diagnostic));
 }
 
 #[tokio::test]

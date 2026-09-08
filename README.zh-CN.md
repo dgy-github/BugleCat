@@ -8,6 +8,8 @@
 
 [设计说明 PDF](docs/ai-coding-agent-design-brief.pdf) · [设计说明 HTML](docs/ai-coding-agent-design-brief.html)
 
+[自我测试报告：六类源码自修复](docs/reports/self_repair_20260908.md) · [评测子包与复跑入口](evals/self_repair/README.md)
+
 📖 **[设计理念手册](docs/design-philosophy.zh-CN.md)** —— 系统讲解分层编排、递归子任务分解、无工具推理节点、渐进披露、视觉分流、记忆自进化与基准方法论“为什么这样设计”。
 
 🛡️ **[上下文压缩安全协议](docs/context-compression-safety-protocol.zh-CN.md)** —— 解释 Coding Agent 为什么会在压缩后发生任务状态漂移，以及如何用任务快照、决策溯源、Git 证据和只读恢复控制风险。

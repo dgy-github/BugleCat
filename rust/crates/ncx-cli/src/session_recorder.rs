@@ -169,7 +169,7 @@ impl SessionRecorder {
         let (currency, estimated_cost) = estimated
             .map(|(currency, amount)| (Some(currency), Some(amount)))
             .unwrap_or((None, None));
-        let status = if result.stop_reason == "error" {
+        let status = if result.stop_reason != "completed" {
             TurnStatus::Failed
         } else {
             TurnStatus::Completed

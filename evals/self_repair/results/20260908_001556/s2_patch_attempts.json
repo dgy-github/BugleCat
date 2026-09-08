@@ -1,0 +1,87 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 123.8,
+    "returncode": 1,
+    "timed_out": false,
+    "grader": {
+      "status": "test_failed",
+      "passed": 16,
+      "failed": 3,
+      "elapsed_s": 0.35,
+      "returncode": 101,
+      "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... FAILED\ntest patch::tests::context_only_insertion_stays_inside_function ... FAILED\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... FAILED\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\nfailures:\n\n---- patch::tests::context_disambiguates_repeated_lines stdout ----\n\nthread 'patch::tests::context_disambiguates_repeated_lines' (47428) panicked at crates\\ncx-tools\\src\\patch.rs:525:9:\nassertion `left == right` failed\n  left: \"def first():\\n    return 2\\ndef second():\\n    pass\\n\"\n right: \"def first():\\n    pass\\ndef second():\\n    return 2\\n\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- patch::tests::context_only_insertion_stays_inside_function stdout ----\n\nthread 'patch::tests::context_only_insertion_stays_inside_function' (43516) panicked at crates\\ncx-tools\\src\\patch.rs:499:9:\nassertion `left == right` failed\n  left: \"    value = 1\\ndef main():\\n    pass\\n\"\n right: \"def main():\\n    value = 1\\n    pass\\n\"\n\n---- patch::tests::missing_context_rejects_insertion_without_writing stdout ----\n\nthread 'patch::tests::missing_context_rejects_insertion_without_writing' (21288) panicked at crates\\ncx-tools\\src\\patch.rs:509:9:\nassertion failed: apply_patch(\"*** Begin Patch\\n*** Update File: a.py\\n@@\\n def absent():\\n+    value = 1\\n     pass\\n*** End Patch\",\n        &root, allow_all).is_err()\n\n\nfailures:\n    patch::tests::context_disambiguates_repeated_lines\n    patch::tests::context_only_insertion_stays_inside_function\n    patch::tests::missing_context_rejects_insertion_without_writing\n\ntest result: FAILED. 16 passed; 3 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.01s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.15s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\nerror: test failed, to rerun pass `-p ncx-tools --lib`\n"
+    },
+    "integrity_issues": [],
+    "patch": "s2_patch_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 3116,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 120003,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 120004,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  },
+  {
+    "attempt": 2,
+    "elapsed_s": 166.63,
+    "returncode": 1,
+    "timed_out": false,
+    "grader": {
+      "status": "test_failed",
+      "passed": 16,
+      "failed": 3,
+      "elapsed_s": 0.38,
+      "returncode": 101,
+      "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... FAILED\ntest patch::tests::context_only_insertion_stays_inside_function ... FAILED\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... FAILED\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\nfailures:\n\n---- patch::tests::context_disambiguates_repeated_lines stdout ----\n\nthread 'patch::tests::context_disambiguates_repeated_lines' (26416) panicked at crates\\ncx-tools\\src\\patch.rs:525:9:\nassertion `left == right` failed\n  left: \"def first():\\n    return 2\\ndef second():\\n    pass\\n\"\n right: \"def first():\\n    pass\\ndef second():\\n    return 2\\n\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- patch::tests::context_only_insertion_stays_inside_function stdout ----\n\nthread 'patch::tests::context_only_insertion_stays_inside_function' (39960) panicked at crates\\ncx-tools\\src\\patch.rs:499:9:\nassertion `left == right` failed\n  left: \"    value = 1\\ndef main():\\n    pass\\n\"\n right: \"def main():\\n    value = 1\\n    pass\\n\"\n\n---- patch::tests::missing_context_rejects_insertion_without_writing stdout ----\n\nthread 'patch::tests::missing_context_rejects_insertion_without_writing' (33164) panicked at crates\\ncx-tools\\src\\patch.rs:509:9:\nassertion failed: apply_patch(\"*** Begin Patch\\n*** Update File: a.py\\n@@\\n def absent():\\n+    value = 1\\n     pass\\n*** End Patch\",\n        &root, allow_all).is_err()\n\n\nfailures:\n    patch::tests::context_disambiguates_repeated_lines\n    patch::tests::context_only_insertion_stays_inside_function\n    patch::tests::missing_context_rejects_insertion_without_writing\n\ntest result: FAILED. 16 passed; 3 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n    Finished `test` profile [optimized + debuginfo] target(s) in 0.15s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\nerror: test failed, to rerun pass `-p ncx-tools --lib`\n"
+    },
+    "integrity_issues": [],
+    "patch": "s2_patch_attempt2.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 4247,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 41655,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 120014,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "http_status": 200,
+        "elapsed_ms": 120014,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]
