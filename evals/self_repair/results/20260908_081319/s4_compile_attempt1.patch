@@ -1,0 +1,18 @@
+diff --git a/rust/crates/ncx-core/src/tools/python_check.rs b/rust/crates/ncx-core/src/tools/python_check.rs
+index a8bf3b5..5664e71 100644
+--- a/rust/crates/ncx-core/src/tools/python_check.rs
++++ b/rust/crates/ncx-core/src/tools/python_check.rs
+@@ -77,9 +77,11 @@ pub(crate) fn failure(ctx: &ToolContext) -> Option<&'static str> {
+         .flatten()
+         .any(|e| e.starts_with("compile_failed"))
+     {
+-        None // lost failure status
++        // Syntax errors are the strongest reason to refuse completion and must
++        // win over interrupted/unavailable/pending verification evidence.
++        Some("compile_failed")
+     } else if checks.values().any(Option::is_some) {
+-        None // lost pending status
++        Some("verification_failed")
+     } else {
+         None
+     }

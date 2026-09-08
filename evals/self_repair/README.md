@@ -8,6 +8,8 @@
 
 [中文自我测试报告](../../docs/reports/self_repair_20260908.md)
 
+[最新：2026-09-08 下午复跑报告](../../docs/reports/self_repair_20260908_081319.md)：首轮 6/6，独立重放全部通过，40 项验收检查通过；[结构化结果与候选补丁](results/20260908_081319/summary.json)。候选补丁作为故障注入评测证据收录，不用于覆盖主项目健康源码。早前报告与失败轨迹保留。
+
 在项目根目录运行，需要 Python 3.11+、Rust 工具链、已缓存的 Cargo 依赖、
 `cargo build --manifest-path rust/Cargo.toml --release -p ncx-cli` 构建的执行器，以及本机已配置的
 `preset:deepseek` / `deepseek-v4-pro`。当前运行入口针对 Windows `ncx.exe`。

@@ -1,0 +1,89 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 46.06,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 2,
+      "failed": 0,
+      "checks": [
+        "tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake",
+        "tools::tests::self_repair_unicode_path_still_rejects_binary"
+      ],
+      "elapsed_s": 30.06,
+      "returncode": 0,
+      "output_tail": "\nrunning 2 tests\ntest tools::tests::self_repair_unicode_path_reads_utf16_without_mojibake ... ok\ntest tools::tests::self_repair_unicode_path_still_rejects_binary ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 0.00s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s5_encoding\\rust\\crates\\ncx-tools)\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s5_encoding\\rust\\crates\\ncx-provider)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s5_encoding\\rust\\crates\\ncx-core)\n    Finished `test` profile [optimized + debuginfo] target(s) in 27.57s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n",
+      "cache_invalidation_s": 0.47
+    },
+    "integrity_issues": [],
+    "patch": "s5_encoding_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5308,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4953,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4759,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4628,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4268,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3523,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 8602,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3223,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

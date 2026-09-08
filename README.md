@@ -4,6 +4,8 @@ English | [简体中文](README.zh-CN.md)
 
 ## Collaboration & self-test evidence
 
+Latest: [September 8 afternoon rerun report](docs/reports/self_repair_20260908_081319.md) — **6/6 on the first attempt**, all six patches independently replayed; 609.09 seconds of agent runtime. Same model and executor as the earlier run below; a small-sample result, not proof of a stable success rate.
+
 Interested in coding-agent integration and customization, evaluation and self-repair research, or joint development? Contact **[2537676793@qq.com](mailto:2537676793@qq.com)** with your team, use case, proposed scope, and timeline. Scope and delivery arrangements are discussed individually.
 
 In the **September 8, 2026** six-category source self-repair test using `deepseek-v4-pro`, BugleCat passed **5/6 tasks on the first attempt** and **6/6 with at most one feedback turn per task**. Independent checks and patch replay verified the results. This is a small, controlled fault-injection test with specified files and visible tests—not a general success-rate claim or production certification.

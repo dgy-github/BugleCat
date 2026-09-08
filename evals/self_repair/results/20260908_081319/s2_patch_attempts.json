@@ -1,0 +1,146 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 262.32,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 19,
+      "failed": 0,
+      "checks": [
+        "patch::tests::add_file_rejects_existing",
+        "patch::tests::add_file_writes_to_disk",
+        "patch::tests::context_disambiguates_repeated_lines",
+        "patch::tests::context_only_insertion_stays_inside_function",
+        "patch::tests::delete_file",
+        "patch::tests::fuzzy_matching_does_not_rewrite_context_indentation",
+        "patch::tests::missing_context_rejects_insertion_without_writing",
+        "patch::tests::move_file_writes_dest_removes_source",
+        "patch::tests::parse_add_file",
+        "patch::tests::parse_rejects_add_line_without_plus",
+        "patch::tests::parse_requires_begin_and_end",
+        "patch::tests::parse_update_with_locator_and_change",
+        "patch::tests::summary_orders_a_r_m_d",
+        "patch::tests::tmpdir_creates_unique_directories",
+        "patch::tests::unwritable_path_blocks_whole_patch",
+        "patch::tests::update_failure_to_locate_is_atomic",
+        "patch::tests::update_replaces_matched_lines",
+        "patch::tests::update_uses_locator_to_disambiguate",
+        "patch::tests::update_with_whitespace_fallback"
+      ],
+      "elapsed_s": 4.63,
+      "returncode": 0,
+      "output_tail": "\nrunning 19 tests\ntest patch::tests::add_file_rejects_existing ... ok\ntest patch::tests::add_file_writes_to_disk ... ok\ntest patch::tests::context_disambiguates_repeated_lines ... ok\ntest patch::tests::context_only_insertion_stays_inside_function ... ok\ntest patch::tests::delete_file ... ok\ntest patch::tests::fuzzy_matching_does_not_rewrite_context_indentation ... ok\ntest patch::tests::missing_context_rejects_insertion_without_writing ... ok\ntest patch::tests::move_file_writes_dest_removes_source ... ok\ntest patch::tests::parse_add_file ... ok\ntest patch::tests::parse_rejects_add_line_without_plus ... ok\ntest patch::tests::parse_requires_begin_and_end ... ok\ntest patch::tests::parse_update_with_locator_and_change ... ok\ntest patch::tests::summary_orders_a_r_m_d ... ok\ntest patch::tests::tmpdir_creates_unique_directories ... ok\ntest patch::tests::unwritable_path_blocks_whole_patch ... ok\ntest patch::tests::update_failure_to_locate_is_atomic ... ok\ntest patch::tests::update_replaces_matched_lines ... ok\ntest patch::tests::update_uses_locator_to_disambiguate ... ok\ntest patch::tests::update_with_whitespace_fallback ... ok\n\ntest result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s2_patch\\rust\\crates\\ncx-tools)\n    Finished `test` profile [optimized + debuginfo] target(s) in 3.16s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_tools-7689bfe7b16e094f.exe)\n",
+      "cache_invalidation_s": 0.3
+    },
+    "integrity_issues": [],
+    "patch": "s2_patch_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3445,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 2818,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 34861,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 48010,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5623,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 6334,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 103236,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 2684,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 17410,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3306,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 3227,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 16449,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 6671,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

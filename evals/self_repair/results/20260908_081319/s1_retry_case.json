@@ -1,0 +1,131 @@
+{
+  "id": "s1_retry",
+  "title": "失败分类与重试边界",
+  "target": "bench/run.py",
+  "attempts": [
+    {
+      "attempt": 1,
+      "elapsed_s": 63.03,
+      "returncode": 0,
+      "timed_out": false,
+      "grader": {
+        "status": "passed",
+        "passed": 9,
+        "failed": 0,
+        "checks": [
+          "compile failure precedence",
+          "empty response + missing file",
+          "legacy tuple API",
+          "ordinary failure not retried",
+          "recovery keeps evidence and time",
+          "retry exhaustion bounded",
+          "success mentioning empty response",
+          "success never retried",
+          "zero disables retries"
+        ],
+        "elapsed_s": 0.14,
+        "returncode": 0,
+        "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        1/1     5.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     6.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nPASS: empty response + missing file\nPASS: compile failure precedence\nPASS: success mentioning empty response\nPASS: recovery keeps evidence and time\nPASS: retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+      },
+      "integrity_issues": [],
+      "patch": "s1_retry_attempt1.patch",
+      "provider_diagnostics": [
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 5360,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3412,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4754,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 38017,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3137,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3294,
+          "attempts": 1,
+          "retries": 0
+        }
+      ]
+    }
+  ],
+  "status": "passed",
+  "healthy": {
+    "status": "passed",
+    "passed": 9,
+    "failed": 0,
+    "checks": [
+      "compile failure precedence",
+      "empty response + missing file",
+      "legacy tuple API",
+      "ordinary failure not retried",
+      "recovery keeps evidence and time",
+      "retry exhaustion bounded",
+      "success mentioning empty response",
+      "success never retried",
+      "zero disables retries"
+    ],
+    "elapsed_s": 0.16,
+    "returncode": 0,
+    "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        1/1     5.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     6.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nPASS: empty response + missing file\nPASS: compile failure precedence\nPASS: success mentioning empty response\nPASS: recovery keeps evidence and time\nPASS: retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+  },
+  "agent_shell_preflight": {
+    "passed": true,
+    "elapsed_s": 1.95,
+    "returncode": 0
+  },
+  "healthy_target_sha256": "9f2e5a0a64ee11409563e6bd5038e3e5fb618d71bd7e511e8850dccecac579bf",
+  "seed_head": "4c520557171b681c03df5fd2a9fc76c2ca5ea487",
+  "baseline_sha256": "bdaa5ec42f9d8398ffe36145424fd445c4e31a9d9fa939c0868e8bac90db6c1d",
+  "seed": {
+    "status": "test_failed",
+    "passed": 5,
+    "failed": 4,
+    "checks": [
+      "compile failure precedence",
+      "empty response + missing file",
+      "legacy tuple API",
+      "ordinary failure not retried",
+      "recovery keeps evidence and time",
+      "retry exhaustion bounded",
+      "success mentioning empty response",
+      "success never retried",
+      "zero disables retries"
+    ],
+    "elapsed_s": 0.14,
+    "returncode": 1,
+    "output_tail": "\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        0/1     2.0s   (failure)\n  -> nanocodex: 0/1 runs passed; 0/1 tasks fully solved; 0 timed out\n\n=== nanocodex  (x1) ===\n  test_task        1/1     2.0s\n  -> nanocodex: 1/1 runs passed; 1/1 tasks fully solved; 0 timed out\nFAIL: AssertionError(('missing_expected_file', 'empty_response')): empty response + missing file\nFAIL: AssertionError(('missing_expected_file', 'compile_failed')): compile failure precedence\nPASS: success mentioning empty response\nFAIL: AssertionError((1, 2)): recovery keeps evidence and time\nFAIL: AssertionError((2.0, 6)): retry exhaustion bounded\nPASS: zero disables retries\nPASS: ordinary failure not retried\nPASS: success never retried\nPASS: legacy tuple API\n\n"
+  }
+}

@@ -1,0 +1,86 @@
+diff --git a/rust/crates/ncx-tools/src/patch.rs b/rust/crates/ncx-tools/src/patch.rs
+index e31785d..c2798d2 100644
+--- a/rust/crates/ncx-tools/src/patch.rs
++++ b/rust/crates/ncx-tools/src/patch.rs
+@@ -174,13 +174,13 @@ fn parse_update_body(
+     let mut chunks: Vec<Chunk> = Vec::new();
+     let mut pending_locators: Vec<String> = Vec::new();
+     let mut current: Option<Chunk> = None;
+-    let mut changed = false;
++    let mut has_change = false;
+ 
+     // flush: commit current chunk if it has any change lines.
+     macro_rules! flush {
+         () => {{
+             if let Some(c) = current.take() {
+-                if changed {
++                if has_change {
+                     chunks.push(c);
+                 }
+             }
+@@ -191,7 +191,7 @@ fn parse_update_body(
+         let raw = body[i];
+         if let Some(rest) = raw.strip_prefix(HUNK_AT) {
+             flush!();
+-            changed = false;
++            has_change = false;
+             let locator = rest.trim();
+             if !locator.is_empty() {
+                 pending_locators.push(locator.to_string());
+@@ -204,26 +204,31 @@ fn parse_update_body(
+             Some(c) => (c, &raw[1..]),
+             None => (' ', ""),
+         };
++        if current.is_none() {
++            current = Some(Chunk {
++                locators: std::mem::take(&mut pending_locators),
++                ..Default::default()
++            });
++        }
++        let c = current.as_mut().unwrap();
+         match marker {
+             ' ' => {
+-                flush!();
+-                i += 1;
++                // Context line: an unchanged line that is part of this hunk.
++                // It must match in the file and is never rewritten, even when
++                // the match succeeds via a whitespace fallback.
++                let new_index = c.ins_lines.len();
++                let old_index = c.del_lines.len();
++                c.del_lines.push(content.to_string());
++                c.ins_lines.push(content.to_string());
++                c.context_lines.push((new_index, old_index));
+             }
+-            '+' | '-' => {
+-                changed = true;
+-                if current.is_none() {
+-                    current = Some(Chunk {
+-                        locators: std::mem::take(&mut pending_locators),
+-                        ..Default::default()
+-                    });
+-                }
+-                let c = current.as_mut().unwrap();
+-                if marker == '-' {
+-                    c.del_lines.push(content.to_string());
+-                } else {
+-                    c.ins_lines.push(content.to_string());
+-                }
+-                i += 1;
++            '-' => {
++                c.del_lines.push(content.to_string());
++                has_change = true;
++            }
++            '+' => {
++                c.ins_lines.push(content.to_string());
++                has_change = true;
+             }
+             _ => {
+                 return err(format!(
+@@ -231,6 +236,7 @@ fn parse_update_body(
+                 ));
+             }
+         }
++        i += 1;
+     }
+     flush!();
+     if chunks.is_empty() {

@@ -1,0 +1,142 @@
+{
+  "id": "s3_budget",
+  "title": "超时预算与退出码",
+  "target": "rust/crates/ncx-cli/src/cli_app.rs",
+  "attempts": [
+    {
+      "attempt": 1,
+      "elapsed_s": 60.7,
+      "returncode": 0,
+      "timed_out": false,
+      "grader": {
+        "status": "passed",
+        "passed": 1,
+        "failed": 0,
+        "checks": [
+          "cli_app::exit_tests::incomplete_turns_return_failure"
+        ],
+        "elapsed_s": 22.48,
+        "returncode": 0,
+        "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-tools)\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-provider)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-core)\n   Compiling ncx-cli v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-cli)\n    Finished `test` profile [optimized + debuginfo] target(s) in 20.49s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n",
+        "cache_invalidation_s": 0.45
+      },
+      "integrity_issues": [],
+      "patch": "s3_budget_attempt1.patch",
+      "provider_diagnostics": [
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 5327,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2816,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 5967,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 5906,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4221,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 2422,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 7629,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 8814,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4789,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 7556,
+          "attempts": 1,
+          "retries": 0
+        }
+      ]
+    }
+  ],
+  "status": "passed",
+  "healthy": {
+    "status": "passed",
+    "passed": 1,
+    "failed": 0,
+    "checks": [
+      "cli_app::exit_tests::incomplete_turns_return_failure"
+    ],
+    "elapsed_s": 25.68,
+    "returncode": 0,
+    "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-tools)\n   Compiling ncx-app-server v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-app-server)\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-provider)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-core)\n   Compiling ncx-cli v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-cli)\n    Finished `test` profile [optimized + debuginfo] target(s) in 23.90s\n     Running unittests src\\main.rs (rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\n",
+    "cache_invalidation_s": 0.29
+  },
+  "agent_shell_preflight": {
+    "passed": true,
+    "elapsed_s": 25.25,
+    "returncode": 0
+  },
+  "healthy_target_sha256": "b4cf242bd5539bee00f007f9a0f11501362e245b804bd09deb0787255d077fd6",
+  "seed_head": "01105acfca9ca2cd3d2071896935a0ebe7eda857",
+  "baseline_sha256": "55065e55036702e83b73def4de5c9a2c686b37d13f197aab81ae3192726457ce",
+  "seed": {
+    "status": "test_failed",
+    "passed": 0,
+    "failed": 1,
+    "checks": [
+      "cli_app::exit_tests::incomplete_turns_return_failure"
+    ],
+    "elapsed_s": 26.09,
+    "returncode": 101,
+    "output_tail": "\nrunning 1 test\ntest cli_app::exit_tests::incomplete_turns_return_failure ... FAILED\n\nfailures:\n\n---- cli_app::exit_tests::incomplete_turns_return_failure stdout ----\n\nthread 'cli_app::exit_tests::incomplete_turns_return_failure' (784) panicked at crates\\ncx-cli\\src\\cli_app.rs:313:13:\nassertion `left == right` failed: task_budget\n  left: 0\n right: 1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    cli_app::exit_tests::incomplete_turns_return_failure\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 37 filtered out; finished in 0.00s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-tools)\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-provider)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-core)\n   Compiling ncx-cli v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s3_budget\\rust\\crates\\ncx-cli)\n    Finished `test` profile [optimized + debuginfo] target(s) in 24.21s\n     Running unittests src\\main.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx-2d0c610cb8954812.exe)\nerror: test failed, to rerun pass `-p ncx-cli --bin ncx`\n",
+    "cache_invalidation_s": 0.4
+  }
+}

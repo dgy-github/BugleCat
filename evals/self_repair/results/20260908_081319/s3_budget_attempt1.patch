@@ -1,0 +1,13 @@
+diff --git a/rust/crates/ncx-cli/src/cli_app.rs b/rust/crates/ncx-cli/src/cli_app.rs
+index 1b893f9..a324030 100644
+--- a/rust/crates/ncx-cli/src/cli_app.rs
++++ b/rust/crates/ncx-cli/src/cli_app.rs
+@@ -295,7 +295,7 @@ async fn run_prompt(
+ }
+ 
+ fn turn_exit_code(reason: &str) -> i32 {
+-    i32::from(matches!(reason, "error" | "timeout"))
++    i32::from(reason != "completed")
+ }
+ 
+ #[cfg(test)]

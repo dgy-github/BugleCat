@@ -1,0 +1,101 @@
+[
+  {
+    "attempt": 1,
+    "elapsed_s": 90.11,
+    "returncode": 0,
+    "timed_out": false,
+    "grader": {
+      "status": "passed",
+      "passed": 6,
+      "failed": 0,
+      "checks": [
+        "agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success",
+        "agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence",
+        "agent_loop::tests::basic_tests::repaired_python_compile_allows_completion",
+        "tools::tests::python_delete_alias_clears_failed_validation",
+        "tools::tests::python_patch_registers_all_written_files_before_cancellation",
+        "tools::tests::python_patch_reports_compile_failure_then_recovery"
+      ],
+      "elapsed_s": 32.33,
+      "returncode": 0,
+      "output_tail": "\nrunning 6 tests\ntest agent_loop::tests::basic_tests::failed_python_compile_blocks_completion_and_budget_success ... ok\ntest agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence ... ok\ntest agent_loop::tests::basic_tests::repaired_python_compile_allows_completion ... ok\ntest tools::tests::python_delete_alias_clears_failed_validation ... ok\ntest tools::tests::python_patch_registers_all_written_files_before_cancellation ... ok\ntest tools::tests::python_patch_reports_compile_failure_then_recovery ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 285 filtered out; finished in 0.90s\n\n\n   Compiling ncx-tools v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s4_compile\\rust\\crates\\ncx-tools)\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s4_compile\\rust\\crates\\ncx-provider)\n   Compiling ncx-core v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s4_compile\\rust\\crates\\ncx-core)\n    Finished `test` profile [optimized + debuginfo] target(s) in 28.85s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_core-ea0cf4e44d52197b.exe)\n",
+      "cache_invalidation_s": 0.54
+    },
+    "integrity_issues": [],
+    "patch": "s4_compile_attempt1.patch",
+    "provider_diagnostics": [
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 8589,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 6019,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 2773,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 4763,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 10028,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 18473,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 7049,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 5492,
+        "attempts": 1,
+        "retries": 0
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "kind": "success",
+        "http_status": 200,
+        "elapsed_ms": 8901,
+        "attempts": 1,
+        "retries": 0
+      }
+    ]
+  }
+]

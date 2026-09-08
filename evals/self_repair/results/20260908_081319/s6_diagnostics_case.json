@@ -1,0 +1,116 @@
+{
+  "id": "s6_diagnostics",
+  "title": "连接诊断与日志脱敏",
+  "target": "rust/crates/ncx-provider/src/provider/diagnostics.rs",
+  "attempts": [
+    {
+      "attempt": 1,
+      "elapsed_s": 86.87,
+      "returncode": 0,
+      "timed_out": false,
+      "grader": {
+        "status": "passed",
+        "passed": 3,
+        "failed": 0,
+        "checks": [
+          "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+          "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+          "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+        ],
+        "elapsed_s": 6.46,
+        "returncode": 0,
+        "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s6_diagnostics\\rust\\crates\\ncx-provider)\n    Finished `test` profile [optimized + debuginfo] target(s) in 4.55s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\n",
+        "cache_invalidation_s": 0.34
+      },
+      "integrity_issues": [],
+      "patch": "s6_diagnostics_attempt1.patch",
+      "provider_diagnostics": [
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3236,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 8859,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 3257,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 56048,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 4548,
+          "attempts": 1,
+          "retries": 0
+        },
+        {
+          "model": "deepseek-v4-pro",
+          "kind": "success",
+          "http_status": 200,
+          "elapsed_ms": 6763,
+          "attempts": 1,
+          "retries": 0
+        }
+      ]
+    }
+  ],
+  "status": "passed",
+  "healthy": {
+    "status": "passed",
+    "passed": 3,
+    "failed": 0,
+    "checks": [
+      "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+      "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+      "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+    ],
+    "elapsed_s": 7.03,
+    "returncode": 0,
+    "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat\\rust\\crates\\ncx-provider)\n    Finished `test` profile [optimized + debuginfo] target(s) in 5.08s\n     Running unittests src\\lib.rs (rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\n",
+    "cache_invalidation_s": 0.42
+  },
+  "agent_shell_preflight": {
+    "passed": true,
+    "elapsed_s": 6.18,
+    "returncode": 0
+  },
+  "healthy_target_sha256": "95cdfff30b5fa9d74c3833a203c63fc77424caacf9626a1d3fde5d95f5fbbb9b",
+  "seed_head": "e87333f6011eaf342873b7e800e14fb04c1d70f4",
+  "baseline_sha256": "fae83191ff06081e3c7b542d8a5e5db66bc802d1cd156cb10087a83622a96468",
+  "seed": {
+    "status": "test_failed",
+    "passed": 1,
+    "failed": 2,
+    "checks": [
+      "provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status",
+      "provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries",
+      "provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model"
+    ],
+    "elapsed_s": 6.05,
+    "returncode": 101,
+    "output_tail": "\nrunning 3 tests\ntest provider::diagnostics::tests::self_repair_diagnostic_clears_previous_http_status ... ok\ntest provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries ... FAILED\ntest provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model ... FAILED\n\nfailures:\n\n---- provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries stdout ----\n\nthread 'provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries' (19564) panicked at crates\\ncx-provider\\src\\provider\\diagnostics.rs:75:9:\nassertion `left == right` failed\n  left: Number(1)\n right: 0\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n---- provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model stdout ----\n\nthread 'provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model' (34672) panicked at crates\\ncx-provider\\src\\provider\\diagnostics.rs:62:9:\nassertion failed: !text.contains(\"fixture-credential\")\n\n\nfailures:\n    provider::diagnostics::tests::self_repair_diagnostic_counts_only_retries\n    provider::diagnostics::tests::self_repair_diagnostic_redacts_key_in_model\n\ntest result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.00s\n\n\n   Compiling ncx-provider v0.1.0 (D:\\github_dgy\\BugleCat-selftest-six-20260908-afternoon\\s6_diagnostics\\rust\\crates\\ncx-provider)\n    Finished `test` profile [optimized + debuginfo] target(s) in 4.47s\n     Running unittests src\\lib.rs (D:\\github_dgy\\BugleCat\\rust\\target\\debug\\deps\\ncx_provider-6d44c356a9302c02.exe)\nerror: test failed, to rerun pass `-p ncx-provider --lib`\n",
+    "cache_invalidation_s": 0.28
+  }
+}

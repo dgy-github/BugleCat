@@ -285,6 +285,7 @@
 
   <section class="evidence" id="self-test" aria-labelledby="self-test-title">
     <h2 id="self-test-title">让 BugleCat 修复自己的源码</h2>
+    <p>最新复跑：<a href="https://github.com/dgy-github/BugleCat/blob/main/docs/reports/self_repair_20260908_081319.md">9 月 8 日下午报告</a>，首轮 6 / 6，六份补丁独立重放全部通过，Agent 累计 609.09 秒。沿用相同模型和执行器，小样本改善不代表稳定成功率提高。下方保留早前运行记录。</p>
     <p>2026 年 9 月 8 日，使用 <code>deepseek-v4-pro</code> 完成六类真实源码故障注入测试：失败分类与重试、补丁定位、预算退出码、编译门禁、文件编码、诊断脱敏。</p>
     <p class="lead">首轮通过 5 / 6 道；每题最多一次反馈后，最终通过 6 / 6 道。</p>
     <p>结果由独立测试验收，并从原始故障副本重放补丁复查。报告保留了首轮失败、重试、耗时与候选补丁，不只展示成功结果。</p>
