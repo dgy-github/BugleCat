@@ -27,6 +27,7 @@ pub struct AgentRuntimeProfile {
     pub task_budget: TaskBudget,
     pub max_parallel_tool_calls: usize,
     pub context_edit: ContextEditPolicy,
+    pub context_window: i64,
 }
 
 /// Permission knobs derived from a single permission-mode selection.
@@ -76,6 +77,7 @@ impl AgentRuntimeProfile {
     fn with_permissions(cfg: &Config, permissions: RuntimePermissionProfile) -> Self {
         Self {
             permissions,
+            context_window: cfg.context_window.max(1),
             task_budget: TaskBudget {
                 max_model_calls: positive_usize(cfg.max_iterations, DEFAULT_MAX_MODEL_CALLS),
                 max_tool_calls: nonnegative_usize(cfg.max_tool_calls, DEFAULT_MAX_TOOL_CALLS),
@@ -101,6 +103,8 @@ impl AgentRuntimeProfile {
 
     /// Apply the normalized profile to a newly assembled agent.
     pub fn apply(self, agent: AgentLoop) -> AgentLoop {
+        let mut agent = agent;
+        agent.context_window = self.context_window;
         agent
             .with_task_budget(self.task_budget)
             .with_max_parallel_tool_calls(self.max_parallel_tool_calls)
@@ -128,21 +132,30 @@ impl AgentRuntimeProfile {
 /// shared timeout, retry, endpoint, and API-key mapping.
 pub fn model_provider_from_config(cfg: &Config, model: impl Into<String>) -> Box<dyn Provider> {
     let model = model.into();
-    if cfg.provider_protocol == "anthropic" {
-        return Box::new(AnthropicProvider::new(
+    let inner: Box<dyn Provider> = if cfg.provider_protocol == "anthropic" {
+        Box::new(AnthropicProvider::new(
             cfg.api_key.clone(),
             &cfg.base_url,
             model,
             cfg.timeout_s as u64,
-        ));
-    }
-    Box::new(DeepSeekProvider::with_opts(
-        cfg.api_key.clone(),
-        &cfg.base_url,
-        model,
-        cfg.timeout_s as u64,
-        cfg.max_retries as u32,
-    ))
+        ))
+    } else {
+        Box::new(DeepSeekProvider::with_opts(
+            cfg.api_key.clone(),
+            &cfg.base_url,
+            model,
+            cfg.timeout_s as u64,
+            cfg.max_retries as u32,
+        ))
+    };
+    crate::model_provider::CatalogAwareProvider::wrap(
+        inner,
+        ncx_provider::ProviderCatalogRequest::new(
+            &cfg.base_url,
+            &cfg.provider_protocol,
+            Some(cfg.api_key.clone()),
+        ),
+    )
 }
 
 /// Build the optional vision provider using the main endpoint/key as fallback.
@@ -160,13 +173,16 @@ pub fn vision_provider_from_config(cfg: &Config) -> Option<Box<dyn Provider>> {
     } else {
         cfg.vl_api_key.clone()
     };
-    Some(Box::new(DeepSeekProvider::with_opts(
-        api_key,
-        base_url,
-        cfg.vl_model.clone(),
-        cfg.timeout_s as u64,
-        cfg.max_retries as u32,
-    )))
+    Some(crate::model_provider::CatalogAwareProvider::wrap(
+        Box::new(DeepSeekProvider::with_opts(
+            api_key.clone(),
+            base_url,
+            cfg.vl_model.clone(),
+            cfg.timeout_s as u64,
+            cfg.max_retries as u32,
+        )),
+        ncx_provider::ProviderCatalogRequest::new(base_url, "openai", Some(api_key)),
+    ))
 }
 
 /// Conservative built-in capability catalog used before sending image blocks.
@@ -350,6 +366,7 @@ mod tests {
         assert_eq!(
             cli_profile,
             AgentRuntimeProfile {
+                context_window: cfg.context_window,
                 permissions: RuntimePermissionProfile {
                     sandbox_mode: "workspace-write".into(),
                     approval_policy: "untrusted".into(),

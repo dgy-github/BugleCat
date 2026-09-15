@@ -10,17 +10,23 @@
 //! * [`slash`] — REPL slash-command parsing.
 
 pub mod agent_loop;
+pub mod agent_state;
 pub mod checkpoint;
+pub mod context_retrieval;
+pub mod context_store;
+pub mod context_trace;
 pub mod custom_commands;
 pub mod editor_tool;
 pub mod genome;
 pub mod goal_tools;
 pub mod hooks;
+pub mod instruction_state;
 pub mod isolate;
 pub mod lsp_tool;
 pub mod mcp_tool;
 pub mod media_tools;
 pub mod memory;
+pub mod memory_index;
 mod memory_merge;
 mod memory_summarizer;
 pub mod mentions;
@@ -56,7 +62,16 @@ pub(crate) mod test_support;
 pub use agent_loop::{
     suggest_title_with_provider, AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult,
 };
+pub use agent_state::{AgentState, AgentStateMachine};
 pub use checkpoint::{CheckpointMeta, CheckpointStore, RestoreReport};
+pub use context_retrieval::{
+    ContextRetriever, Layer as ContextLayer, RetrievalContextProvider, RetrievalResult,
+    RetrievedNote,
+};
+pub use context_store::{ContextEvent, ContextStore, EventStatus, EventType, ToolCallDetail};
+pub use context_trace::{
+    retrieve as retrieve_sources, RetrievedSource, SourceKind, SourceRecord, SourceTraceStore,
+};
 pub use custom_commands::{
     custom_command_prompt, expand_custom_command_template, list_custom_commands,
     parse_custom_command_query, resolve_custom_command, CustomCommandQuery, CustomCommandSummary,
@@ -65,16 +80,22 @@ pub use editor_tool::StrReplaceEditorTool;
 pub use genome::Genome;
 pub use goal_tools::{GoalAuthoritySource, GoalToolService, GoalTurnAuthority};
 pub use hooks::{HookEvent, HookOutcome};
+pub use instruction_state::{
+    Instruction, InstructionLedger, InstructionStatus, Origin as InstructionOrigin, Polarity,
+};
 pub use lsp_tool::{LspProvider, LspRequest, LspTool};
 pub use mcp_tool::{prepare_mcp_server_tools, register_mcp_server};
 pub use media_tools::{GenerateImageTool, GenerateVideoTool, MediaGenerationService, MediaPrice};
 pub use memory::{MemoryEntry, MemoryStore, Summarizer};
+pub use memory_index::{Evidence, IndexedNote, MemoryIndex, NoteStatus, PromotionRefused};
 pub use memory_merge::MemoryMergeDraft;
 pub use memory_summarizer::ProviderMemorySummarizer;
 pub use mentions::{expand_file_mentions, find_mentions};
 pub use ncx_context::{
     ContextAssembler, ContextEntry, ContextFragment, ContextService, TextContextFragment,
 };
+pub use ncx_provider::model_catalog::resolve_context_capacity;
+pub use ncx_provider::preset_catalog;
 pub use ncx_provider::{parse_catalog_models, DiscoveredProviderModel};
 pub use orchestrator::{
     AgentCallResult, AgentRunner, Complexity, Orchestrator, OrchestratorConfig,
@@ -122,7 +143,7 @@ pub use tool_recovery::{ToolCapability, ToolFailureClass};
 pub use tool_scheduler::{BoundedToolScheduler, ToolScheduler};
 pub use tools::{
     ApprovalDecision, ApprovalHandler, ApprovalRequest, SessionGrants, Tool, ToolContext,
-    ToolRegistry,
+    ToolDuplicatePolicy, ToolRegistry, ToolRetryPolicy, ToolRuntimePolicy,
 };
 pub use turn_context::{TurnContextProvider, TurnContextRegistry, TurnContextRequest};
 pub use user_question::{UserQuestionHandler, UserQuestionRequest};

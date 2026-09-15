@@ -227,7 +227,7 @@ async fn repl(
 
         let (cmd, arg) = parse_slash(line);
         if let Some(cmd) = cmd {
-            match dispatch_slash(&cmd, &arg, agent, cfg, recorder, &usage) {
+            match dispatch_slash(&cmd, &arg, agent, cfg, recorder, &usage).await {
                 SlashOutcome::Exit => break,
                 SlashOutcome::Printed(text) => println!("{text}"),
                 SlashOutcome::ReloadMcp => {
@@ -310,7 +310,7 @@ enum SlashOutcome {
 
 /// Handle a slash command that doesn't require a model call. Returns the text to
 /// print, an exit signal, or (for unknown commands) treats the line as a prompt.
-fn dispatch_slash(
+async fn dispatch_slash(
     cmd: &str,
     arg: &str,
     agent: &mut AgentLoop,
@@ -346,7 +346,7 @@ fn dispatch_slash(
         "/pdf" => SlashOutcome::Prompt(doc_prompt("pdf", arg)),
         "/pptx" => SlashOutcome::Prompt(doc_prompt("pptx", arg)),
         "/xlsx" => SlashOutcome::Prompt(doc_prompt("xlsx", arg)),
-        "/compact" => SlashOutcome::Printed(compact_session_text(agent, recorder)),
+        "/compact" => SlashOutcome::Printed(compact_session_text(agent, recorder).await),
         "/model" => {
             if arg.is_empty() {
                 SlashOutcome::Printed(format!("model: {}", cfg.model))

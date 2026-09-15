@@ -14,6 +14,12 @@ pub enum StreamDelta {
 pub trait Provider {
     fn model(&self) -> &str;
 
+    /// Capacity resolved for this route/model from live metadata or a matching preset.
+    /// Unknown capacity is not inferred from a similar model name.
+    async fn context_window(&self) -> Option<i64> {
+        None
+    }
+
     /// Model identifier returned by the provider for the most recent response.
     /// `None` means the wire response did not include an authoritative model.
     fn confirmed_model(&self) -> Option<String> {

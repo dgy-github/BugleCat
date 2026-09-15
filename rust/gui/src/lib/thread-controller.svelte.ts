@@ -151,7 +151,7 @@ export class ThreadController {
       case "assistant_delta": this.handleAssistantDelta(event); break;
       case "reasoning_delta": this.handleReasoningDelta(event); break;
       case "context_compacted":
-        if (this.accepts(event.session_id)) this.messages.push({ role: "compact", text: `已自动压缩上下文：${event.original_chars.toLocaleString()} → ${event.edited_chars.toLocaleString()} 字符，清理 ${event.dropped_messages} 条旧消息和 ${event.compressed_tool_results} 条工具结果；已生成压缩安全快照并核对任务约束，代码事实仍以工作区、diff 和测试结果为准。` });
+        if (this.accepts(event.session_id)) this.messages.push({ role: "compact", text: `已更新上下文摘要：${event.original_chars.toLocaleString()} → ${event.edited_chars.toLocaleString()} 字符，归纳 ${event.dropped_messages} 条历史消息，保留近期完整对话与工具调用。摘要用于恢复任务，代码事实以工作区、diff 和测试结果为准。` });
         break;
       case "orchestrator_stage":
         if (this.accepts(event.session_id)) this.messages.push({ role: "orchestration", stage: event.stage, text: event.detail });
@@ -175,7 +175,8 @@ export class ThreadController {
       case "loaded": this.handleLoaded(event); break;
       case "error": this.handleError(event); break;
     }
-    this.callbacks.scrollDown();
+    // Events from background sessions must not move the active reader's viewport.
+    if (this.accepts(event.session_id)) this.callbacks.scrollDown();
   }
 
   private handleReady(event: Extract<UiEvent, { kind: "ready" }>): void {

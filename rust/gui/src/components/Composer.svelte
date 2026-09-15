@@ -42,7 +42,7 @@
   {/if}
   {#if needsWorkspace}<div class="ws-warn"><span>⚠ 当前工作区是主目录（非项目），已暂停对话以免误操作。请选择项目目录。</span><button class="plain" onclick={chooseWorkspace}>选择项目目录</button></div>{/if}
   <div class="composer-shell">
-    <textarea bind:value={input} onkeydown={onKey} oninput={() => { if (input.startsWith("/")) slashIdx = 0; }} onpaste={handlePaste} placeholder={needsWorkspace ? "请先选择项目目录…" : "给智能体发消息"} disabled={switching} rows="2"></textarea>
+    <textarea id="task-input" aria-label="任务内容" bind:value={input} onkeydown={onKey} oninput={() => { if (input.startsWith("/")) slashIdx = 0; }} onpaste={handlePaste} placeholder={needsWorkspace ? "请先选择项目目录…" : "描述你的想法，或输入 / 查看命令…"} disabled={switching} rows="2"></textarea>
     <div class="composer-meta">
       <button class="toolbtn attach" title="添加文件/图片" onclick={attachFiles} disabled={switching} aria-label="添加">＋</button>
     <div class="model-wrap">

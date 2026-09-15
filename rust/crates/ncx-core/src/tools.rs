@@ -30,8 +30,8 @@ use crate::skills::Skill;
 use crate::terminal_tools::TerminalManager;
 use crate::tool_middleware::{ToolMiddleware, ToolMiddlewareDecision};
 use crate::tool_recovery::{
-    classify_tool_result, fallback_call, infer_capabilities, resolve_unique_missing_read,
-    ToolCapability,
+    classify_tool_result, infer_capabilities, resolve_unique_missing_read, ToolCapability,
+    ToolFailureClass,
 };
 use crate::user_question::UserQuestionHandler;
 
@@ -59,6 +59,58 @@ pub struct ToolCatalogEntry {
     pub description: String,
     pub read_only: bool,
     pub capabilities: Vec<ToolCapability>,
+}
+
+/// Runtime guardrails owned by a tool rather than by the outer agent loop.
+/// The loop still limits the total task budget, while these limits protect a
+/// particular tool from duplicate or runaway invocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolDuplicatePolicy {
+    Allow,
+    Reject,
+}
+
+/// Whether a tool opts into the single conservative retry. `TransientOnce` is
+/// necessary but not sufficient: the call must also be read-only or the tool
+/// must declare itself idempotent, so a partially applied write is never
+/// replayed automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRetryPolicy {
+    None,
+    TransientOnce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolRuntimePolicy {
+    pub max_calls_per_turn: Option<usize>,
+    pub max_calls_per_task: Option<usize>,
+    pub duplicate_policy: ToolDuplicatePolicy,
+    pub retry_policy: ToolRetryPolicy,
+    pub idempotent: bool,
+    pub approval_required: bool,
+    pub risk_level: u8,
+}
+
+impl Default for ToolRuntimePolicy {
+    fn default() -> Self {
+        Self {
+            max_calls_per_turn: None,
+            max_calls_per_task: None,
+            duplicate_policy: ToolDuplicatePolicy::Allow,
+            retry_policy: ToolRetryPolicy::TransientOnce,
+            idempotent: false,
+            approval_required: false,
+            risk_level: 0,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ToolRuntimeState {
+    turn_id: Option<u64>,
+    turn_calls: HashMap<String, usize>,
+    task_calls: HashMap<String, usize>,
+    seen: HashSet<(String, String)>,
 }
 
 /// A user's answer to an approval prompt. `Always` additionally remembers the
@@ -139,6 +191,10 @@ pub struct ToolContext {
     /// Optional approval prompt. `None` = no prompting (escalations then rely on
     /// the policy alone, i.e. an out-of-sandbox write simply fails).
     pub approver: Option<Rc<dyn ApprovalHandler>>,
+    /// Shared task lifecycle. Present when a host drives an agent loop, so an
+    /// approval or a write probe raised inside a tool moves the same state the
+    /// loop is driving rather than a private copy.
+    pub state_recorder: Option<Rc<crate::agent_state::StateRecorder>>,
     /// Optional interactive question boundary. When absent, the question tool
     /// is not registered, so headless runtimes never advertise a dead tool.
     pub user_question_handler: Option<Rc<dyn UserQuestionHandler>>,
@@ -185,6 +241,7 @@ impl ToolContext {
             goal_turn_authority: Rc::new(RefCell::new(None)),
             goal_service: None,
             approver: None,
+            state_recorder: None,
             user_question_handler: None,
             lsp_provider: None,
             process_manager: Rc::new(tokio::sync::Mutex::new(ProcessManager::default())),
@@ -312,6 +369,34 @@ pub trait Tool {
         self.read_only()
     }
 
+    /// Per-tool execution policy enforced by [`ToolRegistry::execute`].
+    /// Built-ins keep the permissive default; high-risk or non-idempotent
+    /// integrations can override this without teaching the agent loop about
+    /// their semantics.
+    fn runtime_policy(&self) -> ToolRuntimePolicy {
+        ToolRuntimePolicy::default()
+    }
+
+    /// Stable capability groups for this tool, used for discovery and for
+    /// reporting what an exhausted fallback chain was trying to achieve.
+    fn capabilities(&self) -> Vec<crate::tool_recovery::ToolCapability> {
+        crate::tool_recovery::infer_capabilities(self.name(), self.description())
+    }
+
+    /// Declare an argument-compatible substitute for a given failure class.
+    /// Returning `None` means "no safe substitute" — the failure is reported as
+    /// is rather than left to the model to guess a replacement call. The default
+    /// consults the built-in route table so built-ins keep their existing
+    /// behaviour while MCP and plugin tools can declare their own routes.
+    fn fallback_route(
+        &self,
+        args: &Value,
+        failure: crate::tool_recovery::ToolFailureClass,
+    ) -> Option<(String, Value)> {
+        crate::tool_recovery::fallback_call(self.name(), args, failure)
+            .map(|(name, args)| (name.to_string(), args))
+    }
+
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String;
 
     fn to_schema(&self) -> Value {
@@ -334,10 +419,32 @@ pub struct ToolRegistry {
     by_name: HashMap<String, usize>,
     middleware: Vec<Rc<dyn ToolMiddleware>>,
     middleware_names: HashSet<String>,
+    runtime_state: Rc<RefCell<ToolRuntimeState>>,
+    recovery_trace: RefCell<Option<crate::context_trace::SourceTraceStore>>,
     pub(crate) plugin_state: crate::plugins::PluginRuntimeState,
 }
 
 impl ToolRegistry {
+    /// Persist recovery chains (original tool, failure class, each attempt and
+    /// the final outcome) alongside the session's other provenance records.
+    pub fn set_recovery_trace(&self, store: crate::context_trace::SourceTraceStore) {
+        self.recovery_trace.replace(Some(store));
+    }
+
+    /// Start a fresh user task. Counters and idempotency keys are scoped to
+    /// this task, so a new turn cannot inherit a previous model's retries.
+    pub fn begin_task(&self, turn_id: u64) {
+        let mut state = self.runtime_state.borrow_mut();
+        state.turn_id = Some(turn_id);
+        state.turn_calls.clear();
+        state.task_calls.clear();
+        state.seen.clear();
+    }
+
+    pub fn runtime_policy(&self, name: &str) -> Option<ToolRuntimePolicy> {
+        self.get(name).map(|tool| tool.runtime_policy())
+    }
+
     pub fn harness_diagnostics(&self) -> crate::plugins::HarnessDiagnostics {
         crate::plugins::HarnessDiagnostics {
             llm: self
@@ -419,6 +526,8 @@ impl ToolRegistry {
             by_name: HashMap::new(),
             middleware: Vec::new(),
             middleware_names: HashSet::new(),
+            runtime_state: Rc::new(RefCell::new(ToolRuntimeState::default())),
+            recovery_trace: RefCell::new(None),
             plugin_state: Default::default(),
         }
     }

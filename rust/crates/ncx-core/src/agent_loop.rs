@@ -10,6 +10,7 @@ use ncx_provider::ModelResponse;
 use serde_json::{json, Value};
 use std::rc::Rc;
 
+use crate::agent_state::{AgentState, StateRecorder};
 use crate::hooks::{run_matching_hooks, HookEvent};
 pub use crate::model_provider::Provider;
 use crate::model_provider::StreamDelta;
@@ -20,7 +21,12 @@ use crate::tools::ToolRegistry;
 use crate::turn_context::{TurnContextProvider, TurnContextRegistry};
 
 const DEFAULT_MAX_PARALLEL_TOOL_CALLS: usize = 8;
+/// Token allowance for injected recall notes. Deliberately small: notes are
+/// pointers into recorded history, and the model reads the real record through
+/// `recall_sources` when it needs the detail.
+const RETRIEVAL_BUDGET_TOKENS: usize = 1_500;
 
+mod compaction;
 mod deliverable;
 mod tool_dispatch;
 mod trace;
@@ -97,6 +103,9 @@ pub struct AgentLoop {
     pub turn_timeout: std::time::Duration,
     pub task_budget: TaskBudget,
     pub context_edit: ContextEditPolicy,
+    pub context_window: i64,
+    resolved_context_window: Option<i64>,
+    context_usage: std::cell::Cell<Option<(usize, i64)>>,
     pub reasoning_effort: Option<String>,
     max_parallel_tool_calls: usize,
     tool_scheduler: Box<dyn ToolScheduler>,
@@ -110,6 +119,8 @@ pub struct AgentLoop {
     context_service: Option<Rc<crate::plugins::ContextServiceDescriptor>>,
     media_service: Option<Rc<crate::plugins::MediaServiceDescriptor>>,
     cost_service: Option<Rc<crate::plugins::CostTelemetryService>>,
+    state_machine: Rc<StateRecorder>,
+    retrieval_provider: Option<Rc<crate::context_retrieval::RetrievalContextProvider>>,
 }
 
 impl AgentLoop {
@@ -123,7 +134,34 @@ impl AgentLoop {
         Ok(Self::new(provider, tools, session).with_vision_provider(vision))
     }
 
-    pub fn new(provider: Box<dyn Provider>, tools: ToolRegistry, session: Session) -> Self {
+    pub fn new(provider: Box<dyn Provider>, mut tools: ToolRegistry, mut session: Session) -> Self {
+        // Provenance recall is only offered when the session has a durable
+        // trace; otherwise the tool could only ever answer "nothing recorded".
+        if let Some(store) = session.trace_store() {
+            tools.set_recovery_trace(store.clone());
+            tools.register(Box::new(crate::context_trace::RecallSourcesTool::new(
+                store.clone(),
+            )));
+        }
+        // Fact events live beside the session log. Without a durable log the
+        // recorder still drives state, it just has nowhere to persist it.
+        let event_store = session
+            .log_path
+            .as_deref()
+            .and_then(|path| path.parent())
+            .and_then(|dir| {
+                crate::context_store::ContextStore::open(dir.join("events.sqlite3")).ok()
+            })
+            .map(Rc::new);
+        if let Some(store) = &event_store {
+            session.set_event_store(store.clone());
+        }
+        let state_machine = Rc::new(StateRecorder::new(
+            session.session_id.clone(),
+            tools.ctx.workspace.clone(),
+            event_store,
+        ));
+        tools.ctx.state_recorder = Some(state_machine.clone());
         let llm_capabilities =
             tools.service::<crate::plugins::LlmServiceDescriptor>("llm.provider");
         let policy_service = tools.service::<crate::plugins::PolicyService>("policy");
@@ -132,7 +170,7 @@ impl AgentLoop {
         let context_service = tools.service::<crate::plugins::ContextServiceDescriptor>("context");
         let media_service = tools.service::<crate::plugins::MediaServiceDescriptor>("media");
         let cost_service = tools.service::<crate::plugins::CostTelemetryService>("cost.telemetry");
-        AgentLoop {
+        let mut agent = AgentLoop {
             provider,
             vision_provider: None,
             tools,
@@ -147,6 +185,9 @@ impl AgentLoop {
             ),
             task_budget: TaskBudget::default(),
             context_edit: ContextEditPolicy::default(),
+            context_window: 1_048_576,
+            resolved_context_window: None,
+            context_usage: std::cell::Cell::new(None),
             reasoning_effort: None,
             max_parallel_tool_calls: DEFAULT_MAX_PARALLEL_TOOL_CALLS,
             tool_scheduler: Box::new(BoundedToolScheduler),
@@ -160,7 +201,49 @@ impl AgentLoop {
             context_service,
             media_service,
             cost_service,
+            state_machine,
+            retrieval_provider: None,
+        };
+        // Layered recall is registered as an ordinary turn context provider, so
+        // it stays reversible and cannot mutate the session or tool registry.
+        if agent.session.trace_store().is_some() || agent.session.event_store().is_some() {
+            let mut provider = crate::context_retrieval::RetrievalContextProvider::new(
+                agent.tools.ctx.workspace.clone(),
+                agent.session.session_id.clone(),
+                RETRIEVAL_BUDGET_TOKENS,
+            );
+            if let Some(trace) = agent.session.trace_store() {
+                provider = provider.with_trace(trace.clone());
+            }
+            if let Some(events) = agent.session.event_store() {
+                provider = provider.with_events(events.clone());
+            }
+            // The metadata index lives beside the Markdown memory store, so the
+            // long-term layer is only available when a memory store is attached.
+            if let Some(store) = &agent.tools.ctx.memory {
+                if let Ok(index) = crate::memory_index::MemoryIndex::for_store(store) {
+                    let _ = index
+                        .rebuild_from_markdown(store, &agent.tools.ctx.workspace.to_string_lossy());
+                    provider = provider.with_memory(index);
+                }
+            }
+            let provider = Rc::new(provider);
+            if agent.turn_context.register(provider.clone()).is_ok() {
+                agent.retrieval_provider = Some(provider);
+            }
         }
+        agent
+    }
+
+    /// Lifecycle state of the active task. This is intentionally separate from
+    /// the model's textual reasoning and can be persisted by host adapters.
+    pub fn state(&self) -> AgentState {
+        self.state_machine.current()
+    }
+
+    /// Recorded lifecycle of the active task, including approval decisions.
+    pub fn state_history(&self) -> Vec<crate::agent_state::StateTransition> {
+        self.state_machine.history()
     }
 
     pub fn with_max_iterations(mut self, n: usize) -> Self {
@@ -198,6 +281,8 @@ impl AgentLoop {
 
     /// Replace the primary model provider without rebuilding tools or session.
     pub fn replace_provider(&mut self, provider: Box<dyn Provider>) -> Box<dyn Provider> {
+        self.context_usage.set(None);
+        self.resolved_context_window = None;
         std::mem::replace(&mut self.provider, provider)
     }
 
@@ -255,6 +340,7 @@ impl AgentLoop {
             task_budget: self.task_budget.clone(),
             max_parallel_tool_calls: self.max_parallel_tool_calls,
             context_edit: self.context_edit.clone(),
+            context_window: self.context_window,
         }
     }
 
@@ -352,9 +438,15 @@ impl AgentLoop {
         system_notes: &[String],
         sink: &mut Option<EventSink>,
     ) -> (ModelResponse, ContextEditStats) {
-        let edited = self
-            .session
-            .for_model_edited(system_notes, &self.context_edit);
+        // Persistent semantic compaction owns history reduction. Do not silently
+        // clip its recent tail again while constructing the provider request.
+        let edited = self.session.for_model_edited(
+            system_notes,
+            &ContextEditPolicy {
+                enabled: false,
+                ..self.context_edit.clone()
+            },
+        );
         let effort = self
             .llm_capabilities
             .as_ref()
@@ -373,6 +465,12 @@ impl AgentLoop {
                 emit(sink, event);
             })
             .await;
+        if response.finish_reason != "error" {
+            if let Some(tokens) = response.usage.get("prompt_tokens").filter(|n| **n > 0) {
+                self.context_usage
+                    .set(Some((self.session.messages.len(), *tokens)));
+            }
+        }
         (response, edited.stats)
     }
 
@@ -423,6 +521,39 @@ impl AgentLoop {
         authority: crate::goal_tools::GoalAuthoritySource,
     ) -> TurnResult {
         self.next_turn_id = self.next_turn_id.wrapping_add(1).max(1);
+        if matches!(
+            &authority,
+            crate::goal_tools::GoalAuthoritySource::DirectHuman
+        ) {
+            self.tools.begin_task(self.next_turn_id);
+        }
+        self.session.set_turn_id(self.next_turn_id);
+        if let Some(provider) = &self.retrieval_provider {
+            provider.set_active_turn(Some(self.next_turn_id));
+            // Only a direct human turn carries a new instruction. An automatic
+            // Goal round must not be able to withdraw a stored memory.
+            if matches!(
+                &authority,
+                crate::goal_tools::GoalAuthoritySource::DirectHuman
+            ) {
+                provider.record_user_instruction(
+                    &crate::agent_loop::turn::user_query_text(&user_input),
+                    self.next_turn_id,
+                );
+            }
+        }
+        self.state_machine.begin_turn(self.next_turn_id);
+        self.session
+            .set_workspace_revision(self.state_machine.workspace_revision());
+        let _ = self
+            .state_machine
+            .record(AgentState::Planned, "model produced a plan for the task");
+        let _ = self
+            .state_machine
+            .record(AgentState::Authorized, "turn authority attested by host");
+        let _ = self
+            .state_machine
+            .record(AgentState::Executing, "turn loop started");
         self.tools.ctx.active_turn_id.set(Some(self.next_turn_id));
         self.tools
             .ctx
@@ -435,7 +566,30 @@ impl AgentLoop {
         // borrow-conflicting with `&mut self`; restore it after (one return path).
         let mut sink = self.event_sink.take();
         let result = turn::run(self, user_input, cancel_check, &mut sink).await;
+        let _ = self
+            .state_machine
+            .record(AgentState::Observing, "turn loop returned");
         let result = self.apply_stop_hook(result, &mut sink).await;
+        // The turn's own stop reason decides the terminal state. A turn that ran
+        // out of budget or was cancelled is not a completed task.
+        let (terminal, trigger) = match result.stop_reason.as_str() {
+            "cancelled" => (AgentState::Cancelled, "user cancelled the turn"),
+            "timeout" => (AgentState::NeedsHuman, "turn timed out"),
+            "task_budget" => (AgentState::NeedsHuman, "task budget exhausted"),
+            "compaction_failed" => (AgentState::NeedsHuman, "context compaction failed"),
+            "blocked" => (AgentState::NeedsHuman, "turn blocked before execution"),
+            "error" => (AgentState::Failed, "model service call failed"),
+            other => {
+                // Post-edit validation failures arrive as their own reason and
+                // must not be reported as a completed task.
+                if other.contains("compile") || other.contains("validation") {
+                    (AgentState::Failed, "post-edit validation failed")
+                } else {
+                    (AgentState::Completed, "turn finished")
+                }
+            }
+        };
+        let _ = self.state_machine.record(terminal, trigger);
         self.tools.ctx.goal_turn_authority.replace(None);
         self.tools.ctx.active_turn_id.set(None);
         self.event_sink = sink;

@@ -15,6 +15,11 @@ use std::time::Duration;
 struct ScriptedProvider {
     responses: RefCell<Vec<ModelResponse>>,
     calls: RefCell<usize>,
+    /// Canned reply for summarization requests. A large history is summarized in
+    /// several bounded chunks, and that count depends on the model's budget, so
+    /// scripting one response per chunk would make every test brittle.
+    summary: RefCell<Option<ModelResponse>>,
+    summary_calls: Rc<std::cell::Cell<usize>>,
 }
 use std::cell::RefCell;
 impl ScriptedProvider {
@@ -22,15 +27,41 @@ impl ScriptedProvider {
         ScriptedProvider {
             responses: RefCell::new(responses),
             calls: RefCell::new(0),
+            summary: RefCell::new(None),
+            summary_calls: Rc::new(std::cell::Cell::new(0)),
         }
     }
+
+    /// Answer every summarization request with `response`, and count them.
+    fn with_summary(self, response: ModelResponse) -> (Self, Rc<std::cell::Cell<usize>>) {
+        let counter = self.summary_calls.clone();
+        *self.summary.borrow_mut() = Some(response);
+        (self, counter)
+    }
 }
+
+/// Summarization requests are identified by the compaction system prompt, not by
+/// call position, so a test does not have to know the chunk count.
+fn is_summary_request(messages: &[Value]) -> bool {
+    messages
+        .first()
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.starts_with("You summarize conversation records"))
+}
+
 #[async_trait(?Send)]
 impl Provider for ScriptedProvider {
     fn model(&self) -> &str {
         "scripted"
     }
-    async fn chat(&self, _m: &[Value], _t: &[Value], _r: Option<&str>) -> ModelResponse {
+    async fn chat(&self, m: &[Value], _t: &[Value], _r: Option<&str>) -> ModelResponse {
+        if is_summary_request(m) {
+            if let Some(canned) = self.summary.borrow().clone() {
+                self.summary_calls.set(self.summary_calls.get() + 1);
+                return canned;
+            }
+        }
         *self.calls.borrow_mut() += 1;
         let mut r = self.responses.borrow_mut();
         if r.is_empty() {
@@ -89,6 +120,7 @@ fn assistant_toolcall(calls: Vec<ToolCall>) -> ModelResponse {
 }
 
 mod basic_tests;
+mod compaction_tests;
 mod runtime_tests;
 
 struct CapturingProvider {

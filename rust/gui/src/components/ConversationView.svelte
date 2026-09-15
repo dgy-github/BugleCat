@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WelcomeScene from "./WelcomeScene.svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { buglecatAsset } from "../lib/buglecat-assets";
   type ToolEntry = { name: string; args?: string; result?: string };
@@ -24,6 +25,7 @@
     toolGroupFailureCount,
     toolOutcome,
     forkCurrent,
+    selectPrompt,
   }: {
     messages: Message[];
     activeView: "chat" | "trajectory";
@@ -35,6 +37,7 @@
     toolGroupFailureCount: (group: ToolGroup) => number;
     toolOutcome: (result: string) => "ok" | "err" | "empty";
     forkCurrent: () => void;
+    selectPrompt: (prompt: string) => void;
   } = $props();
 
   let copiedIndex = $state<number | null>(null);
@@ -52,6 +55,9 @@
     }
     return -1;
   });
+  let activeReasoning = $derived(reasoningIdx === null ? null : messages[reasoningIdx]);
+  let runningTools = $derived(messages.slice(lastUserIndex + 1).flatMap(message =>
+    message.role === "tool_group" ? message.tools.filter(tool => tool.result === undefined).map(tool => tool.name) : []));
 
   async function copyMessage(text: string, index: number) {
     try {
@@ -106,6 +112,19 @@
   }
 </script>
 
+{#snippet liveActivity()}
+    <div class="live-activity">
+      {#if activeReasoning?.role === "reasoning" && !activeReasoning.settled}
+        <details class="live-reasoning">
+          <summary><img class="thinking-cat" src={buglecatAsset("thinking", 24)} alt="" aria-hidden="true" /><span>思考中…</span><span class="live-reasoning-label">思考过程</span><span aria-hidden="true">⌄</span></summary>
+          <pre class="reasoning-content">{activeReasoning.text}</pre>
+        </details>
+      {:else}
+        <div class="thinking" role="status"><img class="thinking-cat" src={buglecatAsset("thinking", 24)} alt="" aria-hidden="true" />{runningTools.length ? `执行中 · ${runningTools.join("、")}` : streamingIdx !== null ? "正在输出…" : "思考中…"}</div>
+      {/if}
+    </div>
+{/snippet}
+
 <div class="scroll" bind:this={scroller}>
   {#if activeView === "trajectory"}
     <div class="trajectory-view">
@@ -121,12 +140,12 @@
     </div>
   {:else}
   {#if messages.length === 0}
-    <div class="empty-wrap">
-      <img class="empty-cat" src={buglecatAsset("empty", 64)} alt="妙脆角猫咪" />
-      <p class="empty"><strong>妙脆角猫咪准备好了</strong><br />把要检查、修改或生成的任务交给我。</p>
-    </div>
+    <WelcomeScene {selectPrompt} />
   {/if}
   {#each messages as message, index}
+    {#if busy && index === lastUserIndex + 1}
+      {@render liveActivity()}
+    {/if}
     {#if message.role === "user"}
       <div class="message-block user-block"><div class="msg user"><div class="bubble">{#if message.text}<div>{message.text}</div>{/if}{#if message.images?.length}<div class="user-image-grid">{#each message.images as path}<button class="user-image-card" onclick={() => openLocalArtifact(path)} title={`打开 ${path}`}>{#if localPreviews[path]}<img src={localPreviews[path] || ""} alt={path.split(/[\\/]/).pop() || "上传图片"} />{:else}<span>图片加载中…</span>{/if}</button>{/each}</div>{/if}</div></div><div class="message-actions user-actions"><button onclick={() => copyMessage(message.text, index)} title="复制消息">{copiedIndex === index ? "✓" : "▢"}</button></div></div>
     {:else if message.role === "assistant"}
@@ -171,7 +190,7 @@
         <span class="artifact-open" aria-hidden="true">↗</span>
       </button>
     {:else if message.role === "reasoning"}
-      {#if !(busy && message.settled && index > lastUserIndex)}
+      {#if !(busy && index > lastUserIndex)}
       <details class="reasoning-run" class:settled={message.settled} class:current-run={busy && index > lastUserIndex}>
         <summary>
           <span class="reasoning-caret" aria-hidden="true">›</span>
@@ -182,8 +201,7 @@
       </details>
       {/if}
     {:else}
-      {#if !(busy && message.settled && index > lastUserIndex)}
-      <details class="tool-run" class:settled={message.settled} class:current-run={busy && index > lastUserIndex} open={!message.settled}>
+      <details class="tool-run" class:settled={message.settled} class:current-run={busy && index > lastUserIndex} open={!message.settled || (busy && index > lastUserIndex)}>
         <summary>
           <span class="tool-run-caret" aria-hidden="true">›</span>
           <span class="tool-run-icon" aria-hidden="true">⌘</span>
@@ -219,11 +237,10 @@
           {/each}
         </div>
       </details>
-      {/if}
     {/if}
   {/each}
-  {#if busy && streamingIdx === null && reasoningIdx === null}
-    <div class="thinking"><img class="thinking-cat" src={buglecatAsset("thinking", 24)} alt="" aria-hidden="true" /> 思考中…</div>
+  {#if busy && messages.length === lastUserIndex + 1}
+    {@render liveActivity()}
   {/if}
   {/if}
 </div>

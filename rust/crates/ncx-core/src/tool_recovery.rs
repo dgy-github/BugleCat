@@ -223,6 +223,122 @@ pub fn fallback_call(
     }
 }
 
+/// What a failed write actually did to the workspace, observed rather than
+/// assumed. A tool can report failure after it has already written part of its
+/// change; substituting for it then would apply that part twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteEffect {
+    /// Every implicated path is byte-identical to before the attempt.
+    None,
+    /// At least one implicated path changed; the write partially applied.
+    Partial(Vec<String>),
+    /// The call's targets could not be determined, so nothing can be claimed.
+    /// Treated as unsafe: absence of evidence is not evidence of absence.
+    Unverifiable,
+}
+
+impl fmt::Display for WriteEffect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => f.write_str("no-effect"),
+            Self::Partial(paths) => write!(f, "partial({})", paths.join(",")),
+            Self::Unverifiable => f.write_str("unverifiable"),
+        }
+    }
+}
+
+/// Content fingerprint of the paths one call could touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WriteFingerprint {
+    entries: Vec<(String, Option<String>)>,
+}
+
+impl WriteFingerprint {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Paths whose content or existence differs from `self`.
+    pub fn diff(&self, other: &Self) -> Vec<String> {
+        let mut changed = Vec::new();
+        for (path, before) in &self.entries {
+            let after = other
+                .entries
+                .iter()
+                .find(|(candidate, _)| candidate == path)
+                .map(|(_, hash)| hash);
+            if after != Some(before) {
+                changed.push(path.clone());
+            }
+        }
+        changed
+    }
+}
+
+/// Paths a call declares it will touch. Argument names are matched
+/// conservatively, and `apply_patch` bodies are parsed for their file markers.
+pub fn implicated_paths(args: &Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for key in ["path", "file_path", "file", "target", "destination"] {
+        if let Some(value) = args.get(key).and_then(Value::as_str) {
+            out.push(value.to_string());
+        }
+    }
+    if let Some(items) = args.get("paths").and_then(Value::as_array) {
+        out.extend(items.iter().filter_map(Value::as_str).map(str::to_string));
+    }
+    if let Some(patch) = args.get("patch").and_then(Value::as_str) {
+        for line in patch.lines() {
+            for marker in ["*** Add File:", "*** Update File:", "*** Delete File:"] {
+                if let Some(rest) = line.trim().strip_prefix(marker) {
+                    out.push(rest.trim().to_string());
+                }
+            }
+        }
+    }
+    out.retain(|path| !path.trim().is_empty());
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Fingerprint the implicated paths. A missing file records `None`, which is
+/// itself a fact: creating it later counts as a change.
+pub fn fingerprint_paths(workspace: &Path, paths: &[String]) -> WriteFingerprint {
+    use sha2::{Digest, Sha256};
+    let entries = paths
+        .iter()
+        .map(|path| {
+            let resolved = if Path::new(path).is_absolute() {
+                PathBuf::from(path)
+            } else {
+                workspace.join(path)
+            };
+            let hash = std::fs::read(&resolved).ok().map(|bytes| {
+                Sha256::digest(&bytes)[..8]
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            });
+            (path.clone(), hash)
+        })
+        .collect();
+    WriteFingerprint { entries }
+}
+
+/// Compare a before/after fingerprint pair into a decision.
+pub fn classify_write_effect(before: &WriteFingerprint, after: &WriteFingerprint) -> WriteEffect {
+    if before.is_empty() {
+        return WriteEffect::Unverifiable;
+    }
+    let changed = before.diff(after);
+    if changed.is_empty() {
+        WriteEffect::None
+    } else {
+        WriteEffect::Partial(changed)
+    }
+}
+
 /// Resolve a missing `read_file` request only when recursive basename search
 /// produces exactly one candidate. Ambiguous matches are deliberately left to
 /// `find_files` so recovery never guesses which source file the model meant.
@@ -481,6 +597,354 @@ mod tests {
 
         assert!(result.contains("retried flaky_read"), "{result}");
         assert_eq!(calls.get(), 2);
+    }
+
+    /// Always fails with the configured message and declares `substitute` as
+    /// its route for every failure class.
+    struct RoutingTool {
+        message: &'static str,
+        policy: crate::tools::ToolRuntimePolicy,
+        calls: Rc<Cell<usize>>,
+    }
+
+    struct SubstituteTool {
+        calls: Rc<Cell<usize>>,
+    }
+
+    #[async_trait(?Send)]
+    impl Tool for RoutingTool {
+        fn name(&self) -> &str {
+            "routing"
+        }
+        fn description(&self) -> &str {
+            "Test tool with a declared substitute route."
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+        fn read_only(&self) -> bool {
+            true
+        }
+        fn runtime_policy(&self) -> crate::tools::ToolRuntimePolicy {
+            self.policy
+        }
+        fn fallback_route(
+            &self,
+            _args: &Value,
+            _failure: ToolFailureClass,
+        ) -> Option<(String, Value)> {
+            Some(("substitute".to_string(), json!({})))
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            self.calls.set(self.calls.get() + 1);
+            self.message.into()
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl Tool for SubstituteTool {
+        fn name(&self) -> &str {
+            "substitute"
+        }
+        fn description(&self) -> &str {
+            "Read-only substitute used by RoutingTool."
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+        fn read_only(&self) -> bool {
+            true
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            self.calls.set(self.calls.get() + 1);
+            "substitute ran".into()
+        }
+    }
+
+    fn routing_registry(
+        label: &str,
+        message: &'static str,
+        policy: crate::tools::ToolRuntimePolicy,
+    ) -> (ToolRegistry, Rc<Cell<usize>>, Rc<Cell<usize>>) {
+        let root = fixture(label);
+        let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(READ_ONLY, &root));
+        let primary = Rc::new(Cell::new(0));
+        let substitute = Rc::new(Cell::new(0));
+        let mut registry = ToolRegistry::empty(ctx);
+        registry.register(Box::new(RoutingTool {
+            message,
+            policy,
+            calls: primary.clone(),
+        }));
+        registry.register(Box::new(SubstituteTool {
+            calls: substitute.clone(),
+        }));
+        (registry, primary, substitute)
+    }
+
+    #[tokio::test]
+    async fn permission_denial_is_never_retried_or_substituted() {
+        let (registry, primary, substitute) = routing_registry(
+            "denied",
+            "Error: shell not allowed by approval policy 'never'",
+            crate::tools::ToolRuntimePolicy::default(),
+        );
+
+        let result = registry.execute_with_recovery("routing", &json!({})).await;
+
+        assert!(result.contains("not allowed"), "{result}");
+        assert_eq!(primary.get(), 1, "denial must not be retried");
+        assert_eq!(substitute.get(), 0, "denial must not be routed around");
+    }
+
+    #[tokio::test]
+    async fn cancellation_is_never_substituted() {
+        let (registry, primary, substitute) = routing_registry(
+            "cancelled",
+            "[interrupted: stopped by user]",
+            crate::tools::ToolRuntimePolicy::default(),
+        );
+
+        registry.execute_with_recovery("routing", &json!({})).await;
+
+        assert_eq!(primary.get(), 1);
+        assert_eq!(substitute.get(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_tool_can_opt_out_of_retry_but_still_declare_a_substitute() {
+        let (registry, primary, substitute) = routing_registry(
+            "no_retry",
+            "Error: service unavailable (status 503)",
+            crate::tools::ToolRuntimePolicy {
+                retry_policy: crate::tools::ToolRetryPolicy::None,
+                ..crate::tools::ToolRuntimePolicy::default()
+            },
+        );
+
+        let result = registry.execute_with_recovery("routing", &json!({})).await;
+
+        assert_eq!(
+            primary.get(),
+            1,
+            "retry_policy None must suppress the retry"
+        );
+        assert_eq!(substitute.get(), 1);
+        assert!(result.contains("routing -> substitute"), "{result}");
+    }
+
+    #[tokio::test]
+    async fn idempotent_mutating_tool_is_retried_but_default_mutating_tool_is_not() {
+        let root = fixture("idempotent_retry");
+        let ctx = ToolContext::new(root.clone(), SandboxPolicy::new(READ_ONLY, &root));
+        let calls = Rc::new(Cell::new(0));
+        let mut registry = ToolRegistry::empty(ctx);
+        registry.register(Box::new(IdempotentWriteTool {
+            calls: calls.clone(),
+        }));
+
+        let result = registry
+            .execute_with_recovery("idempotent_write", &json!({}))
+            .await;
+
+        assert!(result.contains("retried idempotent_write"), "{result}");
+        assert_eq!(calls.get(), 2);
+    }
+
+    struct IdempotentWriteTool {
+        calls: Rc<Cell<usize>>,
+    }
+
+    #[async_trait(?Send)]
+    impl Tool for IdempotentWriteTool {
+        fn name(&self) -> &str {
+            "idempotent_write"
+        }
+        fn description(&self) -> &str {
+            "Mutating but idempotent test tool."
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+        fn runtime_policy(&self) -> crate::tools::ToolRuntimePolicy {
+            crate::tools::ToolRuntimePolicy {
+                idempotent: true,
+                ..crate::tools::ToolRuntimePolicy::default()
+            }
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            let call = self.calls.get() + 1;
+            self.calls.set(call);
+            if call == 1 {
+                "Error: service unavailable (status 503)".into()
+            } else {
+                "written".into()
+            }
+        }
+    }
+
+    /// Mutating tool that writes part of its change and then reports failure,
+    /// which is exactly the case a naive substitute would double-apply.
+    struct PartialWriteTool {
+        target: PathBuf,
+        write: bool,
+    }
+
+    #[async_trait(?Send)]
+    impl Tool for PartialWriteTool {
+        fn name(&self) -> &str {
+            "partial_write"
+        }
+        fn description(&self) -> &str {
+            "Writes part of its change, then fails."
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object", "properties": {}})
+        }
+        fn runtime_policy(&self) -> crate::tools::ToolRuntimePolicy {
+            crate::tools::ToolRuntimePolicy {
+                retry_policy: crate::tools::ToolRetryPolicy::None,
+                ..crate::tools::ToolRuntimePolicy::default()
+            }
+        }
+        fn fallback_route(
+            &self,
+            _args: &Value,
+            _failure: ToolFailureClass,
+        ) -> Option<(String, Value)> {
+            Some(("substitute".to_string(), json!({})))
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            if self.write {
+                std::fs::write(&self.target, "half applied\n").unwrap();
+            }
+            "Error: service unavailable (status 503)".into()
+        }
+    }
+
+    async fn run_partial_write_case(label: &str, write: bool) -> (String, usize) {
+        let root = fixture(label);
+        let ctx = ToolContext::new(
+            root.clone(),
+            SandboxPolicy::new(ncx_sandbox::WORKSPACE_WRITE, &root),
+        );
+        let substitute_calls = Rc::new(Cell::new(0));
+        let mut registry = ToolRegistry::empty(ctx);
+        registry.register(Box::new(PartialWriteTool {
+            target: root.join("out.txt"),
+            write,
+        }));
+        registry.register(Box::new(SubstituteTool {
+            calls: substitute_calls.clone(),
+        }));
+        let result = registry
+            .execute_with_recovery("partial_write", &json!({"path": "out.txt"}))
+            .await;
+        (result, substitute_calls.get())
+    }
+
+    #[tokio::test]
+    async fn a_partially_applied_write_is_not_substituted() {
+        let (result, substitute_calls) = run_partial_write_case("partial_applied", true).await;
+
+        assert_eq!(substitute_calls, 0, "substitute must not double-apply");
+        assert!(result.contains("partial("), "{result}");
+        assert!(result.contains("out.txt"), "{result}");
+        assert!(result.contains("Re-read the affected paths"), "{result}");
+    }
+
+    #[tokio::test]
+    async fn a_write_that_changed_nothing_may_still_be_substituted() {
+        let (result, substitute_calls) = run_partial_write_case("partial_clean", false).await;
+
+        assert_eq!(substitute_calls, 1, "{result}");
+        assert!(result.contains("partial_write -> substitute"), "{result}");
+    }
+
+    #[tokio::test]
+    async fn a_write_with_undeterminable_targets_is_never_substituted() {
+        let root = fixture("partial_unverifiable");
+        let ctx = ToolContext::new(
+            root.clone(),
+            SandboxPolicy::new(ncx_sandbox::WORKSPACE_WRITE, &root),
+        );
+        let substitute_calls = Rc::new(Cell::new(0));
+        let mut registry = ToolRegistry::empty(ctx);
+        registry.register(Box::new(PartialWriteTool {
+            target: root.join("out.txt"),
+            write: false,
+        }));
+        registry.register(Box::new(SubstituteTool {
+            calls: substitute_calls.clone(),
+        }));
+
+        // No path-shaped argument: the runtime cannot prove the write was inert.
+        let result = registry
+            .execute_with_recovery("partial_write", &json!({"query": "anything"}))
+            .await;
+
+        assert_eq!(substitute_calls.get(), 0, "{result}");
+        assert!(result.contains("unverifiable"), "{result}");
+    }
+
+    #[test]
+    fn implicated_paths_cover_argument_names_and_patch_markers() {
+        assert_eq!(
+            implicated_paths(&json!({"path": "a.rs"})),
+            vec!["a.rs".to_string()]
+        );
+        let patch = json!({"patch": "*** Begin Patch\n*** Update File: src/b.rs\n+x\n*** Delete File: src/a.rs\n*** End Patch"});
+        assert_eq!(
+            implicated_paths(&patch),
+            vec!["src/a.rs".to_string(), "src/b.rs".to_string()]
+        );
+        assert!(implicated_paths(&json!({"query": "none"})).is_empty());
+    }
+
+    #[test]
+    fn creating_a_previously_missing_file_counts_as_a_change() {
+        let root = fixture("fingerprint_create");
+        let paths = vec!["new.txt".to_string()];
+        let before = fingerprint_paths(&root, &paths);
+        std::fs::write(root.join("new.txt"), "created").unwrap();
+        let after = fingerprint_paths(&root, &paths);
+        assert_eq!(
+            classify_write_effect(&before, &after),
+            WriteEffect::Partial(vec!["new.txt".to_string()])
+        );
+        assert_eq!(classify_write_effect(&before, &before), WriteEffect::None);
+        assert_eq!(
+            classify_write_effect(&fingerprint_paths(&root, &[]), &after),
+            WriteEffect::Unverifiable
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_chain_is_recorded_with_the_tool_that_actually_answered() {
+        let dir = crate::test_support::unique_temp_dir("recovery_chain_trace");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = crate::context_trace::SourceTraceStore::new(dir.join("sources.jsonl"));
+        let (registry, _, _) = routing_registry(
+            "chain_trace",
+            "Error: service unavailable (status 503)",
+            crate::tools::ToolRuntimePolicy::default(),
+        );
+        registry.set_recovery_trace(store.clone());
+
+        registry.execute_with_recovery("routing", &json!({})).await;
+
+        let records = store.records();
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(
+            records[0].kind,
+            crate::context_trace::SourceKind::ToolRecovery
+        );
+        assert_eq!(records[0].status.as_deref(), Some("substituted"));
+        assert!(
+            records[0].text.contains("substitute substitute succeeded"),
+            "{:?}",
+            records[0].text
+        );
     }
 
     #[tokio::test]

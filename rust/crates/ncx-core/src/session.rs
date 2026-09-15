@@ -15,6 +15,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub use ncx_context::{ContextEditPolicy, ContextEditStats};
 use serde_json::{json, Value};
 
+use crate::context_trace::{RetrievedSource, SourceKind, SourceRecord, SourceTraceStore};
+use crate::tool_recovery::classify_tool_result;
+
+mod semantic_compaction;
+pub use semantic_compaction::CompactionPlan;
+
 pub const COMPACTED_HISTORY_PREFIX: &str = "[压缩后保留的会话里程碑";
 
 #[derive(Debug, Clone)]
@@ -23,7 +29,7 @@ pub struct ContextMessages {
     pub stats: ContextEditStats,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CompactionSafetySnapshot {
     pub original_requirements: Vec<String>,
     pub confirmed_decisions: Vec<String>,
@@ -43,12 +49,25 @@ pub struct SafeCompactionResult {
     pub conflicts: Vec<String>,
 }
 
+/// Longest excerpt stored per provenance record. The full text stays in the
+/// JSONL log; `content_hash` covers the untruncated original.
+const MAX_TRACE_EXCERPT_CHARS: usize = 4_000;
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub system: String,
     pub messages: Vec<Value>,
     pub log_path: Option<PathBuf>,
     pub restored_count: usize,
+    /// Stable id for provenance records. Derived from the log path so a resumed
+    /// session keeps appending to the same trace.
+    pub session_id: String,
+    trace: Option<SourceTraceStore>,
+    /// Indexed fact events. Shared with the agent loop's state recorder so both
+    /// write into one store and a query sees one consistent history.
+    events: Option<std::rc::Rc<crate::context_store::ContextStore>>,
+    turn_id: Option<u64>,
+    workspace_revision: Option<String>,
 }
 
 impl Session {
@@ -62,11 +81,248 @@ impl Session {
                 let _ = fs::create_dir_all(parent);
             }
         }
+        let session_id = log_path
+            .as_deref()
+            .and_then(Path::file_stem)
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_else(now_stamp);
+        let trace = log_path
+            .as_deref()
+            .map(|path| SourceTraceStore::new(path.with_extension("sources.jsonl")));
         Session {
             system: system.into(),
             messages: Vec::new(),
             log_path,
             restored_count: 0,
+            session_id,
+            trace,
+            events: None,
+            turn_id: None,
+            workspace_revision: None,
+        }
+    }
+
+    /// Attach the shared fact-event store. Without it the session still works;
+    /// it simply has no indexed history to query.
+    pub fn set_event_store(&mut self, store: std::rc::Rc<crate::context_store::ContextStore>) {
+        self.events = Some(store);
+    }
+
+    pub fn event_store(&self) -> Option<&std::rc::Rc<crate::context_store::ContextStore>> {
+        self.events.as_ref()
+    }
+
+    /// Tool calls this session started but never saw finish. These must not be
+    /// compacted away and must not be silently re-issued.
+    pub fn unresolved_tool_calls(&self) -> Vec<String> {
+        self.events
+            .as_ref()
+            .and_then(|store| store.unresolved_tool_calls(&self.session_id).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|event| event.tool_call_id)
+            .collect()
+    }
+
+    fn append_event(&self, msg: &Value) {
+        let Some(store) = &self.events else {
+            return;
+        };
+        let workspace = None;
+        match role(msg) {
+            Some("user") => {
+                let text = message_content_text(msg);
+                if text.trim().is_empty() {
+                    return;
+                }
+                let _ = store.append(
+                    &crate::context_store::ContextEvent::new(
+                        format!("{}-user-{}", self.session_id, self.messages.len()),
+                        self.session_id.clone(),
+                        crate::context_store::EventType::UserMessage,
+                        crate::context_store::EventStatus::Completed,
+                    )
+                    .with_turn(self.turn_id)
+                    .with_workspace(workspace)
+                    .with_source_ref(self.source_ref())
+                    .with_payload(&json!({"text_hash": crate::context_trace::content_hash(&text)})),
+                );
+            }
+            Some("assistant") => {
+                for call in msg
+                    .get("tool_calls")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let call_id = call.get("id").and_then(Value::as_str).unwrap_or_default();
+                    let name = call
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    // Started, not completed: the result event closes it.
+                    let _ = store.append(
+                        &crate::context_store::ContextEvent::new(
+                            format!("{}-call-{call_id}", self.session_id),
+                            self.session_id.clone(),
+                            crate::context_store::EventType::ToolCall,
+                            crate::context_store::EventStatus::Started,
+                        )
+                        .with_turn(self.turn_id)
+                        .with_tool_call(Some(call_id.to_string()))
+                        .with_source_ref(self.source_ref())
+                        .with_payload(&json!({
+                            "tool": name,
+                            "workspace_revision": self.workspace_revision,
+                        })),
+                    );
+                }
+            }
+            Some("tool") => {
+                let text = message_content_text(msg);
+                let call_id = msg
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let status = match classify_tool_result(&text) {
+                    None => crate::context_store::EventStatus::Completed,
+                    Some(crate::tool_recovery::ToolFailureClass::Cancelled) => {
+                        crate::context_store::EventStatus::Cancelled
+                    }
+                    Some(_) => crate::context_store::EventStatus::Failed,
+                };
+                let _ = store.append(
+                    &crate::context_store::ContextEvent::new(
+                        format!("{}-result-{call_id}", self.session_id),
+                        self.session_id.clone(),
+                        crate::context_store::EventType::ToolResult,
+                        status,
+                    )
+                    .with_turn(self.turn_id)
+                    .with_tool_call(Some(call_id.to_string()))
+                    .with_source_ref(self.source_ref())
+                    .with_payload(&json!({
+                        "tool": msg.get("name").and_then(Value::as_str),
+                        "result_hash": crate::context_trace::content_hash(&text),
+                        "exit_code": parse_exit_code(&text),
+                        "workspace_revision": self.workspace_revision,
+                    })),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Points an event back at the verbatim JSONL line it came from.
+    fn source_ref(&self) -> Option<String> {
+        self.log_path
+            .as_ref()
+            .map(|path| format!("{}#{}", path.display(), self.messages.len()))
+    }
+
+    /// Provenance store for this session, when it has a durable log.
+    pub fn trace_store(&self) -> Option<&SourceTraceStore> {
+        self.trace.as_ref()
+    }
+
+    /// Tag subsequent records with the active turn. Called by the agent loop at
+    /// the start of each user task.
+    pub fn set_turn_id(&mut self, turn_id: u64) {
+        self.turn_id = Some(turn_id);
+    }
+
+    /// Workspace revision every event in this turn is anchored to. Read once per
+    /// turn by the caller rather than per event, so a tool result can be placed
+    /// against the tree state it actually observed.
+    pub fn set_workspace_revision(&mut self, revision: Option<String>) {
+        self.workspace_revision = revision;
+    }
+
+    /// Search this session's recorded sources. Returns nothing when the session
+    /// has no durable trace rather than falling back to the in-memory history,
+    /// so a caller can never mistake live context for recorded provenance.
+    pub fn retrieve_sources(&self, query: &str, max: usize) -> Vec<RetrievedSource> {
+        self.trace
+            .as_ref()
+            .map(|store| store.retrieve(query, max))
+            .unwrap_or_default()
+    }
+
+    /// Record a source that is not itself a session message, such as a
+    /// compaction checkpoint summary.
+    pub fn record_source(&self, kind: SourceKind, text: &str, status: Option<&str>) {
+        let Some(store) = &self.trace else {
+            return;
+        };
+        let mut record = self.new_record(kind, text);
+        record.status = status.map(str::to_string);
+        let _ = store.append(&record);
+    }
+
+    fn new_record(&self, kind: SourceKind, text: &str) -> SourceRecord {
+        SourceRecord {
+            source_id: format!("{}-{}", self.session_id, self.messages.len()),
+            session_id: self.session_id.clone(),
+            task_id: None,
+            turn_id: self.turn_id,
+            timestamp: now_millis(),
+            kind,
+            text: text.chars().take(MAX_TRACE_EXCERPT_CHARS).collect(),
+            content_hash: crate::context_trace::content_hash(text),
+            ..SourceRecord::default()
+        }
+    }
+
+    /// Mirror one appended message into the provenance log. Only externally
+    /// verifiable facts are recorded: user instructions, tool calls and tool
+    /// results. Assistant prose is a proposal, not evidence, so it is skipped.
+    fn append_trace(&self, msg: &Value) {
+        let Some(store) = &self.trace else {
+            return;
+        };
+        match role(msg) {
+            Some("user") => {
+                let text = message_content_text(msg);
+                if !text.trim().is_empty() {
+                    let _ = store.append(&self.new_record(SourceKind::UserMessage, &text));
+                }
+            }
+            Some("assistant") => {
+                let calls = msg.get("tool_calls").and_then(Value::as_array);
+                for call in calls.into_iter().flatten() {
+                    let function = call.get("function");
+                    let name = function
+                        .and_then(|f| f.get("name"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let arguments = function
+                        .and_then(|f| f.get("arguments"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let mut record =
+                        self.new_record(SourceKind::ToolCall, &format!("{name} {arguments}"));
+                    record.tool_name = Some(name.to_string());
+                    record.tool_call_id =
+                        call.get("id").and_then(Value::as_str).map(str::to_string);
+                    let _ = store.append(&record);
+                }
+            }
+            Some("tool") => {
+                let text = message_content_text(msg);
+                let mut record = self.new_record(SourceKind::ToolResult, &text);
+                record.tool_name = msg.get("name").and_then(Value::as_str).map(str::to_string);
+                record.tool_call_id = msg
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                record.status = Some(match classify_tool_result(&text) {
+                    Some(class) => class.to_string(),
+                    None => "ok".to_string(),
+                });
+                let _ = store.append(&record);
+            }
+            _ => {}
         }
     }
 
@@ -175,7 +431,12 @@ impl Session {
                 out.push(json!({"role": "system", "content": note}));
             }
         }
-        out.extend(body);
+        out.extend(body.into_iter().map(|mut message| {
+            if let Some(object) = message.as_object_mut() {
+                object.remove("_compaction_safety");
+            }
+            message
+        }));
         stats.edited_chars = out.iter().map(json_chars).sum();
         ContextMessages {
             messages: out,
@@ -341,6 +602,8 @@ impl Session {
     }
 
     fn append(&mut self, msg: Value) {
+        self.append_trace(&msg);
+        self.append_event(&msg);
         self.messages.push(msg.clone());
         self.append_log(&msg);
     }
@@ -459,8 +722,17 @@ fn safety_snapshot(messages: &[Value], workspace: &Path) -> CompactionSafetySnap
             )
         })
         .collect();
+    // The opening requests plus the latest one. Taking only the first few would
+    // carry the task's origin into the checkpoint while dropping what the user
+    // most recently asked for, which is the intent currently in force.
+    let mut original_requirements: Vec<String> = users.iter().take(3).cloned().collect();
+    if let Some(latest) = users.last() {
+        if !original_requirements.contains(latest) {
+            original_requirements.push(latest.clone());
+        }
+    }
     CompactionSafetySnapshot {
-        original_requirements: users.iter().take(4).cloned().collect(),
+        original_requirements,
         confirmed_decisions,
         prohibitions: pick(
             &[
@@ -639,6 +911,26 @@ pub(crate) fn redact_image_data(msg: &Value, placeholder: &str) -> Value {
     out
 }
 
+/// Exit code reported by a tool result, when it declares one.
+///
+/// This reads the documented `Exit code: N` line of the shell result contract —
+/// the same string contract `classify_tool_result` already depends on. Tools
+/// that do not report an exit code simply have none; a missing value is never
+/// inferred to be success.
+fn parse_exit_code(text: &str) -> Option<i32> {
+    text.lines()
+        .filter_map(|line| line.trim().strip_prefix("Exit code:"))
+        .filter_map(|code| code.trim().parse::<i32>().ok())
+        .next_back()
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 fn now_stamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -647,7 +939,11 @@ fn now_stamp() -> String {
 }
 
 fn json_chars(v: &Value) -> usize {
-    serde_json::to_string(v)
+    let mut wire = v.clone();
+    if let Some(object) = wire.as_object_mut() {
+        object.remove("_compaction_safety");
+    }
+    serde_json::to_string(&wire)
         .map(|s| s.chars().count())
         .unwrap_or(0)
 }
@@ -790,6 +1086,246 @@ fn compress_tool_result(msg: &mut Value, max_chars: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn records_facts_but_not_assistant_prose_in_the_provenance_trace() {
+        let dir = crate::test_support::unique_temp_dir("session_trace_facts");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut session = Session::with_log("sys", Some(dir.join("s.jsonl")));
+        session.set_turn_id(7);
+        session.add_user_text("不要提交任何改动");
+        session.add_assistant(
+            "我打算先读文件",
+            Some(vec![json!({"id":"call-1","type":"function",
+                "function":{"name":"read_file","arguments":"{\"path\":\"a.rs\"}"}})]),
+            "internal thinking",
+        );
+        session.add_tool_result("call-1", "read_file", "Error: not found");
+
+        let records = session.trace_store().unwrap().records();
+        let kinds: Vec<_> = records.iter().map(|r| r.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                SourceKind::UserMessage,
+                SourceKind::ToolCall,
+                SourceKind::ToolResult
+            ],
+            "assistant prose and reasoning must not become evidence"
+        );
+        assert!(records.iter().all(|r| r.turn_id == Some(7)));
+        assert_eq!(records[1].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(records[2].status.as_deref(), Some("notfound"));
+        assert_eq!(
+            records[0].content_hash,
+            crate::context_trace::content_hash("不要提交任何改动")
+        );
+    }
+
+    #[test]
+    fn compaction_rewrites_the_log_but_the_original_instruction_stays_recallable() {
+        let dir = crate::test_support::unique_temp_dir("session_trace_compaction");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut session = Session::with_log("sys", Some(dir.join("s.jsonl")));
+        session.add_user_text("调查 releases 目录");
+        for i in 0..40 {
+            session.add_assistant(
+                "",
+                Some(vec![json!({"id":format!("c{i}"),"type":"function",
+                    "function":{"name":"read_file","arguments":"{}"}})]),
+                "",
+            );
+            let body = if i == 0 {
+                format!("releases 校验和 {}", "内容".repeat(400))
+            } else {
+                "内容".repeat(400)
+            };
+            session.add_tool_result(&format!("c{i}"), "read_file", &body);
+        }
+        let plan = session.prepare_compaction(20_000, &dir).unwrap();
+        session
+            .commit_compaction(
+                plan,
+                &ncx_provider::ModelResponse {
+                    content: "Goal: 调查。Next steps: 继续。".into(),
+                    finish_reason: "stop".into(),
+                    ..Default::default()
+                },
+                &dir,
+            )
+            .unwrap();
+
+        // The rewritten JSONL no longer holds the summarized tool evidence...
+        let log = std::fs::read_to_string(dir.join("s.jsonl")).unwrap();
+        assert!(!log.contains("releases 校验和"));
+        // ...but the append-only trace still does, and recall finds it.
+        let found = session.retrieve_sources("releases 校验和", 5);
+        assert!(
+            found
+                .iter()
+                .any(|item| item.record.text.contains("releases 校验和")),
+            "{found:?}"
+        );
+        assert!(session
+            .trace_store()
+            .unwrap()
+            .records()
+            .iter()
+            .any(|r| r.kind == SourceKind::SessionSummary));
+    }
+
+    fn session_with_events(label: &str) -> (Session, std::path::PathBuf) {
+        let dir = crate::test_support::unique_temp_dir(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut session = Session::with_log("sys", Some(dir.join("s.jsonl")));
+        session.set_event_store(std::rc::Rc::new(
+            crate::context_store::ContextStore::open(dir.join("events.sqlite3")).unwrap(),
+        ));
+        (session, dir)
+    }
+
+    #[test]
+    fn tool_calls_and_results_are_paired_by_call_id_with_terminal_status() {
+        let (mut session, _dir) = session_with_events("session_events_pairing");
+        session.set_turn_id(2);
+        session.add_user_text("跑一下测试");
+        session.add_assistant(
+            "",
+            Some(vec![
+                json!({"id":"ok-1","type":"function","function":{"name":"shell","arguments":"{}"}}),
+                json!({"id":"bad-1","type":"function","function":{"name":"shell","arguments":"{}"}}),
+            ]),
+            "",
+        );
+        session.add_tool_result("ok-1", "shell", "all tests passed");
+        session.add_tool_result("bad-1", "shell", "Error: command not found");
+
+        let store = session.event_store().unwrap();
+        assert_eq!(
+            store.tool_call_status("ok-1").unwrap(),
+            Some(crate::context_store::EventStatus::Completed)
+        );
+        assert_eq!(
+            store.tool_call_status("bad-1").unwrap(),
+            Some(crate::context_store::EventStatus::Failed)
+        );
+        // A recorded failure is still a resolved call.
+        assert!(session.unresolved_tool_calls().is_empty());
+        let events = store.session_events(&session.session_id).unwrap();
+        assert!(events.iter().all(|event| event.turn_id == Some(2)));
+        assert!(events.iter().all(|event| event
+            .source_ref
+            .as_deref()
+            .is_some_and(|r| r.contains("s.jsonl"))));
+    }
+
+    #[test]
+    fn a_tool_call_query_reports_exit_code_revision_and_source_together() {
+        let (mut session, _dir) = session_with_events("session_events_detail");
+        session.set_turn_id(5);
+        session.set_workspace_revision(Some("abc1234".into()));
+        session.add_assistant(
+            "",
+            Some(vec![json!({"id":"sh-1","type":"function",
+                "function":{"name":"shell","arguments":"{}"}})]),
+            "",
+        );
+        session.add_tool_result("sh-1", "shell", "STDERR: boom\n\nExit code: 2");
+
+        let detail = session
+            .event_store()
+            .unwrap()
+            .tool_call_detail("sh-1")
+            .unwrap()
+            .expect("a recorded call must be queryable");
+        assert_eq!(detail.tool.as_deref(), Some("shell"));
+        assert_eq!(detail.status, crate::context_store::EventStatus::Failed);
+        assert_eq!(detail.exit_code, Some(2));
+        assert_eq!(detail.workspace_revision.as_deref(), Some("abc1234"));
+        assert_eq!(detail.turn_id, Some(5));
+        assert!(detail.source_ref.is_some());
+        assert!(detail.result_hash.is_some());
+    }
+
+    #[test]
+    fn a_call_with_no_recorded_outcome_reports_unknown_not_success() {
+        let (mut session, _dir) = session_with_events("session_events_unknown_detail");
+        session.add_assistant(
+            "",
+            Some(vec![json!({"id":"open-1","type":"function",
+                "function":{"name":"apply_patch","arguments":"{}"}})]),
+            "",
+        );
+
+        let detail = session
+            .event_store()
+            .unwrap()
+            .tool_call_detail("open-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.status, crate::context_store::EventStatus::Unknown);
+        // A tool that never reported an exit code does not get one invented.
+        assert_eq!(detail.exit_code, None);
+    }
+
+    #[test]
+    fn a_tool_that_reports_no_exit_code_is_not_given_one() {
+        let (mut session, _dir) = session_with_events("session_events_no_exit_code");
+        session.add_assistant(
+            "",
+            Some(vec![json!({"id":"r-1","type":"function",
+                "function":{"name":"read_file","arguments":"{}"}})]),
+            "",
+        );
+        session.add_tool_result("r-1", "read_file", "file contents");
+
+        let detail = session
+            .event_store()
+            .unwrap()
+            .tool_call_detail("r-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.status, crate::context_store::EventStatus::Completed);
+        assert_eq!(detail.exit_code, None);
+    }
+
+    #[test]
+    fn an_unanswered_tool_call_blocks_compaction_instead_of_being_summarized_away() {
+        let (mut session, dir) = session_with_events("session_events_unresolved");
+        session.add_user_text("改一下配置");
+        for i in 0..40 {
+            session.add_assistant(
+                "",
+                Some(vec![json!({"id":format!("c{i}"),"type":"function",
+                    "function":{"name":"read_file","arguments":"{}"}})]),
+                "",
+            );
+            session.add_tool_result(&format!("c{i}"), "read_file", &"内容".repeat(400));
+        }
+        // A write whose result never arrived: its effect on the workspace is
+        // unknown, so the history containing it is not finished history.
+        session.add_assistant(
+            "",
+            Some(vec![json!({"id":"dangling","type":"function",
+                "function":{"name":"apply_patch","arguments":"{}"}})]),
+            "",
+        );
+
+        assert_eq!(
+            session.unresolved_tool_calls(),
+            vec!["dangling".to_string()]
+        );
+        let error = match session.prepare_compaction(20_000, &dir) {
+            Err(error) => error,
+            Ok(_) => panic!("compaction must refuse while a call is unresolved"),
+        };
+        assert!(error.contains("dangling"), "{error}");
+
+        // Once the result is recorded, compaction may proceed.
+        session.add_tool_result("dangling", "apply_patch", "applied");
+        assert!(session.unresolved_tool_calls().is_empty());
+        assert!(session.prepare_compaction(20_000, &dir).is_ok());
+    }
 
     #[test]
     fn estimate_tokens_counts_text_and_tool_calls() {

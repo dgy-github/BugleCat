@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { hoverDepth } from "../lib/hover-depth";
   import { buglecatAsset } from "../lib/buglecat-assets";
   let {
     sidebarOpen, sessionTitle, busy, rightPanel, toggleSidebar,
@@ -12,7 +13,8 @@
   } = $props();
 </script>
 
-<header class="topbar">
+<header class="topbar" use:hoverDepth={".tbtn"}>
+  {#if sidebarOpen}<button class="collapse mobile-sidebar-toggle" onclick={toggleSidebar} aria-label="收起侧边栏">☰</button>{/if}
   {#if !sidebarOpen}<button class="collapse" onclick={toggleSidebar} title="展开侧边栏" aria-label="展开侧边栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M9 4v16"/><path d="m12.5 9 3 3-3 3"/></svg></button>{/if}
   <span class="title">{sessionTitle}</span>
   {#if busy}<img class="status-cat" src={buglecatAsset("processing", 24)} alt="处理中" title="处理中…" />{/if}

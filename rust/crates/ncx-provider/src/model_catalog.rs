@@ -174,10 +174,59 @@ fn normalize_model(value: &Value) -> Option<DiscoveredProviderModel> {
     Some(DiscoveredProviderModel {
         id: id.to_string(),
         name,
-        context_length: value.get("context_length").and_then(Value::as_u64),
+        context_length: model_context_length(value),
         input_price_per_million: price_per_million(value, "prompt"),
         output_price_per_million: price_per_million(value, "completion"),
     })
+}
+
+/// Normalize advertised context capacities; output-token limits are not context windows.
+pub fn model_context_length(value: &Value) -> Option<u64> {
+    [
+        "context_length",
+        "context_window",
+        "max_context_length",
+        "max_model_len",
+        "inputTokenLimit",
+    ]
+    .iter()
+    .filter_map(|key| value.get(key))
+    .find_map(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_str()?.parse().ok())
+            .filter(|n| *n > 0 && *n <= i64::MAX as u64)
+    })
+}
+
+/// Capacity for an exact route/model. Live metadata wins over maintained presets.
+pub fn resolve_context_capacity(
+    models: &[DiscoveredProviderModel],
+    base_url: &str,
+    model: &str,
+) -> Option<(i64, &'static str)> {
+    if let Some(value) = models
+        .iter()
+        .find(|entry| entry.id == model)
+        .and_then(|entry| entry.context_length)
+        .and_then(|n| i64::try_from(n).ok())
+        .filter(|n| *n > 0)
+    {
+        return Some((value, "provider"));
+    }
+    let normalize = |url: &str| {
+        url.trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .to_ascii_lowercase()
+    };
+    crate::preset_catalog::catalog()
+        .into_iter()
+        .flat_map(|provider| provider.models)
+        .find(|entry| entry.model_id == model && normalize(&entry.base_url) == normalize(base_url))
+        .and_then(|entry| entry.context_length)
+        .and_then(|n| i64::try_from(n).ok())
+        .filter(|n| *n > 0)
+        .map(|value| (value, "preset"))
 }
 
 fn price_per_million(value: &Value, field: &str) -> Option<f64> {
@@ -206,6 +255,55 @@ fn valid_model_id(value: &str) -> bool {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn context_capacity_normalizes_aliases_without_using_output_limits() {
+        for field in [
+            "context_length",
+            "context_window",
+            "max_context_length",
+            "max_model_len",
+            "inputTokenLimit",
+        ] {
+            let row = serde_json::json!({"id":"exact-model",field:"131072"});
+            assert_eq!(model_context_length(&row), Some(131072));
+        }
+        assert_eq!(
+            model_context_length(&serde_json::json!({"max_tokens":8192,"context_length":0})),
+            None
+        );
+        assert_eq!(
+            model_context_length(&serde_json::json!({"context_length":-1})),
+            None
+        );
+        assert_eq!(
+            model_context_length(&serde_json::json!({"context_length":18446744073709551615u64})),
+            None
+        );
+    }
+
+    #[test]
+    fn context_capacity_live_metadata_wins_and_presets_are_route_scoped() {
+        let rows = parse_catalog_models(
+            &serde_json::json!({"data":[{"id":"deepseek-v4-pro","context_window":65536}]}),
+        );
+        assert_eq!(
+            resolve_context_capacity(&rows, "https://api.deepseek.com", "deepseek-v4-pro"),
+            Some((65536, "provider"))
+        );
+        assert_eq!(
+            resolve_context_capacity(&[], "https://api.deepseek.com/v1/", "deepseek-v4-pro"),
+            Some((1_000_000, "preset"))
+        );
+        assert_eq!(
+            resolve_context_capacity(&[], "https://unrelated-proxy.example/v1", "deepseek-v4-pro"),
+            None
+        );
+        assert_eq!(
+            resolve_context_capacity(&rows, "https://api.deepseek.com", "deepseek-v4-pro-unknown"),
+            None
+        );
+    }
     use std::net::TcpListener;
     use std::thread;
 

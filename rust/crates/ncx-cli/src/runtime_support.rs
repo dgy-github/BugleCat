@@ -1,11 +1,14 @@
 use super::*;
 use crate::session_recorder::SessionRecorder;
 
-pub(crate) fn compact_session_text(
+pub(crate) async fn compact_session_text(
     agent: &mut AgentLoop,
     recorder: &mut SessionRecorder,
 ) -> String {
-    let stats = agent.session.compact(&agent.context_edit);
+    let stats = match agent.compact_context(None).await {
+        Ok((stats, _)) => stats,
+        Err(error) => return format!("Compaction failed: {error}"),
+    };
     if let Err(error) = recorder.replace_model_context(&agent.session) {
         return format!("Compaction succeeded but persistence failed: {error}");
     }

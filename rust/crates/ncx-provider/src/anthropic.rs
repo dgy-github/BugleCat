@@ -152,10 +152,14 @@ fn parse_response(value: &Value) -> ModelResponse {
             _ => {}
         }
     }
-    response.finish_reason = if response.tool_calls.is_empty() {
-        "stop"
-    } else {
+    response.finish_reason = if !response.tool_calls.is_empty() {
         "tool_calls"
+    } else {
+        match value.get("stop_reason").and_then(Value::as_str) {
+            Some("max_tokens") | Some("length") => "length",
+            Some("end_turn") | Some("stop_sequence") | None => "stop",
+            Some(other) => other,
+        }
     }
     .into();
     let mut usage = BTreeMap::new();

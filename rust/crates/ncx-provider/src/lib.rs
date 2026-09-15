@@ -14,6 +14,7 @@ pub mod api;
 pub mod chat_probe;
 pub mod dashscope_media;
 pub mod model_catalog;
+pub mod preset_catalog;
 pub mod provider;
 pub mod request;
 pub mod response;

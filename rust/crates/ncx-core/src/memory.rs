@@ -15,7 +15,7 @@
 //! phrases, Jaccard, and a tiny domain synonym map), tie-break by recency, and
 //! return a capped block to prepend to the system prompt.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
@@ -80,6 +80,12 @@ impl MemoryStore {
         }
         self.write_all(&entries)?;
         Ok(true)
+    }
+
+    /// Path of the Markdown file this store owns. The metadata index is built
+    /// from it and lives beside it.
+    pub fn markdown_path(&self) -> &Path {
+        &self.path
     }
 
     /// Parse all stored entries (empty if the file is absent / unreadable).

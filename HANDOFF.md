@@ -1,5 +1,112 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-09-15（三）：计划收口，29/29 完成
+
+补齐上一节遗留的四项，`docs/superpowers/plans/2026-09-14-context-association-memory.md` 的 7 个任务、29 项 checkbox 全部完成。
+
+- **运行时落差已消除**：`RetrievalContextProvider` 现在持有 `MemoryIndex` 与 `InstructionLedger`，长期记忆层和冲突层真正参与注入（此前只接了 trace 与 event store）。`AgentLoop::new` 在有 `MemoryStore` 时按 Markdown 重建索引并交给 provider；每个 **direct-human** 回合把用户指令记进 ledger 并撤回与之矛盾的记忆，**自动 Goal 回合不能触发撤回**。新增 3 项回归覆盖记忆层注入、矛盾指令撤回、冲突渲染。
+- **Task 6 退出码逐调用关联**：新增 `ContextStore::tool_call_detail`，一次返回 tool / status / exit_code / result_hash / workspace_revision / source_ref / turn_id。退出码取自 shell 结果契约里既有的 `Exit code: N` 行——`classify_tool_result` 本就依赖同一契约，没有额外引入脆弱性；**未报告退出码的工具就是没有，不会被推断成 0**。无结果事件的调用返回 `Unknown` 而非成功。workspace revision 每轮由 `StateRecorder` 读一次，经 `Session::set_workspace_revision` 带进工具事件，与状态转换锚定同一棵树。
+- **Task 5 取消路径**：`MemoryIndex` 已接入 GUI `rust/gui/src-tauri/src/memory_merge_job.rs`。索引重建放在 `commit_if_current` 的**同一把提交围栏内**——取消若赢得围栏，Markdown 重写与索引重建一起不发生，索引不可能描述一次从未落盘的合并。新增 2 项回归：取消后 Markdown 与索引都未变；提交后索引按合并结果重建。
+- **Task 7 GUI 构建**：`npm run build` 通过——protocol check v3（70 methods）、`tsc --noEmit`、Vite 155 modules。
+- 验证：`cargo test --workspace --lib` 全绿（ncx-core 372，上一节 366，+6）；GUI Tauri `cargo test --lib` 124 通过（上一节 122，+2）；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all --check`、前端 `npm run build` 通过。
+- 唯一按「可选」处理未做的：Task 3 的**语义召回**。当前是结构化过滤 + 时间排序 + 关键词匹配；语义召回需要 embedding 依赖与额外模型调用，计划原文即标注为可选。
+- GUI Tauri 的 11 项失败仍是断言 Svelte 源码文本的既有失败（2026-09-10 未提交的前端改版所致），数量与前两轮一致，本轮未修。
+- 未做：真实 WebView/桌面 E2E、真实模型调用、Python 门禁、benchmark。本轮未提交、未推送。
+
+## 2026-09-15（续）：分层召回、记忆索引与分块压缩
+
+接着上一节推完计划文档剩下的 Task 3/5/7。29 项 checkbox 现完成 26 项。
+
+- **Task 5 记忆索引（3/4）**：新增 `ncx-core::memory_index`。Markdown 仍是事实来源，SQLite 只是可重建的元数据索引（workspace/tags/keywords/source_ref/evidence_kind/status/created_at/superseded_by）。两条安全性质写在索引里而不是调用方：① `Evidence::SessionSummary` 作为唯一来源时 `promote` 直接拒绝——摘要是对会话的断言，不是对项目的断言；② 被当前会话指令反驳的 note 标记 `Superseded` 并退出召回，但行保留、`superseded_by` 记录覆盖者，便于审计。`apply_ledger` 只接受 `Origin::CurrentSession` 的指令来撤回记忆。
+- **Task 3 分层召回（4/4）**：新增 `ncx-core::context_retrieval`。六层按**权威度**而非相似度排序：ActiveTurn → RecentSession → UnresolvedState → Workspace → LongTermMemory → HistoricalSummary。每层有 token 配额（0.30/0.25/0.15/0.15/0.10/0.05），未用额度向下级联；跨层按内容哈希去重，高权威层保留。产物是**带来源 ID 的 notes 指针**，不替代原始 tool result——渲染头部明确写了 "not instructions" 且指向 `recall_sources`。未决指令冲突单独渲染为「do not pick one, ask the user」。
+- `RetrievalContextProvider` 已注册进 `AgentLoop.turn_context`（可逆、不可变更会话与工具注册表），每轮同步 active turn，预算 1500 token。
+- **Task 7 分块/增量压缩（4/5）**：`CompactionPlan` 从单一 `request` 改为 `chunks`，每段请求受独立输入预算约束（`input_budget - 3000`，给系统提示和滚动摘要留位）。**这条同时修掉了 2026-09-11 审计里 `prepare_compaction(20_000)` 构造约 175,400 Token 摘要输入的缺陷**——现有回归对 500/5000/50000 轮历史逐段断言请求不超预算。
+- 摘要提示改为要求逐条引用 `[S12]` 形式的来源 ID，并按 FACT / INFERENCE / REVOKED / CONFLICT 标注。`commit_compaction` 校验引用：**摘要引用不存在的来源即拒绝并保留原始历史**——否则等于把不可证伪的断言当历史写进上下文。
+- 安全快照的 `original_requirements` 从「前 4 条用户消息」改为「前 3 条 + 最新一条」。原做法会把任务起点带进检查点却丢掉用户最近的要求，而后者才是当前生效的意图。
+- 新增前置检查：recent tail 自身超过压缩目标时直接拒绝，不再一路走到 commit 才失败——省掉一次无效模型调用。巨大工具结果落在 prefix 里会单独成段而不被丢弃，落在 tail 里则明确拒绝压缩。
+- `compact_context` 改为逐段调用并把滚动摘要传递给下一段；用量跨段累加，只提交最后一段的结果，中途失败不动 live history。
+- 测试替身 `ScriptedProvider` 增加 `with_summary`：摘要请求按系统提示识别，不占用脚本序列，因此分段数变化不会让测试变脆。
+- 验证：`cargo test --workspace --lib` 全绿（ncx-core 366，上一节 340，+26）；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all --check`、GUI `cargo check --all-targets` 通过。
+- 未做（4 项，详见计划文档末尾）：Task 5 的取消路径回归——`rust/gui/src-tauri/src/memory_merge_job.rs` 本轮未改动，`MemoryIndex` 尚未接进 GUI 记忆合并作业；Task 6 的退出码逐调用关联（需先改工具结果契约）；Task 7 的前端 `npm run build`；Task 3 的可选语义召回。
+- 另需注意：`ContextRetriever` 的 MemoryIndex 与 InstructionLedger 两层已实现并测试，但宿主还没把它们传进 `RetrievalContextProvider`，**运行时目前只注入 trace 和 event store 两层**。
+- GUI Tauri `cargo test --lib` 仍为 122 通过 / 11 失败，全部是断言 Svelte 源码文本的既有失败，数量与本轮开始时一致。
+- 本轮未提交、未推送。
+
+## 2026-09-15：写预检、状态机接线与 SQLite 事实事件存储
+
+- **SQLite 事实事件存储（计划 Task 1）**：新增 `ncx-core::context_store`。`rusqlite 0.40.1 bundled` 复用 workspace 既有版本（ncx-video-agent 已在用），未引入新的构建负担。表 `context_events` 带 `session_id+sequence` 唯一索引和 task/status、tool_call_id、workspace、agent_id 索引；WAL 模式。写入按 `event_id` 幂等——崩溃后重放同一 id 返回原事实、不新增序号，因此写操作不会被重复计数。`sequence` 分配与插入在同一事务内。`EventStatus::Unknown` 是可查询的真实状态，不折叠成成功或失败。
+- **会话事件接线（Task 2）**：`Session` 新增共享 `Rc<ContextStore>`，user/tool_call/tool_result 写入统一事件字段，带 `turn_id`、`tool_call_id`、`source_ref`（指回 JSONL 行号）和内容哈希。JSONL 原始记录格式未改。
+- **未完成工具调用阻断压缩（Task 6）**：`prepare_compaction` 在 `unresolved_tool_calls()` 非空时直接返回错误并列出调用 ID。结果从未记录的调用，其工作区影响未知，不是"已完成历史"，不能被摘要掉。回归覆盖：挂起的 apply_patch 阻断压缩，补记结果后放行。
+- **写工具替补状态预检**：`execute_with_recovery` 对非只读调用在首次尝试前对 `implicated_paths`（path/file/target/paths 参数 + apply_patch 的 Add/Update/Delete File 标记）做 SHA-256 指纹。失败后重新指纹比对，得出 `WriteEffect::None | Partial | Unverifiable`。只有 `None` 才允许替补；`Partial` 和 `Unverifiable` 都拒绝并返回"重新读取受影响路径"的明确失败——目标无法确定时按不安全处理，不把"没有证据"当成"没有影响"。探针结果以 `EventType::WriteProbe` 落盘，`Unverifiable` 记为 `Unknown` 状态。
+- **状态机扩展与接线**：`AgentState` 补齐 `Blocked`/`Failed`/`Cancelled`/`Unknown`。`Cancelled`/`Unknown` 可从任意非终态进入；`Unknown` 只能被显式重新进入（→ Understand/NeedsHuman/Cancelled），不能直接跳到 Completed 或 Failed。新增 `Executing → AwaitingConfirmation` 以支持工具在执行中途请求审批。
+- `AgentStateMachine` 现在记录 `StateTransition`（from/to/trigger/turn_id/tool_call_id/permission_decision/workspace_revision/timestamp）；被拒绝的转换不入历史。新增 `StateRecorder`（`Rc` 共享给 `ToolContext.state_recorder`）持久化每次转换为 `EventType::StateTransition` 事件，workspace revision 每轮读一次 `git rev-parse HEAD`。
+- `StateTrackingApprover` 在 `effective_context()` 里包装宿主审批器（最后包装，不改变决定）：审批走 `AwaitingConfirmation → Authorized|Blocked → Executing`。**拒绝不终结任务**——记为 `Blocked` 并回到 `Executing`，模型可另寻路径。回归覆盖批准与拒绝两条链路及其 SQLite 落盘。
+- 回合终态由 `stop_reason` 决定：cancelled → `Cancelled`；timeout/task_budget/compaction_failed/blocked → `NeedsHuman`；error 与 post-edit 校验失败 → `Failed`；其余 → `Completed`。预算耗尽或超时的回合不再被记成已完成任务。
+- **指令有效性与冲突检测（Task 4）**：新增 `instruction_state`。识别中英文否定与撤销；CJK 按二元组切分主题，无需分词器。规则：同源同主题、范围相同或更宽且更晚 → 覆盖并保留 supersedes 链；范围更窄（例外）或互不包含 → 双方保持生效并标记 `Conflicted`，**不自动选取**；长期记忆来源永不覆盖当前会话指令，无论时间戳。撤销只作用于其实际覆盖的范围，且不转为许可。
+- 验证：`cargo test --workspace --lib` 全绿（ncx-core 340，较上轮 313 增 27）；`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all --check`、GUI `cargo check --all-targets` 通过。
+- 未做：计划 Task 3（分层 Context Retrieval）、Task 5（记忆 SQLite 索引与合并安全）、Task 7（压缩器接入与 1k/10k/100k 压测）全部未开工；Task 2 的重启后补读配对测试、Task 6 的退出码/workspace revision 逐调用关联与崩溃恢复端到端用例未做。`instruction_state` 已实现但无调用点——查询器（Task 3）尚不存在。详见计划文档末尾的实施状态。
+- 未做：前端构建、真实 WebView/桌面 E2E、真实模型调用、Python 门禁、benchmark。GUI Tauri `cargo test --lib` 仍为 122 通过 / 11 失败，全部是断言 Svelte 源码文本的既有失败（2026-09-10 未提交的前端改版所致），数量与本轮开始时一致。
+- 本轮未提交、未推送。
+
+## 2026-09-15：来源追溯接线与工具替补策略门
+
+- 纠正上一轮扫描的说法：工具 fallback **不是**未实现。`tool_recovery.rs` 早已有失败分类、只读单次重试和硬编码工具对路由。实际缺口是它不走 `ToolRuntimePolicy`、路由写死在中心 match、替补链不落盘。
+- `context_trace` 此前零调用方，现已接入 `Session`：新增 `session_id`、`trace`、`turn_id` 字段，日志旁写同名 `.sources.jsonl` 追加式来源库。只记录可外部核验的事实（用户指令、工具调用、工具结果），助手散文和 reasoning 不作为证据。记录带 `turn_id`、`tool_call_id`、`tool_name`、归一化 `status` 和全文 `content_hash`；正文超过 4,000 字符只存摘录，哈希仍覆盖原文。
+- `commit_compaction` 会重写会话 JSONL，因此摘要提交后额外写入一条 `SessionSummary` 来源；被摘要掉的工具证据只能从追加式来源库恢复。新增回归证明压缩后原始工具输出已不在 JSONL 内、但 `retrieve_sources` 仍能召回。
+- 新增只读 `recall_sources` 工具，仅在会话有持久 trace 时注册；返回 source_id/kind/turn_id/timestamp/tool_call_id/status/content_hash/conflict_with。`AgentLoop::new` 负责注册并绑定恢复链 trace，`run_turn_with_authority` 同步 `set_turn_id`。
+- `execute_with_recovery` 改由策略驱动：重试条件为「可重试失败 + `retry_policy=TransientOnce` + （调用只读 或 声明幂等）」，`ToolRuntimePolicy::default()` 的 `retry_policy` 相应改为 `TransientOnce` 以保持只读工具原行为。`PermissionDenied` 与 `Cancelled` 由 `may_substitute` 统一拦截，既不重试也不替补。替补候选改由 `Tool::fallback_route` 声明（默认委托原内置路由表），非只读且非幂等的候选一律拒绝并返回原始失败。
+- 每条替补链结构化写入来源库（`SourceKind::ToolRecovery`，含原工具、失败类、逐步骤和终态 refused/recovered/substituted/failed），因此由替补工具产出的结果不会被当成原工具的结果。
+- 新增 `Tool::capabilities()` 默认委托 `infer_capabilities`。
+- 验证：`cargo test --workspace --lib` 全绿（ncx-core 313，较上轮 306 增 7；其余包不变）；`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --all --check` 通过。
+- 未做：GUI 前端构建、真实 WebView/桌面 E2E、真实模型调用、Python 门禁、benchmark。GUI Tauri `cargo test --lib` 为 122 通过 / 11 失败，全部是断言 Svelte 源码文本的既有失败（2026-09-10 未提交的前端改版所致），与本轮 Rust 改动无关，本轮未修。
+- 未做：写工具替补前的状态预检仍未实现，当前是直接拒绝非幂等写替补而不是核对部分成功状态。`AgentStateMachine` 的 `awaiting_confirmation`/`needs_human` 接线、状态转换事件持久化、SQLite 事实事件存储（`docs/superpowers/plans/2026-09-14-context-association-memory.md` 的 7 个任务）仍全部未开工。
+- 本轮未提交、未推送。
+
+## 2026-09-11：继续审计复现结果
+
+- 新增审计证据保存在 `C:/Users/25376/.codex/visualizations/2026/09/10/01a08aa3-4627-7630-b94c-36ffe5a62461/audit-20260911/`。本地模拟 Anthropic `stop_reason=max_tokens` 被归一成 `stop`，因此不完整摘要会被接受；同样增删行数的 Git 内容变化保持 `diff --stat` 不变，当前校验可能放行；`prepare_compaction(20_000)` 构造的摘要输入估算约 175,400 Token；长约束超过 500 字符的禁止事项不会进入安全摘录。
+- 控制器离线复现确认恢复运行会话会清空 `reasoningIndex`，下一条 reasoning delta 可创建第二个未结束思考块。后台事件触发当前窗口滚动的问题已修复为 session fence，离线复现从 1 次滚动降至 0 次。
+- 本轮未宣称上述 P1/P2 问题已全部修复；已生成审计 canvas `buglecat-audit-20260911.canvas.tsx` 展示证据、优先级和状态。此前模型容量、压缩流程和 UI 改动的验证结果不覆盖本轮新增缺陷。
+
+## 2026-09-10：纠正活动区上下关系
+
+- 用户再次指出工具记录跑到猫咪上方，前次理解反了。当前轮猫咪状态入口改放在用户消息之后、该轮执行记录之前；思考详情展开在入口下面，工具记录继续在其下方。输出阶段显示“正在输出…”，不把入口移回列表末尾。此节覆盖下一节的“状态放在工具下方”。
+- 前端构建通过；实际 ConversationView 在 WebView 挂载验证状态入口位于工具上方、只有一个、详情可展开，完成工具仍可见。开发窗口 HMR 已生效。
+
+## 2026-09-10：当前思考和执行状态放在工具记录下方
+
+- ConversationView 末尾统一 live-activity：运行中显示实际未完成工具名，有 reasoning delta 时显示可展开的猫咪思考入口；不再在历史位置重复显示当前思考。保留本轮已完成工具记录，去掉工具组 8rem 内层滚动，当前状态自然位于最新记录下方。
+- 前端构建通过；真实 WebView 临时挂载实际 ConversationView 验证：已完成工具可见、思考入口在工具下方且只有一个、点击展开有效、执行状态显示 shell。测试组件已卸载，无模型调用或用户会话修改；当前开发窗口已 HMR。
+
+## 2026-09-10：修复阅读区悬停抖动
+
+- 移除 ConversationView 的 hoverDepth 绑定，输出/思考/工具/产物阅读区不再倾斜或浮起。导航控件命中区域固定，仅装饰图标保留轻微旋转和静态阴影；同时覆盖旧 tbtn:hover 的 -1px 位移，去掉欢迎建议按钮的 -3px 位移，避免边缘悬停反复进入/离开。
+- 真实 WebView 复现旧顶部按钮下边缘抖动（一轮 12 次采样发生 8 次 hover 切换），修复后新建按钮/顶部按钮均 0 次切换、位置不变；临时思考区追加流式文本验证位置稳定、点击折叠正常，测试节点已移除。前端协议/类型/Vite 构建通过，当前桌面已 HMR；未发起模型请求或改动用户会话。
+
+## 2026-09-10：模型容量动态预算（覆盖下节的字符预算兼容策略）
+
+- 用户要求按当前模型查询容量。Configured provider 包装器复用现有 ProviderCatalogClient 查询当前接口的 `/models`，精确匹配模型 ID；缓存按 provider 实例隔离（成功 5 分钟、未知 30 秒），接口/模型切换不会串用容量；视觉路由独立解析。
+- 解析 context_length/context_window/max_context_length/max_model_len/inputTokenLimit。实时值优先；缺失时只匹配同一路由的已有模型预设，仍未知才回退至不超过 32,768 Token。GUI 原维护目录移入 ncx-provider/preset_catalog.rs 共享，未另建重复模型表。
+- 自动输入预算为模型容量的 7/8，近期尾部为可用历史预算的 1/3，移除固定 12 万字符与 2 万 Token 上限。设置页改为只读展示模型、容量、来源及触发预算；旧字符字段保留协议兼容但不再控制自动压缩。
+- 验证：ncx-core 301、ncx-provider 63、ncx-cli 38 项回归通过，追加近期尾部随容量增长测试 1 项通过；三包严格 Clippy 与前端构建通过；正常配置开发桌面已自动重编译启动，WebView 实测当前 deepseek-v4-flash-vision-exp 容量 1,000,000、预算 875,000，来源明确显示 preset（接口没有返回容量），密钥仍已配置。实时查询/缓存/换接口/主模型与视觉切换使用本地 HTTP 和替身测试，未发起付费模型测试调用。
+
+## 2026-09-10：按 Pi 思路修复桌面上下文压缩
+
+- 对照 badlogic/pi-mono 的 `packages/coding-agent/src/core/compaction/compaction.ts`，参考 SHA `bbb61e34aaf231639fdaaad1adbd757947034eac`。采用 Token 近期尾部、模型增量摘要、完整工具组、失败不落盘；不是完整移植 Pi 的会话分支/溢出重试系统。
+- 自动路径与 CLI `/compact` 共用 `AgentLoop::compact_context`。真实 prompt_tokens + 后续消息估算优先；无用量时估算系统/消息/工具定义。保留既有 context_edit_max_chars 配置兼容，按 /2 转保守 Token 预算，并受 context_window 预留空间限制；原按消息条数和工具字符数裁剪的设置不再用于自动摘要。
+- `session/semantic_compaction.rs` 在摘要完整、释放足够空间、会话与 diff 摘要未变化后原子替换日志；失败/取消保留原历史。只维护一个摘要与非递归安全快照，内部快照元数据不发送模型；统计包括最终摘要和快照文本。摘要不是语义正确性证明，快照仍是有界启发式约束摘录。
+- 已验证 ncx-core 299 项、ncx-cli 38 项；Clippy 两包全 targets 严格通过；桌面 Windows MSVC cargo check、前端协议/类型/构建通过。新增 8 项覆盖工具组、二次摘要、日志恢复、失败/取消、原子写失败、实际用量触发、用量累计及本地 HTTP 模拟模型链路。未使用真实密钥发起测试请求，未做真实模型摘要质量评测或跨平台桌面 E2E。
+- 本次修复未提交/推送；保留上一轮 UI 改动和用户配置。原会话中已被旧算法丢弃的内容不会凭空恢复。
+- 开发桌面已重编译启动新后端，真实 WebView 检查新上下文设置通过；DeepSeek 保持 active，三组原有凭据 has_api_key 均为 true（未读取/输出密钥）。正常配置开发进程的 exec session 为 41544，CDP 9338。
+
+## 2026-09-10：分层视觉桌面风格
+
+- 补齐实际操作区域的 2.5D 悬停：侧栏品牌/新建/会话卡、顶部按钮、猫咪头像、工具与思考摘要、产物卡；MutationObserver 自动绑定运行中新增卡片，卸载时清理。真实 WebView 鼠标验证左右约 ±6°、离开归零、点击展开和减少动画静态回退通过；此项用动态插入卡片验证，没有额外发起模型调用。
+- 按用户指定 layered-visual-ui 重构桌面视觉：暖白/墨绿主题、深色对应色板、欢迎页完整猫咪插画卡/背景圆环/前景标签分层，侧栏、输入框和工作区面板使用统一色彩。素材复用项目原图转 WebP，没有外部生图。
+- WelcomeScene 的建议卡只填入 Composer，不自动发送。复用技能 motion.js，Svelte action 卸载时 destroy；方向键、方向按钮、触屏原生滚动、减少动画及图片失败回退均保留。
+- 验证：motion 5 项通过；protocol check、TypeScript 与 Vite build 通过；真实 Tauri/WebView2 已验证 1440px/375px、深浅色、建议填入、双向键盘位移、减少动画归零、触屏不触发视差、图片失败回退与刷新恢复。QA 截图和结果位于当前任务 visualizations 目录。手机仅模拟，无真实设备验收。
+- 未修复此前审计的 9 项缺陷；未提交/推送。本次不是后端状态机变更。
+
 ## 2026-09-08 下午：六类自测独立复跑
 
 - 后续用户授权将本轮报告与候选补丁证据提交 GitHub；本次发布同步中英文 README、展示页及评测子包入口。候选作为评测证据，不覆盖主项目健康源码；下文“未提交”记录为复跑结束时的状态。
@@ -1564,3 +1671,45 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
   `tool_dispatch.rs` 新的单测对 `call_is_read_only` 动态分类的断言方向正确；
   `openai_compat` 新增安装后解析测试通过且临时目录唯一；thread-store 跨进程 lease
   测试（唯一路径+轮询上限+子进程 helper）与 Python 侧 `tmp_path` 用法均规范。
+
+## 2026-09-14：工具注册、降级与替补策略设计记录
+
+- `AgentLoop` 的最大模型调用次数和最大工具调用次数只能作为整轮/全局熔断器，不能替代工具级策略。
+- `ToolRegistry` 后续应统一负责工具执行前校验：工具身份、参数、workspace/session/agent 权限边界、审批策略、重复调用、幂等性、重试、并发额度和超时。
+- 读工具与写工具必须使用不同策略。读工具可按“工具名 + 规范化参数 + workspace 版本/文件哈希”判断重复读取；写工具默认不自动重试，非幂等写入必须防止相同 `tool_call_id` 或任务重复执行。
+- 工具执行记录至少应关联 `task_id`、`session_id`、`agent_id`、`tool_call_id`、规范化参数、workspace revision、状态、结果哈希和尝试次数。
+- 工具失败后应按能力声明查找 fallback 工具，而不是由模型临时猜测。建议 `ToolSpec` 声明 capability、fallback_tools、fallback_policy、retry_policy、idempotency、risk_level 和 approval_policy。
+- 只有工具不可用、临时网络错误、超时、结果为空等可恢复错误允许候选替补；参数错误应先修正参数。权限拒绝、用户拒绝审批、路径越界不能通过替补绕过。
+- 写工具替补前必须检查当前状态，防止部分成功后重复写入；替补链必须记录原工具、失败原因、替补工具和最终结果。所有替补失败必须返回明确失败，不得伪造成功。
+- 当前 BugleCat 已有系统级预算、审批、取消、workspace/generation fence、失败保留历史和 checkpoint/JSONL 恢复；尚未形成完整的 `ToolRegistry` 工具级重复策略与 fallback runtime。
+- 目标执行链：参数校验 → 权限校验 → 重复/幂等校验 → 工具级额度 → 并发/超时 → 审批或只读降级 → 执行 → 结果校验 → 状态持久化 → 错误分类/有限重试/能力替补 → 明确终态。
+
+## 2026-09-14：Sandbox 增强路线
+
+- **应用层策略主线**：所有工具统一经过 `ToolRuntime`，执行前集中完成路径、命令、权限、审批、重复执行、幂等、重试、超时和 workspace 边界校验。`SandboxPolicy` 负责物理访问规则，`ToolRegistry` 负责工具能力和风险策略，`AgentLoop` 只保留整轮预算与循环熔断。
+- **Git worktree 任务隔离**：每个高风险或可并行任务使用独立 Git worktree，子任务只在自己的 worktree 执行；完成后读取并审核完整 diff、测试结果和工作区状态，再由主任务决定是否合并回主 workspace。
+- Git/worktree 和 checkpoint 只承担版本追踪、变更审核与恢复辅助，不能替代应用层权限校验，也不能被视为容器级安全隔离。
+
+## 2026-09-14：上下文/记忆来源追溯要求
+
+- 来源追溯针对的是执行依据的事实，不是模型内部思考过程。摘要、召回结果和工具状态必须能定位回原始用户指令、项目约束、工具调用、工具结果、checkpoint 或长期记忆记录。
+- 每条来源至少带 `source_type`、`source_id`、`session_id`、`task_id`、`agent_id`、`turn_id`、`timestamp`、`status` 和 `log_ref`；项目文件约束还要带 `source_path`、行号或内容哈希；工具结果还要带 `tool_call_id`、工具名、退出码/执行状态和结果哈希。
+- 摘要不得冒充原始事实，不得引用不存在的来源，不得丢失时间顺序或会话关联，不得把已撤销/已覆盖指令当作当前约束。
+- 样本评测必须检查：来源是否真实存在、ID 是否可定位 JSONL/SQLite 原记录、session/task/agent/turn 是否一致、时间顺序是否正确、摘要是否与事实一致、指令覆盖/撤销状态是否正确、工具调用与结果是否配对。
+- 来源缺失、冲突未解决或状态 unknown 时，系统应标记不确定并阻止高风险执行，不能由模型或召回器自行补全事实。
+
+## 2026-09-14：统一 Agent 流程状态机缺口
+
+- 当前 BugleCat 的需求理解、规划、审批、权限、工具执行、观察、重规划、持久化和恢复能力分散在 `AgentLoop`、`ToolRegistry`、`Approval`、`SandboxPolicy`、`Session`、`Checkpoint` 等模块中，尚未由统一任务状态机串联。
+- 目标显式流程状态：`understand` → `planned` → `awaiting_confirmation` → `authorized` → `executing` → `observing` → `replanning` → `completed`。
+- 异常/暂停状态：`needs_human`、`blocked`、`failed`、`cancelled`、`unknown`。
+- 状态转换必须记录 `task_id`、`session_id`、`agent_id`、`turn_id`、时间、触发事件、工具调用 ID、权限决定、结果来源和 workspace revision。
+- 模型负责意图理解与计划建议；运行时负责状态转换、权限和工具执行；观察器负责验证结果；计划变更必须产生新版本；高风险或无法判断的分支进入 `needs_human`，不能由模型静默绕过。
+- 后续实现应把现有模块接入统一状态机，而不是在 AgentLoop、ToolRegistry、Approval 或 Session 中继续增加互相独立的状态判断。
+
+## 2026-09-15：四组架构能力第一批实现
+
+- `ncx-core::ToolRuntimePolicy` 已加入 `Tool` trait；`ToolRegistry::execute` 现在统一执行工具级 per-turn/per-task 调用额度、规范化参数重复检测和幂等策略入口。每个 `AgentLoop` 用户任务开始时调用 `begin_task` 清理计数与去重键，重试和 fallback 也会经过同一执行门。
+- 新增 `agent_state` 模块和 `AgentStateMachine`，提供 `understand/planned/awaiting_confirmation/authorized/executing/observing/replanning/needs_human/completed` 状态词汇及非法跳转拒绝；AgentLoop 当前已接入基础生命周期（planned → authorized → executing → observing → completed），审批/人工介入细分状态仍需继续接线。
+- 新增 `context_trace` JSONL 来源追溯存储，记录 `source_id/session_id/task_id/turn_id/timestamp/source_kind/text`，按匹配度再按时间排序，并在相反指令同时命中时返回冲突来源 ID；已导出给宿主层，下一步接入 Session、Memory 和上下文组装器。
+- 验证：`cargo test --manifest-path rust/Cargo.toml -p ncx-core --lib` 306 项通过。当前仍未完成真实桌面 E2E、真实模型调用、跨平台编译运行；状态机完整事件持久化和 fallback 能力声明编排待后续批次。

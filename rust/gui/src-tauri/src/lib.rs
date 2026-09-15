@@ -1598,6 +1598,9 @@ fn open_config_dir() -> Result<(), String> {
 /// returned in the clear — only whether one is set, plus a masked tail.
 #[derive(Serialize)]
 pub struct Settings {
+    context_capacity_model: String,
+    resolved_context_window: i64,
+    context_window_source: String,
     model: String,
     base_url: String,
     vl_model: String,
@@ -1639,7 +1642,11 @@ pub struct Settings {
 
 fn settings_from_config(cfg: &Config) -> Settings {
     let redacted = cfg.redacted();
+    let capacity = ncx_core::resolve_context_capacity(&[], &cfg.base_url, &cfg.model);
     Settings {
+        context_capacity_model: cfg.model.clone(),
+        resolved_context_window: capacity.map(|(n, _)| n).unwrap_or(cfg.context_window.clamp(1, 32_768)),
+        context_window_source: capacity.map(|(_, source)| source).unwrap_or("fallback").into(),
         model: cfg.model.clone(),
         base_url: cfg.base_url.clone(),
         vl_model: cfg.vl_model.clone(),
@@ -1701,7 +1708,12 @@ fn get_settings(provider_catalog: &ProviderCatalogService) -> Result<Settings, S
     })
     .map_err(|e| e.to_string())?;
     let mut settings = settings_from_config(&cfg);
-    settings.available_models = merged_available_models(&cfg, provider_catalog);
+    let models = provider_catalog.discover_config(&cfg).unwrap_or_default();
+    if let Some((window, source)) = ncx_core::resolve_context_capacity(&models, &cfg.base_url, &cfg.model) {
+        settings.resolved_context_window = window;
+        settings.context_window_source = source.into();
+    }
+    settings.available_models = merge_model_ids(&cfg, &models);
     Ok(settings)
 }
 
@@ -1713,18 +1725,12 @@ fn valid_provider_model_id(value: &str) -> bool {
         })
 }
 
-fn merged_available_models(cfg: &Config, provider_catalog: &ProviderCatalogService) -> Vec<String> {
-    let discovered = provider_catalog
-        .discover_config(cfg)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|model| model.id)
-        .collect::<Vec<_>>();
+fn merge_model_ids(cfg: &Config, discovered: &[ncx_core::DiscoveredProviderModel]) -> Vec<String> {
     let mut models = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for model in std::iter::once(cfg.model.as_str())
         .chain(cfg.available_models.iter().map(String::as_str))
-        .chain(discovered.iter().map(String::as_str))
+        .chain(discovered.iter().map(|model| model.id.as_str()))
     {
         if valid_provider_model_id(model) && seen.insert(model.to_string()) {
             models.push(model.to_string());

@@ -325,8 +325,16 @@ fn run_merge(
         if cancelled.load(Ordering::SeqCst) {
             return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
         }
+        let indexed_workspace = workspace.to_string_lossy().to_string();
         coordinator.commit_if_current(generation, &cancelled, || {
-            store.commit_summarize_consolidate(draft)
+            let removed = store.commit_summarize_consolidate(draft)?;
+            // Reindex inside the same commit fence that guards the Markdown
+            // write. A cancellation that wins the fence prevents both, so the
+            // index can never describe a merge the store never applied.
+            if let Ok(index) = ncx_core::MemoryIndex::for_store(&store) {
+                let _ = index.rebuild_from_markdown(&store, &indexed_workspace);
+            }
+            Ok(removed)
         })
     });
     finish_outcome(&coordinator, generation, &cancelled, outcome);
@@ -443,6 +451,75 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
         assert!(!committed.load(Ordering::SeqCst));
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn a_cancelled_merge_leaves_both_the_markdown_store_and_its_index_untouched() {
+        let workspace = test_workspace("cancel_index");
+        let store = ncx_core::MemoryStore::new(workspace.join(".ncx").join("memory"));
+        store.remember("构建需要 MSVC", &[], 10).unwrap();
+        store.remember("测试用 pytest", &[], 20).unwrap();
+        let index = ncx_core::MemoryIndex::for_store(&store).unwrap();
+        index
+            .rebuild_from_markdown(&store, &workspace.to_string_lossy())
+            .unwrap();
+        let before_entries = store.entries();
+        let before_notes = index.active_notes(&workspace.to_string_lossy()).len();
+
+        let (coordinator, cancelled) = running_job(21, workspace.clone());
+        coordinator.cancel().unwrap();
+
+        // The commit closure is what would rewrite the store and reindex; the
+        // fence must refuse to run it at all.
+        let error = coordinator
+            .commit_if_current(21, &cancelled, || {
+                store.remember("合并写入的记忆", &[], 40).unwrap();
+                let index = ncx_core::MemoryIndex::for_store(&store).unwrap();
+                index
+                    .rebuild_from_markdown(&store, &workspace.to_string_lossy())
+                    .unwrap();
+                Ok(0)
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(store.entries(), before_entries, "Markdown store was rewritten");
+        assert_eq!(
+            index.active_notes(&workspace.to_string_lossy()).len(),
+            before_notes,
+            "index diverged from the store after a cancellation"
+        );
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn a_committed_merge_rebuilds_the_index_from_the_merged_store() {
+        let workspace = test_workspace("commit_index");
+        let store = ncx_core::MemoryStore::new(workspace.join(".ncx").join("memory"));
+        store.remember("旧记忆 A", &[], 10).unwrap();
+        let index = ncx_core::MemoryIndex::for_store(&store).unwrap();
+        index
+            .rebuild_from_markdown(&store, &workspace.to_string_lossy())
+            .unwrap();
+        assert_eq!(index.active_notes(&workspace.to_string_lossy()).len(), 1);
+
+        let (coordinator, cancelled) = running_job(22, workspace.clone());
+        let removed = coordinator
+            .commit_if_current(22, &cancelled, || {
+                store.remember("合并后的新记忆 B", &[], 30)?;
+                let index = ncx_core::MemoryIndex::for_store(&store).unwrap();
+                index
+                    .rebuild_from_markdown(&store, &workspace.to_string_lossy())
+                    .unwrap();
+                Ok(1)
+            })
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        let notes = index.active_notes(&workspace.to_string_lossy());
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(notes.iter().any(|note| note.text == "合并后的新记忆 B"));
         let _ = std::fs::remove_dir_all(workspace);
     }
 

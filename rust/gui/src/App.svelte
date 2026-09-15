@@ -211,6 +211,7 @@
       {toolGroupFailureCount}
       {toolOutcome}
       forkCurrent={() => thread.currentId && threadLifecycle.fork(thread.currentId, thread.title)}
+      selectPrompt={(prompt) => { composer.input = prompt; document.getElementById("task-input")?.focus(); }}
     />
 
     <Composer

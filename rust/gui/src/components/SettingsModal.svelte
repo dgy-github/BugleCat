@@ -4,6 +4,9 @@
   import ModelCatalogSettings from "./ModelCatalogSettings.svelte";
   import CustomProvidersSettings from "./CustomProvidersSettings.svelte";
   type Settings = {
+    context_capacity_model: string;
+    resolved_context_window: number;
+    context_window_source: string;
     model: string;
     base_url: string;
     vl_model: string;
@@ -312,10 +315,9 @@
           {:else if activeSection === "context"}
             <section class="settings-page"><div class="settings-page-head"><h3>上下文</h3><p>控制长会话何时压缩，以及压缩时保留多少近期信息。</p></div>
               <div class="settings-card">
-                <label class="settings-switch-row"><span><strong>自动裁剪上下文</strong><small>接近上限时压缩历史工具结果和旧消息</small></span><input type="checkbox" bind:checked={settings.context_edit_enabled} /></label>
-                <label><span><strong>字符上限</strong><small>超过后触发上下文整理</small></span><input type="number" min="1" bind:value={settings.context_edit_max_chars} /></label>
-                <label><span><strong>保留最近消息</strong><small>压缩时完整保留的消息数量</small></span><input type="number" min="1" bind:value={settings.context_edit_keep_recent_messages} /></label>
-                <label><span><strong>工具结果上限</strong><small>单条历史工具结果保留字符数</small></span><input type="number" min="1" bind:value={settings.context_edit_max_tool_result_chars} /></label>
+                <label class="settings-switch-row"><span><strong>自动摘要上下文</strong><small>接近预算时归纳历史，保留任务进度和约束</small></span><input type="checkbox" bind:checked={settings.context_edit_enabled} /></label>
+                <div class="settings-callout">模型：{settings.context_capacity_model}<br />上下文容量：{settings.resolved_context_window.toLocaleString()} Token<br />来源：{settings.context_window_source === "provider" ? "当前接口实时模型目录" : settings.context_window_source === "preset" ? "接口未提供容量，使用项目维护的该模型目录" : "容量未知，使用保守回退值（不超过 32,768 Token）"}<br />压缩触发预算：{(settings.resolved_context_window - Math.floor(settings.resolved_context_window / 8)).toLocaleString()} Token</div>
+                <p class="hint">切换模型或接口后自动重新查询。预留 1/8 容量供输出和工具结果使用，近期完整对话保留约剩余可用预算的 1/3，工具调用与结果成组保留。摘要使用当前模型，会产生额外用量。</p>
               </div>
             </section>
           {:else if activeSection === "skills"}

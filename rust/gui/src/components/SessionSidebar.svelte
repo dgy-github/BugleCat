@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { hoverDepth } from "../lib/hover-depth";
   import { buglecatAsset } from "../lib/buglecat-assets";
   import type { DshUiSlotContribution } from "../lib/plugin-controller.svelte";
   type SessionRow = {
@@ -124,7 +125,7 @@
   }
 </script>
 
-<aside class="sidebar" class:collapsed={!sidebarOpen}>
+<aside class="sidebar" class:collapsed={!sidebarOpen} use:hoverDepth={".new-session, .side-brand-mark, .recent-item"}>
   <div class="side-head">
     <span class="side-brand"><img class="side-brand-mark" src={buglecatAsset("avatar", 24)} alt="BugleCat 猫咪图标" /><span>BugleCat</span><small>HARNESS</small></span>
     <button class="side-collapse" onclick={toggleSidebar} title="收起侧边栏" aria-label="收起侧边栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M9 4v16M15.5 9l-3 3 3 3"/></svg></button>

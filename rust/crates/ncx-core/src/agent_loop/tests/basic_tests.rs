@@ -312,15 +312,19 @@ async fn persists_reasoning_on_tool_call_turn() {
 #[tokio::test]
 async fn long_history_is_automatically_compacted_before_the_next_model_call() {
     let ws = tmpdir("automatic_context_compaction");
-    let provider = ScriptedProvider::new(vec![ModelResponse {
+    let (provider, _summary_calls) = ScriptedProvider::new(vec![ModelResponse {
         content: "已承接压缩后的上下文。".into(),
         ..Default::default()
-    }]);
+    }])
+    .with_summary(ModelResponse {
+        content: "已完成 report-0.pdf 等交付物验证；继续最新用户请求。".into(),
+        ..Default::default()
+    });
     let mut loop_ = build(&ws, Box::new(provider));
     for i in 0..20 {
         loop_.session.add_user_text(&format!(
             "旧任务 {i}：生成并验证交付物 {}",
-            "背景".repeat(30)
+            "背景".repeat(3_000)
         ));
         loop_.session.add_assistant(
             &format!("旧任务 {i} 已完成，文件位于 report-{i}.pdf"),
@@ -330,7 +334,7 @@ async fn long_history_is_automatically_compacted_before_the_next_model_call() {
     }
     loop_.context_edit = ContextEditPolicy {
         enabled: true,
-        max_chars: 900,
+        max_chars: 60_000,
         keep_recent_messages: 4,
         max_tool_result_chars: 40,
     };
@@ -342,6 +346,7 @@ async fn long_history_is_automatically_compacted_before_the_next_model_call() {
     let result = loop_.run_turn(json!("继续处理刚才的交付物"), None).await;
 
     assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.final_text, "已承接压缩后的上下文。");
     assert!(
         loop_.session.messages.len() < before,
         "超过阈值后应把压缩结果写回会话，而不是只生成临时发送视图"
@@ -381,14 +386,14 @@ async fn compact_hooks_wrap_persisted_compaction_and_feed_runtime_notes() {
     for i in 0..16 {
         loop_
             .session
-            .add_user_text(&format!("old request {i} {}", "x".repeat(80)));
+            .add_user_text(&format!("old request {i} {}", "x".repeat(8_000)));
         loop_
             .session
             .add_assistant(&format!("old result {i}"), None, "");
     }
     loop_.context_edit = ContextEditPolicy {
         enabled: true,
-        max_chars: 700,
+        max_chars: 60_000,
         keep_recent_messages: 4,
         max_tool_result_chars: 40,
     };

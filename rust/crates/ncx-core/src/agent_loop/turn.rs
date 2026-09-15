@@ -29,6 +29,7 @@ struct TurnState {
     usage: BTreeMap<String, i64>,
     consecutive_empty_responses: usize,
     consecutive_transport_errors: usize,
+    compaction_calls: usize,
 }
 
 impl TurnState {
@@ -78,6 +79,9 @@ pub(super) async fn run(
         .min(agent.task_budget.max_model_calls.max(1));
 
     for iteration in 0..max_model_calls {
+        if iteration + state.compaction_calls >= max_model_calls {
+            return model_budget_result(agent, max_model_calls, state);
+        }
         if is_cancelled(cancel) {
             return interrupted_result(
                 agent,
@@ -91,7 +95,7 @@ pub(super) async fn run(
             .tools
             .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
             .is_some()
-            && agent.session.needs_compaction(&agent.context_edit)
+            && agent.should_compact(&prompt.runtime_notes, &prompt.tool_query)
         {
             let hook_args = json!({
                 "max_chars": agent.context_edit.max_chars,
@@ -111,11 +115,24 @@ pub(super) async fn run(
                 prompt.runtime_notes.push(pre.notes);
             }
             if !pre.blocked {
-                if let Some(safe) = agent
-                    .session
-                    .compact_safely_if_needed(&agent.context_edit, &agent.tools.ctx.workspace)
                 {
-                    let stats = safe.stats;
+                    let (stats, usage) = match agent.compact_context(cancel).await {
+                        Ok(result) => result,
+                        Err(error) => {
+                            if is_cancelled(cancel) {
+                                return interrupted_result(
+                                    agent,
+                                    iteration + 1,
+                                    state,
+                                    tokio::time::Instant::now() >= deadline,
+                                );
+                            }
+                            let text = format!("上下文压缩未完成：{error}");
+                            return state.finish(text, iteration + 1, "compaction_failed");
+                        }
+                    };
+                    add_usage(&mut state.usage, &usage);
+                    state.compaction_calls += 1;
                     let rendered = format!(
                         "chars {} -> {}; compressed_tool_results={}; dropped_messages={}",
                         stats.original_chars,
@@ -135,18 +152,14 @@ pub(super) async fn run(
                     if !post.notes.trim().is_empty() {
                         prompt.runtime_notes.push(post.notes);
                     }
-                    if !safe.conflicts.is_empty() {
-                        agent.tools.ctx.compaction_read_only_recovery.set(true);
-                        prompt.runtime_notes.push(format!(
-                            "压缩一致性校验失败，已进入只读恢复模式：{}。重新读取工作区、git diff、测试结果和最近有效决策；证据不足时暂停并询问用户。",
-                            safe.conflicts.join("；")
-                        ));
-                    }
                     emit(sink, LoopEvent::ContextCompacted(stats));
                 }
             }
         }
 
+        if iteration + state.compaction_calls >= max_model_calls {
+            return model_budget_result(agent, max_model_calls, state);
+        }
         let response =
             match request_model_cancellable(agent, &prompt, iteration, &mut state, sink, cancel)
                 .await
@@ -269,7 +282,12 @@ async fn prepare_prompt(
     agent: &mut AgentLoop,
     user_input: &Value,
 ) -> Result<PromptContext, TurnResult> {
-    agent.use_vision_this_turn = agent.vision_provider.is_some() && has_image_block(user_input);
+    let use_vision = agent.vision_provider.is_some() && has_image_block(user_input);
+    if agent.use_vision_this_turn != use_vision {
+        agent.context_usage.set(None);
+    }
+    agent.use_vision_this_turn = use_vision;
+    agent.resolve_context_window().await;
     let tool_query = user_query_text(user_input);
     let hook = run_matching_hooks(
         &agent.tools.ctx.hooks,
@@ -589,12 +607,12 @@ fn model_budget_result(
 
 fn budget_note(agent: &AgentLoop, model_call: usize, tool_calls_used: usize) -> String {
     format!(
-        "Runtime task budget: model_call {}/{}; tool_calls {}/{}; context_limit_chars {}. Stay within this budget, prefer direct progress, and summarize before asking for more work.",
+        "Runtime task budget: model_call {}/{}; tool_calls {}/{}; context_input_budget_tokens {}. Stay within this budget, prefer direct progress, and summarize before asking for more work.",
         model_call,
         agent.task_budget.max_model_calls,
         tool_calls_used,
         agent.task_budget.max_tool_calls,
-        agent.context_edit.max_chars,
+        agent.compaction_budget(),
     )
 }
 
@@ -606,7 +624,7 @@ fn has_image_block(user_input: &Value) -> bool {
     })
 }
 
-fn user_query_text(user_input: &Value) -> String {
+pub(super) fn user_query_text(user_input: &Value) -> String {
     if let Some(text) = user_input.as_str() {
         return text.to_string();
     }
