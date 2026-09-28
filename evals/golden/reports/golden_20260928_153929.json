@@ -1,0 +1,369 @@
+{
+  "schema": "buglecat.golden.report.v1",
+  "generated_at": "2026-09-28T15:39:29.389062+00:00",
+  "selected_tiers": [
+    "unit"
+  ],
+  "gate": {
+    "executed": 24,
+    "passed": 24,
+    "failed": 0,
+    "skipped": 6,
+    "skipped_critical": 0,
+    "pass_rate": 1.0,
+    "gate_passed": true
+  },
+  "coverage": {
+    "matrix": {
+      "agent_loop": {
+        "passed": 3,
+        "failed": 0,
+        "skipped": 2
+      },
+      "sandbox_guard": {
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0
+      },
+      "orchestrator": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 1
+      },
+      "patch_engine": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 1
+      },
+      "mcp": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "memory_context": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "compaction": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "session": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "provider": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 1
+      },
+      "tools": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "config": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "metrics_honesty": {
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "bench_task": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 1
+      },
+      "self_repair": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "covered_capabilities": [
+      "agent_loop",
+      "bench_task",
+      "compaction",
+      "config",
+      "mcp",
+      "memory_context",
+      "metrics_honesty",
+      "orchestrator",
+      "patch_engine",
+      "provider",
+      "sandbox_guard",
+      "self_repair",
+      "session",
+      "tools"
+    ]
+  },
+  "results": [
+    {
+      "id": "G-LOOP-001",
+      "capability": "agent_loop",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 2.4,
+      "priority": "critical"
+    },
+    {
+      "id": "G-LOOP-002",
+      "capability": "agent_loop",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 2.1,
+      "priority": "critical"
+    },
+    {
+      "id": "G-LOOP-003",
+      "capability": "sandbox_guard",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.5,
+      "priority": "critical"
+    },
+    {
+      "id": "G-STATE-001",
+      "capability": "agent_loop",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 2.3,
+      "priority": "critical"
+    },
+    {
+      "id": "G-ORCH-001",
+      "capability": "orchestrator",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 2.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SANDBOX-001",
+      "capability": "sandbox_guard",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SANDBOX-002",
+      "capability": "sandbox_guard",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SANDBOX-003",
+      "capability": "sandbox_guard",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-PATCH-001",
+      "capability": "patch_engine",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-MCP-001",
+      "capability": "mcp",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-MEM-001",
+      "capability": "memory_context",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.9,
+      "priority": "critical"
+    },
+    {
+      "id": "G-MEM-002",
+      "capability": "memory_context",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 2.3,
+      "priority": "critical"
+    },
+    {
+      "id": "G-COMPACT-001",
+      "capability": "compaction",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.9,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SESSION-001",
+      "capability": "session",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 2.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SESSION-002",
+      "capability": "session",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.8,
+      "priority": "critical"
+    },
+    {
+      "id": "G-PROVIDER-001",
+      "capability": "provider",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 7.2,
+      "priority": "critical"
+    },
+    {
+      "id": "G-PROVIDER-002",
+      "capability": "provider",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.8,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SKILLS-001",
+      "capability": "tools",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.9,
+      "priority": "critical"
+    },
+    {
+      "id": "G-CONFIG-001",
+      "capability": "config",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-EVAL-001",
+      "capability": "metrics_honesty",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-EVAL-002",
+      "capability": "metrics_honesty",
+      "tier": "unit",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 1.3,
+      "priority": "critical"
+    },
+    {
+      "id": "G-BENCH-001",
+      "capability": "bench_task",
+      "tier": "unit",
+      "status": "passed",
+      "seconds": 2.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-SR-001",
+      "capability": "self_repair",
+      "tier": "unit",
+      "status": "passed",
+      "seconds": 0.0,
+      "priority": "critical"
+    },
+    {
+      "id": "G-GEN-001",
+      "capability": "compaction",
+      "tier": "unit",
+      "status": "passed",
+      "seconds": 0.1,
+      "priority": "critical"
+    },
+    {
+      "id": "G-RUST-PATCH-001",
+      "capability": "patch_engine",
+      "tier": "cargo",
+      "status": "skipped",
+      "reason": "tier_not_selected",
+      "priority": "high"
+    },
+    {
+      "id": "G-RUST-CORE-001",
+      "capability": "agent_loop",
+      "tier": "cargo",
+      "status": "skipped",
+      "reason": "tier_not_selected",
+      "priority": "high"
+    },
+    {
+      "id": "G-RUST-CLI-001",
+      "capability": "agent_loop",
+      "tier": "cargo",
+      "status": "skipped",
+      "reason": "tier_not_selected",
+      "priority": "high"
+    },
+    {
+      "id": "G-RUST-PROVIDER-001",
+      "capability": "provider",
+      "tier": "cargo",
+      "status": "skipped",
+      "reason": "tier_not_selected",
+      "priority": "high"
+    },
+    {
+      "id": "G-AGENT-BENCH-001",
+      "capability": "bench_task",
+      "tier": "agent",
+      "status": "skipped",
+      "reason": "tier_not_selected",
+      "priority": "high"
+    },
+    {
+      "id": "G-AGENT-ORCH-001",
+      "capability": "orchestrator",
+      "tier": "agent",
+      "status": "skipped",
+      "reason": "tier_not_selected",
+      "priority": "high"
+    }
+  ]
+}

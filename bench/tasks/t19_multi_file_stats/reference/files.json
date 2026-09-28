@@ -1,0 +1,7 @@
+{
+  "files": {
+    "models.py": "from dataclasses import dataclass\n\n\n@dataclass\nclass Order:\n    order_id: str\n    quantity: int\n    price: float\n\n    def total(self) -> float:\n        return self.quantity * self.price\n",
+    "store.py": "import json\n\nfrom models import Order\n\n\ndef load_orders(path):\n    with open(path, \"r\", encoding=\"utf-8\") as handle:\n        raw = json.load(handle)\n    return [Order(order_id=r[\"order_id\"], quantity=r[\"quantity\"], price=r[\"price\"]) for r in raw]\n\n\ndef total_revenue(orders):\n    return sum(o.total() for o in orders)\n",
+    "report.py": "from store import load_orders, total_revenue\n\n\ndef build_report(path):\n    orders = load_orders(path)\n    return f\"orders={len(orders)} revenue={total_revenue(orders):.2f}\"\n"
+  }
+}

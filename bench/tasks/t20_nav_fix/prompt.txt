@@ -1,0 +1,7 @@
+In this mini-repo, `python cli.py 45` prints `0m45s` but users expect `45s`.
+Likewise `python cli.py 90` must print `1m30s`, `python cli.py 3600` must
+print `1h0m0s`, `python cli.py 60` must print `1m0s`, `python cli.py 0`
+must print `0s`, and `python cli.py 3725` must print `1h2m5s`.
+
+Find where the duration formatting is implemented and fix it in place.
+Do not change the CLI interface.

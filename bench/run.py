@@ -37,7 +37,7 @@ REPORTS = BENCH / "reports"
 NCX = Path(os.environ.get(
     "NCX_FORGE_NCX_BIN", BENCH.parent / "rust" / "target" / "release" / "ncx.exe"
 )).resolve()
-HIDDEN = {"check.py", "prompt.txt"}
+HIDDEN = {"check.py", "prompt.txt", "reference"}
 ALL_AGENTS = ["nanocodex", "nanocodex-orch", "opencode", "claude"]
 DEFAULT_POST_EDIT_TIMEOUT = 15
 DEFAULT_EMPTY_RESPONSE_RETRIES = 2

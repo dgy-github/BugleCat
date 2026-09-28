@@ -1,0 +1,37 @@
+name: eval-gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  golden-gate:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install project
+        run: python -m pip install -e .
+
+      - name: Offline unit tests
+        run: python -m pytest tests -q
+
+      - name: Golden regression gate (unit tier)
+        run: python -m evals.golden.runner --tier unit
+
+      - name: Upload golden report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-report
+          path: evals/golden/reports/
+
+  # cargo / agent tiers need the Rust toolchain and a configured model route;
+  # they stay manual (see evals/golden/README.md) and are not release gates here.

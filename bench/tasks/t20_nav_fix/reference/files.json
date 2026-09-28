@@ -1,0 +1,5 @@
+{
+  "files": {
+    "utils/format.py": "\"\"\"Shared formatting helpers for the order CLI.\"\"\"\n\n\ndef format_duration(seconds: int) -> str:\n    \"\"\"Render a duration in seconds as a compact string like 1h2m5s.\n\n    Contract:\n      - drop higher units that are zero (45 -> \"45s\", 90 -> \"1m30s\")\n      - keep zero-valued lower units when a higher unit is present (60 -> \"1m0s\")\n      - 0 -> \"0s\"\n    \"\"\"\n    if seconds < 0:\n        raise ValueError(\"seconds must be non-negative\")\n    hours = seconds // 3600\n    minutes = (seconds % 3600) // 60\n    rest = seconds % 60\n    if hours:\n        return f\"{hours}h{minutes}m{rest}s\"\n    if minutes:\n        return f\"{minutes}m{rest}s\"\n    return f\"{rest}s\"\n"
+  }
+}

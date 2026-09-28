@@ -1,0 +1,19 @@
+Create a tiny order-stats package with THREE cooperating files in the
+workspace root. All files are required; they must work together.
+
+1. models.py — define a dataclass `Order` with fields:
+   order_id (str), quantity (int), price (float).
+   Give it a method `total()` returning quantity * price (float).
+
+2. store.py — define `load_orders(path)` that reads a JSON file containing
+   a list of order objects (keys: order_id, quantity, price) and returns a
+   list of Order instances. Also define `total_revenue(orders)` returning
+   the sum of order.total() over the list (0.0 for an empty list).
+
+3. report.py — define `build_report(path)` that loads orders from the JSON
+   file and returns EXACTLY this one-line string:
+   "orders=<N> revenue=<R>"
+   where <N> is the order count and <R> is the total revenue formatted to
+   two decimal places (e.g. "orders=3 revenue=63.50").
+
+The grader will create its own JSON file and call build_report on it.

@@ -1,3 +1,4 @@
-The file buggy.py has a median(nums) function that is wrong for even-length lists.
-Fix it in place so that median([1,2,3,4]) == 2.5 and median([1,2,3]) == 2.
-Edit the existing file.
+The file buggy.py has a median(nums) function that is wrong.
+It must return the median for ANY input order (sorted or unsorted):
+median([1,2,3,4]) == 2.5, median([1,2,3]) == 2, and median([3,1,2]) == 2.
+Fix it in place. Edit the existing file.

@@ -1,0 +1,42 @@
+{
+  "schema": "buglecat.golden.v1",
+  "description": "BugleCat 金标回归评测集：按能力面组织的分层用例。tier=unit 可离线确定性执行；cargo/agent 层显式选择后执行，未选择时记 skipped（critical 用例被 skip 即门禁失败，SKIP 不等于 PASS）。",
+  "tiers": ["unit", "cargo", "agent"],
+  "capabilities": [
+    "agent_loop", "sandbox_guard", "patch_engine", "tools", "mcp",
+    "memory_context", "session", "provider", "config", "orchestrator",
+    "bench_task", "self_repair", "compaction", "metrics_honesty"
+  ],
+  "cases": [
+    {"id": "G-LOOP-001", "title": "Agent 主循环（模型→工具→回填）", "capability": "agent_loop", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_loop.py"},
+    {"id": "G-LOOP-002", "title": "流式输出契约", "capability": "agent_loop", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_streaming.py"},
+    {"id": "G-LOOP-003", "title": "逐步审批流", "capability": "sandbox_guard", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_step_approval.py"},
+    {"id": "G-STATE-001", "title": "状态机与终态映射", "capability": "agent_loop", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_state_store.py"},
+    {"id": "G-ORCH-001", "title": "编排器：主/快模型路由与 worker 晋升", "capability": "orchestrator", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_orchestrator.py"},
+    {"id": "G-SANDBOX-001", "title": "沙箱策略（只读/工作区写/全权限）", "capability": "sandbox_guard", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_sandbox.py"},
+    {"id": "G-SANDBOX-002", "title": "补丁写入审批", "capability": "sandbox_guard", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_apply_patch_approval.py"},
+    {"id": "G-SANDBOX-003", "title": "shell 只读约束", "capability": "sandbox_guard", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_shell_readonly.py"},
+    {"id": "G-PATCH-001", "title": "V4A 补丁引擎（上下文锚定/原子拒绝）", "capability": "patch_engine", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_patch.py"},
+    {"id": "G-MCP-001", "title": "MCP 客户端：协议握手失败即关闭、工具集原子重载", "capability": "mcp", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_mcp.py"},
+    {"id": "G-MEM-001", "title": "语义记忆读写与晋升安全", "capability": "memory_context", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_memory.py"},
+    {"id": "G-MEM-002", "title": "事实合并幂等", "capability": "memory_context", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_fact_merge.py"},
+    {"id": "G-COMPACT-001", "title": "上下文压缩契约", "capability": "compaction", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_compaction.py"},
+    {"id": "G-SESSION-001", "title": "会话恢复", "capability": "session", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_resume.py"},
+    {"id": "G-SESSION-002", "title": "会话分叉", "capability": "session", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_session_fork.py"},
+    {"id": "G-PROVIDER-001", "title": "Provider 流式与诊断脱敏", "capability": "provider", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_deepseek_provider.py"},
+    {"id": "G-PROVIDER-002", "title": "计费核算（未知模型不编造成本）", "capability": "provider", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_pricing.py"},
+    {"id": "G-SKILLS-001", "title": "技能系统", "capability": "tools", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_skills.py"},
+    {"id": "G-CONFIG-001", "title": "配置解析与预算字段", "capability": "config", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_config.py"},
+    {"id": "G-EVAL-001", "title": "评测诚实性：空轨迹必须得 None 而非 0 分", "capability": "metrics_honesty", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_eval_harness.py"},
+    {"id": "G-EVAL-002", "title": "评分器防作弊：禁止零测试通过", "capability": "metrics_honesty", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_self_repair_suite.py"},
+    {"id": "G-BENCH-001", "title": "基准任务库有效性：21 题全部通过 种子失败+参考解答通过+非vacuous 校验", "capability": "bench_task", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "bench_tasks"},
+    {"id": "G-SR-001", "title": "自修复用例锚点有效性：6 案例注入点在源码中唯一", "capability": "self_repair", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "self_repair_anchors"},
+    {"id": "G-GEN-001", "title": "压缩夹具生成器确定性（含已知损伤注入）", "capability": "compaction", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "harness_generate"},
+    {"id": "G-RUST-PATCH-001", "title": "Rust 补丁引擎测试（ncx-tools patch）", "capability": "patch_engine", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-tools", "patch::"]},
+    {"id": "G-RUST-CORE-001", "title": "Rust Python 编译门禁", "capability": "agent_loop", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "python_check"]},
+    {"id": "G-RUST-CLI-001", "title": "Rust 退出码映射（未完成回合必须失败）", "capability": "agent_loop", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-cli", "incomplete_turns"]},
+    {"id": "G-RUST-PROVIDER-001", "title": "Rust 诊断脱敏", "capability": "provider", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-provider", "self_repair_diagnostic"]},
+    {"id": "G-AGENT-BENCH-001", "title": "Agent 全量基准（18+2 题，需 ncx.exe 与模型 Key）", "capability": "bench_task", "tier": "agent", "priority": "high", "kind": "agent", "args": ["--agent", "nanocodex", "--repeats", "1", "--timeout", "240"]},
+    {"id": "G-AGENT-ORCH-001", "title": "编排模式基准（需 ncx.exe 与模型 Key）", "capability": "orchestrator", "tier": "agent", "priority": "high", "kind": "agent", "args": ["--agent", "nanocodex-orch", "--repeats", "1", "--timeout", "240"]}
+  ]
+}
