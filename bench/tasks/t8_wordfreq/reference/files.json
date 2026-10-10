@@ -1,0 +1,5 @@
+{
+  "files": {
+    "wordfreq.py": "from collections import Counter\n\n\ndef _words(text):\n    word = []\n    for ch in text:\n        if ch.isalnum():\n            word.append(ch.lower())\n        elif word:\n            yield \"\".join(word)\n            word = []\n    if word:\n        yield \"\".join(word)\n\n\ndef top_n(text, n):\n    if n <= 0:\n        return []\n    counts = Counter(_words(text))\n    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))\n    return ranked[:n]\n"
+  }
+}

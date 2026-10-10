@@ -18,6 +18,10 @@ pub enum SourceKind {
     /// A retry/substitution chain, so a result produced by a fallback tool is
     /// never mistaken for a result from the tool the model actually called.
     ToolRecovery,
+    /// Evidence from a check the host ran itself (e.g. post-edit syntax
+    /// verification). Recorded as provenance rather than as an assistant
+    /// message, so the model never sees it as something it said.
+    RuntimeVerification,
     SessionSummary,
     ProjectMemory,
     DynamicContext,
@@ -45,6 +49,21 @@ pub struct SourceRecord {
     /// checked against the full record in the session log.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeProvenance {
+    #[serde(default)]
+    pub workspace: String,
+    pub checker: String,
+    pub target_paths: Vec<String>,
+    pub content_hashes: std::collections::BTreeMap<String, String>,
+    pub scope: String,
+    pub source_ref: String,
 }
 
 impl Default for SourceRecord {
@@ -61,6 +80,8 @@ impl Default for SourceRecord {
             tool_name: None,
             status: None,
             content_hash: String::new(),
+            workspace: None,
+            runtime: None,
         }
     }
 }
@@ -119,6 +140,9 @@ impl SourceTraceStore {
 }
 
 pub fn retrieve(mut records: Vec<SourceRecord>, query: &str, max: usize) -> Vec<RetrievedSource> {
+    // Old prototype observations were DynamicContext records. Keep them as
+    // diagnostics, but never recall them as facts after upgrading.
+    records.retain(|r| r.status.as_deref() != Some("jev_shadow"));
     let words = terms(query);
     let query_lower = query.to_lowercase();
     records.retain(|record| {

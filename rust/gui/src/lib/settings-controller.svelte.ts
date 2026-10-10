@@ -83,6 +83,7 @@ export class SettingsController {
       if (pluginResult.status === "rejected") unavailable.push("插件信息");
       if (unavailable.length) this.notify(`${unavailable.join("、")}暂时不可用，其他设置仍可正常修改`);
       if (settings.has_yunmo_api_key) await this.refreshYunmo(false);
+      await this.refreshOfficial(false);
     } catch (error) { this.notify(`设置加载失败：${error}`); }
   };
 
@@ -91,6 +92,17 @@ export class SettingsController {
     try { this.catalog = await invoke<ModelCatalogResponse>("refresh_openrouter_models"); }
     catch (error) { this.notify(`OpenRouter 模型目录刷新失败：${error}`); }
     finally { this.catalogRefreshing = false; }
+  };
+
+  refreshOfficial = async (notifyError = true): Promise<void> => {
+    try {
+      this.catalog = await invoke<ModelCatalogResponse>("refresh_official_models");
+      const settings = this.settings ?? await appServerRequest<Settings>({ method: "settingsRead" });
+      this.settings = settings;
+      if (settings.available_models.length > 0) this.modelApplied(settings.model, settings.available_models);
+    } catch (error) {
+      if (notifyError) this.notify(`官方模型目录刷新失败：${error}`);
+    }
   };
 
   refreshYunmo = async (notifyError = true): Promise<void> => {
@@ -110,11 +122,15 @@ export class SettingsController {
 
   refreshRuntimeModels = async (): Promise<void> => {
     try {
+      await this.refreshOfficial(false);
       const settings = await appServerRequest<Settings>({ method: "settingsRead" });
-      if (!settings.has_yunmo_api_key || !settings.base_url.includes("api.yunmo-ai.com")) return;
-      const catalog = await invoke<ModelCatalogResponse>("refresh_yunmo_models");
-      const models = catalog.providers.find((provider) => provider.id === "yunmo")?.models.map((model) => model.model_id) ?? [];
-      if (models.length > 0) this.modelApplied(settings.model, models);
+      if (settings.has_yunmo_api_key && settings.base_url.includes("api.yunmo-ai.com")) {
+        const catalog = await invoke<ModelCatalogResponse>("refresh_yunmo_models");
+        const models = catalog.providers.find((provider) => provider.id === "yunmo")?.models.map((model) => model.model_id) ?? [];
+        if (models.length > 0) this.modelApplied(settings.model, models);
+        return;
+      }
+      if (settings.available_models.length > 0) this.modelApplied(settings.model, settings.available_models);
     } catch { /* Startup keeps the persisted list when the remote catalog is unavailable. */ }
   };
 

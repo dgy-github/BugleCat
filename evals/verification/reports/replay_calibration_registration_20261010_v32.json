@@ -1,0 +1,38 @@
+{
+  "schema": "buglecat.verification.calibration-registration.v1",
+  "dataset_hash": "9e49f01febf805d0ae9ec653b117e76b0c6d88e1088bbed6b6f7fb0908f04d7f",
+  "protocol": {
+    "schema": "buglecat.verification.calibration-protocol.v1",
+    "model": "jev-1.13.0",
+    "policy_version": "host-rules-v3.2",
+    "template_version": "jev-single-claim-v2",
+    "categories": [
+      "semantic"
+    ],
+    "threshold_grid": [
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      0.95,
+      0.975,
+      0.99,
+      1.0
+    ],
+    "max_false_block_rate": 0.02,
+    "confidence": 0.95,
+    "min_supported": 150,
+    "min_unsupported": 50,
+    "min_paired_improvements": 5,
+    "purpose": "Frozen source-bound development probe, not formal calibration or production authorization",
+    "group_n": 1,
+    "maximum_new_attempts": 1,
+    "automatic_retries": 0,
+    "known_limitations": "author-exposed original development reply; one positive group and zero negative groups; original framework factual verdict unavailable; old fixture before snapshot missing and host coverage unknown",
+    "holdout_allowed": false
+  },
+  "protocol_hash": "f7f0c90f43ad4f6ac18a7fa70ae4f2c607e71e5b8ae082e7d4aca8ccfe4710d5",
+  "declaration": "Must be frozen before viewing probabilities; hash is not proof of timing.",
+  "artifact_hash": "a09e1dd870b1d122be7ef881616fcac6c8f86e46fd7ce74f0ae5f250469b6311"
+}

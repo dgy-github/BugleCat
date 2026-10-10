@@ -1,0 +1,5 @@
+{
+  "files": {
+    "intervals.py": "def merge(intervals):\n    merged = []\n    for start, end in sorted(intervals, key=lambda iv: iv[0]):\n        if merged and start <= merged[-1][1]:\n            merged[-1][1] = max(merged[-1][1], end)\n        else:\n            merged.append([start, end])\n    return merged\n"
+  }
+}

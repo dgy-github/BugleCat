@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "no-cycle-check",
+      "why": "cycle silently returns a partial order",
+      "file": "toposort.py",
+      "old": "if len(order) != len(graph):",
+      "new": "if False:"
+    }
+  ]
+}

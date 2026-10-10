@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "unsorted",
+      "why": "forgets to sort",
+      "file": "buggy.py",
+      "old": "s = sorted(nums)",
+      "new": "s = list(nums)"
+    }
+  ]
+}

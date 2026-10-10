@@ -29,14 +29,21 @@
     {"id": "G-CONFIG-001", "title": "配置解析与预算字段", "capability": "config", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_config.py"},
     {"id": "G-EVAL-001", "title": "评测诚实性：空轨迹必须得 None 而非 0 分", "capability": "metrics_honesty", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_eval_harness.py"},
     {"id": "G-EVAL-002", "title": "评分器防作弊：禁止零测试通过", "capability": "metrics_honesty", "tier": "unit", "priority": "critical", "kind": "pytest", "target": "tests/test_self_repair_suite.py"},
-    {"id": "G-BENCH-001", "title": "基准任务库有效性：21 题全部通过 种子失败+参考解答通过+非vacuous 校验", "capability": "bench_task", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "bench_tasks"},
+    {"id": "G-BENCH-001", "title": "基准任务库有效性：20 题全部通过 种子失败+参考解答通过（参考解必备）+非vacuous 校验", "capability": "bench_task", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "bench_tasks"},
     {"id": "G-SR-001", "title": "自修复用例锚点有效性：6 案例注入点在源码中唯一", "capability": "self_repair", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "self_repair_anchors"},
     {"id": "G-GEN-001", "title": "压缩夹具生成器确定性（含已知损伤注入）", "capability": "compaction", "tier": "unit", "priority": "critical", "kind": "builtin", "validator": "harness_generate"},
     {"id": "G-RUST-PATCH-001", "title": "Rust 补丁引擎测试（ncx-tools patch）", "capability": "patch_engine", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-tools", "patch::"]},
-    {"id": "G-RUST-CORE-001", "title": "Rust Python 编译门禁", "capability": "agent_loop", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "python_check"]},
+    {"id": "G-RUST-CORE-001", "title": "Rust Python 编译门禁", "capability": "agent_loop", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "python"]},
     {"id": "G-RUST-CLI-001", "title": "Rust 退出码映射（未完成回合必须失败）", "capability": "agent_loop", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-cli", "incomplete_turns"]},
     {"id": "G-RUST-PROVIDER-001", "title": "Rust 诊断脱敏", "capability": "provider", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-provider", "self_repair_diagnostic"]},
-    {"id": "G-AGENT-BENCH-001", "title": "Agent 全量基准（18+2 题，需 ncx.exe 与模型 Key）", "capability": "bench_task", "tier": "agent", "priority": "high", "kind": "agent", "args": ["--agent", "nanocodex", "--repeats", "1", "--timeout", "240"]},
-    {"id": "G-AGENT-ORCH-001", "title": "编排模式基准（需 ncx.exe 与模型 Key）", "capability": "orchestrator", "tier": "agent", "priority": "high", "kind": "agent", "args": ["--agent", "nanocodex-orch", "--repeats", "1", "--timeout", "240"]}
+    {"id": "G-RUST-STORE-001", "title": "Rust SQLite 事实事件存储（幂等写入/Unknown 状态）", "capability": "memory_context", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "context_store::"]},
+    {"id": "G-RUST-RETRIEVAL-001", "title": "Rust 分层召回（权威排序/配额/去重）", "capability": "memory_context", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "context_retrieval::"]},
+    {"id": "G-RUST-MEMIDX-001", "title": "Rust 记忆索引（摘要不得晋升/指令撤回）", "capability": "memory_context", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "memory_index::"]},
+    {"id": "G-RUST-COMPACT-001", "title": "Rust 分块压缩（预算/引用校验/失败不落盘）", "capability": "compaction", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "semantic_compaction::"]},
+    {"id": "G-RUST-RECOVERY-001", "title": "Rust 工具恢复（写指纹/拒绝双写/不绕过拒绝）", "capability": "tools", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "tool_recovery::"]},
+    {"id": "G-RUST-STATE-001", "title": "Rust Agent 状态机（终态/Unknown 不可直达完成）", "capability": "agent_loop", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "agent_state::"]},
+    {"id": "G-RUST-INSTR-001", "title": "Rust 指令有效性与冲突检测", "capability": "memory_context", "tier": "cargo", "priority": "high", "kind": "cargo", "args": ["test", "-p", "ncx-core", "--lib", "instruction_state::"]},
+    {"id": "G-AGENT-BENCH-001", "title": "Agent 全量基准（18+2 题，需 ncx.exe 与模型 Key）", "capability": "bench_task", "tier": "agent", "priority": "high", "kind": "agent", "args": ["--agent", "nanocodex", "--repeats", "3", "--timeout", "240", "--min-pass-rate", "0.45", "--gate-metric", "clean"]},
+    {"id": "G-AGENT-ORCH-001", "title": "编排模式基准（需 ncx.exe 与模型 Key）", "capability": "orchestrator", "tier": "agent", "priority": "high", "kind": "agent", "args": ["--agent", "nanocodex-orch", "--repeats", "3", "--timeout", "240", "--min-pass-rate", "0.45", "--gate-metric", "clean"]}
   ]
 }

@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "no-tiebreak",
+      "why": "ties keep first-seen order instead of alphabetical",
+      "file": "wordfreq.py",
+      "old": "key=lambda kv: (-kv[1], kv[0])",
+      "new": "key=lambda kv: -kv[1]"
+    }
+  ]
+}

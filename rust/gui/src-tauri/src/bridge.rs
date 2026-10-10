@@ -559,6 +559,11 @@ pub enum UiEvent {
         needs_workspace: bool,
     },
     /// A streamed chunk of assistant text (append to the in-progress bubble).
+    Verification {
+        session_id: String,
+        status: String,
+        candidate_hash: String,
+    },
     AssistantDelta {
         session_id: String,
         text: String,
@@ -663,6 +668,8 @@ pub struct UiMsg {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub confirmed_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<String>,
 }
 
 pub(crate) fn emit(app: &AppHandle, ev: UiEvent) {
@@ -756,6 +763,17 @@ fn make_sink(
     let mut latest_tool_call = None;
     Box::new(move |ev: LoopEvent| {
         let (ui, item) = match ev {
+            LoopEvent::Verification {
+                status,
+                candidate_hash,
+            } => (
+                UiEvent::Verification {
+                    session_id: session_id.clone(),
+                    status,
+                    candidate_hash,
+                },
+                None,
+            ),
             LoopEvent::AssistantDelta(text) => (
                 UiEvent::AssistantDelta {
                     session_id: session_id.clone(),
@@ -1544,7 +1562,11 @@ fn protocol_thread_ui(
     let ResponsePayload::Thread(thread) = outcome.response.payload else {
         return None;
     };
-    Some(snapshot_to_ui(&protocol_thread_messages(&thread, true)))
+    let mut messages = snapshot_to_ui(&protocol_thread_messages(&thread, true));
+    let log = session_log_path(Path::new(&thread.metadata.workspace), session_id)
+        .with_extension("verification.jsonl");
+    restore_verification(&mut messages, &log, session_id);
+    Some(messages)
 }
 
 fn latest_protocol_thread_seed(
@@ -2946,6 +2968,7 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
                         text: "较早的会话内容已自动压缩，关键要求和完成结果已保留。".into(),
                         model: None,
                         confirmed_model: None,
+                        verification: None,
                     });
                     continue;
                 }
@@ -2955,6 +2978,7 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
                         text: content,
                         model: None,
                         confirmed_model: None,
+                        verification: None,
                     });
                     saw_user = true;
                 }
@@ -2972,6 +2996,7 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
                             .get("_ncx_confirmed_model")
                             .and_then(Value::as_str)
                             .map(str::to_string),
+                        verification: None,
                     });
                 }
             }
@@ -2993,6 +3018,7 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
                             text: format!("{name}\n{url}"),
                             model: None,
                             confirmed_model: None,
+                            verification: None,
                         });
                     }
                 }
@@ -3002,6 +3028,36 @@ fn snapshot_to_ui(messages: &[Value]) -> Vec<UiMsg> {
     }
     flush_final(&mut out, &mut final_assistant);
     out
+}
+
+fn restore_verification(messages: &mut [UiMsg], path: &Path, session_id: &str) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let records: Vec<Value> = text
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    for message in messages.iter_mut().filter(|m| m.role == "assistant") {
+        let hash = ncx_core::context_trace::content_hash(&message.text);
+        let record = records.iter().rev().find(|r| {
+            r["schema"] == "buglecat.verification.record.v2"
+                && r["session_id"] == session_id
+                && r["result"]["candidate_hash"] == hash
+        });
+        if let Some(record) = record {
+            // A historical judgment says nothing about files after restart.
+            // Restore its existence without manufacturing a current Pass badge.
+            message.verification = Some(
+                if record["result"]["persistence_status"] == "recorded" {
+                    "historical"
+                } else {
+                    "fault"
+                }
+                .into(),
+            );
+        }
+    }
 }
 
 fn snapshot_text_content(content: Option<&Value>) -> String {
@@ -3141,6 +3197,47 @@ fn base64_encode(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verification_history_never_manufactures_current_pass_or_legacy_labels() {
+        let (_, root) = protocol_server("verification-history");
+        let path = root.join("verification.jsonl");
+        let record = json!({"schema":"buglecat.verification.record.v2", "session_id":"session",
+            "result":{"candidate_hash":ncx_core::context_trace::content_hash("original"),
+                "verdict":"pass","persistence_status":"recorded"}});
+        std::fs::write(&path, format!("malformed\n{record}\n")).unwrap();
+        let mut visible = snapshot_to_ui(&[
+            json!({"role":"user","content":"first"}),
+            json!({"role":"assistant","content":"original"}),
+            json!({"role":"user","content":"second"}),
+            json!({"role":"assistant","content":"changed"}),
+        ]);
+        restore_verification(&mut visible, &path, "session");
+        assert_eq!(visible[1].verification.as_deref(), Some("historical"));
+        assert!(visible[3].verification.is_none());
+        let mut foreign = snapshot_to_ui(&[
+            json!({"role":"user","content":"first"}),
+            json!({"role":"assistant","content":"original"}),
+        ]);
+        restore_verification(&mut foreign, &path, "other-session");
+        assert!(foreign[1].verification.is_none());
+        std::fs::write(&path, "{\"schema\":\"buglecat.verification.shadow.v1\"}\n").unwrap();
+        restore_verification(&mut foreign, &path, "session");
+        assert!(foreign[1].verification.is_none());
+    }
+
+    #[test]
+    fn verification_event_is_session_bound_and_contains_no_probability_badge() {
+        let value = serde_json::to_value(UiEvent::Verification {
+            session_id: "exact-session".into(),
+            status: "unverified".into(),
+            candidate_hash: "hash".into(),
+        })
+        .unwrap();
+        assert_eq!(value["session_id"], "exact-session");
+        assert_eq!(value["kind"], "verification");
+        assert!(value.get("probability").is_none());
+    }
     use ncx_core::{Skill, Tool};
     use ncx_sandbox::WORKSPACE_WRITE;
 
@@ -3741,7 +3838,9 @@ mod tests {
         assert!(SYSTEM_PROMPT
             .contains("Accuracy, action, and verification always come before role-play"));
         assert!(SYSTEM_PROMPT.contains("never add it to errors, warnings"));
-        assert!(SYSTEM_PROMPT.contains("After every file edit, verify that the requested file exists"));
+        assert!(
+            SYSTEM_PROMPT.contains("After every file edit, verify that the requested file exists")
+        );
         assert!(SYSTEM_PROMPT.contains("Do not claim completion until the check passes"));
         assert!(SYSTEM_PROMPT.contains("create or edit that exact path"));
         assert!(SYSTEM_PROMPT.contains("Run every visible example"));

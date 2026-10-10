@@ -7,7 +7,7 @@
   type ReasoningMsg = { role: "reasoning"; text: string; settled: boolean };
   type Message =
     | { role: "user"; text: string; images?: string[] }
-    | { role: "assistant" | "note" | "compact"; text: string }
+    | { role: "assistant" | "note" | "compact"; text: string; model?: string; confirmedModel?: string; verification?: string }
     | { role: "orchestration"; stage: string; text: string }
     | { role: "orchestrator_activity"; worker: number; tool: string; phase: "started" | "finished"; failure?: string }
     | { role: "artifact"; kind: "image" | "video" | "file"; name: string; url: string }
@@ -82,6 +82,20 @@
     return [...new Set(matches.map((path) => path.trim()))];
   }
 
+  function visibleAssistantText(text: string): string {
+    if (/^(?:\[error\]\s*)?HTTP 400\s*\|/.test(text) && text.includes('"event":"provider_request"')) {
+      return "模型服务拒绝了本次请求（HTTP 400，请求格式或参数无效）。当前会话已保留，请重试本轮。";
+    }
+    const compact = [...text.slice(0, 1_024)]
+      .filter((ch) => !/\s/.test(ch) && ch !== "|" && ch !== "｜")
+      .join("");
+    const marker = compact.indexOf("<DSMLcalls>");
+    if (marker >= 0 && marker <= 8 && compact.includes("<DSMLinvokename=")) {
+      return "这条历史回答包含文本形式的工具调用，命令并未执行。请重新发送请求。";
+    }
+    return text;
+  }
+
   function openLocalArtifact(path: string) {
     void invoke("open_local_artifact", { path });
   }
@@ -93,8 +107,12 @@
     return "neutral";
   }
 
+  function verificationLabel(status: string): string {
+    return ({ draft: "草稿", checking: "核验中…", passed: "规则核验通过", unverified: "未验证", fault: "核验记录故障", historical: "有历史核验记录 · 当前未验证" } as Record<string, string>)[status] || "未验证";
+  }
+
   $effect(() => {
-    const paths = messages.flatMap((message) => message.role === "assistant" ? localArtifacts(message.text) : message.role === "user" ? (message.images ?? []) : []);
+    const paths = messages.flatMap((message) => message.role === "assistant" ? localArtifacts(visibleAssistantText(message.text)) : message.role === "user" ? (message.images ?? []) : []);
     for (const path of paths) {
       if (Object.prototype.hasOwnProperty.call(localPreviews, path)) continue;
       localPreviews = { ...localPreviews, [path]: null };
@@ -134,7 +152,7 @@
         <div class="trajectory-row" data-role={message.role}>
           <span class="trajectory-index">{String(index + 1).padStart(2, "0")}</span>
           <span class="trajectory-kind">{message.role === "user" ? "用户" : message.role === "assistant" ? "回答" : message.role === "reasoning" ? "思考" : message.role === "tool_group" ? "工具" : message.role === "artifact" ? "产物" : message.role === "compact" ? "压缩" : message.role === "orchestration" ? "编排" : message.role === "orchestrator_activity" ? `W${message.worker}` : "状态"}</span>
-          <span class="trajectory-summary">{message.role === "tool_group" ? `${message.tools.map((tool) => tool.name).join(", ")} · ${message.settled ? "已完成" : "执行中"}` : message.role === "artifact" ? message.name : message.role === "orchestrator_activity" ? `${message.tool} · ${message.phase === "started" ? "执行中" : message.failure ? `失败 (${message.failure})` : "完成"}` : message.text.split("\n")[0]?.slice(0, 160)}</span>
+          <span class="trajectory-summary">{message.role === "tool_group" ? `${message.tools.map((tool) => tool.name).join(", ")} · ${message.settled ? "已完成" : "执行中"}` : message.role === "artifact" ? message.name : message.role === "orchestrator_activity" ? `${message.tool} · ${message.phase === "started" ? "执行中" : message.failure ? `失败 (${message.failure})` : "完成"}` : (message.role === "assistant" || message.role === "note" ? visibleAssistantText(message.text) : message.text).split("\n")[0]?.slice(0, 160)}</span>
         </div>
       {/each}
     </div>
@@ -153,8 +171,11 @@
         <div class="msg assistant"><img class="message-cat" src={buglecatAsset("avatar", 32)} alt="妙脆角猫咪" />
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="bubble md" onclick={openRenderedLink}>{@html renderMarkdown(message.text)}</div>
+          <div class="bubble md" onclick={openRenderedLink}>{@html renderMarkdown(visibleAssistantText(message.text))}</div>
         </div>
+        {#if message.verification}
+          <div class="assistant-model" role="status" aria-atomic="true" title="校验状态独立于任务完成；模型概率不代表事实正确率">{verificationLabel(message.verification)}</div>
+        {/if}
         {#if message.confirmedModel && message.model && message.confirmedModel !== message.model}
           <div class="assistant-model mismatch" title="API 响应的 model 字段与请求值不一致；该字段不证明中转站上游的内部模型">请求 {message.model} → 响应字段 {message.confirmedModel}</div>
         {:else if message.confirmedModel}
@@ -162,7 +183,7 @@
         {:else if message.model}
           <div class="assistant-model" title="服务端未返回 model 字段，本条仅显示请求型号">请求模型 · {message.model}</div>
         {/if}
-        {#each localArtifacts(message.text) as path}
+        {#each localArtifacts(visibleAssistantText(message.text)) as path}
           <button class="local-artifact-card" class:has-preview={Boolean(localPreviews[path])} onclick={() => openLocalArtifact(path)} title={`打开 ${path}`}>
             {#if localPreviews[path]}<img src={localPreviews[path] || ""} alt={path.split(/[\\/]/).pop() || "生成图片"} />{:else}<span class="local-artifact-icon" aria-hidden="true">▧</span>{/if}
             <span class="local-artifact-copy"><strong>{path.split(/[\\/]/).pop()}</strong><code>{path}</code></span><span aria-hidden="true">↗</span>
@@ -170,7 +191,7 @@
         {/each}
         {#if index !== streamingIdx}
           <div class="message-actions assistant-actions">
-            <button onclick={() => copyMessage(message.text, index)} title="复制回答">{copiedIndex === index ? "✓" : "▢"}</button>
+            <button onclick={() => copyMessage(visibleAssistantText(message.text), index)} title="复制回答">{copiedIndex === index ? "✓" : "▢"}</button>
             <button class:on={feedback[index] === "good"} onclick={() => toggleFeedback(index, "good")} title="回答有帮助">♡</button>
             <button class:on={feedback[index] === "bad"} onclick={() => toggleFeedback(index, "bad")} title="回答需改进">♧</button>
             {#if index === lastAssistantIndex}<button onclick={forkCurrent} disabled={busy} title={busy ? "执行完成后可从这里分叉" : "从这条回答分叉新会话"}>⑂</button>{/if}
@@ -178,7 +199,7 @@
         {/if}
       </div>
     {:else if message.role === "note"}
-      <div class="msg note {noteTone(message.text)}">{message.text}</div>
+      <div class="msg note {noteTone(visibleAssistantText(message.text))}">{visibleAssistantText(message.text)}</div>
     {:else if message.role === "compact"}
       <div class="msg compact"><span aria-hidden="true">◇</span>{message.text}</div>
     {:else if message.role === "orchestration"}

@@ -1,0 +1,61 @@
+{
+  "schema": "buglecat.verification.annotation-calibration-status.v1",
+  "date": "2026-10-10",
+  "kind": "execution status, not effect certification",
+  "annotation": {
+    "queue": "evals/verification/reports/review_queue_20261010_r2.json",
+    "template": "evals/verification/reports/human_review_template_20261010_r2.json",
+    "real_candidate_n": 11,
+    "task_group_n": 3,
+    "source_file_n": 8,
+    "reviewed_completion_label_n": 0,
+    "status": "pending_independent_review",
+    "all_split": "development",
+    "raw_prose_commands_exported": false,
+    "scores_visible_to_reviewer": false
+  },
+  "calibration": {
+    "report": "evals/verification/reports/calibration_development_result_20261010_r2.json",
+    "status": "development_rehearsal_only_gate_failed",
+    "adapted_legacy_case_n": 18,
+    "semantic_case_n": 2,
+    "supported_label_n": 0,
+    "unsupported_label_n": 0,
+    "author_unknown_label_n": 2,
+    "exploratory_grid_tie_candidate": 1.0,
+    "certified_threshold": null,
+    "original_framework_A": "unavailable",
+    "runtime": "Python v1 fixture baseline; not final Rust host-rules-v3.1",
+    "request_hashes": "derived local fixture hashes; historical remote hashes unrecorded"
+  },
+  "holdout": {
+    "status": "not_run",
+    "independent_case_n": 0,
+    "attempted_guard_check": "development calibration cannot open holdout",
+    "guard_exit_code": 1,
+    "holdout_probabilities_read": false,
+    "receipt_created_by_evaluation": false,
+    "reason": "no fresh independently reviewed grouped data and no qualified calibrated threshold",
+    "do_not_confuse": "this status report is not an evaluation receipt"
+  },
+  "verification": {
+    "pytest_passed": 91,
+    "pytest_failed": 0,
+    "ruff": "passed",
+    "tooling": "register/calibrate/one-time holdout; local review queue/import; legacy development-only adapter"
+  },
+  "budget": {
+    "new_jev_attempts": 0,
+    "new_main_model_attempts": 0,
+    "cumulative_jev_attempts": 26,
+    "authorized_first_batch_max": 30,
+    "remaining_first_batch": 4,
+    "proposed_next_batch": "25 calibration groups + 25 holdout groups, <=1 Jev each, <=50 additional attempts, no automatic retries",
+    "new_batch_authorized": false,
+    "feasibility": "25 calibration groups cannot pass the declared 150-supported/50-unsupported gate; the reserved 25 holdout calls must remain unspent until a qualified calibration exists",
+    "cost": null
+  },
+  "production_authorized": false,
+  "production_categories": [],
+  "fresh_labels_and_budget_required_before_live_calls": true
+}

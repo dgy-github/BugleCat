@@ -9,6 +9,7 @@ export type UserQuestion = { session_id: string; id: number; question: string; o
 export type UiEvent =
   | { kind: "ready"; model: string; provider_id: string; provider_protocol: string; sandbox: string; workspace: string; session_id: string; models: string[]; permission_mode: string; reasoning_effort: string; needs_workspace: boolean }
   | { kind: "assistant_delta"; session_id: string; text: string }
+  | { kind: "verification"; session_id: string; status: string; candidate_hash: string }
   | { kind: "reasoning_delta"; session_id: string; text: string }
   | { kind: "context_compacted"; session_id: string; original_chars: number; edited_chars: number; dropped_messages: number; compressed_tool_results: number }
   | { kind: "orchestrator_stage"; session_id: string; stage: string; detail: string }
@@ -22,7 +23,7 @@ export type UiEvent =
   | { kind: "question"; session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean }
   | { kind: "done"; session_id: string; final_text: string; stop_reason: string; usage: Record<string, number> }
   | { kind: "session_title"; session_id: string; title: string }
-  | { kind: "loaded"; session_id: string; messages: { role: string; text: string; model?: string; confirmed_model?: string; tools?: ToolEntry[]; kind?: "image" | "video" | "file"; name?: string; url?: string }[] }
+  | { kind: "loaded"; session_id: string; messages: { role: string; text: string; model?: string; confirmed_model?: string; verification?: string; tools?: ToolEntry[]; kind?: "image" | "video" | "file"; name?: string; url?: string }[] }
   | { kind: "error"; session_id: string; message: string };
 
 type QueuedTurn = { text: string; images: string[]; shown: string; executionMode: "agent" | "orchestrator" };
@@ -64,6 +65,7 @@ export class ThreadController {
   // next explicit navigation installs a new expected session.
   private readyFenceClosed = false;
   private trajectoryStart = 0;
+  private pendingVerification: string | undefined;
 
   constructor(private readonly usage: UsageController, private readonly callbacks: ThreadCallbacks) {}
 
@@ -149,6 +151,17 @@ export class ThreadController {
     switch (event.kind) {
       case "ready": this.handleReady(event); break;
       case "assistant_delta": this.handleAssistantDelta(event); break;
+      case "verification": {
+        if (!this.accepts(event.session_id)) break;
+        this.pendingVerification = event.status;
+        const draft = this.streamingIndex === null ? undefined : this.messages[this.streamingIndex];
+        if (draft?.role === "assistant") draft.verification = event.status;
+        else if (event.status === "invalidated") {
+          const final = [...this.messages].reverse().find((message) => message.role === "assistant");
+          if (final?.role === "assistant") final.verification = "unverified";
+        }
+        break;
+      }
       case "reasoning_delta": this.handleReasoningDelta(event); break;
       case "context_compacted":
         if (this.accepts(event.session_id)) this.messages.push({ role: "compact", text: `已更新上下文摘要：${event.original_chars.toLocaleString()} → ${event.edited_chars.toLocaleString()} 字符，归纳 ${event.dropped_messages} 条历史消息，保留近期完整对话与工具调用。摘要用于恢复任务，代码事实以工作区、diff 和测试结果为准。` });
@@ -200,7 +213,8 @@ export class ThreadController {
     if (this.streamingIndex === null) {
       if (event.text === "") return;
       settleCompletedToolGroups(this.messages);
-      this.messages.push({ role: "assistant", text: event.text });
+      this.pendingVerification = undefined;
+      this.messages.push({ role: "assistant", text: event.text, verification: "draft" });
       this.streamingIndex = this.messages.length - 1;
     } else {
       const message = this.messages[this.streamingIndex];
@@ -226,13 +240,14 @@ export class ThreadController {
     if (this.streamingIndex !== null) {
       const message = this.messages[this.streamingIndex];
       if (message?.role === "assistant") {
-        if (event.text.trim() === "") this.messages.splice(this.streamingIndex, 1); else { message.text = event.text; message.model = event.model; message.confirmedModel = event.confirmed_model || undefined; }
+        if (event.text.trim() === "") this.messages.splice(this.streamingIndex, 1); else { message.text = event.text; message.model = event.model; message.confirmedModel = event.confirmed_model || undefined; message.verification = this.pendingVerification; }
       }
       this.streamingIndex = null;
     } else if (event.text.trim() !== "") {
       settleCompletedToolGroups(this.messages);
-      this.messages.push({ role: "assistant", text: event.text, model: event.model, confirmedModel: event.confirmed_model || undefined });
+      this.messages.push({ role: "assistant", text: event.text, model: event.model, confirmedModel: event.confirmed_model || undefined, verification: this.pendingVerification });
     }
+    this.pendingVerification = undefined;
   }
 
   private handleToolStart(event: Extract<UiEvent, { kind: "tool_start" }>): void {
@@ -323,11 +338,21 @@ export class ThreadController {
   }
 
   private handleLoaded(event: Extract<UiEvent, { kind: "loaded" }>): void {
-    if (this.skippedLoadedSessions.delete(event.session_id)) return;
+    if (this.skippedLoadedSessions.delete(event.session_id)) {
+      if (this.accepts(event.session_id) && !this.runningSessions.has(event.session_id)) {
+        for (const restored of event.messages) {
+          if (restored.role !== "assistant" || !restored.verification) continue;
+          const existing = this.messages.find((message) => message.role === "assistant" && message.text === restored.text);
+          if (existing?.role === "assistant") existing.verification = restored.verification;
+        }
+      }
+      return;
+    }
     if (!this.accepts(event.session_id)) return;
+    this.pendingVerification = undefined;
     const restored = event.messages.flatMap((message): ConversationMessage[] => {
       if (message.role === "user" && message.text.trim()) return [{ role: "user", text: message.text }];
-      if (message.role === "assistant" && message.text.trim()) return [{ role: "assistant", text: message.text, model: message.model, confirmedModel: message.confirmed_model }];
+      if (message.role === "assistant" && message.text.trim()) return [{ role: "assistant", text: message.text, model: message.model, confirmedModel: message.confirmed_model, verification: message.verification }];
       if (message.role === "artifact" && message.url) return [{ role: "artifact", kind: message.kind || "file", name: message.name || "生成产物", url: message.url }];
       if (message.role.startsWith("artifact_") && message.text.trim()) {
         const [name, ...urlParts] = message.text.split("\n");

@@ -14,7 +14,7 @@
 | tier | 内容 | 默认 |
 |---|---|---|
 | `unit` | 24 个 critical 用例：pytest 直引 51 个测试文件中的核心面 + 3 个内建校验器。**离线可跑、确定性、零外部依赖** | 默认执行 |
-| `cargo` | 4 个 Rust 侧关键行为（补丁引擎/编译门禁/退出码映射/诊断脱敏） | `--tier unit,cargo` |
+| `cargo` | 11 个 Rust 侧关键行为（补丁引擎/编译门禁/退出码/脱敏 + 事实存储/分层召回/记忆索引/分块压缩/工具恢复/状态机/指令冲突）；过滤器匹配 0 个测试即判失败 | `--tier unit,cargo`；CI 的 `rust-gate` job 用 `--tier cargo --scope-to-tiers` |
 | `agent` | 2 个真实 Agent 跑分（需 `ncx.exe` + 已配置模型路由） | `--tier unit,cargo,agent` |
 
 ## 门禁语义（不可弱化）
@@ -22,7 +22,7 @@
 1. **SKIP ≠ PASS**：任何 tier 未选中/工具缺失导致的 skip 只是不计入通过；**critical 用例被 skip = 门禁直接失败**。cargo/agent 用例定为 high（可离线豁免），unit 层全部 critical（不可豁免）。
 2. **缺失证据即关闭（fail closed）**：一次都没执行（如过滤器配错）不可能得出通过；空执行的 pass_rate 为 `null` 而非 0/100。
 3. **基础设施错误与真实失败分开**：runner 内部异常记 `error`，同样失败门禁，但报告里可与断言失败区分。
-4. **基准确有效才算数**：G-BENCH-001 对 `bench/tasks/*` 逐题校验——**评分器非空洞**（agent 动手前 check 必须失败）、**种子缺陷真实存在**（修好 t2_median "不改就通过"的问题）、**参考解答必须通过**（`reference/files.json`，纯数据、不动态执行，且 `bench/run.py` 已将 `reference/` 列入 HIDDEN 不会泄漏进 Agent 工作区）。
+4. **基准确有效才算数**：G-BENCH-001 对 `bench/tasks/*` 逐题校验——**评分器非空洞**（agent 动手前 check 必须失败）、**种子缺陷真实存在**（修好 t2_median "不改就通过"的问题）、**参考解答必须通过**（`reference/files.json`，纯数据、不动态执行，且 `bench/run.py` 已将 `reference/` 列入 HIDDEN 不会泄漏进 Agent 工作区）、**故意写错的答案必须被拒**（`reference/mutants.json`，每题必备；每个 mutant 是对参考解的一处精确替换并附原因，锚点必须唯一；任何 mutant 能通过 check 即判 grader 太弱。参考解也是每题必备）。校验时用 `python -B` 并清理 `__pycache__`，避免同长度改动复用旧字节码造成假通过。
 5. **judge 永不冒充**：`judge.py` 仅用于确定性断言覆盖不了的开放输出（如压缩摘要忠实度）；判定需 `method=llm 且 score>=4`，端点未配置记 `skip` 且**退出码非 0**——"没评"永远不等于"评过"。
 
 ## 用法
@@ -56,6 +56,6 @@ agent 层跑分建议逐步引入 repeats>=3）。
 
 ## 与 eval-gate CI 的关系
 
-`.github/workflows/eval-gate.yml` 在 push/PR 时跑 `pytest tests -q` +
-`python -m evals.golden.runner`（unit 层）。cargo/agent 层因需要工具链与密钥，
-仅在发版流水线人工触发。
+`.github/workflows/eval-gate.yml` 在 push/PR 时跑两个 job：`golden-gate`（`pytest tests -q` +
+unit 层）和 `rust-gate`（rustfmt + `cargo test --workspace --lib` + cargo 层）。agent 层需要
+模型密钥，仅人工触发；`benchmark` 低于 `--min-pass-rate` 时以非 0 退出。

@@ -17,6 +17,7 @@ const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
 const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
 const MAX_CONSECUTIVE_EMPTY_RESPONSES: usize = 3;
 const MAX_CONSECUTIVE_TRANSPORT_ERRORS: usize = 3;
+const MAX_TEXT_TOOL_CALL_RESPONSES: usize = 2;
 const SOFT_CONVERGENCE_TOOL_CALLS: usize = 32;
 const HARD_CONVERGENCE_TOOL_CALLS: usize = 40;
 const HARD_CONVERGENCE_FAILURES: usize = 6;
@@ -29,7 +30,12 @@ struct TurnState {
     usage: BTreeMap<String, i64>,
     consecutive_empty_responses: usize,
     consecutive_transport_errors: usize,
+    text_tool_call_responses: usize,
     compaction_calls: usize,
+    verification_budget: crate::verification::Budget,
+    verification_corrections: usize,
+    verification_issues: std::collections::HashSet<String>,
+    check_snapshots: crate::verification::evidence::CheckSnapshots,
 }
 
 impl TurnState {
@@ -79,7 +85,7 @@ pub(super) async fn run(
         .min(agent.task_budget.max_model_calls.max(1));
 
     for iteration in 0..max_model_calls {
-        if iteration + state.compaction_calls >= max_model_calls {
+        if iteration + state.compaction_calls + state.verification_budget.calls >= max_model_calls {
             return model_budget_result(agent, max_model_calls, state);
         }
         if is_cancelled(cancel) {
@@ -157,7 +163,7 @@ pub(super) async fn run(
             }
         }
 
-        if iteration + state.compaction_calls >= max_model_calls {
+        if iteration + state.compaction_calls + state.verification_budget.calls >= max_model_calls {
             return model_budget_result(agent, max_model_calls, state);
         }
         let response =
@@ -174,6 +180,46 @@ pub(super) async fn run(
                     )
                 }
             };
+        if looks_like_text_tool_calls(&response) {
+            state.text_tool_call_responses += 1;
+            // Streaming may have shown this draft already. An empty authoritative
+            // response clears it in the GUI; the text is never stored or executed.
+            emit(
+                sink,
+                LoopEvent::AssistantText {
+                    text: String::new(),
+                    model: agent.provider.model().to_string(),
+                    confirmed_model: agent.provider.confirmed_model(),
+                },
+            );
+            if state.text_tool_call_responses < MAX_TEXT_TOOL_CALL_RESPONSES
+                && iteration + 1 < max_model_calls
+            {
+                continue;
+            }
+            let text = "模型连续返回了文本形式的工具调用，扫描命令未执行。请重试，或切换支持工具调用的模型。".to_string();
+            agent.session.add_assistant(&text, None, "");
+            return state.finish(text, iteration + 1, "error");
+        }
+        if state.text_tool_call_responses > 0
+            && state.tools_used.is_empty()
+            && !response.has_tool_calls()
+            && response.finish_reason != "error"
+        {
+            emit(
+                sink,
+                LoopEvent::AssistantText {
+                    text: String::new(),
+                    model: agent.provider.model().to_string(),
+                    confirmed_model: agent.provider.confirmed_model(),
+                },
+            );
+            let text =
+                "模型未通过工具接口执行扫描，无法确认项目内容。请重试或切换支持工具调用的模型。"
+                    .to_string();
+            agent.session.add_assistant(&text, None, "");
+            return state.finish(text, iteration + 1, "error");
+        }
         if !response.has_tool_calls()
             && response.finish_reason != "error"
             && !response.content.trim().is_empty()
@@ -186,11 +232,41 @@ pub(super) async fn run(
                     Err(_) => return interrupted_result(agent, iteration + 1, state, true),
                 };
             if !evidence.is_empty() {
-                agent.session.add_assistant(
-                    &format!("[Runtime syntax verification]\n{}", evidence.join("\n")),
-                    None,
-                    "",
-                );
+                let note = format!("[Runtime syntax verification]\n{}", evidence.join("\n"));
+                if !prompt.runtime_notes.contains(&note) {
+                    // Durable evidence goes to provenance, not to a fake
+                    // assistant message; the runtime note is model-only.
+                    for item in &evidence {
+                        let Ok(data) = serde_json::from_str::<Value>(item) else {
+                            continue;
+                        };
+                        let Some(path) = data["path"].as_str() else {
+                            continue;
+                        };
+                        let mut hashes = std::collections::BTreeMap::new();
+                        if let Some(hash) = data["content_sha256"].as_str() {
+                            hashes.insert(path.to_owned(), hash.to_owned());
+                        }
+                        let status = if data["status"] == "compile_passed" {
+                            "passed"
+                        } else {
+                            "failed"
+                        };
+                        agent.session.record_runtime_verification(
+                            item,
+                            crate::context_trace::RuntimeProvenance {
+                                workspace: data["workspace"].as_str().unwrap_or_default().into(),
+                                checker: "python.compile.-I.-S".into(),
+                                target_paths: vec![path.into()],
+                                content_hashes: hashes,
+                                scope: "python_syntax_only".into(),
+                                source_ref: format!("python_check:{path}"),
+                            },
+                            status,
+                        );
+                    }
+                    prompt.runtime_notes.push(note);
+                }
             }
             if let Some(reason) = python_check::failure(&agent.tools.ctx) {
                 let note = format!("Completion rejected: {reason}. Repair edited Python files and pass syntax validation before finishing. The latest runtime syntax verification contains the current path/error evidence.");
@@ -198,6 +274,142 @@ pub(super) async fn run(
                     prompt.runtime_notes.push(note);
                 }
                 continue;
+            }
+        }
+        if agent.verification.mode != crate::verification::Mode::Off
+            && !response.has_tool_calls()
+            && response.finish_reason != "error"
+            && !response.content.trim().is_empty()
+            && !has_unfinished_plan(agent)
+        {
+            let input = crate::verification::evidence::packet(
+                &agent.session,
+                &agent.tools.ctx.workspace,
+                &response.content,
+                &state.check_snapshots,
+            );
+            emit(
+                sink,
+                LoopEvent::Verification {
+                    status: "checking".into(),
+                    candidate_hash: input.candidate_hash.clone(),
+                },
+            );
+            state.verification_budget.limit = state.verification_budget.calls
+                + max_model_calls.saturating_sub(
+                    iteration + 1 + state.compaction_calls + state.verification_budget.calls,
+                );
+            let mut checked = if agent.verification.model_enabled {
+                crate::verification::verify(
+                    &input,
+                    &mut state.verification_budget,
+                    Some(&cancelled),
+                )
+                .await
+            } else {
+                let mut checked = crate::verification::policy::evaluate(&input);
+                checked.call_status = "model_disabled".into();
+                checked
+            };
+            crate::verification::apply_experimental_policy(
+                &agent.verification,
+                &input,
+                &mut checked,
+            );
+            if cancelled() {
+                checked.persistence_status = "attempted".into();
+                if crate::verification::persist(&agent.session, agent.verification.mode, &checked)
+                    .is_err()
+                {
+                    emit(
+                        sink,
+                        LoopEvent::Verification {
+                            status: "fault".into(),
+                            candidate_hash: input.candidate_hash.clone(),
+                        },
+                    );
+                }
+                return interrupted_result(
+                    agent,
+                    iteration + 1,
+                    state,
+                    tokio::time::Instant::now() >= deadline,
+                );
+            }
+            let current_files = crate::verification::evidence::workspace_snapshot(
+                &agent.session,
+                &agent.tools.ctx.workspace,
+            );
+            if current_files != input.current_files {
+                for decision in &mut checked.decisions {
+                    if input.claims.iter().any(|c| {
+                        c.id == decision.claim_id
+                            && c.kind == crate::verification::types::ClaimKind::TestsPassed
+                    }) {
+                        decision.verdict = crate::verification::types::Verdict::NeedEvidence;
+                        decision.reason_code = "files_changed_during_verification".into();
+                    }
+                }
+                checked.verdict = crate::verification::types::Verdict::Unknown;
+            }
+            let correct = checked.should_correct(&agent.verification, &input);
+            checked.persistence_status = "recorded".into();
+            if let Err(reason) =
+                crate::verification::persist(&agent.session, agent.verification.mode, &checked)
+            {
+                checked.persistence_status = reason.into();
+            }
+            let status = if checked.persistence_status != "recorded" {
+                "fault"
+            } else if checked.verdict == crate::verification::types::Verdict::Pass {
+                "passed"
+            } else {
+                "unverified"
+            };
+            emit(
+                sink,
+                LoopEvent::Verification {
+                    status: status.into(),
+                    candidate_hash: input.candidate_hash.clone(),
+                },
+            );
+            if correct {
+                // Clear the streamed draft before asking the main model to
+                // revise. Rejected text is never committed as an assistant fact.
+                emit(
+                    sink,
+                    LoopEvent::AssistantText {
+                        text: String::new(),
+                        model: agent.provider.model().into(),
+                        confirmed_model: agent.provider.confirmed_model(),
+                    },
+                );
+                let feedback = checked.feedback();
+                let new_issue = state.verification_issues.insert(feedback.clone());
+                if state.verification_corrections < crate::verification::MAX_CORRECTIONS
+                    && new_issue
+                    && iteration + 1 < max_model_calls
+                {
+                    state.verification_corrections += 1;
+                    prompt.runtime_notes.push(format!(
+                        "{feedback}\nRejected draft data:\n{}",
+                        crate::verification::evidence::redact(&response.content)
+                    ));
+                    continue;
+                }
+                let text =
+                    "本轮校验未能确认完成声明；已保留工具记录和工作，请补充证据或明确修订回答。"
+                        .to_string();
+                agent.session.add_assistant(&text, None, "");
+                emit(
+                    sink,
+                    LoopEvent::AssistantText {
+                        text: text.clone(),
+                        model: agent.provider.model().into(),
+                        confirmed_model: agent.provider.confirmed_model(),
+                    },
+                );
+                return state.finish(text, iteration + 1, "verification_failed");
             }
         }
         if let Some((text, reason)) = finish_response(agent, &prompt, &response, &mut state, sink) {
@@ -208,6 +420,14 @@ pub(super) async fn run(
             continue;
         }
         persist_tool_calls(agent, &response);
+        let before = (agent.verification.mode != crate::verification::Mode::Off
+            && response.tool_calls.len() == 1)
+            .then(|| {
+                crate::verification::evidence::workspace_snapshot(
+                    &agent.session,
+                    &agent.tools.ctx.workspace,
+                )
+            });
         if let Some(stop) = tool_dispatch::execute(
             agent,
             &response.tool_calls,
@@ -225,6 +445,18 @@ pub(super) async fn run(
                 return interrupted_result(agent, iteration + 1, state, true);
             }
             return stop_turn(agent, stop, iteration, state);
+        }
+        if let Some(before) = before {
+            let after = crate::verification::evidence::workspace_snapshot(
+                &agent.session,
+                &agent.tools.ctx.workspace,
+            );
+            agent
+                .session
+                .record_verification_snapshot(&response.tool_calls[0].id, &before, &after);
+            state
+                .check_snapshots
+                .insert(response.tool_calls[0].id.clone(), (before, after));
         }
     }
 
@@ -406,6 +638,12 @@ async fn request_model(
             state.consecutive_transport_errors
         ));
     }
+    if state.text_tool_call_responses > 0 {
+        notes.push(
+            "Your previous response wrote tool calls as DSML text. That text was not executed. Use the provided native tool_calls interface to call tools; do not serialize tool invocations in assistant content or claim that files were inspected."
+                .to_string(),
+        );
+    }
     let (response, edit_stats) = agent.call_model(&schemas, &notes, sink).await;
     add_usage(&mut state.usage, &response.usage);
     trace::model_response(iteration, &response, &edit_stats);
@@ -443,7 +681,7 @@ fn finish_response(
         let text = if response.content.is_empty() {
             "模型服务调用失败，请稍后重试。".to_string()
         } else {
-            response.content.clone()
+            present_provider_error(&response.content).unwrap_or_else(|| response.content.clone())
         };
         agent.session.add_assistant(&text, None, "");
         return Some((text, "error"));
@@ -488,6 +726,9 @@ fn finish_response(
         state.deliverable_finish_rejections += 1;
         return None;
     }
+    if has_unfinished_plan(agent) {
+        return None;
+    }
     agent
         .session
         .add_assistant(&text, None, &response.reasoning);
@@ -499,9 +740,6 @@ fn finish_response(
             confirmed_model: agent.provider.confirmed_model(),
         },
     );
-    if has_unfinished_plan(agent) {
-        return None;
-    }
     Some((text, "completed"))
 }
 
@@ -510,6 +748,44 @@ fn is_retryable_transport_error(message: &str) -> bool {
     message.starts_with("RequestError:")
         || message.starts_with("TimeoutError:")
         || message.starts_with("StreamError:")
+}
+
+fn looks_like_text_tool_calls(response: &ModelResponse) -> bool {
+    if response.finish_reason == "error" || response.has_tool_calls() {
+        return false;
+    }
+    let compact: String = response
+        .content
+        .chars()
+        .filter(|ch| !ch.is_whitespace() && *ch != '|' && *ch != '｜')
+        .take(1_024)
+        .collect();
+    compact.contains("<DSMLcalls>") && compact.contains("<DSMLinvokename=")
+}
+
+fn present_provider_error(message: &str) -> Option<String> {
+    let (_, details) = message.rsplit_once(" | ")?;
+    let diagnostic: Value = serde_json::from_str(details).ok()?;
+    if diagnostic.get("event")?.as_str()? != "provider_request" {
+        return None;
+    }
+    match diagnostic.get("kind")?.as_str()? {
+        "read_timeout" => Some(
+            "模型响应中断：服务端在一段时间内没有继续输出。当前任务和会话已保留，请重试本轮；如果反复发生，请检查网络或切换模型线路。"
+                .to_string(),
+        ),
+        "http_error" => {
+            let status = diagnostic.get("http_status")?.as_u64()?;
+            let message = match status {
+                400 => "模型服务拒绝了本次请求（HTTP 400，请求格式或参数无效）。当前会话已保留；请重试本轮，若仍失败请检查模型线路。".to_string(),
+                401 | 403 => format!("模型服务拒绝访问（HTTP {status}）。请检查该模型线路的密钥和权限；当前会话已保留。"),
+                429 => "模型服务暂时限流（HTTP 429）。请稍后重试；当前会话已保留。".to_string(),
+                _ => format!("模型服务返回 HTTP {status}。当前会话已保留，请稍后重试。"),
+            };
+            Some(message)
+        }
+        _ => None,
+    }
 }
 
 fn has_unfinished_plan(agent: &AgentLoop) -> bool {

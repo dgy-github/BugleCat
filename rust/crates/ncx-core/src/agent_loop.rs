@@ -70,6 +70,12 @@ pub enum LoopEvent {
     ReasoningDelta(String),
     /// Old tool-heavy history was compacted and persisted before a model call.
     ContextCompacted(ContextEditStats),
+    /// Host verification status for the current draft. No probability is a
+    /// calibrated correctness percentage.
+    Verification {
+        status: String,
+        candidate_hash: String,
+    },
     /// The assistant's final visible text for this step. The UI finalizes the
     /// streamed bubble with this authoritative text (or creates one if no deltas).
     AssistantText {
@@ -107,6 +113,7 @@ pub struct AgentLoop {
     resolved_context_window: Option<i64>,
     context_usage: std::cell::Cell<Option<(usize, i64)>>,
     pub reasoning_effort: Option<String>,
+    pub verification: crate::verification::Config,
     max_parallel_tool_calls: usize,
     tool_scheduler: Box<dyn ToolScheduler>,
     turn_context: TurnContextRegistry,
@@ -135,6 +142,7 @@ impl AgentLoop {
     }
 
     pub fn new(provider: Box<dyn Provider>, mut tools: ToolRegistry, mut session: Session) -> Self {
+        session.set_workspace(&tools.ctx.workspace);
         // Provenance recall is only offered when the session has a durable
         // trace; otherwise the tool could only ever answer "nothing recorded".
         if let Some(store) = session.trace_store() {
@@ -156,6 +164,26 @@ impl AgentLoop {
         if let Some(store) = &event_store {
             session.set_event_store(store.clone());
         }
+        let next_turn_id = event_store
+            .as_ref()
+            .and_then(|store| store.session_events(&session.session_id).ok())
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.turn_id)
+            .max()
+            .unwrap_or(0)
+            .max(
+                session
+                    .trace_store()
+                    .map(|s| {
+                        s.records()
+                            .into_iter()
+                            .filter_map(|r| r.turn_id)
+                            .max()
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0),
+            );
         let state_machine = Rc::new(StateRecorder::new(
             session.session_id.clone(),
             tools.ctx.workspace.clone(),
@@ -189,10 +217,11 @@ impl AgentLoop {
             resolved_context_window: None,
             context_usage: std::cell::Cell::new(None),
             reasoning_effort: None,
+            verification: crate::verification::Config::from_env(),
             max_parallel_tool_calls: DEFAULT_MAX_PARALLEL_TOOL_CALLS,
             tool_scheduler: Box::new(BoundedToolScheduler),
             turn_context: TurnContextRegistry::default(),
-            next_turn_id: 0,
+            next_turn_id,
             use_vision_this_turn: false,
             event_sink: None,
             llm_capabilities,
@@ -569,7 +598,19 @@ impl AgentLoop {
         let _ = self
             .state_machine
             .record(AgentState::Observing, "turn loop returned");
+        let candidate_before_hook = result.final_text.clone();
         let result = self.apply_stop_hook(result, &mut sink).await;
+        if self.verification.mode != crate::verification::Mode::Off
+            && result.final_text != candidate_before_hook
+        {
+            emit(
+                &mut sink,
+                LoopEvent::Verification {
+                    status: "invalidated".into(),
+                    candidate_hash: crate::context_trace::content_hash(&result.final_text),
+                },
+            );
+        }
         // The turn's own stop reason decides the terminal state. A turn that ran
         // out of budget or was cancelled is not a completed task.
         let (terminal, trigger) = match result.stop_reason.as_str() {
@@ -578,6 +619,10 @@ impl AgentLoop {
             "task_budget" => (AgentState::NeedsHuman, "task budget exhausted"),
             "compaction_failed" => (AgentState::NeedsHuman, "context compaction failed"),
             "blocked" => (AgentState::NeedsHuman, "turn blocked before execution"),
+            "verification_failed" => (
+                AgentState::NeedsHuman,
+                "completion claim lacks verified evidence",
+            ),
             "error" => (AgentState::Failed, "model service call failed"),
             other => {
                 // Post-edit validation failures arrive as their own reason and

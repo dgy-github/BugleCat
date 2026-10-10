@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "right-assoc-minus",
+      "why": "subtraction operands swapped",
+      "file": "expr.py",
+      "old": "value = value - term()",
+      "new": "value = term() - value"
+    }
+  ]
+}

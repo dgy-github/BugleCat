@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "bool-base-accepted",
+      "why": "bool base not rejected with TypeError",
+      "file": "basen.py",
+      "old": "if not isinstance(base, int) or isinstance(base, bool):",
+      "new": "if not isinstance(base, int):"
+    }
+  ]
+}

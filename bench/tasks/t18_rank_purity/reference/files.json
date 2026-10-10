@@ -1,0 +1,5 @@
+{
+  "files": {
+    "solution.py": "def rank_scores(scores):\n    ordered = sorted(scores, key=lambda item: (-item[1], item[0]))\n    return [\n        {\"name\": name, \"score\": score, \"rank\": i}\n        for i, (name, score) in enumerate(ordered, start=1)\n    ]\n"
+  }
+}

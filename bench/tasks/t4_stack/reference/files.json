@@ -1,0 +1,5 @@
+{
+  "files": {
+    "stack.py": "class Stack:\n    def __init__(self):\n        self._items = []\n\n    def push(self, x):\n        self._items.append(x)\n\n    def pop(self):\n        if not self._items:\n            raise IndexError(\"pop from empty stack\")\n        return self._items.pop()\n\n    def peek(self):\n        if not self._items:\n            raise IndexError(\"peek from empty stack\")\n        return self._items[-1]\n\n    def is_empty(self):\n        return not self._items\n\n    def size(self):\n        return len(self._items)\n"
+  }
+}

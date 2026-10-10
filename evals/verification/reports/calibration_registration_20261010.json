@@ -1,0 +1,34 @@
+{
+  "schema": "buglecat.verification.calibration-registration.v1",
+  "dataset_hash": "cb5a9810397fe925e4d3801ac7eebc8de0f287076faa450d15e039f8a31d1152",
+  "protocol": {
+    "schema": "buglecat.verification.calibration-protocol.v1",
+    "model": "jev-1.13.0",
+    "policy_version": "python-fixture-baseline-v1",
+    "template_version": "unrecorded-legacy-fixture",
+    "categories": [
+      "semantic"
+    ],
+    "threshold_grid": [
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      0.95,
+      0.975,
+      0.99,
+      1.0
+    ],
+    "max_false_block_rate": 0.02,
+    "confidence": 0.95,
+    "min_supported": 150,
+    "min_unsupported": 50,
+    "min_paired_improvements": 5,
+    "purpose": "predeclared exploratory category gate; not approved production policy",
+    "required_later": "fresh human/assertion labels, unexposed grouped holdout, v3.1 request bindings and closed-loop success/latency/budget gates"
+  },
+  "protocol_hash": "88f85cfe0655379f0e9e293202da893a56de2d532e4176244e61a9ef692b74b1",
+  "declaration": "Must be frozen before viewing probabilities; hash is not proof of timing.",
+  "artifact_hash": "1faa60ee2739059eee02e6f1bb411fe25802364e1ffccc4840ff5e57715b6471"
+}

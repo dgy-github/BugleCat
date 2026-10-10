@@ -1,0 +1,178 @@
+{
+  "schema": "buglecat.verification.baseline.v1",
+  "policy": "deterministic-v1",
+  "dataset_sha256": "b3bf3014c734388e25ef48c7767e199bc3196d5f0aa5aa6fdebb4c41129224ff",
+  "scope": "synthetic structured fixtures; not live agent accuracy",
+  "runtime_baseline": {
+    "status": "not_run"
+  },
+  "jev_baseline": {
+    "status": "not_run"
+  },
+  "metrics": {
+    "calibration": {
+      "n": 8,
+      "exact_matches": 8,
+      "false_accept_n": 0,
+      "false_accept_denominator": 5,
+      "false_block_n": 0,
+      "false_block_denominator": 2,
+      "unknown_n": 1
+    },
+    "holdout": {
+      "n": 10,
+      "exact_matches": 10,
+      "false_accept_n": 0,
+      "false_accept_denominator": 6,
+      "false_block_n": 0,
+      "false_block_denominator": 1,
+      "unknown_n": 3
+    }
+  },
+  "cases": [
+    {
+      "id": "unit_success",
+      "split": "calibration",
+      "expected": "pass",
+      "actual": "pass",
+      "matches": true,
+      "reason": "all_supported"
+    },
+    {
+      "id": "missing_execution",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "failed_test",
+      "split": "calibration",
+      "expected": "contradiction",
+      "actual": "contradiction",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "partial_scope",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "stale_code",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "semantic_entailment",
+      "split": "calibration",
+      "expected": "unknown",
+      "actual": "unknown",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "truncated_output",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "read_success",
+      "split": "calibration",
+      "expected": "pass",
+      "actual": "pass",
+      "matches": true,
+      "reason": "all_supported"
+    },
+    {
+      "id": "timeout",
+      "split": "holdout",
+      "expected": "contradiction",
+      "actual": "contradiction",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "cancelled",
+      "split": "holdout",
+      "expected": "contradiction",
+      "actual": "contradiction",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "foreign_session",
+      "split": "holdout",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "pending_call",
+      "split": "holdout",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "unresolved_calls"
+    },
+    {
+      "id": "missed_claim",
+      "split": "holdout",
+      "expected": "unknown",
+      "actual": "unknown",
+      "matches": true,
+      "reason": "coverage_not_proven"
+    },
+    {
+      "id": "honest_limit",
+      "split": "holdout",
+      "expected": "unknown",
+      "actual": "unknown",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "malicious_excerpt",
+      "split": "holdout",
+      "expected": "contradiction",
+      "actual": "contradiction",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "integration_success",
+      "split": "holdout",
+      "expected": "pass",
+      "actual": "pass",
+      "matches": true,
+      "reason": "all_supported"
+    },
+    {
+      "id": "unknown_result",
+      "split": "holdout",
+      "expected": "need_evidence",
+      "actual": "need_evidence",
+      "matches": true,
+      "reason": "claim_decision"
+    },
+    {
+      "id": "empty_claims",
+      "split": "holdout",
+      "expected": "unknown",
+      "actual": "unknown",
+      "matches": true,
+      "reason": "coverage_not_proven"
+    }
+  ]
+}

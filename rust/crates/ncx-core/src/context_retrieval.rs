@@ -375,6 +375,8 @@ fn note_from_event(layer: Layer, event: &crate::context_store::ContextEvent) -> 
         EventType::ApprovalDecision => "approval decided".to_string(),
         EventType::WriteProbe => "write effect probed".to_string(),
         EventType::Checkpoint => "checkpoint written".to_string(),
+        EventType::RuntimeVerification => "runtime verification recorded".to_string(),
+        EventType::VerificationSnapshot => "verification file snapshot recorded".to_string(),
     };
     let flag = if event.status == EventStatus::Unknown {
         " [outcome unknown]"

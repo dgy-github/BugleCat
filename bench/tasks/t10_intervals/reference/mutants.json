@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "touching-split",
+      "why": "touching intervals not merged",
+      "file": "intervals.py",
+      "old": "start <= merged[-1][1]",
+      "new": "start < merged[-1][1]"
+    }
+  ]
+}

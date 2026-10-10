@@ -1,5 +1,431 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-10-10：用户暂停开发，保存 Git 提交（当前状态）
+
+用户要求“暂停下把目前做的东西提交到gitlab 上”。已中断开发代理，停止实际 `verification_collect.exe` 进程；复查无采集进程运行，后续收费调用暂停。Git 当前分支为 `feat/context-association-memory`，现有 origin 指向 GitHub；GitLab 仓库地址待用户提供，不把 GitHub 当作 GitLab 推送。
+
+- [暂停时实际台账](evals/verification/reports/benchmark_collection_user_pause_20261010.json)：主模型启动 **12** 次、完成并保存原始响应 **11** 次；第12次已保留预算占位，但因进程停止没有完成收据，其远端消耗未知，不能当作零费用或重试。主模型授权余额 **388** 次；本阶段新增 Jev **0** 次，新增授权余额 **400** 次，历史累计仍 **27** 次。
+- 已保存响应可确认的用量合计为 2119 input / 38405 output / 40524 total，包含截断失败；不包含未完成请求的未知用量，账户余额与金额未查询。
+- 第二批资源调整已实现并实际运行，输出上限8192的新cohort与旧4096分开留痕。第二批候选尚未完成独立审阅；正式阈值仍未认证，留出评测未启动。不得将这次暂停提交称为项目最终完成。
+- v3.2 本地运行包和既有验证见 [交付报告](reports/release-v32-20261010.md)。运行包、SQLite预算台账、原始请求/响应、会话数据、截图和诊断exe留在本机；提交代码、测试、协议、公开来源及不含密钥的汇总证据。恢复时须使用本机原台账，不能从 Git 摘要重建为零计数。
+- 仍待处理：肯定Semantic声明样本不足；`No tests were executed` 的否定被抽成 positive TestsPassed 的问题已记录但未修复；正式独立标签、阈值校准及留出认证未完成。暂停期间不继续开发和收费评测。
+
+## 2026-10-10：400次扩展预算已获批准（最新）
+
+用户随后明确回复“那就跑400次”，承接此前“最多400次新增Jev、最多400次新增主模型请求”的提案。授权现固定在 [400预算记录](evals/verification/reports/jev_budget_authorization_20261010_400.json)：每组最多各一次，无自动重试，失败/取消启动计数，先8组小批检查。此前Jev累计27，新累计上限427；旧49余额不再叠加。账户余额和金额仍未知，不把次数当余额。
+
+执行中：GPT-6.1-Sol开发显式live的真实单响应采集runner，保留原始请求/实际发送hash、响应、session/sources、packet与原生声明；根agent准备独立Oracle/正式intake与Jev全局计数。新外部任务不发参考算法、隐藏测试或标签给主模型，只提供公开函数接口以避免函数名歧义造成假失败。单响应采集没有工具闭环，不能冒充完整AgentLoop效果评测。
+
+### 首批实际收费与继续条件
+
+- 已运行实际collector `reports/benchmark-collection-batch01-20261010-r2`，**主模型6次已启动/6条真实HTTP200原始响应、3条有效候选、3条正文截断；Jev新增0**。全局SQLite原子保留6，主模型新增预算余394；Jev新增预算余400，历史累计仍27。费用金额未知。
+- 3条截断的 `finish_reason=length`，4096 completion tokens全部为reasoning，正文为空，失败不删除也不自动重试。首批总用量（包括失败）1182 input/16565 output，17747 total；[含失败台账](evals/verification/reports/benchmark_collection_budget_batch01_20261010.json)。连续同类失败保护停止余2未调用组。
+- 根独立join真实main请求、原始response bytes、原candidate、session/sources、packet和事件收据，3条有效候选均通过；冻结官方接受断言也3/3passed。但三条原native候选均无肯定Semantic声明，实际表达未执行/不确定，因此不改标签凑正例，也没有可用Jev调用分母。[独立审阅队列](evals/verification/reports/benchmark_review_batch01_20261010.json)。
+- 实际发现 v3.2 将“No tests were executed”这一诚实否定错误抽为positive TestsPassed；已保留原packet/决定并记录，不在收费运行中静默改策略。
+- 继续前按 [显式资源调整](evals/verification/reports/benchmark_resource_adjustment_20261010.json) 将**新未调用组**的输出上限4096→8192，仍deepseek-flash/ultra/60秒/0重试、同原预算计数器、同原native策略和提示。旧build/旧settings绑定和失败收据保留，新cohort单独报告；首批余2未调用组可在新prepare目录调用一次，已启动6组不能重跑。[新8组manifest](evals/verification/reports/benchmark_collection_batch02_20261010_r2.json)。资源cohort入口正在开发与零费验证，暂未发第二批。
+
+已固定 [正式协议](evals/verification/reports/benchmark_400_protocol_20261010.json) 和 [首8校准组manifest](evals/verification/reports/benchmark_collection_batch01_20261010.json)。独立Oracle在去凭证子进程执行冻结官方接受断言，先核对参考实现；参考异常、超时、受限依赖保留Unknown。它仅支持“冻结接受标准”的限定事实，不能证明全部算法语义正确。400是上限，不保证能获得150正/50负或足量肯定Semantic声明；不得造假成功、改标签或降低门槛。正式留出仍须等待合格校准。
+
+## 2026-10-10：补齐独立样本与新版运行包（最新执行状态）
+
+本节覆盖下方历史状态。用户要求补齐独立正负样本、校准和最终评测，再交付最新修复包。其随后询问“怎么可能就剩这么多次了，是本来额度不够还是”是在澄清授权预算，**没有批准400次Jev或400次主模型请求**。
+
+- **费用澄清**：剩49是上一批用户批准的50次新增尝试减去实际1次，不是账户余额或服务限制。累计Jev27；本轮新增收费0。账户余额未查询，金额未知。400来自既定每阶段150正/50负、校准和留出各200的规模推算，主模型实际负例数量和闭环回合无法保证；不当成已花费次数或固定报价。
+- **独立来源准备**：下载Google Research MBPP官方固定commit `f82046ba5aabbbb427dbfd38a254d26bff08b533` 的未修改sanitized数据，SHA256 `ca95deaa9a01ef0a6f439f88bcf0dd3db3563d22f22aad6cae04ebb9a8d8c8e9`。427任务按参考代码AST标识符归一合并为413组，固定seed预分206校准/207留出；未执行公开参考代码，未生成主模型回答，未读取Jev概率。[来源目录](evals/verification/reports/external_mbpp_catalog_20261010.json)、[归属与许可](evals/verification/data/mbpp/ATTRIBUTION.md)。公开数据可能已被模型训练使用，不声称模型未见过。
+- **真实标签仍缺**：外部来源池的真实主模型候选及正/负标签均为0，不能拿正确参考答案或人为假成功补分母。另找到共享历史7来源，整理11条pending候选，仅元数据导出，尚未验证可用的不可变版本与逐声明证据；不抵正式样本数。[共享历史队列](evals/verification/reports/shared_history_review_queue_20261010.json)。
+- **正式入口加固**：成功观察必须有明确recorded状态及相等的有效request/actual发送hash。新增缺失、null、错配、非法hash回归；校准和公开基准相关50测试通过。行内字段一致还不能替代原始transport收据封存验证，正式intake须补来源验证。生产默认off、enforce categories为空，正式阈值仍null，留出未启动。
+- **GPT-6.1-Sol运行包已完成**：新目录 `releases/jev-v32-20261010-182431` 包含host-rules-v3.2修复的CLI、GUI与NSIS；433构建输入图hash `d443f3cdda67731d16c007218724976c798ced43d3fbc9e402f7f827b4458526` 前后一致。CLI 8,115,200字节/hash `3e1794ddaf51b95757ba00d0d933fff6a18cbf81f0584f8d57618f060bcf5ab0`；GUI 14,641,664字节/hash `f9d1b62df55e5fea53ea450b7c606acf2df03deadd471302e35b8e0229e7ffae`；NSIS 4,896,369字节/hash `b297e7d72b3ec529d6c5cd3ce3e892627699e6a47c12149f6a6169fc288c7dfb`，root独立复核字节/hash一致。Core412、Provider68、GUI138、协议5通过，Clippy/fmt/前端构建通过。包内实际CLI启动/GUI会话恢复与三种模式取消、断网、日志故障、重新加载通过，每种写入恰好一次，无虚假Pass，实际runtime确认v3.2，Jev尝试0。NSIS仅生成未执行安装/升级，软件包版本沿用0.1.0；旧v3.1包保留。[交付报告](reports/release-v32-20261010.md)、[完整清单](releases/jev-v32-20261010-182431/manifest.json)。运行包完成不代表正式阈值/留出已完成。
+
+后续按 [正式采集协议](evals/verification/FORMAL_COLLECTION_PROTOCOL.md) 执行：冻结来源/Oracle/分组→新真实主模型响应→独立断言与范围标注→封存真实传输收据→预算内Jev→校准合格才开启一次留出。原49次可用于探索，不能满足当前正式门槛；扩大收费范围须得到明确授权。
+
+## 2026-10-10：用户确认后的断言标注与真实来源回放（当前执行状态）
+
+用户已选择“可执行断言标注，疑难项由你人工复核”，并批准 **最多50次新增 Jev 尝试、无自动重试**。Codex 对疑难项的复核记为 `model_reviewed`，不冒充真实人工标签。此授权覆盖本批50新增，累计上限为既有26+50=76；先最多25探索调用，其余25预留，正式校准不达标不打开留出。
+
+- **完成标注**：`annotation_audit.py` 对原6个开发回答独立执行冻结的隐藏grader，核对保护文件字节、最终直接 `python check.py` 的调用/结果、输出/异常和 `twice(n)` AST。6次grader均通过且文件hash前后未变；5条限定事实得到 `assertion_reviewed/supported`。自然语言范围解释由Codex复核，`full_language_certified=false`；不代表整条回答或一般语义得到认证。
+- **修正候选污染**：原11条队列中2条宿主语法提示、1条DSML调用、1条HTTP错误不属于完成回答。筛选修复后 **7候选/3原任务组/8来源，5 supported、2 Unknown、0 unsupported**。[新队列](evals/verification/reports/review_queue_20261010_r3.json)、[已标注数据](evals/verification/reports/reviewed_candidates_20261010_r2.json)、[断言收据](evals/verification/reports/assertion_receipts_20261010_r2.json)。旧11条及其审计保留，不能再把它们当11条真实完成回答。
+- **两个Unknown**：历史项目扫描缺不可变目标版本及完整逐声明范围；Jev开发修复轮的最终回答只是“未能确认完成”的诚实限制。产物断言通过不把限制回答改成语义成功，也不把Unknown当负例。
+- **来源绑定回放**：GPT-6.1-Sol 新增离线 `verification_replay` example，从原候选、原session/sources以及原SQLite事件的只读视图构造宿主packet。临时复制事件供ContextStore使用，保持序列/hash，不回放写操作，不由标签补scope。记录逐声明选择、原文UTF-8 span及prepared request hash；仅显式live可收费。[原6审阅manifest](evals/verification/reports/fixed_replay_manifest_20261010_r2.json)。首次v3.1回放及修复后v3.2结果分开保留。
+- **校准/留出门槛**：现有标注仍为作者已看过的development，3组且无unsupported组；已认证阈值仍为空，留出未运行。预算获批不改变150 supported/50 unsupported校准组及置信门槛；不复制同题不同arm凑样本，不降低门槛消耗预留费用。
+- **验证**：断言审计/队列/校准/适配器直接相关 **69 passed**，Ruff通过。新增example的测试与最终综合验证见本节收尾。仅新增评测工具，既有v3.1发布exe未重建；不将当前example源码hash冒充已发布产物hash。
+
+**后续顺序**：检查原候选packet可用性→按独立任务组及已复核声明冻结来源与注册→仅对B=Unknown的有界肯定semantic进行预算内探索→扩充新的正/负真实任务组与独立标注→校准合格后一次性新留出→真实闭环收益认证。现有7候选是可审计开发资料，不是盲测认证集。
+
+### 本轮实际回放与探索收尾
+
+- **修复真实抽取缺陷**：离线6例发现 `not success.` / `not a success.` 被错分为肯定semantic。已补窄词边界规则、真实失败/限制/混合正负/notebook回归，策略源码升为 **host-rules-v3.2**。旧v3.1报告与发布exe保持原版本。修复后6例均prepared，typed eligible由4降为2；两条肯定均来自同一修复任务组，其他4条诚实失败/限制没有可调用肯定声明。[v3.2原6packet](reports/replay-original6-packets-20261010-v32.jsonl)
+- **原始事实边界**：original修复声明span0..38为“The final `python check.py` run passed”，证据为同目标成功sequence14/exit0与旧失败sequence10/exit1，当前file_freshness=false，要求和覆盖Unknown。独立断言支持所述历史最终检查，但宿主不认证当前完整任务。rules arm所选语义没有直接证据refs，不用手填补齐，也不把同题两arm算两组。
+- **真实新增收费1次**：只选上述original的一个原任务组，先冻结 [精确声明/断言收据绑定](evals/verification/reports/replay_claim_selection_20261010.json)、[数据](evals/verification/reports/replay_development_dataset_20261010_v32.json)、[协议](evals/verification/reports/replay_calibration_protocol_20261010_v32.json) 与 [注册](evals/verification/reports/replay_calibration_registration_20261010_v32.json)，再调用。实际model `jev-1.13.0`，888 input/57 output tokens，1,011ms，无重试、0主模型调用。contradiction=0.07、unsupported_success=0.15、incomplete=0.22。[原始attempt日志](evals/verification/reports/replay_live_events_20261010_v32.jsonl)、[新累计台账](evals/verification/reports/jev_call_ledger_20261010_r4.json)：**累计27，新增预算剩49，探索剩24，留出预留25**，金额null。
+- **暴露并保留构建遗漏**：该次运行的main example在新增 `actual_request_hash` 日志字段前构建；cargo test/clippy通过没有重新链接main。旧compiled transport有hash equality guard，prepared request hash与response hash有记录，但本次独立actual发送hash字段缺失，不能事后补写原日志。导入仅显式development例外，`actual_request_hash=null` / `actual_transport_hash_unrecorded_development_only`；正式校准新增此缺陷门禁，不重跑收费来补齐。
+- **当前源码开发校准**：[实际探索结果](evals/verification/reports/replay_development_calibration_20261010_v32.json) 九个阈值均保留Unknown，无Pass晋升；1个supported独立组、0负例，零误拦的单侧95%上界仍为95%，新增拒绝收益无法估计。**certified_threshold=null**，1.0仅最高网格同分候选。作者暴露、小样本、无负例、无显著配对收益及发送hash字段缺失均保留为失败原因。没有运行新留出或读取其概率。
+- **当前测试**：8个相关Python测试文件 **116 passed in0.93s**，Ruff通过。v3.2 verification suite **28 passed/1 ignored**、replay **7 passed**、strict Clippy/fmt通过。实际main收据的零网络复验与最终example构建见后续构建收尾；旧发布目录未重建，也未升级安装器。
+
+### 构建收尾与最终证据
+
+- GPT-6.1-Sol 已在重建前归档旧example main，SHA `b9ba99046970923ec95133b5f1cf9cf56c546511dacf45d8f8b7c72daedf948d`；[前后构建诊断](reports/replay-binary-diagnostic-20261010/before-rebuild.json)保存mtime及字节hash。收费时未记录binary摘要，该诊断不冒充当场付费进程认证。
+- 实际 `cargo build --example verification_replay` 后增加 **offline-receipt-test**，完全零HTTP/零密钥。真正main生成actual发送body hash、编译时源码hash和exe hash；同一RecordingTransport的提交字段可复验。[离线main收据](reports/replay-binary-diagnostic-20261010/offline-main-receipt-final.jsonl)仅本地夹具，不替换那1次付费缺字段收据。[实施报告](reports/replay-implementation-20261010.md)
+- 新example exe SHA `7537b1144f0241ecdadfa9091ab19e50f86cd830f7da6e229a3ae90d01c59c23`；example源码SHA `6c65f2e7583e5c9ddb393103d0a4de8354c0fcfc9a4cdc4d8e2bb3ed5eaebe7f`。这是独立评测debug入口，不是新GUI/CLI安装发布。未来live同时保存compiled source/exe metadata。
+- 父代理独立复验：九个Python相关文件 **119 passed in1.08s**、Ruff通过；Rust core全库 **412 passed /1 ignored**。新增真实main的两条回归通过；没有重新付费，没有修改原paid事件日志。新v3.2开发产物的holdout实际门禁exit1，未读概率、未生成收据。
+- **断言来源最终收口**：审计新增原trial canonical manifest hash核对及执行期间来源改变拒绝；再次核对原6工作区，标签保持5 scoped supported/2 Unknown。[最新标注](evals/verification/reports/reviewed_candidates_20261010_r3.json)、[最新断言收据](evals/verification/reports/assertion_receipts_20261010_r3.json)。收费注册仍绑定原r2收据，不改写旧注册和paid记录。最终九个Python文件 **120 passed in0.88s**、Ruff通过。
+- 最新完整[执行状态](evals/verification/reports/annotation_calibration_status_20261010_r4.json)与[预算台账](evals/verification/reports/jev_call_ledger_20261010_r4.json)。本次任务完成了限定断言标注、真实来源回放、一次注册后开发探索及入口修复；**正式阈值与新留出仍未完成**，生产categories空。
+
+**还需的真实数据**：当前150正/50负门槛针对肯定semantic且B=Unknown的独立任务组；5条supported叙述包括诚实失败，不能全算肯定校准正例，同题两arm也不增加组数。先收集新的、版本可追踪的真实任务来源并独立标注错误完成/正确限定完成/Unknown；新留出组单独封存。获批50次费用不等于已具备这些数据，不为凑25调用造候选。
+
+## 2026-10-10：标注与校准工具初次准备（历史状态，已由上节覆盖）
+
+**用户继续要求推进三项评测。本轮完成零付费工具与真实候选准备，未冒充已完成独立标注、阈值认证或新留出实测。生产类别仍为空；下面的 v3.1 exe 交付不变。**
+
+- **独立标注准备**：`review_queue.py` 从两份本地历史与已有正式三组日志整理11个真实回答候选、3个原任务组、8来源（其中1来源无工具结果）。只导出hash/位置/退出元数据，不导出原始正文、命令、路径或Jev分数。6个三组开发候选按原两题合并组，不把每个arm当成独立题。5个旧历史候选也只作development。
+- **标签状态**：[标注队列](evals/verification/reports/review_queue_20261010_r2.json)、[人工模板](evals/verification/reports/human_review_template_20261010_r2.json) 全部pending/unlabeled。已有工具退出与隐藏grader断言单列，不自动认证广义完成。merge校验原始数据/候选/source hash、复核主体、依据、scope与全文确认；模型复核单列model_reviewed，不能当人工确认。实际人工复核尚未收到。
+- **GPT-6.1-Sol 工具交付**：`calibration.py` 提供register/calibrate/holdout；复用Rust Unknown→拒绝的单向策略，从不概率晋升Pass。按任务组防泄漏，模型/模板/策略与输入hash绑定，区分事实四态和交付/纠正动作；输出未知分母、配对新增拒绝与误拦组置信上界。读留出概率前落盘消费锁，失败也消耗；同注册换输出名不能重跑。[实施报告](reports/calibration-implementation-20261010.md)
+- **实际离线演练**：复用已经付费的旧18条v1观察，全部转development/作者已看/pending；旧模板和远端request hash未记录，明确derived/unrecorded，不能伪造当前Rust来源。只有2条semantic候选，均作者unknown，1条为空抽取；没有supported/unsupported正负分母。九阈值试算未过门槛，1.0仅同分网格候选，**certified_threshold=null**。[最新演练结果](evals/verification/reports/calibration_development_result_20261010_r2.json)；原开发报告保留。
+- **留出状态**：真实留出not_run。实际调用holdout开发产物被门禁拒绝（exit1：development calibration cannot open holdout），没有读取留出概率或产生评测收据；不能把工具41项回归中的夹具当成新留出。完整[状态报告](evals/verification/reports/annotation_calibration_status_20261010.json)与[标注/校准协议](evals/verification/ANNOTATION_PROTOCOL.md)。
+- **验证**：直接相关六个pytest文件合计**91 passed in0.64s**，新增三个工具及对应测试Ruff通过；包括重复/外来标签、陈旧来源、同题跨arm分组、不可假冒盲测、版本/概率/阈值绑定、未成功响应、小样本置信界与一次性留出失败消耗。adapter初次遇空claims失败，修复为非肯定候选，不增加覆盖认证。
+- **费用/边界**：本轮0 Jev、0主模型新请求，仍**26/30，剩4**，没有读取凭证或自动扩展预算。未改Rust/生产开关、未重建exe、未commit/push/publish，独立聊天保留trace路径未修改。
+
+**待具备的输入与顺序**：先独立复核11候选并补来源可追踪的新任务组→建立宿主逐声明/request真实hash与标签绑定→按原任务划分校准/未暴露留出→在看新概率前冻结用途门槛和注册→正式校准达标后一次留出→另做真实闭环任务收益认证。现有3组不足以构成有代表性的新留出。
+
+**具体预算提案（尚未批准）**：第一批探索25个校准组+25个新留出组，每组一条合格声明、最多一次Jev，共最多50新增尝试，无自动重试；固定历史候选不调用主模型，生成新闭环需另列主模型预算。该50组探索仍达不到开发协议150正例/50负例独立组的统计门槛，也不等于生产认证。当前预算剩4，已向用户请求是否扩大；等待答复期间不调用。详细程序入口、样本规则、费用边界见上述协议。
+
+预算可行性约束：25校准组不足以通过当前正式校准门槛，不能打开holdout；其余25组仅预留，保持未暴露、未调用，不为耗尽预算读取留出。50为收费上限，不表示可直接完成50组实测；需先扩充校准来源/预算并达标，不能降低门槛解锁留出。
+
+## 2026-10-10：Jev R1/R2 实施与真实开发对照（当前交付状态）
+
+**本节覆盖下方历史“下一步/未实现/当前入口”。GPT-6.1-Sol 已完成有界 R1/R2 与 R4 本地 exe 交付；R3 已跑小开发集但未通过效果认证。不能把工程通过当成减少幻觉的证明。**
+
+- **产品变更**：typed runtime provenance；原用户事件与 InstructionLedger 精确主体改口；call/result/快照按工作区、轮次、序列和 hash 关联；重复 ID、越界、链接、旧数据、实际替代工具身份缺失保守未验证。同目标新鲜成功可替代旧失败，显式引用旧失败仍否决。声明区分肯定/否定/部分/代码/引用/时间；来源覆盖、事实覆盖、任务履行认证分开。
+- **策略**：最终 `host-rules-v3.1`。Jev 仅处理有界肯定语义，按完成事实优先级排队；新增明确版本的实验拒绝策略，不从概率生成 Pass。取消共享原 deadline；尝试数独立于成功观察。生产 `Config::from_env()` 的 enforce categories 为空、ExperimentalJevPolicy=None；默认 off。
+- **实现验证**：最终 core **411 passed / 1 ignored**、provider **68 passed / 1 ignored**、GUI **138 passed**；strict Clippy/fmt、前端 build/typecheck、protocol 5 tests 通过。Python 相关 **35 passed** 与 Ruff 通过；完整日志与命令见 [实施记录](reports/implementation-r1r2-20261010.md)。ignored 为付费 opt-in，本轮未运行。
+- **真实三组**：同 DeepSeek `deepseek-flash`、同两题、同源码/runner hash、同预算，original **2/2**、rules **2/2**、jev **1/2**。Jev 组功能修复成功却被确定性旧失败规则误拦；已补“旧失败缺快照、后来同目标新鲜成功”的回归修复，不重新收费刷结果。详见 [真实对照报告](evals/verification/R3_RESULT.md)、`trial_summary_20261010_r3.json`。
+- **版本区分**：上述真实三组为 `host-rules-v3`、source SHA256 `43f1b726396c9865ff5a33e34b6d3e6a43cf63a61fc088635ad255f3b0e29f92`；最终包为 v3.1，修复后尚无新的真实付费三组结果。不能把旧评测变成新包认证。
+- **预算**：新增 **4** Jev 尝试/成功响应，2,807 input / 228 output tokens；前轮22，累计 **26/30**，金额未知。无付费组重跑；GUI 本地夹具不计 Jev 请求。[累计台账](evals/verification/reports/jev_call_ledger_20261010_r3.json)
+- **历史数据**：只读164消息/4回合/93工具结果，19成功退出记录、20失败、54未知；仅导出匿名元数据，完成标签仍待独立复核。[盘点](evals/verification/reports/history_inventory_20261010_r2.json)；独立聊天的 trace_replay 文件仍未落盘，未代写其保留路径。
+- **过程保留**：original r1 曾因 runner Windows路径身份不一致 task_budget；修正 canonical root 后跑正式r2，r1诊断与额外主模型用量39,058/3,388 tokens仍保留。三个正式组主模型合计58,951/1,882 tokens。没有删除失败分母或改阈值。
+- **新可运行产物**：[BugleCat.exe](releases/jev-r1r2-20261010-164839/BugleCat.exe)、[ncx.exe](releases/jev-r1r2-20261010-164839/ncx.exe)、[manifest.json](releases/jev-r1r2-20261010-164839/manifest.json)。GUI SHA256 `416db3963b1b36a9e0f51341a2ee9ae3a222c792df7c12e7a3303ff36838c6bd`；CLI SHA256 `4c281475df12bf58d7c2640e644e227148d3f8a0488eebe7b6b19614504cec5e`，父代理已独立核对两份文件 hash。构建含既有 WIP，准确源码 hash 以 manifest 为准，不能只用 HEAD 代替。
+- **最终源码收尾**：构建时 crates 图 hash 为 `203b80518a859e9dad5a750682aeb5fdd96917759663051067ef4552d01ea205`；随后仅维护未执行的 `cfg(test)` 付费夹具，最终 checkout 图为 `ae237f63f0a1348ed6cf417533a4bc697b571ee326bf67e53df98d8b3c0227a3`。manifest 分别保存 staged_build_source_sha256 与 source_sha256；两 exe 字节不变，core 再次411通过/1 ignored。没有将收尾后的源码图冒充重新构建 GUI 或付费重评。
+- **复制产物实机复验**：[生命周期报告](reports/gui-lifecycle-new-20261010.json) 的 off/shadow/enforce 各一次真实写入，取消、恢复、断网通过，shadow/enforce 日志故障可见；无重复写入与 Pass 标签。[正常/恢复报告](reports/runtime-smoke-new-20261010.json)：CLI exit=0，GUI 未验证，恢复显示“有历史核验记录 · 当前未验证”。15 次 localhost 主模型请求，**0 Jev 新请求**。GUI 取消发生在写入后的主模型等待；Jev 请求中取消由异步 transport 回归覆盖，尚无该阶段的 GUI 付费实测。
+- **启动与回滚**：直接运行新 GUI exe 默认 off；需要旁路时用 `scripts/with-jev-shadow.ps1 -Executable <上述新exe绝对路径>`，从当前用户环境读取 key。关闭时设置进程 `NCX_JEV_MODE=off` 后重启；旧 `releases/jev-shadow-20261010-155325` 与原安装包保留。仅设置 enforce 环境变量不会开放生产类别；实验阈值0.95未认证。
+- **当前未完成**：独立完成标签/新校准与盲测留出、足量误拦/错误放行测量、生产阈值认证和安装器升级验收。分类启用依据见 [policy_status.json](evals/verification/policy_status.json)。原安装包未重建；无 commit/push/publish，既有 WIP 保留。
+
+### 下一阶段执行顺序与验收
+
+1. **零付费数据整理**：先检查独立聊天保留的 trace 文件是否已落盘，再从匿名历史盘点挑选真实成功、错误完成、诚实未知、修复重跑和用户改口案例。每例保留原会话分组、目标、来源 hash、候选、证据与可执行标签依据；独立复核前保持待复核。探索目标30–50例，禁止通过复制变体凑数。
+2. **抽取/来源评测**：先检查原始事件到声明、scope、coverage 的转换；旧来源缺失、附件与 recovery 身份缺失继续 Unknown。分别报告漏抽、误抽、未知及分母，再进入固定候选三组回放。
+3. **预注册校准与留出**：锁定类别、阈值、误拦上限、任务成功率、延迟及预算门槛；按原会话/任务分组划分新的独立留出。当前0.95只是开发阈值。C 相对 B 的改善必须由留出数据证明，改策略后不能继续复用已看过的留出数据认证。
+4. **真实闭环复验**：在最终代码/模型/提示/预算固定后按任务随机化三组顺序，保留失败和尝试总账。先制定 case 数 × 每例 Jev 调用 × 重复数与主模型预算；当前26/30不授权自动扩大收费，也不默认重跑开发组。
+5. **发布门槛**：独立认证满足后才按类别开放；随后做 Jev checking 阶段 GUI 取消/超时与新 NSIS 安装升级验收。模型、模板、策略变化须重新认证；off/shadow 回滚保留。
+
+后续执行入口：[剩余计划](docs/superpowers/plans/2026-10-10-jev-remaining.md)，只继续未勾选项。当前工程交付完成，效果认证仍未完成。
+
+## 历史启动记录：2026-10-10 R1–R4 开始执行（已由顶部完成记录覆盖）
+
+- 用户已明确授权“开始开发吧”。沿用 GPT-6.1-Sol 实施 R1/R2 与 R4，父代理负责 R3 和最终交接记录；不覆盖已有 WIP。
+- 已新增真实主模型闭环 runner `rust/crates/ncx-core/examples/verification_trial.rs`、两个隔离任务 `evals/verification/task_trials.json`、报告评分器 `trials.py` 及运行前冻结的 `TRIAL_PROTOCOL.md`。
+- 评分器用真实 shell 调用/结果关联、隐藏文件断言与受限回答判分；包含“先失败→修复→成功重跑”和“真实失败→诚实报告”。未运行真实任务前不记录效果结论。
+- 当前验证：`python -m pytest tests/test_verification_trials.py tests/test_verification_baseline.py -q`：27 passed；新评分器 Ruff 通过。Rust 仍处实施中，待执行代理确认编译后才跑真实主模型三组。
+- 预算：本轮 Jev 至多 6 新尝试，前轮约22，累计不超过原首批30；每轮10总模型调用/12工具/60s，两个开发题各跑 original/rules/jev，未授权自动扩充收费样本。
+- 实验阈值0.95仅用于显式实验宿主配置，生产策略保持门槛控制；结果必须注明小开发集、非独立盲测，无足够效果证据不启用生产Jev拦截。
+- 本条为启动记录；后续完成与未完成状态由最终执行记录覆盖，不预写完成。
+
+## 历史规划记录：2026-10-10 剩余工作收敛计划（已由顶部覆盖）
+
+用户本轮要求规划剩余工作。本节只补实施顺序与验收设计，不表示已启动新一轮开发或批准扩大收费评测。前轮旁路交付保留，以下 R1–R4 是后续执行入口；详细文件、案例、指标与发布条件见 [剩余开发计划](docs/superpowers/plans/2026-10-10-jev-remaining.md)。
+
+- **核对到的真实缺口**：`evidence.rs` 目前按全文命令/`[call_id]` 匹配证据，收集可见 user 文本但不认证撤销与覆盖；runtime verification 的 workspace 由当前上下文赋值而非原始校验事件证明；`policy.rs` 对通用语义保持 Unknown，Jev 为观察信号。文档中的“已接入”不能解释成“Jev 已正式裁决”。
+- **R1 优先：可信证据与有效要求**。复用 InstructionLedger、ContextStore、SourceTraceStore；补 runtime 原始工作区/轮次/校验对象关联；替换仅文本包含的证据匹配；区分失败历史与同一目标的已修复重跑。旧证据无来源字段时保持 unknown。
+- **R2 随后：可判定结论和纠正行为**。第一批只覆盖 executed / tests_passed / stale_evidence / scope_mismatch；一般根因判断、架构建议等继续允许未知。独立统计证据缺失、抽取失败和语义不确定，不为提高 pass 率强行归类。
+- **R3 效果对照**。先完成离线真实轨迹标签，再跑同任务同主模型预算的原框架/规则/规则+Jev 三组；区分固定候选回放与闭环修正效果。先锁定校准策略，后看新留出结果。现有 18 条合成数据只作回归，不能证明增益。
+- **R4 发布收尾**。按类别启用，先确定性矛盾，再考虑经认证的 Jev 信号；补 GUI 实际取消/故障/恢复，更新构建并核对 hash。新安装包另做构建验证，未签名则明确标记；保留 off/shadow 回滚。
+- **协作边界**：独立聊天拥有 `trace_replay.py`、`trace_cases.json`、`test_verification_trace_replay.py` 及报告，接手前检查实际落盘状态。当前扫描尚未发现这些文件，不预记完成，不在两个线程重复创建。
+- **完成定义**：可运行并可观测的旁路已交付；下一里程碑是四类结论的可信验证和真实对照报告。只有对应类别有留出集证据且达到预先制定门槛，才能标“可拦截”；全面理解任意自然语言不作为本期承诺。
+- **执行顺序**：R1 → R2 → R3 → R4。R3 的离线标签整理可与 R1 并行，但运行评测必须锁定代码/策略；本轮不派发实现代理、不调用收费 API。
+
+## 2026-10-10：GPT-6.1-Sol 执行单——Jev 从旁路原型到可交付版本
+
+**本节保留第一期执行入口与验收历史；当前入口已更新到文件顶部与剩余开发计划。** 用户已要求 GPT-6.1-Sol 按详细计划继续开发，并把全过程及完成证据回写本文件。详细契约补充见 [计划文档](docs/superpowers/plans/2026-10-10-jev-verification.md)，实际代码与测试为最终事实来源。
+
+### 当前起点与完成定义
+
+**本轮执行已结束（2026-10-10 16:00，GPT-6.1-Sol）：P0/P2/P4/P5 的可运行旁路交付完成；P1 仍保守限制，P3 真实任务效果门槛未达。下面“已有/未完成”是执行起点，当前状态以 checkbox 和结束记录为准。生产 enforce 类别为空，未证明减少幻觉。**
+
+- 已有：Rust Jev HTTP 客户端、completed 之后的 shadow 观察、18 条合成夹具、Python v1 契约/离线规则、两项真实 smoke、Windows 启动包装。
+- 未完成：完整证据组装、候选声明覆盖、文件新鲜度、逐结论裁决、故障矩阵、真实任务三组对照、有限纠正、GUI 校验状态、新版可运行产物。
+- 交付目标：可信证据和裁决链在 Rust 跑通，shadow 可用且可观测，enforce 实现但仅在证据门槛满足后按类别启用；文档、测试、可运行构建和回滚方式齐备。不能把模型效果未验证包装成“整体完成”。
+- 起点原型在 completed 后调用；本轮已将核验前移到 `finish_response`、assistant 提交和权威展示之前。流式文本保留草稿标签，最终回答与核验记录分开。
+- 保护现有大量未提交 WIP；不 reset、不覆盖、不打包提交无关文件。暂不自动 commit/push/publish。新增构建保留原安装包。
+
+### P0：核对与契约收口
+
+- [x] 读取适用规则、现有计划、verification/provider/turn/context_store/GUI 代码，记录本轮工作树起点。
+- [x] 对照 Python v1、Rust shadow schema 和文档，列明差异；定稿 Rust 类型、错误码、序列化与兼容策略。
+- [x] 区分“事实核验通过”“模型调用成功”“任务完成”；对合法未验证回答允许诚实交付，不强迫所有请求都运行工具。
+- [x] 明确 off/shadow/enforce 配置所有者、启动继承、回滚，以及旧日志缺字段的兼容行为。
+
+验收：类型和状态转换有测试；unknown/skip/调用失败不能算 verified；当前原型限制全部有对应任务。
+
+### P1：宿主证据包与逐声明裁决
+
+- [ ] 复用 ContextStore/SourceTraceStore，按 session/turn/workspace 精确关联工具调用和结果；包含 runtime verification、未决调用、来源 ID、时间、命令和测试范围。
+- [ ] 支持文本/多段 user content 的安全读取；保留当前有效要求，不能仅取最后一条字符串就假设覆盖全部约束。
+- [x] 结论必须回指候选全文原文位置；证据引用必须存在。验证声明覆盖，遗漏/截断/上下文不足至少 unknown，禁止空结论通过。
+- [x] 基于文件内容哈希和验证前后变更判断新鲜度，处理未提交改动；测试通过的范围来自实际执行，不接受模型自填的 scope。仅认证直接 shell 命令和完整快照；复杂命令/并行批次/超量/读失败保留 unknown。
+- [x] 检索与裁剪保留近期关键失败和成功，不能固定只取最前 12 条；显式标注缺失、截断及无法核验项。
+- [x] 规则优先，Jev 逐问题判断语义；同一结论可关联多条证据，明确冲突聚合。外部文本不得改变规则或权限。
+- [x] 脱敏覆盖已知凭证与敏感字段；识别出的私钥/cookie/二进制数据不外发，记录原因；日志不保存密钥、完整敏感配置或账户信息。未知格式秘密识别不作保证。
+
+验收：无执行却称成功、局部冒充全量、旧结果、超时、跨会话证据、漏抽结论、注入文本及合理未知都有可复现回归；原始证据不被改写。
+
+### P2：客户端、预算与持久化
+
+- [x] 抽象可注入的 Jev transport；测试正确响应、缺问题、非法概率、400/401/429/5xx、超时、取消、重定向和畸形 JSON。
+- [x] 单次响应大小、输入预算、每轮调用数及截止时间有硬限制；重试不超总预算，认证错误不重试。
+- [x] 保存实际模型、输入/候选哈希、模板/策略版本、耗时和 token 用量；无法得到费用时不编造金额。
+- [x] 校验记录采用独立类型或隔离存储，不作为项目事实自动召回；持久化失败必须可观察，不静默宣称已记录。
+- [x] 用户取消、任务超时、恢复会话时保守未验证；键缺失时有明确未校验原因；凭证不进入错误正文或日志。取消落盘失败也发 fault。
+
+验收：离线 transport 故障矩阵、取消/预算测试、日志恢复测试通过；小规模真实 API smoke 单独标记，不默认进入收费 CI。
+
+### P3：评测样本、三组基线与启用门槛
+
+- [ ] 保留现有 18 条夹具作规则回归；补脱敏真实失败轨迹和正确完成样本，记录来源和标签依据。
+- [ ] 真实标签来自人工复核或可执行断言，不由 Jev 自评；如果没有独立复核，明确保留“待复核”，不自称独立标注。
+- [ ] 按原始会话/任务分组去重，划分校准与新留出集；同一作者已看过的 holdout 不能宣称盲测。
+- [ ] 原框架、确定性规则、规则+Jev 三组使用同一任务、主模型和预算；分别报告漏放、误拦、unknown、覆盖率、任务成功率、P50/P95 延迟和增量用量。
+- [x] 首批真实 Jev 评测最多 30 次调用，达到上限先汇总；不循环刷分。18 条合成请求已汇总；实际启动 smoke 另计，详细次数见完成记录。
+- [x] 启用 enforce 前执行门槛检查：阈值未校准/收益未证明，生产类别为空，保持 shadow。未证明减少幻觉；阈值冻结和三组对照仍待后续。
+
+验收：报告可复现，有数据/代码/策略版本、实际分母、未运行项和成本边界；SKIP 不算 PASS。
+
+### P4：有限纠正、完成状态与 GUI
+
+- [x] 拆开候选与最终提交；enforce 在答案确认前运行，shadow 不改变原放行逻辑。
+- [x] NeedEvidence/Contradiction 生成具体、带来源的运行时反馈，最多两轮补证据或修订，复用权限/工具链，不自动重放写操作。
+- [x] 候选或文件变化使旧裁决失效；拒绝同一问题无限循环。耗尽预算时明确未验证，保留工作和原始记录。stop hook 改答另发 invalidated。
+- [x] GUI 区分草稿、核验中、通过、未验证/故障；概率不显示为事实正确率。历史答案不补造已验证标签。
+- [x] 验证 GUI、会话日志、轨迹、任务终态及恢复后一致；关闭功能时保持兼容。集成取消/纠正由 Rust 测试覆盖，GUI 正常完成与重启恢复由实际 smoke 覆盖；未交互实测 GUI 中途取消。
+
+验收：集成测试覆盖成功、修订、取消、超时、恢复和降级；前端构建通过，实际界面检查有证据或明确环境限制。
+
+### P5：构建、交付与回滚
+
+- [x] 运行直接相关 Rust/Python 测试、fmt/clippy；GUI 类型检查、前端构建和 Tauri 回归通过。见最终命令记录。
+- [x] 构建新的本地可运行产物，记录路径、构建时间和源码版本/工作树状态；保留旧产物。新 exe 与旧 NSIS 安装包明确分开，安装包未重建。
+- [x] 小任务实际启动验证 shadow 记录；使用隔离临时目录、localhost 主模型夹具与合成回答，未使用用户生产项目。
+- [x] 记录配置方法、诊断日志位置、关闭/回滚步骤、剩余问题和下一阶段范围。参见本节结束记录及 evals/verification/README.md 当前 v2 小节。
+
+验收：新产物可以运行，有真实调用/日志证据；未满足的项保持未勾选，不能因时间或篇幅将计划标成完成。
+
+### 执行与开发日志要求
+
+每完成一个阶段，直接在本节勾选已验证项，并追加以下记录；详细计划同步更新，避免两份状态冲突：
+
+```text
+日期 / 执行模型 / 阶段：
+状态：完成 | 部分完成 | 阻塞（具体原因）
+变更：文件、行为和原因
+验证：精确命令、退出码、通过/失败/跳过数量、报告路径
+真实调用：模型、请求数、用量、结果；不得包含 key
+产物：可运行路径及构建版本（尚未构建则写未构建）
+限制：未验证项、效果证据不足、回滚方法
+下一步：剩余 checkbox 和具体动作
+```
+
+#### 2026-10-10 16:00 / GPT-6.1-Sol / 本轮执行结束
+
+- **状态**：可运行 shadow 交付完成，P0/P2/P4/P5 已验证；P1 部分完成（窄执行/测试声明 + conservative Unknown），P3 效果研究未完成。无 commit/push/publish；原有大量 WIP 保留。后续独立复核可以只读工作树与报告，本执行代理已停止修改源码。
+- **代码**：`rust/crates/ncx-core/src/verification.rs` 和 `verification/{types,evidence,snapshot,policy,tests}.rs`；`ncx-provider/src/jev.rs` 及 synthetic `examples/jev_evaluate.rs`；session/agent_loop/turn/context_trace 接线；GUI bridge、conversation model/controller/view、两项 history/event tests；`evals/verification/summarize_live.py`、`rust/gui/e2e/verification.mjs`。既有 GUI `catalog_layers` 仅提取 `CatalogLayers` 类型别名解除 Clippy 警告，无运行行为变更。
+- **主链验证**：`cargo test -p ncx-core -p ncx-provider --lib --manifest-path rust/Cargo.toml` 退出 0：core **398 passed / 1 ignored**，provider **68 passed / 1 ignored**；ignored 为显式收费测试，不算通过。`cargo clippy -p ncx-core -p ncx-provider -p ncx-cli --all-targets --manifest-path rust/Cargo.toml -- -D warnings`、`cargo fmt --all --check --manifest-path rust/Cargo.toml` 均退出 0。
+- **GUI 验证**：`cargo test --manifest-path rust/gui/src-tauri/Cargo.toml --lib -q` **138 passed**；GUI `cargo clippy ... --all-targets -- -D warnings` 和 `cargo fmt ... --all --check` 均退出 0。`npm.cmd --prefix rust/gui run build` 及 Tauri beforeBuild 通过 protocol v3/70、tsc、155 modules；最终 asset `index-D-MurtJ3.js`。日志为 `evals/verification/reports/{rust-tests,rust-clippy,gui-tests,gui-clippy,frontend-build,gui-build}-20261010.log`。
+- **Python**：本代理重新运行 `python -m pytest tests/test_verification_baseline.py -q`：**23 passed**；`python -m ruff check evals/verification/summarize_live.py` 通过。独立聊天此前报告全套 673 passed，不当成本代理的全量测试；其新增 trace_replay 审计也单独归属，不替代真实主模型评测。
+- **真实调用**：官方 `/v1/models` 返回 `jev-latest/jev-preview`，报告 `jev_models_20261010.json`。18/18 合成请求返回 `jev-1.13.0`，12,341 input / 1,026 output tokens，P50 **852ms** / P95 **1001ms**；0/11 合成负例漏放、0/3 合成正例误拦、4 unknown 是 v1 规则结果，rules+Jev 为旁路观察所以相同，不能当成 Jev 增益。报告 `jev_live_20261010.jsonl`、`jev_summary_20261010.json`；原框架真实任务对照 not_run、task success/cost null、作者已看过的 holdout 非盲测。
+- **调用预算与失败过程**：本轮共 **20 次**（18 合成 + 2 GUI 各一 claim）；两次 GUI 合计 924 input / 114 output，本轮合计 13,265 / 1,140 tokens，金额未知。此前阶段另 2 smoke；合并 22 也低于首批 30 上限。3 次 GUI setup selector/弹层重试没有 paid call；首个 paid GUI 成功落盘但恢复旧标题 selector 超时，按实际已调用计费，修正自动标题 selector 后全断言通过。未重试 Jev 请求，见 `jev_call_ledger_20261010.json`。
+- **实际启动**：`node rust/gui/e2e/verification.mjs --live` 退出 0；新 CLI exit 0，GUI Jev `ok`，verdict `unknown`，未验证标签可见，重载历史标签 DOM 断言通过。`runtime_smoke_20261010.json` 保留 paid 证据。最后从下述复制产物运行无 key 小任务与重启恢复均退出 0：`staged_no_key_smoke_20261010.json`（CLI 0 / GUI missing_key / unknown / 0 新调用）、`restore_smoke_20261010.json`（0 主模型请求、0 新 Jev、恢复历史 label + bounds）。截图 `jev_gui_20261010.png` 及 `jev_gui_restored_20261010.png`；WebView2 像素捕获有帧延迟，恢复状态以同时记录的 DOM exact text/bounds 为准。夹具在报告指定临时目录保留审计，无用户生产数据。
+- **产物**：`releases/jev-shadow-20261010-155325/ncx.exe`（7,971,328 bytes，构建 15:48:34，SHA256 `3babd5cfc143443f40c3f436370aff2b5283c11f7f4eae344e510b701d0a4da2`）；`BugleCat.exe`（14,492,672 bytes，最终构建 15:57:37，SHA256 `2208ad03f2cba81c4e1ca2a834607c2ffbfa5a9426248351cb61fc56e54e14da`）。`manifest.json` 记录 branch/HEAD、70 dirty paths、源文件 hashes 和二进制 hashes。CLI 命令 `cargo build --release -p ncx-cli --manifest-path rust/Cargo.toml`、GUI `npm.cmd run tauri -- build --no-bundle --target x86_64-pc-windows-msvc` 均退出 0。旧安装包保留，NSIS 本轮没有更新。
+- **配置/回滚**：默认 off；使用 `scripts/with-jev-shadow.ps1 -Executable <本轮新 exe>` 从 Windows 用户环境加载 key 并开启 shadow。Agent 装配时读取模式，切换要重启。`NCX_JEV_MODE=off` 重启关闭，使用保留旧安装包回滚。诊断在 `.nanocodex/sessions/<session>.verification.jsonl`，不作为事实召回；概率不是正确率；调用成功不是任务完成或事实 Pass。
+- **未完成与下一阶段**：P1 历史要求撤销/归并、任意语义的声明/覆盖认证、runtime provenance 的完整 workspace 关联；复杂命令、并行批次、超量/不完整快照均 unknown。P3 需独立标签 + 脱敏真实成功/失败轨迹 + 新留出任务 + 同主模型同预算三组对照，随后才可冻结阈值/收益/误拦界限和批准 enforce 类别。GUI 中途取消尚未交互实测（Rust cancel 测试通过）。这些能力不能由本轮合成样本或 localhost smoke 代替证明，未完成 checkbox 保留。
+
+#### 2026-10-10 / GPT-6.1-Sol / P0 完成、P1/P2/P4 实现与回归中（历史过程）
+
+- 状态：P0 完成；P1/P2/P4 部分完成。起点分支 `feat/context-association-memory`，HEAD `17530133e49241664ed4d665252e9ac24282ea5b`，63 个 dirty paths（包含此前 Jev 原型及大量无关 WIP）。本轮无 commit/push/publish。
+- 规则：已读取用户 AGENTS 指令、Windows PowerShell、guided-development 与 UI 状态提示技能；按顺序读取 HANDOFF 历史并以当前源码核对。沿用 core/provider 所有者；现有插件没有候选提交前异步闸门，因此仅在 turn loop 增加该缺失接入点。
+- 契约：Python v1 保持为离线结构化夹具；Rust 改为 `input/result/record.v2`，增加原文 UTF-8 byte spans、宿主 session/turn/workspace、命令、source_ref、时间与 SHA-256 快照。v1 shadow 概率日志不迁移为事实；旧 `jev_shadow` DynamicContext 从事实召回过滤。整体 coverage 保守为 unknown，逐结论 narrow Pass 不等于任务 Verified；合法未验证回答可完成交付。
+- 变更：`verification/{types,evidence,snapshot,policy,tests}.rs`、`verification.rs`、provider `jev.rs`、session/agent_loop/turn/context_trace、GUI bridge/conversation/thread-controller。新增独立 `.verification.jsonl`，不存密钥和完整证据正文；日志写失败发出 fault。恢复 turn ID 取现有事件最大值，避免复用旧核验轮次。
+- 限额：48,000-byte 请求、32,000-byte 响应、每调用 8s、每轮最多 3 次 Jev，计入原任务 model-call 总预算、沿用原任务 deadline；无自动重试。验证 before/after/current SHA-256，包括未提交/未跟踪文件，排除当前会话诊断日志与生成目录；超量、symlink、读失败、批次并行无法证明均不认证新鲜度。
+- 模式：`Config::from_env` 在 Agent 装配时读 `NCX_JEV_MODE=off|shadow|enforce`；默认 off。生产 `enforce_categories=[]`，即使设 enforce 也只能观察，直到效果门槛成立。宿主测试可以显式启用已审查的确定性类别；Jev 概率不会覆盖规则或被显示成正确率。
+- 验证：`cargo test -p ncx-core -p ncx-provider --lib --manifest-path rust/Cargo.toml -q`（退出 0）：core **398 passed / 1 ignored**，provider **68 passed / 1 ignored**；日志 `evals/verification/reports/rust-tests-20261010.log`。`cargo clippy -p ncx-core -p ncx-provider -p ncx-cli --all-targets ... -- -D warnings` 退出 0；前端 `npm.cmd --prefix rust/gui run build` 退出 0（protocol v3/70、tsc、155 modules）。
+- GUI：初轮 135 passed / 1 failed，失败是此前状态提示源码断言 `noteTone(message.text)` 与现有 `visibleAssistantText` 不一致；已定向对齐，正在复跑，不能把初轮算通过。已增加草稿/核验中/未验证/fault/历史核验记录标签，历史记录不制造当前 Pass。
+- 真实调用：18 条合成夹具显式回放正在执行，最大 30、无重试；此刻尚无完成证据。产物：尚未构建本轮新版。
+- 限制：声明按全文句段保守抽取，任意语义与要求覆盖仍 unknown；自动撤销/归并历史要求、复杂 shell scope、并行调用逐文件证据与完整独立效果评测尚未完成，相关 checkbox 保留未勾选。历史大文件 turn/bridge 延续既有 owner，新增独立 verification 模块均按业务拆分；不顺手拆整套旧代码。
+- 下一步：完成真实 Jev 小批报告、GUI 恢复/取消验证、新可运行 CLI/GUI 构建、实际无生产数据小任务 smoke；回写最终状态。
+
+#### 2026-10-10：执行计划扩展（实施前）
+
+- 已完成：将后续开发拆为 P0–P5，明确原型接入顺序问题、测试矩阵、真实评测预算、GUI/构建门槛和记录规范。
+- 已派发执行模型：GPT-6.1-Sol，reasoning=high；执行代理 `/root/jev_implementation_sol`。已要求立即按 P0–P5 开发、验证并回写。本条只确认派发，不代表开发完成。
+- 已知前轮验证：provider/core lib 回归、clippy/fmt、23 项 Python 规则测试及 2 项显式真实 smoke 通过。新阶段需按实际改动补充验证，不能沿用旧结果证明新实现。
+
+## 2026-10-10：Jev 决策校验层方案与开发计划（旁路首版已接入源码）
+
+### 续：证据契约与初始离线基线
+
+- **后续接入进度**：Rust 已新增官方 Jev 客户端及完成后 shadow 观察；代码在 `ncx-provider/src/jev.rs`、`ncx-core/src/verification.rs`，`turn.rs` completed 分支调用。默认关闭，使用 `NCX_JEV_MODE=shadow` 开启。第一把用户提供的 key 保存到当前用户环境，仓库无凭证；启动包装见 `scripts/with-jev-shadow.ps1`。
+- provider/core lib 回归、官方接口 smoke、shadow 落盘且会话不变的真实测试通过。独立 shadow schema 始终 unknown，只观察概率；完整证据契约尚未接线，未做 enforce、GUI 展示或新安装包。详情与运行方法见 `evals/verification/README.md`。
+
+- 已新增 [契约与运行说明](evals/verification/README.md)、Pydantic v1 可执行契约、离线规则 runner、18 条合成样本及 JSON 报告；详见开发计划的本日续记。
+- `python -m pytest tests/test_verification_baseline.py -q`：23 passed。结构化样本规则判断 18/18 与作者标签一致：11 个明确负例未错误放行，3 个正例未误拦截，4 个保留 unknown。
+- **效果边界**：非真实日志回放、标签未独立复核，scope/coverage 为夹具给定；不是 Rust 运行时或 Jev 的准确率。报告明确两者为 not_run，未接入线上校验、未证明实际减少幻觉。
+- 下一步改为：补独立标签复核与脱敏真实样本，验证声明/证据提取，再跑原 Rust Agent 基线。原方案归档记录如下，后续进度以本续记和计划开发日志为准。
+
+- 用户目标：引入 Jev 校验，提高 Agent 决策准确性，减少无证据的完成声明、错误推断及摘要失真。本轮授权并完成的是方案记录和开发规划，未接入 API、未修改运行逻辑、未做真实模型验证。
+- 完整开发计划与进度入口：[2026-10-10-jev-verification.md](docs/superpowers/plans/2026-10-10-jev-verification.md)。后续逐项更新该文件的 checklist 和开发日志，HANDOFF 只同步阶段结果与阻塞。
+- 第一阶段：完成前校验。候选回答 → 框架收集真实证据 → 确定性检查 → Jev 逐项判断证据支持程度 → 通过 / 补证据 / 修正矛盾 / 无法判断。优先覆盖“未执行却声称完成、局部测试冒充全量、旧测试验证新代码、超时冒充成功”。
+- 复用位置已核对：`agent_loop/turn.rs` 的完成前 Python 复检和 `finish_response`；`context_store.rs::tool_call_detail` 的状态、退出码、来源、版本字段；`context_trace.rs::SourceRecord` 的证据记录。字段存在不代表证据新鲜度已充分保证，实施时需核对文件内容哈希和测试范围。
+- 模块职责：证据组装、独立 Jev API 适配、确定性放行策略；避免继续在 `turn.rs` 堆积实现。现有 `evals/golden/judge.py` 使用 Chat Completions，不能只更换模型名来调用 Jev。
+- 关键约束：结构化输出不等于事实正确；Jev 不覆盖权限、工具 schema 或明确失败证据。候选回答和摘要不能自证；工具文本作为数据；缺失、截断、超时均不能记为通过。阈值必须经本项目数据校准。补证据/改写最多两轮并共享任务预算。
+- 验证与发布：离线回放 → 旁路记录 → 按错误类别逐步拦截；比较原框架、仅确定性规则、规则 + Jev 三组，统计错误放行、误拦截、任务成功率、延迟和成本。必须包含正确答案对照、未知/失败路径及独立留出集，不能用 Jev 自己生成的标签证明 Jev 有效。
+- 后续阶段：高风险决策点的候选行动选择，以及压缩提交/长期记忆写入前的一致性校验，均待第一阶段效果验证后启动。
+- 官方参考（2026-10-10 查询）：[API](https://api.typesafe.ai/redoc)、[能力说明](https://typesafe.ai/blog/introducing-system-one-models-and-jev)、[工作流评测](https://evals.typesafe.ai/)。接口为 `/v1/systemone`，输入 `state + questions`，支持 Noul / Choice / Score；实际模型名通过 `/v1/models` 获取。尚无本项目账号调用、延迟、成本或准确率实测。
+- 下一步：先完成计划 Task 1 的证据/裁决契约和 Task 2 的脱敏失败样本标注，再实现旁路版本。当前无实施进度可声明完成。
+
+## 2026-10-04：评测集设计审查 + 项目问题扫描
+
+本节开头是审查结论（下文 A~E 各节）。之后同日按 E 的顺序完成了第 1、2 步，并修复了一个由此发现的回归。
+
+### 本轮进度（2026-10-05 00:30）
+
+| 项 | 状态 | 改动文件 |
+|---|---|---|
+| B1 benchmark 退出码 + 通过率阈值 | ✅ | `evals/harness.py`（`--min-pass-rate`、`benchmark_gate()`）、`evals/golden/golden_cases.json`（agent 用例阈值 0.8）、`scripts/run-eval.ps1`、新增 `tests/test_benchmark_gate.py` |
+| B2 Rust 覆盖 + CI | 🟡 | `golden_cases.json` 新增 7 个 cargo 用例；`evals/golden/runner.py`（过滤器匹配到 0 个测试判失败、`--scope-to-tiers`）；`.github/workflows/eval-gate.yml` 新增 `rust-gate`；新增 `tests/test_golden_cargo_tier.py`；`evals/golden/README.md` |
+| G-RUST-CORE-001 空跑 | ✅ | 过滤器 `python_check` 匹配 0 个测试 → `--lib python`（6 个测试） |
+| turn.rs WIP 回归（复检证据不落盘） | ✅ | `ncx-core/src/context_trace.rs`（`SourceKind::RuntimeVerification`）、`agent_loop/turn.rs`（`record_source` 持久化）、`agent_loop/tests/basic_tests.rs` |
+
+验证：相关 pytest 26+4 项通过；`cargo test -p ncx-core --lib` 379/379；`cargo clippy -p ncx-core --all-targets -D warnings`、`cargo fmt --all --check` 通过；golden cargo 层修复前为 10/11，修复后未整体重跑（预期 11/11）。
+
+仍未做 / 注意：
+- 全部未提交。我的改动和用户 WIP（provider、GUI、semantic_compaction、turn.rs 中文本工具调用拦截）混在同一批工作树文件里。
+- `rust-gate` 未在 GitHub 实跑；引入了第三方 action `dtolnay/rust-toolchain`、`Swatinem/rust-cache`；clippy 和 GUI build 未进 CI。
+- 若 GUI 或其他地方按字符串识别 `SourceKind`，需要认识新值 `RuntimeVerification`（SourceKind 没有 serde `rename_all`，按变体名原样序列化），未核查。
+- 既有 lint：`evals/golden/judge.py` 里 `sys` 导入未使用，未修。
+- `harness benchmark` 默认阈值 1.0，裸跑时只要有一题失败就退出 1，会改变现有用法。
+- 下一步：E3 剩余部分——给每题加 mutated-reference（故意写错、grader 必须拒绝），并加强弱 grader（t1/t3/t4 只有几条 assert，硬编码也能过）。
+
+### 2026-10-05 04:45：E3 参考解补齐
+
+- 17 道题新增 `bench/tasks/<task>/reference/files.json`（t1、t3~t18；t2/t19/t20 原来就有）。纯数据，不在运行时执行；`bench/run.py` 的 `HIDDEN` 已包含 `reference`，不会泄漏给 Agent。
+- `validate_bench_tasks`：20/20 valid，每题都满足「种子失败 + 参考解通过」。
+- `runner.py`：**缺少参考解现在判为无效**，原来 `reference_passes=None` 也算 valid。
+- G-BENCH-001 标题从「21 题」改为「20 题」。
+- 验证：`pytest tests/test_golden_runner.py tests/test_golden_cargo_tier.py tests/test_benchmark_gate.py tests/test_bench_run.py` 27 项通过；`runner --case G-BENCH` PASS。
+- 参考解是本轮手写的，只证明「存在一个能过 grader 的解」，**不证明 grader 足够严**，所以 mutated-reference 和弱 grader 加强仍是下一步。
+- 生成脚本留在会话 scratch 目录（`gen_refs.py`），不进仓库。
+
+### 2026-10-05 12:35：E3 完成——mutated-reference + 弱 grader 加强
+
+- **20 题全部新增 `reference/mutants.json`**，共 26 个 mutant。格式：`{id, why, file, old, new}`，每个是对参考解的一处精确替换，附原因说明（例如 `hardcoded-primes`、`get-no-refresh`、`mutates-input`）。
+- **`runner.validate_bench_tasks` 新增第 3 项检查**：每个 mutant 都必须让 check 失败；锚点不唯一时 mutant 判为无效；缺 `mutants.json` 时整题无效。新增 `apply_mutant()`（先把 CRLF 归一化，不修改参考解本身）。
+- **顺手修了 runner 的一个隐患**：同一个临时工作区先后跑参考解和 mutant，而 `.pyc` 只按源文件 mtime+大小判断是否过期，所以同长度、同一秒内写入的 mutant 会复用参考解的字节码，造成假通过（首跑时 t1 `one-is-prime`、t9 `right-assoc-minus` 就是这样「存活」的）。现在改为 `python -B` 运行，并在每次运行前清掉 `__pycache__`，有回归测试覆盖。
+- **加强 3 道弱 grader**（`check.py`）：
+  - t1：对 is_prime 做 -10..299 的穷举，另加大素数 7919 和合数 7917；add 补充负数、浮点、大整数。
+  - t3：n ∈ {0,1,2,3,14,15,16,30,31,100} 时与独立实现的结果整表比对。
+  - t4：6 层深栈逐层检查 peek/size，peek 不得移除元素，0/None/"" 作为普通元素，加交替 push/pop 和复用后空 pop。
+- **证据：旧 grader 会接受的错误解有 5 个**（用 HEAD 版 check.py 实测）：t1 `square-not-checked`、`hardcoded-primes`；t3 `hardcoded-15`；t4 `peek-middle`、`size-capped`。新 grader 全部拒绝。
+- 验证：`validate_bench_tasks` 20/20 valid，每题 mutant 全部被拒；新增 `tests/test_bench_mutants.py` 3 项；相关 pytest 共 30 项通过；ruff 通过。
+- ⚠️ **t1/t3/t4 的 grader 变严了**：历史 benchmark 分数（如 09-04 的 15/18）和新分数不能直接比较，需要重新跑基线。
+- mutant 只覆盖作者能想到的错法，不是完备证明；后续可以从 Agent 真实失败轨迹里提取错解，补充为 mutant。
+- 生成脚本 `gen_mutants.py`、`old_grader_check.py` 留在会话 scratch 目录。均未提交。
+
+### 2026-10-06 14:12：新基线（grader 加强后）
+
+- 运行方式：`python -u bench/run.py --agent nanocodex --repeats 3 --timeout 240`。release `ncx.exe` 于 10-05 12:58 用**当前工作树**重新编译（含用户 WIP 和本节的修复）；模型路由为 `deepseek-flash`（见 provider 诊断日志）。
+- 报告：`bench/reports/report_20261006_141227.md|.json`；逐次轨迹：`trace_20261006_141227.jsonl`。
+- **结果：60/60 次通过，20/20 题全解，但有 29/60 次（48%）超时。**
+  - 每次都通过的题里，3 次全部超时的有：t9_expr_eval、t12_toposort、t17_running_stats（平均耗时都是 240s）。
+  - 没有超时的只有 t6_lru（34s）和 t20_nav_fix（17s）。
+- **怎么解读：**
+  1. **按「是否通过」统计，这套题已经饱和**：100% 通过，没有区分度。golden 里 agent 用例的 `--min-pass-rate 0.8` 等于永远满足，起不到门禁作用。
+  2. **真正的信号是超时**：抽查超时的轨迹（如 t9），目标文件早就写好了，grader 也能通过，但 Agent 一直以约 2s 一次的频率继续调用模型，直到 240s 被杀掉（returncode=None）。也就是**任务做完了却不收尾**。这是效率和成本问题；如果没有外部超时，就是死循环。
+  3. 和旧的 15/18（09-04，`deepseek-v4-pro`，每题 1 次，13/18 超时）**不可直接比较**：模型、grader、重复次数都变了。超时比例 72% → 48% 只能当作参考。
+- **建议（未实施）：**
+  - 门禁指标从 pass rate 改为 **clean pass rate = 通过且未超时**。本次为 31/60 = 51.7%，可以作为初始基线，阈值建议先设在约 0.45，等再跑几次确认波动范围后再收紧。这需要 `bench/run.py`/`harness` 输出这个字段，`benchmark_gate` 改用它。
+  - 单独排查「做完不收尾」：看超时轨迹的会话 JSONL（`.nanocodex/sessions/*.jsonl` 在临时工作区，跑完已删除，需要加 `--keep-workspace` 一类的开关或者在 trace 里保存最后几轮的 assistant 内容），判断是复检/编译门禁反复拒绝完成、文本形式工具调用的重试，还是模型自己反复验证。这和本轮 `turn.rs` 的 WIP 可能有关，未确认。
+  - 题目太简单：后续按 C 节扩 L2/L3（仓库级、行为类）才能恢复区分度。
+
+本节以下 A~E 为审查结论原文，只在 B1/B2 处追加了状态。
+
+### A. 评测集现状
+
+| 资产 | 规模 | 测的是什么 | 主要问题 |
+|---|---|---|---|
+| `bench/tasks` | 20 题（README/manifest 写的是 "18+2"，G-BENCH-001 标题写的是 "21 题"，三处对不上） | 单文件/小模块编码题（fizzbuzz、roman、lru、toposort……） | 题目太简单、公开常见，污染风险高；15/18 已接近饱和，区分度低 |
+| `evals/self_repair` | 6 个故障注入 | 在本仓库真实源码上修 bug | 设计最好，但 n=6、只跑过 1~2 次，不能当成功率用 |
+| `evals/golden`（buglecat.golden.v1） | 24 unit + 4 cargo + 2 agent | 门禁编排 | 见 B，**unit 层其实是在重复跑 pytest，不是评测** |
+| `evals/harness.py` / `metrics.py` | — | 轨迹/压缩指标 | 只有离线夹具，没接到真实回合 |
+
+### B. golden 评测集的具体缺陷（按严重度）
+
+1. **P0 agent 层门禁是空的** ✅ 已修（同日）：`evals/harness.py benchmark` 新增 `--min-pass-rate`（默认 1.0），并新增 `benchmark_gate()`；没有任何执行，或通过率低于阈值时退出 1，报告 JSON 里写入 `benchmark.gate`。golden 的两个 agent 用例显式设了 `--min-pass-rate 0.8`（历史 15/18≈0.83，属于临时基线，等 repeats≥3 后再重定）。`scripts/run-eval.ps1` 会照常出报告，但门禁失败时以非 0 退出。回归测试 `tests/test_benchmark_gate.py` 5 项；相关 26 项测试通过。原问题：`main()` 无论 benchmark 结果如何都 `return 0`，`runner.py` 的 agent 用例只看退出码，所以 **0/20 也会记 passed**。
+2. **P0 unit 层测的是 Python `nanocodex/` 包，但主线产品是 Rust** 🟡 部分已修（同日）：golden 新增 7 个 cargo 用例（context_store / context_retrieval / memory_index / semantic_compaction / tool_recovery / agent_state / instruction_state，按模块路径过滤，共 76 个测试）。runner 现在会解析 `test result:` 行，**过滤器匹配到 0 个测试时判为失败**；这条规则当场抓到 `G-RUST-CORE-001` 的过滤器 `python_check` 一直匹配 0 个测试，**它历来的 passed 是空跑**，已改为 `--lib python`（6 个测试）。`eval-gate.yml` 新增 `rust-gate` job（fmt + `cargo test --workspace --lib` + `runner --tier cargo --scope-to-tiers`）。runner 新增 `--scope-to-tiers`，供分 job 时只跑本层，默认行为不变。新增测试 `tests/test_golden_cargo_tier.py` 4 项。仍未做：clippy 和 GUI `npm run build` 进 CI；CI 上的 Rust job 还没在 GitHub 实跑验证过。
+   - ✅ **已修（同日）**：原因是 WIP 把复检证据从 `session.add_assistant`（持久化）改成了只进 `prompt.runtime_notes`（仅本回合发给模型），失败证据就没地方落盘了。修法：保留 runtime note 给模型，同时用 `Session::record_source` 写入新增的 `SourceKind::RuntimeVerification` 来源记录（`.sources.jsonl`，status=failed/passed），**不再伪造 assistant 消息**。测试改为使用带日志的会话，断言来源记录里有 `IndentationError` 且 status=failed，并且会话里没有 `[Runtime syntax verification]` 形式的 assistant 消息。验证：`cargo test -p ncx-core --lib` 379/379、`cargo clippy -p ncx-core --all-targets -D warnings`、`cargo fmt --all --check` 通过。
+   - 原记录：**修好过滤器后，cargo 层发现了一个真实回归**：`agent_loop::tests::basic_tests::python_recheck_persists_new_failure_evidence` 在当前工作树失败（`basic_tests.rs:39`，会话消息里找不到 `IndentationError`）。在干净的 HEAD `1753013` worktree 上同一测试通过，所以是**未提交的 `agent_loop/turn.rs` 改动**（文本形式工具调用的拦截与重试、可读错误展示）引入的。这部分是用户 WIP，本轮没动。当前 cargo 层 10/11 通过，提交这批 WIP 前必须先修好。原问题：（本文件标题就是「Rust 线」）。24 个 critical 用例全部是 `tests/*.py`，Rust 只有 4 个 cargo 用例，而且 CI 不跑。「agent_loop / sandbox / patch / compaction 已覆盖」的覆盖矩阵对线上实现来说**是虚报**。近期大改动（context_store、context_retrieval、memory_index、分块压缩、tool_recovery、状态机）都在 Rust，golden 里一个都没有。
+3. **P1 unit 层和 pytest 重复**：CI 先跑 `pytest tests -q`，再由 golden 逐文件起 24 次 pytest，同一批测试跑两遍，没有增加任何信号。golden 应该只放 pytest/cargo 里**没有**的东西：基准有效性、锚点有效性、agent 行为。
+4. **P1 17/20 题没有参考解**：只有 t2/t19/t20 有 `reference/files.json`，其余 `reference_passes=None` 也算 valid。也就是说，大部分 grader 只验证过「空工作区会失败」，没验证过「正确答案能通过」，grader 本身写错了也查不出来。另外像 `t3_fizzbuzz/check.py` 这样只有 2 条 assert 的弱 grader，硬编码也能过，需要隐藏用例和边界用例。
+5. **P1 没有统计口径**：agent 用例 `--repeats 1`，没有 pass@k / pass^k、置信区间和基线对比；单次 15/18 vs 18/18 的差别落在噪声范围内（09-05 复测已经证明有间歇性）。超时 13/18 却算 pass，耗时/成本也没进门禁。
+6. **P2 judge 没有校准**：`judge.py` 用 `score>=4` 判定，但没有人工标注的校准集，也没有一致性检查（同一样本多次评分、正反例）。
+7. **P2 环境探测太弱**：`_provider_configured` 只检查 `providers.json` 是否存在；`_ncx_binary` 写死了 `ncx.exe`，不跨平台；agent 用例 14400s 超时内没有进度输出。
+8. **P2 报告进了 git**：`evals/golden/reports/*` 每跑一次就多一对文件（目前有 3 对已提交、1 对未跟踪），应改为 `.gitignore`，只保留 CI artifact 或固定的 baseline。
+
+### C. 建议的评测集设计（目标结构）
+
+```
+evals/
+  golden/            # 门禁：只放「元校验」+ 指向 Rust/Python 的少量冒烟
+  suites/
+    L0_tool/         # 工具单步：apply_patch/shell/read 的确定性契约（Rust cargo，CI 必跑）
+    L1_task/         # 单任务编码：重做后的 bench（每题必须带 reference + 隐藏用例）
+    L2_repo/         # 仓库级：self_repair 扩到 20~30 例 + 多文件/跨模块修复
+    L3_behavior/     # 行为与安全：越权写、危险命令、审批拒绝后改道、注入指令（prompt injection in files）
+    L4_long/         # 长程：压缩前后约束保持、会话恢复、Goal 多轮
+  baselines/         # 每个 suite 的 pass rate/耗时/token 基线（按模型+commit 记录）
+```
+
+设计要点：
+- **每条用例统一 schema**：`id / suite / capability / difficulty / seed_files / prompt / hidden_check / reference / expected_files / forbidden_actions / budget(tokens,s) / tags(contamination: public|private)`。
+- **有效性三连对所有题强制执行**：seed 失败、reference 通过、mutated-reference（故意改错的答案）失败。最后一条用来证明 grader 能区分对错，不是只会挡住空文件。
+- **行为断言不只看结果**：从 trace 里断言「没有调用被禁止的工具 / 没写工作区外 / 拒绝后没有重复同一调用 / 完成前跑过验证」，`metrics.py` 已经有轨迹指标，可以直接复用。
+- **统计门禁**：agent 层 `repeats>=3`，报告 pass@1、pass^3、Wilson 区间；门禁规则写成「相对 baseline 下降超过 X 个百分点且区间不重叠才判失败」，避免噪声导致误报。
+- **私有题占比**：L1/L2 至少一半来自本仓库真实 bug（git 历史里的 fix 提交反向注入），降低污染。
+- **CI 分层**：PR 跑 L0 + golden 元校验（几分钟）；nightly 跑 L1/L3 的小子集（有 Key）；发版跑全量 + baseline 对比。
+
+### D. 其他项目问题
+
+- **工作区很脏**：根目录有未跟踪的 `tmp_last.py`、`tmp_resume_extract.py`、`tmp_safe.py`、`tmp_safe2.py`、`tmp_resume_pages/`，和项目无关，应删除或加进 `.gitignore`。另有 15 个已修改文件（Rust provider/GUI/compaction）和未跟踪的 `rust/crates/ncx-provider/src/official_live.rs` 没提交，09-20 记录的「official live catalog 改动」仍悬着。
+- **二进制进了 git**：`releases/*.exe|*.zip`（安装包、便携包、插件 zip）直接提交，仓库体积会持续膨胀，应改用 GitHub Releases / LFS。
+- **HANDOFF.md 已有约 237KB / 1700+ 行**，按时间倒序堆叠，而且多节互相「覆盖上一节」，读起来很费力。建议拆成 `HANDOFF.md`（只保留当前状态 + 未决事项）和 `docs/handoff-archive/`。
+- **docs 混入大量面试材料**：`docs/interview-prep/`（60+ 文件，含 schedule-agent 等与本项目无关的内容），和产品文档混在一起，建议移出仓库或单独放到一个目录。
+- **Python 与 Rust 双实现并存**：`nanocodex/`（Python）和 `rust/` 功能重叠，629 个 pytest 测的是 Python 版。需要明确 Python 版是参考实现、保留还是废弃，否则测试绿灯会给人错误的安全感（和 B2 是同一个根因）。
+- **CI 缺 Rust**：`eval-gate.yml` 只装 Python；`cargo test/clippy/fmt` 和 GUI `npm run build` 只在本地手动跑，所有 HANDOFF 里「全绿」的说法在 CI 上都不可复现。
+- **历史遗留未决**（摘自前文，仍未关闭）：语义召回（可选）；ToolRuntime 单一编排器、工具级超时/并发预算；真实 WebView/桌面 E2E 从未在 CI 跑过；2026-09-11 审计的 P1/P2（Anthropic `max_tokens` 被归一成 `stop`、`diff --stat` 校验可被绕过、长约束不进安全摘录、恢复会话清空 `reasoningIndex`）没有逐条标注是否已修；Windows 安装包签名。
+- **bench 已知不稳定**：t7/t12/t16 有间歇性失败，13/18 次运行超时（240s）。超时多说明 agent 效率或提示词有问题，而不是题难，值得单独开一个 trace 分析。
+
+### E. 建议的下一步（按顺序）
+
+1. 修 B1（harness 退出码 + 阈值）——改动小、收益大。
+2. 在 golden 加 Rust 用例覆盖 context_store / retrieval / compaction / tool_recovery / 状态机，并把 cargo test 放进 CI。
+3. 给剩下 17 道 bench 题补 reference + mutated-reference，加强弱 grader。
+4. 清理工作区：tmp 文件、报告进 `.gitignore`，决定 releases 二进制和未提交改动的去留。
+5. 再按 C 的结构扩 L2/L3。
+
+## 2026-09-20：四项缺口核对
+
+对照扫描里列出的四项，本轮只落地第 4 项；前三项核对现状，不扩范围实现。
+
+- **4. GUI 源码断言失败已修**：原先 125 通过 / 11 失败。失败来自 Windows CRLF 对不上测试里的 `\n`，以及 4 处源码漂移（`compact_safely_if_needed` → `compact_context`、TopBar `use:hoverDepth`、工具组 markup、New 会话 `Err(e.clone())` 改为 deferred New）。测试模块增加 `frontend_source` 归一化换行，断言跟到当前文案「已更新上下文摘要」。验证：`cargo test --lib --manifest-path rust/gui/src-tauri/Cargo.toml` **136 passed / 0 failed**。
+- **1. 语义召回仍可选未做**：`ContextRetriever` 仍是权威分层 + token 预算 + 去重；`context_trace::retrieve` 是关键词重叠打分。没有 embedding 依赖，也没有语义召回调用。计划原文即标注可选。
+- **2. 工具级 fallback 比交接文档更完整，但仍不是完整 ToolRuntime 编排**：`ToolScheduler` 已走 `execute_with_recovery`。已有额度/去重、中间件、审批、只读恢复、一次瞬时重试、声明式 substitute、写指纹拒绝双写、PermissionDenied/Cancelled 不绕过、recovery 入 trace。仍缺工具级超时/并发预算，以及把「参数→权限→额度→超时→审批→执行→结果校验→终态」收成单一 ToolRuntime 编排器。
+- **3. 验证闸口部分跑通**：Python 离线 `pytest -q` **629 passed in 12.17s**。未跑真实 WebView/桌面 E2E（`npm run test:e2e:*` 会起 Tauri dev）、真实模型调用、benchmark。
+- 工作树里原有的 official live catalog 改动未动。未提交、未推送。
+
 ## 2026-09-15（三）：计划收口，29/29 完成
 
 补齐上一节遗留的四项，`docs/superpowers/plans/2026-09-14-context-association-memory.md` 的 7 个任务、29 项 checkbox 全部完成。

@@ -70,7 +70,7 @@ pub fn apply_reasoning_effort(kwargs: &mut Map<String, Value>, model: &str, effo
         };
         if DISABLED_REASONING_EFFORTS.contains(&normalized.as_str()) {
             extra.insert("thinking".into(), json!({"type": "disabled"}));
-        } else if matches!(normalized.as_str(), "xhigh" | "max" | "highest") {
+        } else if matches!(normalized.as_str(), "xhigh" | "ultra" | "max" | "highest") {
             extra.insert("reasoning_effort".into(), json!("max"));
             extra.insert("thinking".into(), json!({"type": "enabled"}));
         } else if matches!(
@@ -101,11 +101,12 @@ pub fn apply_reasoning_effort(kwargs: &mut Map<String, Value>, model: &str, effo
     }
 }
 
-/// Ensure DeepSeek thinking-mode tool-call history replays `reasoning_content`.
+/// Ensure DeepSeek thinking-mode history replays `reasoning_content`.
 ///
-/// DeepSeek V4/reasoner rejects a request when an assistant history item carries
-/// `tool_calls` but lacks non-empty `reasoning_content`. Returns a cloned,
-/// possibly-patched copy; the input slice is never mutated.
+/// With tools present, DeepSeek requires this field on every prior assistant
+/// message, including app-generated status messages without tool calls. Keep
+/// actual reasoning unchanged and mark older missing content as omitted.
+/// Returns a cloned copy; the input slice is never mutated.
 pub fn sanitize_reasoning_replay(
     messages: &[Value],
     model: &str,
@@ -120,13 +121,6 @@ pub fn sanitize_reasoning_replay(
             continue;
         };
         if obj.get("role").and_then(|v| v.as_str()) != Some("assistant") {
-            continue;
-        }
-        let has_tool_calls = obj
-            .get("tool_calls")
-            .map(|v| !v.is_null() && v.as_array().map(|a| !a.is_empty()).unwrap_or(true))
-            .unwrap_or(false);
-        if !has_tool_calls {
             continue;
         }
         let current = obj
@@ -153,6 +147,7 @@ fn requires_reasoning_content(model: &str) -> bool {
     let n = model.trim().to_lowercase();
     n.starts_with("deepseek-chat")
         || n.starts_with("deepseek-reasoner")
+        || n.starts_with("deepseek-flash")
         || n.starts_with("deepseek-v4")
 }
 
@@ -224,6 +219,23 @@ mod tests {
             kwargs["messages"][0]["reasoning_content"].as_str().unwrap(),
             "real reasoning"
         );
+    }
+
+    #[test]
+    fn flash_replays_reasoning_for_tool_calls_and_plain_assistant_status() {
+        let messages = vec![
+            user_msg("continue"),
+            assistant_toolcall(),
+            json!({"role":"tool", "tool_call_id":"c1", "content":"done"}),
+            json!({"role":"assistant", "content":"[Runtime syntax verification] failed"}),
+        ];
+        let kwargs = build_body("deepseek-flash", &messages, None, None, None, Some("ultra"));
+        let replay = kwargs["messages"].as_array().unwrap();
+        assert_eq!(replay[1]["reasoning_content"], REASONING_PLACEHOLDER);
+        assert_eq!(replay[3]["reasoning_content"], REASONING_PLACEHOLDER);
+        assert_eq!(kwargs["extra_body"]["reasoning_effort"], "max");
+        assert_eq!(kwargs["extra_body"]["thinking"]["type"], "enabled");
+        assert!(messages[3].get("reasoning_content").is_none());
     }
 
     #[test]

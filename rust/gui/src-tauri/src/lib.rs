@@ -12,7 +12,8 @@ mod memory_merge_job;
 pub mod model_catalog;
 
 use model_catalog::{
-    catalog, find_preset, openrouter_model, yunmo_model, CatalogModel, CatalogProvider,
+    catalog, find_preset, merge_official_live_models, openrouter_model, yunmo_model, CatalogModel,
+    CatalogProvider,
 };
 
 use base64::Engine as _;
@@ -107,6 +108,7 @@ struct AppState {
     runtime_handoff_gate: RuntimeHandoffGate,
     openrouter_models: Mutex<Vec<CatalogModel>>,
     yunmo_models: Mutex<Vec<CatalogModel>>,
+    official_live_models: Mutex<HashMap<String, Vec<CatalogModel>>>,
     /// Serializes process-CWD transitions with workspace-bound GUI operations.
     /// Tauri commands can run concurrently, so every snapshot check and its
     /// filesystem/Git operation must share a linearization point with
@@ -327,30 +329,22 @@ pub struct ConfigLocation {
 
 fn list_custom_providers(state: &AppState) -> Result<Vec<CustomProviderView>, String> {
     let routes = state.provider_directory.list()?;
+    let (openrouter, yunmo, official) = catalog_layers(state)?;
     for route in routes
         .iter()
         .filter(|route| route.id.starts_with("preset:"))
     {
         let provider_id = route.id.trim_start_matches("preset:");
-        let models = if provider_id == "openrouter" {
-            state
-                .openrouter_models
-                .lock()
-                .map_err(|_| "OpenRouter 模型缓存不可用")?
-                .clone()
-        } else if provider_id == "yunmo" {
-            state
-                .yunmo_models
-                .lock()
-                .map_err(|_| "云末模型缓存不可用")?
-                .clone()
-        } else {
-            provider_models(provider_id, &[], &[])
-        };
-        let model_ids = models
+        let models = provider_models(provider_id, &openrouter, &yunmo, &official);
+        let mut model_ids = models
             .into_iter()
             .map(|model| model.model_id)
             .collect::<Vec<_>>();
+        if !route.selected_model.is_empty()
+            && !model_ids.iter().any(|model| model == &route.selected_model)
+        {
+            model_ids.insert(0, route.selected_model.clone());
+        }
         if !model_ids.is_empty() && model_ids != route.models {
             state
                 .provider_directory
@@ -691,17 +685,9 @@ fn set_model_for_state(model: String, state: &AppState) -> Result<(), String> {
             .fail(generation, error.to_string())
     })?;
     if let Some(provider_id) = cfg.active_provider_id.strip_prefix("preset:") {
-        let cached = state.openrouter_models.lock().map_err(|_| {
-            state
-                .provider_activation
-                .fail(generation, "OpenRouter 模型缓存不可用".to_string())
-        })?;
-        let yunmo = state.yunmo_models.lock().map_err(|_| {
-            state
-                .provider_activation
-                .fail(generation, "云末模型缓存不可用".to_string())
-        })?;
-        let preset = provider_models(provider_id, &cached, &yunmo)
+        let (cached, yunmo, official) = catalog_layers(state)
+            .map_err(|error| state.provider_activation.fail(generation, error))?;
+        let preset = provider_models(provider_id, &cached, &yunmo, &official)
             .into_iter()
             .find(|item| item.model_id == model)
             .ok_or_else(|| {
@@ -709,12 +695,10 @@ fn set_model_for_state(model: String, state: &AppState) -> Result<(), String> {
                     .provider_activation
                     .fail(generation, format!("模型 {model} 不属于当前预设模型商"))
             })?;
-        let quick_switch_models = provider_models(provider_id, &cached, &yunmo)
+        let quick_switch_models = provider_models(provider_id, &cached, &yunmo, &official)
             .into_iter()
             .map(|item| item.model_id)
             .collect::<Vec<_>>();
-        drop(cached);
-        drop(yunmo);
         state.provider_activation.commit(generation, || {
             write_preset(&state.provider_directory, &preset, &quick_switch_models)
         })?;
@@ -742,23 +726,14 @@ fn set_model_for_state(model: String, state: &AppState) -> Result<(), String> {
             .send(Command::SetModel(model))
             .map_err(|_| "agent thread is not running".to_string());
     }
-    let cached = state.openrouter_models.lock().map_err(|_| {
-        state
-            .provider_activation
-            .fail(generation, "OpenRouter 模型缓存不可用".to_string())
-    })?;
-    let yunmo = state.yunmo_models.lock().map_err(|_| {
-        state
-            .provider_activation
-            .fail(generation, "云末模型缓存不可用".to_string())
-    })?;
-    if let Some(preset) = find_preset_by_model_id(&model, &cfg.base_url, &cached, &yunmo) {
-        let quick_switch_models = provider_models(&preset.provider_id, &cached, &yunmo)
+    let (cached, yunmo, official) =
+        catalog_layers(state).map_err(|error| state.provider_activation.fail(generation, error))?;
+    if let Some(preset) = find_preset_by_model_id(&model, &cfg.base_url, &cached, &yunmo, &official)
+    {
+        let quick_switch_models = provider_models(&preset.provider_id, &cached, &yunmo, &official)
             .into_iter()
             .map(|item| item.model_id)
             .collect::<Vec<_>>();
-        drop(cached);
-        drop(yunmo);
         state.provider_activation.commit(generation, || {
             write_preset(&state.provider_directory, &preset, &quick_switch_models)
         })?;
@@ -1645,8 +1620,13 @@ fn settings_from_config(cfg: &Config) -> Settings {
     let capacity = ncx_core::resolve_context_capacity(&[], &cfg.base_url, &cfg.model);
     Settings {
         context_capacity_model: cfg.model.clone(),
-        resolved_context_window: capacity.map(|(n, _)| n).unwrap_or(cfg.context_window.clamp(1, 32_768)),
-        context_window_source: capacity.map(|(_, source)| source).unwrap_or("fallback").into(),
+        resolved_context_window: capacity
+            .map(|(n, _)| n)
+            .unwrap_or(cfg.context_window.clamp(1, 32_768)),
+        context_window_source: capacity
+            .map(|(_, source)| source)
+            .unwrap_or("fallback")
+            .into(),
         model: cfg.model.clone(),
         base_url: cfg.base_url.clone(),
         vl_model: cfg.vl_model.clone(),
@@ -1709,7 +1689,9 @@ fn get_settings(provider_catalog: &ProviderCatalogService) -> Result<Settings, S
     .map_err(|e| e.to_string())?;
     let mut settings = settings_from_config(&cfg);
     let models = provider_catalog.discover_config(&cfg).unwrap_or_default();
-    if let Some((window, source)) = ncx_core::resolve_context_capacity(&models, &cfg.base_url, &cfg.model) {
+    if let Some((window, source)) =
+        ncx_core::resolve_context_capacity(&models, &cfg.base_url, &cfg.model)
+    {
         settings.resolved_context_window = window;
         settings.context_window_source = source.into();
     }
@@ -1878,9 +1860,36 @@ struct ModelCatalogResponse {
     stale: bool,
 }
 
+type CatalogLayers = (
+    Vec<CatalogModel>,
+    Vec<CatalogModel>,
+    HashMap<String, Vec<CatalogModel>>,
+);
+
+fn catalog_layers(state: &AppState) -> Result<CatalogLayers, String> {
+    Ok((
+        state
+            .openrouter_models
+            .lock()
+            .map_err(|_| "OpenRouter 模型缓存不可用")?
+            .clone(),
+        state
+            .yunmo_models
+            .lock()
+            .map_err(|_| "云末模型缓存不可用")?
+            .clone(),
+        state
+            .official_live_models
+            .lock()
+            .map_err(|_| "官方模型缓存不可用")?
+            .clone(),
+    ))
+}
+
 fn catalog_response(
     openrouter_models: &[CatalogModel],
     yunmo_models: &[CatalogModel],
+    official_live: &HashMap<String, Vec<CatalogModel>>,
     stale: bool,
 ) -> ModelCatalogResponse {
     let mut providers = catalog();
@@ -1895,6 +1904,13 @@ fn catalog_response(
     if !yunmo_models.is_empty() {
         if let Some(provider) = providers.iter_mut().find(|provider| provider.id == "yunmo") {
             provider.models = yunmo_models.to_vec();
+        }
+    }
+    for provider in &mut providers {
+        if let Some(models) = official_live.get(&provider.id) {
+            if !models.is_empty() {
+                provider.models = models.clone();
+            }
         }
     }
     ModelCatalogResponse { providers, stale }
@@ -1986,12 +2002,18 @@ fn provider_models(
     provider_id: &str,
     openrouter_models: &[CatalogModel],
     yunmo_models: &[CatalogModel],
+    official_live: &HashMap<String, Vec<CatalogModel>>,
 ) -> Vec<CatalogModel> {
     if provider_id == "openrouter" && !openrouter_models.is_empty() {
         return openrouter_models.to_vec();
     }
     if provider_id == "yunmo" && !yunmo_models.is_empty() {
         return yunmo_models.to_vec();
+    }
+    if let Some(models) = official_live.get(provider_id) {
+        if !models.is_empty() {
+            return models.clone();
+        }
     }
     catalog()
         .into_iter()
@@ -2005,11 +2027,13 @@ fn find_preset_by_model_id(
     active_base_url: &str,
     openrouter_models: &[CatalogModel],
     yunmo_models: &[CatalogModel],
+    official_live: &HashMap<String, Vec<CatalogModel>>,
 ) -> Option<CatalogModel> {
     let candidates = openrouter_models
         .iter()
         .cloned()
         .chain(yunmo_models.iter().cloned())
+        .chain(official_live.values().flatten().cloned())
         .chain(catalog().into_iter().flat_map(|provider| provider.models));
     let active_base_url = active_base_url.trim_end_matches('/');
     candidates
@@ -2027,7 +2051,11 @@ fn get_model_catalog_for_state(state: &AppState) -> ModelCatalogResponse {
         .yunmo_models
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    catalog_response(&cached, &yunmo, false)
+    let official = state
+        .official_live_models
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    catalog_response(&cached, &yunmo, &official, false)
 }
 
 /// 通过 OpenRouter 公共接口拉取模型和每 Token 费用；接口无需 API 密钥。
@@ -2052,7 +2080,12 @@ async fn refresh_openrouter_models(
         .yunmo_models
         .lock()
         .map_err(|_| "云末模型缓存不可用".to_string())?;
-    Ok(catalog_response(&cached, &yunmo, false))
+
+    let official = state
+        .official_live_models
+        .lock()
+        .map_err(|_| "官方模型缓存不可用".to_string())?;
+    Ok(catalog_response(&cached, &yunmo, &official, false))
 }
 
 #[tauri::command]
@@ -2103,26 +2136,95 @@ async fn refresh_yunmo_models(
         .openrouter_models
         .lock()
         .map_err(|_| "OpenRouter 模型缓存不可用".to_string())?;
-    Ok(catalog_response(&openrouter, &yunmo, false))
+
+    let official = state
+        .official_live_models
+        .lock()
+        .map_err(|_| "官方模型缓存不可用".to_string())?;
+    Ok(catalog_response(&openrouter, &yunmo, &official, false))
 }
 
 /// 选择一个模型预设时，统一保存模型、接口、费用币种和当前厂商的快捷模型。
+#[tauri::command]
+async fn refresh_official_models(
+    state: tauri::State<'_, AppState>,
+) -> Result<ModelCatalogResponse, String> {
+    let cfg = load_config(Overrides::default()).map_err(|error| error.to_string())?;
+    let directory = state.provider_directory.clone();
+    let catalog_svc = state.provider_catalog.clone();
+    let providers = catalog();
+    let discovered = tokio::task::spawn_blocking(move || {
+        let mut live = HashMap::new();
+        for provider in providers {
+            if matches!(provider.id.as_str(), "openrouter" | "yunmo") {
+                continue;
+            }
+            let Some(template) = provider.models.first().cloned() else {
+                continue;
+            };
+            let Ok(key) = resolve_preset_key(&directory, &cfg, &template) else {
+                continue;
+            };
+            let request_cfg = Config {
+                base_url: template.base_url.clone(),
+                provider_protocol: "openai".into(),
+                api_key: key,
+                ..Config::default()
+            };
+            let Ok(models) = catalog_svc.discover_config(&request_cfg) else {
+                continue;
+            };
+            if models.is_empty() {
+                continue;
+            }
+            live.insert(
+                provider.id.clone(),
+                merge_official_live_models(&provider, &models),
+            );
+        }
+        live
+    })
+    .await
+    .map_err(|error| format!("官方模型目录任务失败：{error}"))?;
+    {
+        let mut official = state
+            .official_live_models
+            .lock()
+            .map_err(|_| "官方模型缓存不可用".to_string())?;
+        *official = discovered;
+    }
+    let cfg = load_config(Overrides::default()).map_err(|error| error.to_string())?;
+    if let Some(provider_id) = cfg.active_provider_id.strip_prefix("preset:") {
+        let official = state
+            .official_live_models
+            .lock()
+            .map_err(|_| "官方模型缓存不可用".to_string())?;
+        if let Some(models) = official.get(provider_id) {
+            let mut ids = models
+                .iter()
+                .map(|model| model.model_id.clone())
+                .collect::<Vec<_>>();
+            if !cfg.model.is_empty() && !ids.iter().any(|model| model == &cfg.model) {
+                ids.insert(0, cfg.model.clone());
+            }
+            if !ids.is_empty() {
+                drop(official);
+                write_available_models(&ids)?;
+            }
+        }
+    }
+    let (openrouter, yunmo, official) = catalog_layers(&state)?;
+    Ok(catalog_response(&openrouter, &yunmo, &official, false))
+}
+
 fn apply_model_preset_for_state(
     provider_id: String,
     model_id: String,
     state: &AppState,
 ) -> Result<CatalogModel, String> {
     let generation = state.provider_activation.begin()?;
-    let cached = state.openrouter_models.lock().map_err(|_| {
-        state
-            .provider_activation
-            .fail(generation, "OpenRouter 模型缓存不可用".to_string())
-    })?;
-    let yunmo = state.yunmo_models.lock().map_err(|_| {
-        state
-            .provider_activation
-            .fail(generation, "云末模型缓存不可用".to_string())
-    })?;
+    let (cached, yunmo, official) =
+        catalog_layers(state).map_err(|error| state.provider_activation.fail(generation, error))?;
     let preset = if provider_id == "openrouter" {
         cached
             .iter()
@@ -2136,25 +2238,28 @@ fn apply_model_preset_for_state(
             .cloned()
             .or_else(|| find_preset(&provider_id, &model_id))
     } else {
-        find_preset(&provider_id, &model_id)
+        official
+            .get(&provider_id)
+            .and_then(|models| {
+                models
+                    .iter()
+                    .find(|model| model.model_id == model_id)
+                    .cloned()
+            })
+            .or_else(|| find_preset(&provider_id, &model_id))
     }
     .ok_or_else(|| {
-        state.provider_activation.fail(
-            generation,
-            "未找到所选模型预设，请先刷新 OpenRouter 模型目录".to_string(),
-        )
+        state
+            .provider_activation
+            .fail(generation, "未找到所选模型预设".to_string())
     })?;
-    let quick_switch_models = provider_models(&provider_id, &cached, &yunmo)
+    let quick_switch_models = provider_models(&provider_id, &cached, &yunmo, &official)
         .into_iter()
         .map(|model| model.model_id)
         .collect::<Vec<_>>();
-    drop(cached);
-    drop(yunmo);
-
     state.provider_activation.commit(generation, || {
         write_preset(&state.provider_directory, &preset, &quick_switch_models)
     })?;
-    // 写入已经成功；重建会话的消息若暂时无法发送，也不能误报为保存失败。
     let _ = state.tx.send(Command::SetModel(preset.model_id.clone()));
     Ok(preset)
 }
@@ -4673,6 +4778,7 @@ pub fn run() {
             runtime_handoff_gate: RuntimeHandoffGate::default(),
             openrouter_models: Mutex::new(Vec::new()),
             yunmo_models: Mutex::new(Vec::new()),
+            official_live_models: Mutex::new(HashMap::new()),
             workspace_gate: Mutex::new(()),
             memory_merge: Arc::new(memory_merge_job::MemoryMergeCoordinator::default()),
             forge_job: Arc::new(forge_job::ForgeJobCoordinator::default()),
@@ -4716,6 +4822,7 @@ pub fn run() {
             e2e_ask_question,
             refresh_openrouter_models,
             refresh_yunmo_models,
+            refresh_official_models,
             get_config_location,
             open_config_file,
             open_config_dir,
@@ -4762,6 +4869,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frontend_source(source: &str) -> String {
+        source.replace("\r\n", "\n")
+    }
 
     fn unique_test_dir(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -5127,14 +5238,16 @@ mod tests {
 
     #[test]
     fn compact_session_controls_keep_only_frequent_actions_in_the_composer() {
-        let topbar = include_str!("../../src/components/TopBar.svelte")
-            .split_once("<header class=\"topbar\">")
+        let topbar_source = frontend_source(include_str!("../../src/components/TopBar.svelte"));
+        let topbar = topbar_source
+            .split_once("<header class=\"topbar\"")
             .unwrap()
             .1
             .split_once("</header>")
             .unwrap()
             .0;
-        let composer = include_str!("../../src/components/Composer.svelte")
+        let composer_source = frontend_source(include_str!("../../src/components/Composer.svelte"));
+        let composer = composer_source
             .split_once("<div class=\"composer-shell\">")
             .unwrap()
             .1
@@ -5152,13 +5265,13 @@ mod tests {
         assert!(!composer.contains("execution-wrap"));
         assert!(!composer.contains("profile-wrap"));
 
-        let settings = include_str!("../../src/components/SettingsModal.svelte");
+        let settings = frontend_source(include_str!("../../src/components/SettingsModal.svelte"));
         assert!(settings.contains("Agent / 编排模式"));
         assert!(settings.contains("当前会话 Harness"));
         assert!(settings.contains("当前会话下一轮生效"));
         assert!(settings.contains("disabled={harnessProfileLocked}"));
 
-        let css = include_str!("../../src/app.css");
+        let css = frontend_source(include_str!("../../src/app.css"));
         assert!(css.contains(".composer-meta .approval-wrap { order: 1; }"));
         assert!(css.contains(".composer-meta .model-wrap { order: 2; }"));
         assert!(css.contains(".composer-meta .reasoning-wrap { order: 3; }"));
@@ -5217,10 +5330,11 @@ mod tests {
 
     #[test]
     fn completed_tool_activity_is_hidden_from_final_and_history_views() {
-        let conversation = include_str!("../../src/components/ConversationView.svelte");
-        let model = include_str!("../../src/lib/conversation-model.ts");
-        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
-        let bridge = include_str!("bridge.rs");
+        let conversation =
+            frontend_source(include_str!("../../src/components/ConversationView.svelte"));
+        let model = frontend_source(include_str!("../../src/lib/conversation-model.ts"));
+        let thread = frontend_source(include_str!("../../src/lib/thread-controller.svelte.ts"));
+        let bridge = frontend_source(include_str!("bridge.rs"));
         assert!(thread.contains("role: \"tool_group\""));
         assert!(model.contains(
             "type ToolGroup = { role: \"tool_group\"; tools: ToolEntry[]; settled: boolean }"
@@ -5238,7 +5352,7 @@ mod tests {
         assert!(thread.contains("this.captureTrajectory(event.session_id);"));
         assert!(thread.contains("this.clone(this.messages.slice(start))"));
         assert!(thread.contains("this.trajectoryBySession.set(sessionId"));
-        let app = include_str!("../../src/App.svelte");
+        let app = frontend_source(include_str!("../../src/App.svelte"));
         assert!(app.contains(
             "activeView === \"trajectory\" ? thread.trajectoryMessages : thread.messages"
         ));
@@ -5247,15 +5361,15 @@ mod tests {
 
         // Tool logs remain visible while the turn is running.
         let group = conversation
-            .split_once("{:else}")
+            .split_once("<details class=\"tool-run\"")
             .unwrap()
             .1
-            .split_once("{#if busy && streamingIdx === null && reasoningIdx === null}")
+            .split_once("</details>")
             .unwrap()
             .0;
-        assert!(group.contains("<details class=\"tool-run\""));
+        assert!(conversation.contains("<details class=\"tool-run\""));
         assert!(group.contains("class:settled={message.settled}"));
-        assert!(group.contains("open={!message.settled}"));
+        assert!(group.contains("open={!message.settled"));
         assert!(group.contains("已执行 {message.tools.length} 个工具"));
         assert!(group.contains("toolGroupFailureCount(message)"));
         assert!(group.contains("{#each message.tools as tool}"));
@@ -5263,7 +5377,7 @@ mod tests {
         assert!(group.contains("tool.args"));
         assert!(group.contains("tool.result"));
 
-        let css = include_str!("../../src/app.css");
+        let css = frontend_source(include_str!("../../src/app.css"));
         let tool_css = css
             .split_once("Tool calls")
             .unwrap()
@@ -5523,7 +5637,7 @@ mod tests {
     #[test]
     fn live_yunmo_models_replace_the_static_fallback_catalog() {
         let live = vec![yunmo_model("gpt-5.6-sol"), yunmo_model("gpt-5.6-terra")];
-        let response = catalog_response(&[], &live, false);
+        let response = catalog_response(&[], &live, &HashMap::new(), false);
         let yunmo = response
             .providers
             .iter()
@@ -5537,6 +5651,41 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["gpt-5.6-sol", "gpt-5.6-terra"]
         );
+    }
+
+    #[test]
+    fn live_official_models_overlay_the_static_catalog() {
+        let mut live = HashMap::new();
+        let deepseek = catalog()
+            .into_iter()
+            .find(|provider| provider.id == "deepseek")
+            .unwrap();
+        live.insert(
+            "deepseek".into(),
+            merge_official_live_models(
+                &deepseek,
+                &[ncx_core::DiscoveredProviderModel {
+                    id: "deepseek-new-exp".into(),
+                    name: "DeepSeek New Exp".into(),
+                    context_length: Some(256_000),
+                    input_price_per_million: None,
+                    output_price_per_million: None,
+                }],
+            ),
+        );
+        let response = catalog_response(&[], &[], &live, false);
+        let ids = response
+            .providers
+            .iter()
+            .find(|provider| provider.id == "deepseek")
+            .unwrap()
+            .models
+            .iter()
+            .map(|model| model.model_id.as_str())
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&"deepseek-flash"));
+        assert!(ids.contains(&"deepseek-v4-pro"));
+        assert!(ids.contains(&"deepseek-new-exp"));
     }
 
     #[test]
@@ -5717,16 +5866,18 @@ mod tests {
 
     #[test]
     fn automatic_context_compaction_is_visible_and_session_scoped() {
-        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
-        let css = include_str!("../../src/app.css");
-        let bridge = include_str!("bridge.rs");
-        let core = include_str!("../../../crates/ncx-core/src/agent_loop/turn.rs");
+        let thread = frontend_source(include_str!("../../src/lib/thread-controller.svelte.ts"));
+        let css = frontend_source(include_str!("../../src/app.css"));
+        let bridge = frontend_source(include_str!("bridge.rs"));
+        let core = frontend_source(include_str!(
+            "../../../crates/ncx-core/src/agent_loop/turn.rs"
+        ));
 
-        assert!(core.contains(".compact_safely_if_needed("));
+        assert!(core.contains(".compact_context("));
         assert!(bridge.contains("UiEvent::ContextCompacted"));
         assert!(thread.contains("case \"context_compacted\":"));
         assert!(thread.contains("this.accepts(event.session_id)"));
-        assert!(thread.contains("已自动压缩上下文"));
+        assert!(thread.contains("已更新上下文摘要："));
         assert!(thread.contains("role: \"compact\""));
         assert!(css.contains(".compact"));
     }
@@ -5747,8 +5898,10 @@ mod tests {
 
     #[test]
     fn workspace_switch_invalidates_sidebar_and_profile_requests() {
-        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
-        let app = include_str!("../../src/App.svelte");
+        let lifecycle = frontend_source(include_str!(
+            "../../src/lib/thread-lifecycle-controller.svelte.ts"
+        ));
+        let app = frontend_source(include_str!("../../src/App.svelte"));
         assert!(lifecycle.contains("workspaceChanged = (): void"));
         assert!(lifecycle.contains("this.invalidateRefresh();"));
         assert!(lifecycle.contains("this.sessions = []"));
@@ -5931,7 +6084,9 @@ mod tests {
 
     #[test]
     fn sidebar_refresh_coalesces_bursty_events_with_one_trailing_pass() {
-        let lifecycle = include_str!("../../src/lib/thread-lifecycle-controller.svelte.ts");
+        let lifecycle = frontend_source(include_str!(
+            "../../src/lib/thread-lifecycle-controller.svelte.ts"
+        ));
         assert!(lifecycle.contains("private refreshInFlight: Promise<void> | null = null;"));
         assert!(lifecycle.contains("private refreshDirty = false;"));
         assert!(lifecycle.contains("if (this.refreshInFlight) {\n      this.refreshDirty = true;"));
@@ -6066,7 +6221,7 @@ mod tests {
 
     #[test]
     fn workspace_panel_requests_carry_and_enforce_a_workspace_snapshot() {
-        let backend = include_str!("lib.rs");
+        let backend = frontend_source(include_str!("lib.rs"));
         assert!(backend.contains("fn with_workspace_snapshot<T>("));
         assert!(backend.contains("require_workspace_match(expected_workspace, &current)?;"));
         assert!(backend.contains("fn run_git(workspace: &Path, args: &[&str])"));
@@ -6094,7 +6249,9 @@ mod tests {
             );
         }
 
-        let git = include_str!("../../src/lib/git-workspace-controller.svelte.ts");
+        let git = frontend_source(include_str!(
+            "../../src/lib/git-workspace-controller.svelte.ts"
+        ));
         for command in [
             "git_branches",
             "git_create_branch",
@@ -6108,7 +6265,9 @@ mod tests {
                 "Git request {command} must carry the UI workspace snapshot"
             );
         }
-        let checkpoints = include_str!("../../src/lib/checkpoint-controller.svelte.ts");
+        let checkpoints = frontend_source(include_str!(
+            "../../src/lib/checkpoint-controller.svelte.ts"
+        ));
         for command in [
             "get_checkpoints",
             "checkpoint_files",
@@ -6121,10 +6280,12 @@ mod tests {
                 "checkpoint request {command} must carry the UI workspace snapshot"
             );
         }
-        let files = include_str!("../../src/lib/file-browser-controller.svelte.ts");
+        let files = frontend_source(include_str!(
+            "../../src/lib/file-browser-controller.svelte.ts"
+        ));
         assert!(files.contains("\"list_dir\", { rel: relativePath, expectedWorkspace }"));
         assert!(files.contains("\"read_workspace_file\", { rel: entry.path, expectedWorkspace }"));
-        let memory = include_str!("../../src/lib/memory-controller.svelte.ts");
+        let memory = frontend_source(include_str!("../../src/lib/memory-controller.svelte.ts"));
         assert!(memory.contains("method: \"memoryList\",\n      params: { workspace },"));
         assert!(memory.contains(
             "method: \"memoryMergeStatusRead\",\n        params: { workspace, generation },"
@@ -6251,9 +6412,11 @@ mod tests {
 
     #[test]
     fn workspace_diff_panel_keeps_rows_intact_and_uses_the_panel_scroll() {
-        let css = include_str!("../../src/app.css");
-        let controller = include_str!("../../src/lib/git-workspace-controller.svelte.ts");
-        let panel = include_str!("../../src/components/WorkspacePanels.svelte");
+        let css = frontend_source(include_str!("../../src/app.css"));
+        let controller = frontend_source(include_str!(
+            "../../src/lib/git-workspace-controller.svelte.ts"
+        ));
+        let panel = frontend_source(include_str!("../../src/components/WorkspacePanels.svelte"));
         let file_row = css
             .split_once(".wt-file {")
             .unwrap()
@@ -6302,8 +6465,10 @@ mod tests {
 
     #[test]
     fn runtime_start_stop_cannot_cross_dispose_generations() {
-        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
-        let app = include_str!("../../src/App.svelte");
+        let runtime = frontend_source(include_str!(
+            "../../src/lib/app-runtime-controller.svelte.ts"
+        ));
+        let app = frontend_source(include_str!("../../src/App.svelte"));
         assert!(
             runtime.contains("if (!this.isActive(generation)) return;\n      await this.stop();")
         );
@@ -6318,8 +6483,8 @@ mod tests {
 
     #[test]
     fn forge_observer_disposes_pollers_when_the_app_unmounts() {
-        let forge = include_str!("../../src/lib/forge-controller.svelte.ts");
-        let app = include_str!("../../src/App.svelte");
+        let forge = frontend_source(include_str!("../../src/lib/forge-controller.svelte.ts"));
+        let app = frontend_source(include_str!("../../src/App.svelte"));
         assert!(forge.contains("dispose = (): void"));
         assert!(forge.contains("this.pollGeneration += 1"));
         assert!(forge.contains("isCurrentPoll(lifecycle, poll)"));
@@ -6419,12 +6584,14 @@ mod tests {
 
     #[test]
     fn workspace_switch_creates_a_durable_protocol_thread_before_binding_it() {
-        let runtime = include_str!("../../src/lib/app-runtime-controller.svelte.ts");
-        let composer = include_str!("../../src/lib/composer-controller.svelte.ts");
-        let composer_view = include_str!("../../src/components/Composer.svelte");
-        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
-        let app = include_str!("../../src/App.svelte");
-        let backend = include_str!("lib.rs");
+        let runtime = frontend_source(include_str!(
+            "../../src/lib/app-runtime-controller.svelte.ts"
+        ));
+        let composer = frontend_source(include_str!("../../src/lib/composer-controller.svelte.ts"));
+        let composer_view = frontend_source(include_str!("../../src/components/Composer.svelte"));
+        let thread = frontend_source(include_str!("../../src/lib/thread-controller.svelte.ts"));
+        let app = frontend_source(include_str!("../../src/App.svelte"));
+        let backend = frontend_source(include_str!("lib.rs"));
         let switch_backend = backend
             .split_once("fn set_workspace_for_state")
             .unwrap()
@@ -6682,7 +6849,7 @@ mod tests {
     fn ordinary_status_notes_do_not_use_the_error_palette() {
         let conversation = include_str!("../../src/components/ConversationView.svelte");
         let css = include_str!("../../src/app.css");
-        assert!(conversation.contains("noteTone(message.text)"));
+        assert!(conversation.contains("noteTone(visibleAssistantText(message.text))"));
         assert!(conversation.contains("已切换"));
         assert!(css.contains(".note.success"));
         assert!(css.contains(".note.error"));
@@ -6870,8 +7037,8 @@ mod tests {
 
     #[test]
     fn worker_navigation_uses_durable_workspaces_and_acknowledges_failures() {
-        let bridge = include_str!("bridge.rs");
-        let backend = include_str!("lib.rs");
+        let bridge = frontend_source(include_str!("bridge.rs"));
+        let backend = frontend_source(include_str!("lib.rs"));
 
         // Only the Tauri-side transition owns global CWD writes. In
         // particular, a queued Resume/Fork must never reset it after a later
@@ -6892,7 +7059,8 @@ mod tests {
             .0;
         assert!(new_branch.contains("workspace: command_workspace"));
         assert!(new_branch.contains("completion.send(Ok(()))"));
-        assert!(new_branch.contains("completion.send(Err(e.clone()))"));
+        assert!(new_branch.contains("completion.send(Err("));
+        assert!(new_branch.contains("new session agent deferred"));
 
         let resume_branch = bridge
             .split_once("Command::Resume {")
@@ -7047,16 +7215,25 @@ mod tests {
     #[test]
     fn duplicate_model_id_keeps_the_current_provider_route() {
         let yunmo = vec![yunmo_model("gpt-5.6-sol")];
-        let selected =
-            find_preset_by_model_id("gpt-5.6-sol", "https://api.yunmo-ai.com/v1/", &[], &yunmo)
-                .expect("yunmo route should match by Base URL");
+        let selected = find_preset_by_model_id(
+            "gpt-5.6-sol",
+            "https://api.yunmo-ai.com/v1/",
+            &[],
+            &yunmo,
+            &HashMap::new(),
+        )
+        .expect("yunmo route should match by Base URL");
         assert_eq!(selected.provider_id, "yunmo");
         assert_eq!(selected.base_url, "https://api.yunmo-ai.com/v1");
 
-        assert!(
-            find_preset_by_model_id("gpt-5.6-sol", "https://custom.example/v1", &[], &yunmo,)
-                .is_none()
-        );
+        assert!(find_preset_by_model_id(
+            "gpt-5.6-sol",
+            "https://custom.example/v1",
+            &[],
+            &yunmo,
+            &HashMap::new()
+        )
+        .is_none());
     }
 
     #[test]
@@ -7080,7 +7257,7 @@ mod tests {
             yunmo_api_key: "legacy-yunmo".into(),
             ..Config::default()
         };
-        let deepseek = find_preset("deepseek", "deepseek-v4-flash").unwrap();
+        let deepseek = find_preset("deepseek", "deepseek-flash").unwrap();
         let yunmo = yunmo_model("gpt-5.6-sol");
 
         write_preset_with_config(

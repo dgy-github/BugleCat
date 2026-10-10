@@ -1,0 +1,25 @@
+{
+  "mutants": [
+    {
+      "id": "peek-middle",
+      "why": "peek returns the middle item (right only when size <= 2)",
+      "file": "stack.py",
+      "old": "return self._items[-1]",
+      "new": "return self._items[len(self._items) // 2]"
+    },
+    {
+      "id": "size-capped",
+      "why": "size saturates at 2",
+      "file": "stack.py",
+      "old": "return len(self._items)",
+      "new": "return min(len(self._items), 2)"
+    },
+    {
+      "id": "pop-empty-none",
+      "why": "pop on empty returns None instead of IndexError",
+      "file": "stack.py",
+      "old": "raise IndexError(\"pop from empty stack\")",
+      "new": "return None"
+    }
+  ]
+}

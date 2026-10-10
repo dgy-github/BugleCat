@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import py_compile
+import re
 import shutil
 import subprocess
 import sys
@@ -71,8 +72,13 @@ def _run(cmd: list[str], *, cwd: Path, timeout_s: int) -> tuple[int, str]:
 
 def _run_check_in(ws: Path, check_src: Path) -> tuple[bool, str]:
     # Mirror bench/run.py: the grader is copied in as _check.py, then run.
+    # The workspace is reused across reference/mutant runs, and .pyc files are
+    # validated only by source mtime+size, so a same-length mutant written in
+    # the same second would silently reuse stale bytecode. Never let it.
+    for cache in ws.rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
     shutil.copy(check_src, ws / "_check.py")
-    rc, output = _run([sys.executable, "_check.py"], cwd=ws, timeout_s=BENCH_CHECK_TIMEOUT_S)
+    rc, output = _run([sys.executable, "-B", "_check.py"], cwd=ws, timeout_s=BENCH_CHECK_TIMEOUT_S)
     return rc == 0, output[-400:]
 
 
@@ -86,6 +92,30 @@ def _reference_files(task_dir: Path) -> dict[str, str] | None:
     if not isinstance(files, dict) or not files:
         return None
     return {str(k): str(v) for k, v in files.items()}
+
+
+def _mutants(task_dir: Path) -> list[dict]:
+    """Load reference/mutants.json: {"mutants": [{id, why, file, old, new}]}."""
+    payload = task_dir / "reference" / "mutants.json"
+    if not payload.exists():
+        return []
+    mutants = json.loads(payload.read_text(encoding="utf-8")).get("mutants")
+    return mutants if isinstance(mutants, list) else []
+
+
+def apply_mutant(reference: dict[str, str], mutant: dict) -> dict[str, str] | None:
+    """Return reference files with one exact replacement applied, or None if the
+    anchor is not present exactly once (an ambiguous mutant proves nothing)."""
+    rel = mutant.get("file")
+    old, new = mutant.get("old"), mutant.get("new")
+    if rel not in reference or not isinstance(old, str) or not isinstance(new, str) or not old:
+        return None
+    src = reference[rel].replace("\r\n", "\n")
+    if src.count(old) != 1:
+        return None
+    files = dict(reference)
+    files[rel] = src.replace(old, new)
+    return files
 
 
 def _materialize(ws: Path, files: dict[str, str]) -> None:
@@ -151,8 +181,36 @@ def validate_bench_tasks(task_filter: str | None = None) -> tuple[bool, list[dic
                 if not ref_ok:
                     record["issues"].append(f"reference solution fails check: {ref_tail}")
                     record["valid"] = False
+
+                # 3. Every mutated reference must be REJECTED by the grader.
+                mutants = _mutants(task_dir)
+                record["mutants_rejected"] = None
+                if not mutants:
+                    record["issues"].append("missing reference/mutants.json (grader strictness unverified)")
+                    record["valid"] = False
+                else:
+                    survived = []
+                    for mutant in mutants:
+                        files = apply_mutant(reference, mutant)
+                        if files is None:
+                            record["issues"].append(f"mutant {mutant.get('id')!r}: anchor not found exactly once")
+                            record["valid"] = False
+                            continue
+                        _materialize(ws, files)
+                        killed = not _run_check_in(ws, check)[0]
+                        if not killed:
+                            survived.append(mutant.get("id"))
+                    _materialize(ws, reference)
+                    record["mutants_rejected"] = f"{len(mutants) - len(survived)}/{len(mutants)}"
+                    if survived:
+                        record["issues"].append(f"grader accepts wrong solutions: {survived}")
+                        record["valid"] = False
             else:
-                record["reference_passes"] = None  # create-type task without committed reference
+                # Without a reference we only know the grader rejects an empty
+                # workspace, not that it accepts a correct answer.
+                record["reference_passes"] = None
+                record["issues"].append("missing reference/files.json (grader acceptance unverified)")
+                record["valid"] = False
 
         if not record["valid"]:
             all_valid = False
@@ -214,6 +272,14 @@ def validate_harness_generate() -> tuple[bool, str]:
 
 # ── case execution ───────────────────────────────────────────────────────────
 
+_CARGO_RESULT = re.compile(r"test result: \w+\. (\d+) passed; (\d+) failed")
+
+
+def cargo_tests_run(output: str) -> int:
+    """Total tests actually executed (passed + failed) across all test binaries."""
+    return sum(int(p) + int(f) for p, f in _CARGO_RESULT.findall(output))
+
+
 def _cargo_available() -> bool:
     rc, _out = _run(["cargo", "--version"], cwd=REPO, timeout_s=30)
     return rc == 0
@@ -250,6 +316,11 @@ def execute_case(case: dict, selected_tiers: set[str]) -> dict:
             outcome.update(status="skipped", reason="cargo_not_available")
             return outcome
         rc, output = _run(["cargo", *case["args"]], cwd=REPO / "rust", timeout_s=CARGO_TIMEOUT_S)
+        ran = cargo_tests_run(output)
+        outcome["tests_run"] = ran
+        if rc == 0 and ran == 0:
+            outcome.update(status="failed", exit_code=rc, reason="cargo filter matched zero tests")
+            return outcome
         outcome.update(status="passed" if rc == 0 else "failed", exit_code=rc)
         if rc != 0:
             outcome["tail"] = output[-1500:]
@@ -374,6 +445,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--capability", default=None, help="filter by capability")
     parser.add_argument("--case", default=None, help="filter by case id substring")
     parser.add_argument("--output", default=None, help="report directory override")
+    parser.add_argument("--scope-to-tiers", action="store_true",
+                        help="drop cases outside --tier instead of reporting them as skipped "
+                             "(for split CI jobs; each tier must be gated by some job)")
     args = parser.parse_args(argv)
 
     manifest = load_manifest()
@@ -384,6 +458,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     cases = manifest["cases"]
+    if args.scope_to_tiers:
+        cases = [c for c in cases if c["tier"] in selected_tiers]
     if args.capability:
         cases = [c for c in cases if c["capability"] == args.capability]
     if args.case:

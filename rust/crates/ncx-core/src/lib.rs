@@ -53,6 +53,7 @@ pub mod tool_scheduler;
 pub mod tools;
 pub mod turn_context;
 pub mod user_question;
+pub mod verification;
 mod workspace_promotion;
 pub mod workspace_tools;
 

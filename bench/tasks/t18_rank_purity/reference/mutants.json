@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "mutates-input",
+      "why": "sorts the caller's list in place",
+      "file": "solution.py",
+      "old": "ordered = sorted(scores, key=lambda item: (-item[1], item[0]))",
+      "new": "scores.sort(key=lambda item: (-item[1], item[0]))\n    ordered = scores"
+    }
+  ]
+}

@@ -484,7 +484,11 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
-        assert_eq!(store.entries(), before_entries, "Markdown store was rewritten");
+        assert_eq!(
+            store.entries(),
+            before_entries,
+            "Markdown store was rewritten"
+        );
         assert_eq!(
             index.active_notes(&workspace.to_string_lossy()).len(),
             before_notes,

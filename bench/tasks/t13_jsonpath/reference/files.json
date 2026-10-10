@@ -1,0 +1,5 @@
+{
+  "files": {
+    "jsonpath.py": "def get(data, path, default=None):\n    cur = data\n    for seg in path.split(\".\"):\n        if isinstance(cur, dict):\n            if seg not in cur:\n                return default\n            cur = cur[seg]\n        elif isinstance(cur, list):\n            if not seg.isdigit():\n                return default\n            idx = int(seg)\n            if idx >= len(cur):\n                return default\n            cur = cur[idx]\n        else:\n            return default\n    return cur\n"
+  }
+}

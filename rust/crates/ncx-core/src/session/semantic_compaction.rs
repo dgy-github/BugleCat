@@ -150,8 +150,43 @@ impl Session {
                 16,
             );
         }
-        // Preserve complete safety entries. Truncating by character count can
-        // silently remove the prohibition itself when it appears at the end.
+        // Reserve room for the safety snapshot and the generated checkpoint
+        // before choosing the verbatim tail. Otherwise a valid summary can be
+        // rejected only after all (possibly many) model calls have completed.
+        let target_tokens = input_budget * 3 / 4;
+        let marker_tokens = estimate_tokens(&[json!({"role":"user", "content":
+            safety_marker(&snapshot)})]);
+        let tail_budget = target_tokens - marker_tokens - 2_500;
+        if tail_budget <= 0 {
+            return Err(format!(
+                "压缩安全快照约占 {marker_tokens} Token，已超过 {target_tokens} Token 的压缩目标预留空间；原始上下文已保留。"
+            ));
+        }
+        // Never summarize away the newest user request. It can contain an
+        // image, which is intentionally omitted from summarization records.
+        let newest_user = self
+            .messages
+            .iter()
+            .rposition(|m| role(m) == Some("user"))
+            .filter(|index| *index >= cut);
+        while estimate_tokens(&self.messages[cut..]) > tail_budget {
+            if newest_user.is_some_and(|index| cut >= index) {
+                return Err(format!(
+                    "最新用户请求及其后续记录超过 {tail_budget} Token 的可保留空间；原始上下文已保留。"
+                ));
+            }
+            let group_start = cut;
+            cut += 1;
+            while cut < self.messages.len() && role(&self.messages[cut]) == Some("tool") {
+                cut += 1;
+            }
+            if estimate_tokens(&self.messages[group_start..cut]) > (input_budget - 3_000).max(1_000)
+            {
+                return Err(
+                    "近期单个消息或工具调用组过大，无法安全压缩；原始上下文已保留。".into(),
+                );
+            }
+        }
         // Each line is tagged so the summary can cite where a claim came from.
         let lines: Vec<String> = self.messages[..cut]
             .iter()
@@ -174,7 +209,6 @@ impl Session {
         // The tail is kept verbatim, so if it alone exceeds the target there is
         // no summary that can fit. Detect it here rather than spending model
         // calls on a checkpoint that `commit_compaction` would then reject.
-        let target_tokens = input_budget * 3 / 4;
         let tail = self.messages[cut..].to_vec();
         if estimate_tokens(&tail) > target_tokens {
             return Err(format!(
@@ -231,8 +265,17 @@ impl Session {
         body.extend(plan.tail);
         let original_chars = total_chars(&self.system, &[], &self.messages);
         let edited_chars = total_chars(&self.system, &[], &body);
-        if estimate_tokens(&body) > plan.target_tokens || edited_chars >= original_chars {
-            return Err("摘要未释放足够上下文空间，原始上下文已保留。".into());
+        let edited_tokens = estimate_tokens(&body);
+        if edited_tokens > plan.target_tokens {
+            return Err(format!(
+                "摘要与近期记录合计约 {edited_tokens} Token，超过 {} Token 的压缩目标；原始上下文已保留。",
+                plan.target_tokens
+            ));
+        }
+        if edited_chars >= original_chars {
+            return Err(format!(
+                "压缩后为 {edited_chars} 字符，原始为 {original_chars} 字符，未释放空间；原始上下文已保留。"
+            ));
         }
         let stats = ContextEditStats {
             original_chars,
@@ -416,16 +459,29 @@ mod tests {
     #[test]
     fn an_oversized_record_stuck_in_the_recent_tail_refuses_compaction_early() {
         let dir = tempfile::tempdir().unwrap();
-        // Too little trailing traffic: the huge record stays in the verbatim
-        // tail, so no checkpoint could ever fit the budget.
+        // The record is too large for one summary request, even if moved out
+        // of the verbatim tail. Refuse before spending a model call.
         let session = history_with_oversized_record(40, 200);
 
         let error = match session.prepare_compaction(20_000, dir.path()) {
             Err(error) => error,
-            Ok(_) => panic!("a tail larger than the target must not be planned"),
+            Ok(_) => panic!("a single oversized record must not be planned"),
         };
-        // Refused before any model call, rather than after paying for a summary.
         assert!(error.contains("无法安全压缩"), "{error}");
+    }
+
+    #[test]
+    fn oversized_latest_user_request_is_never_summarized_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = sized_history(40, 4_000);
+        session.add_user_text(&"新请求".repeat(20_000));
+        let original = session.messages.clone();
+        let error = match session.prepare_compaction(20_000, dir.path()) {
+            Err(error) => error,
+            Ok(_) => panic!("latest user request must remain verbatim"),
+        };
+        assert!(error.contains("最新用户请求"), "{error}");
+        assert_eq!(session.messages, original);
     }
 
     #[test]
@@ -588,6 +644,41 @@ mod tests {
         let large = session.prepare_compaction(120_000, dir.path()).unwrap();
         assert!(estimate_tokens(&large.tail) > 20_000);
         assert!(estimate_tokens(&large.tail) > estimate_tokens(&small.tail) * 3);
+    }
+
+    #[test]
+    fn large_safety_snapshot_shrinks_tail_before_spending_summary_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::new("system");
+        session.add_user_text("调查构建失败，不要提交");
+        for i in 0..20 {
+            session.add_assistant(
+                &format!("确认 不要 已完成 未完成 测试 {i} {}", "详".repeat(450)),
+                None,
+                "",
+            );
+        }
+        for i in 0..40 {
+            session.add_assistant(
+                "",
+                Some(vec![json!({"id":format!("c{i}"),"type":"function",
+                    "function":{"name":"read_file","arguments":"{}"}})]),
+                "",
+            );
+            session.add_tool_result(&format!("c{i}"), "read_file", &"x".repeat(4_000));
+        }
+        let plan = session.prepare_compaction(20_000, dir.path()).unwrap();
+        let marker_tokens = estimate_tokens(&[json!({"role":"user", "content":
+            safety_marker(&plan.snapshot)})]);
+        assert!(marker_tokens > 4_000);
+        assert!(estimate_tokens(&plan.tail) <= plan.target_tokens - marker_tokens - 2_500);
+        session
+            .commit_compaction(plan, &ok("Goal: 调查构建失败 [S0]。"), dir.path())
+            .unwrap();
+        assert!(session.messages[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("不要提交"));
     }
 
     #[test]

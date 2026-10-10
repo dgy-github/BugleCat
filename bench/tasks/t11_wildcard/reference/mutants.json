@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "trailing-star",
+      "why": "trailing '*' not consumed",
+      "file": "wildcard.py",
+      "old": "    while j < len(p) and p[j] == \"*\":\n        j += 1\n",
+      "new": ""
+    }
+  ]
+}

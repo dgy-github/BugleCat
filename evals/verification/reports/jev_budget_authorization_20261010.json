@@ -1,0 +1,20 @@
+{
+  "schema": "buglecat.jev.budget-authorization.v1",
+  "date": "2026-10-10",
+  "authorization_source": "direct human reply in current chat",
+  "authorization_text": "批准最多50次新增 Jev 调用",
+  "annotation_method": "可执行断言标注，疑难项由你人工复核",
+  "interpretation_reviewer": "Codex model, not a human identity",
+  "previous_attempts": 26,
+  "maximum_additional_attempts": 50,
+  "maximum_cumulative_attempts": 76,
+  "maximum_exploration_attempts": 25,
+  "reserved_holdout_attempts": 25,
+  "maximum_per_original_group": 1,
+  "automatic_retries": 0,
+  "failures_and_started_cancellations_count": true,
+  "holdout_condition": "qualified registered calibration and fresh unexposed independently labeled task groups",
+  "production_authorized": false,
+  "main_model_generation_authorized_by_this_budget": false,
+  "cost": null
+}

@@ -1,0 +1,18 @@
+{
+  "mutants": [
+    {
+      "id": "hardcoded-15",
+      "why": "hard-codes the first 15 answers",
+      "file": "fizzbuzz.py",
+      "old": "def fizzbuzz(n):\n",
+      "new": "def fizzbuzz(n):\n    return ['1', '2', 'Fizz', '4', 'Buzz', 'Fizz', '7', '8', 'Fizz', 'Buzz', '11', 'Fizz', '13', '14', 'FizzBuzz'][:n]\n"
+    },
+    {
+      "id": "off-by-one",
+      "why": "range ends at n-1",
+      "file": "fizzbuzz.py",
+      "old": "range(1, n + 1)",
+      "new": "range(1, n)"
+    }
+  ]
+}

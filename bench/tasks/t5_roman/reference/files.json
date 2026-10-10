@@ -1,0 +1,5 @@
+{
+  "files": {
+    "roman.py": "_TABLE = [\n    (1000, \"M\"), (900, \"CM\"), (500, \"D\"), (400, \"CD\"),\n    (100, \"C\"), (90, \"XC\"), (50, \"L\"), (40, \"XL\"),\n    (10, \"X\"), (9, \"IX\"), (5, \"V\"), (4, \"IV\"), (1, \"I\"),\n]\n_VALUES = {\"I\": 1, \"V\": 5, \"X\": 10, \"L\": 50, \"C\": 100, \"D\": 500, \"M\": 1000}\n\n\ndef to_roman(n):\n    if not 1 <= n <= 3999:\n        raise ValueError(\"n out of range\")\n    out = []\n    for value, symbol in _TABLE:\n        while n >= value:\n            out.append(symbol)\n            n -= value\n    return \"\".join(out)\n\n\ndef from_roman(s):\n    total = 0\n    for i, ch in enumerate(s):\n        v = _VALUES[ch]\n        if i + 1 < len(s) and _VALUES[s[i + 1]] > v:\n            total -= v\n        else:\n            total += v\n    return total\n"
+  }
+}

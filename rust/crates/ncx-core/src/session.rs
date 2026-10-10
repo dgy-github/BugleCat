@@ -68,6 +68,7 @@ pub struct Session {
     events: Option<std::rc::Rc<crate::context_store::ContextStore>>,
     turn_id: Option<u64>,
     workspace_revision: Option<String>,
+    workspace: Option<String>,
 }
 
 impl Session {
@@ -99,6 +100,7 @@ impl Session {
             events: None,
             turn_id: None,
             workspace_revision: None,
+            workspace: None,
         }
     }
 
@@ -128,16 +130,19 @@ impl Session {
         let Some(store) = &self.events else {
             return;
         };
-        let workspace = None;
+        let workspace = self.workspace.clone();
         match role(msg) {
             Some("user") => {
                 let text = message_content_text(msg);
-                if text.trim().is_empty() {
+                if text.trim().is_empty()
+                    && crate::verification::requirements::attachment_metadata(&msg["content"])
+                        .is_empty()
+                {
                     return;
                 }
                 let _ = store.append(
                     &crate::context_store::ContextEvent::new(
-                        format!("{}-user-{}", self.session_id, self.messages.len()),
+                        format!("{}-user-{}", self.session_id, record_nonce()),
                         self.session_id.clone(),
                         crate::context_store::EventType::UserMessage,
                         crate::context_store::EventStatus::Completed,
@@ -145,7 +150,13 @@ impl Session {
                     .with_turn(self.turn_id)
                     .with_workspace(workspace)
                     .with_source_ref(self.source_ref())
-                    .with_payload(&json!({"text_hash": crate::context_trace::content_hash(&text)})),
+                    .with_payload(&json!({
+                        "text_hash": crate::context_trace::content_hash(&text),
+                        "text": crate::verification::evidence::redact(&text).chars().take(64_000).collect::<String>(),
+                        "text_truncated": text.chars().count() > 64_000,
+                        "text_redacted": crate::verification::evidence::redact(&text) != text,
+                        "attachment_metadata": crate::verification::requirements::attachment_metadata(&msg["content"]),
+                    })),
                 );
             }
             Some("assistant") => {
@@ -164,17 +175,20 @@ impl Session {
                     // Started, not completed: the result event closes it.
                     let _ = store.append(
                         &crate::context_store::ContextEvent::new(
-                            format!("{}-call-{call_id}", self.session_id),
+                            format!("{}-{}-call-{call_id}-{}", self.session_id, self.turn_id.unwrap_or_default(),record_nonce()),
                             self.session_id.clone(),
                             crate::context_store::EventType::ToolCall,
                             crate::context_store::EventStatus::Started,
                         )
                         .with_turn(self.turn_id)
                         .with_tool_call(Some(call_id.to_string()))
+                        .with_workspace(workspace.clone())
                         .with_source_ref(self.source_ref())
                         .with_payload(&json!({
                             "tool": name,
                             "workspace_revision": self.workspace_revision,
+                            "call_hash": crate::context_trace::content_hash(&format!("{name} {}", call["function"]["arguments"].as_str().unwrap_or_default())),
+                            "invocation": crate::verification::provenance::invocation(workspace.as_deref().map(Path::new), name, &call["function"]["arguments"]),
                         })),
                     );
                 }
@@ -194,13 +208,19 @@ impl Session {
                 };
                 let _ = store.append(
                     &crate::context_store::ContextEvent::new(
-                        format!("{}-result-{call_id}", self.session_id),
+                        format!(
+                            "{}-{}-result-{call_id}-{}",
+                            self.session_id,
+                            self.turn_id.unwrap_or_default(),
+                            record_nonce()
+                        ),
                         self.session_id.clone(),
                         crate::context_store::EventType::ToolResult,
                         status,
                     )
                     .with_turn(self.turn_id)
                     .with_tool_call(Some(call_id.to_string()))
+                    .with_workspace(workspace.clone())
                     .with_source_ref(self.source_ref())
                     .with_payload(&json!({
                         "tool": msg.get("name").and_then(Value::as_str),
@@ -230,6 +250,20 @@ impl Session {
     /// the start of each user task.
     pub fn set_turn_id(&mut self, turn_id: u64) {
         self.turn_id = Some(turn_id);
+    }
+
+    pub fn turn_id(&self) -> Option<u64> {
+        self.turn_id
+    }
+
+    pub fn set_workspace(&mut self, workspace: &Path) {
+        self.workspace = Some(
+            workspace
+                .canonicalize()
+                .unwrap_or_else(|_| workspace.to_owned())
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
 
     /// Workspace revision every event in this turn is anchored to. Read once per
@@ -262,7 +296,7 @@ impl Session {
 
     fn new_record(&self, kind: SourceKind, text: &str) -> SourceRecord {
         SourceRecord {
-            source_id: format!("{}-{}", self.session_id, self.messages.len()),
+            source_id: format!("{}-{}", self.session_id, record_nonce()),
             session_id: self.session_id.clone(),
             task_id: None,
             turn_id: self.turn_id,
@@ -270,7 +304,70 @@ impl Session {
             kind,
             text: text.chars().take(MAX_TRACE_EXCERPT_CHARS).collect(),
             content_hash: crate::context_trace::content_hash(text),
+            workspace: self.workspace.clone(),
             ..SourceRecord::default()
+        }
+    }
+
+    pub fn record_runtime_verification(
+        &self,
+        text: &str,
+        provenance: crate::context_trace::RuntimeProvenance,
+        status: &str,
+    ) {
+        use crate::context_store::{ContextEvent, EventStatus, EventType};
+        let mut record = self.new_record(SourceKind::RuntimeVerification, text);
+        record.workspace = Some(provenance.workspace.clone());
+        record.status = Some(status.into());
+        record.runtime = Some(provenance);
+        if let Some(store) = &self.trace {
+            let _ = store.append(&record);
+        }
+        if let Some(store) = &self.events {
+            let _ = store.append(
+                &ContextEvent::new(
+                    record.source_id.clone(),
+                    self.session_id.clone(),
+                    EventType::RuntimeVerification,
+                    if status == "passed" {
+                        EventStatus::Completed
+                    } else {
+                        EventStatus::Failed
+                    },
+                )
+                .with_turn(self.turn_id)
+                .with_workspace(record.workspace.clone())
+                .with_source_ref(Some(record.source_id.clone()))
+                .with_payload(&json!({"record":record})),
+            );
+        }
+    }
+
+    pub fn record_verification_snapshot(
+        &self,
+        call_id: &str,
+        before: &crate::verification::types::FileSnapshot,
+        after: &crate::verification::types::FileSnapshot,
+    ) {
+        use crate::context_store::{ContextEvent, EventStatus, EventType};
+        if let Some(store) = &self.events {
+            let _ = store.append(
+                &ContextEvent::new(
+                    format!(
+                        "{}-{}-snapshot-{call_id}",
+                        self.session_id,
+                        self.turn_id.unwrap_or_default()
+                    ),
+                    self.session_id.clone(),
+                    EventType::VerificationSnapshot,
+                    EventStatus::Completed,
+                )
+                .with_turn(self.turn_id)
+                .with_workspace(self.workspace.clone())
+                .with_tool_call(Some(call_id.into()))
+                .with_source_ref(self.source_ref())
+                .with_payload(&json!({"before":before,"after":after})),
+            );
         }
     }
 
@@ -929,6 +1026,15 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or_default()
+}
+
+fn record_nonce() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!(
+        "{}-{}",
+        now_millis(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
 }
 
 fn now_stamp() -> String {

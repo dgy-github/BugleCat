@@ -1,0 +1,5 @@
+{
+  "files": {
+    "overlap.py": "def find_overlapping(text: str, pattern: str) -> list:\n    indices = []\n    start = 0\n    while True:\n        idx = text.find(pattern, start)\n        if idx == -1:\n            break\n        indices.append(idx)\n        start = idx + 1\n    return indices\n"
+  }
+}

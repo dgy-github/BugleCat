@@ -1,0 +1,5 @@
+{
+  "files": {
+    "lru.py": "from collections import OrderedDict\n\n\nclass LRUCache:\n    def __init__(self, capacity):\n        self.capacity = capacity\n        self._data = OrderedDict()\n\n    def get(self, key):\n        if key not in self._data:\n            return -1\n        self._data.move_to_end(key)\n        return self._data[key]\n\n    def put(self, key, value):\n        if key in self._data:\n            self._data.move_to_end(key)\n        elif len(self._data) >= self.capacity:\n            self._data.popitem(last=False)\n        self._data[key] = value\n"
+  }
+}

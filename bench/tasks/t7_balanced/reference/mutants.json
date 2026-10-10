@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "ignore-leftover",
+      "why": "unclosed openers accepted",
+      "file": "buggy.py",
+      "old": "return not stack",
+      "new": "return True"
+    }
+  ]
+}

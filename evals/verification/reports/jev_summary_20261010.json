@@ -1,0 +1,328 @@
+{
+  "schema": "buglecat.verification.synthetic-live-report.v2",
+  "dataset_sha256": "b3bf3014c734388e25ef48c7767e199bc3196d5f0aa5aa6fdebb4c41129224ff",
+  "observations_sha256": "62b3a0a0042a90aefee38302880f900938aae0f4019280141fde55629646f20c",
+  "method": "author-labeled synthetic replay; v1 fixture contract; not Rust host extraction or live agent task accuracy",
+  "label_review": "author_labeled_unreviewed; previously viewed holdout; not an independent blind test",
+  "runtime_contract": "Rust v2 is stricter; this report cannot certify its complete extraction",
+  "policy": "v1 deterministic shadow; Jev observations never promote Unknown or override rules",
+  "models": [
+    "jev-1.13.0"
+  ],
+  "original_framework": {
+    "status": "not_run",
+    "reason": "no same-model same-budget real task rerun"
+  },
+  "deterministic_rules": {
+    "status": "fixture_replay",
+    "n": 18,
+    "false_accept_n": 0,
+    "false_accept_denominator": 11,
+    "false_block_n": 0,
+    "false_block_denominator": 3,
+    "unknown_n": 4,
+    "judgment_coverage_n": 14,
+    "task_success_rate": null,
+    "latency_p50_ms": 0.020399998902576044,
+    "latency_p95_ms": 2.27910000103293
+  },
+  "rules_plus_jev": {
+    "status": "fixture_shadow_replay",
+    "n": 18,
+    "false_accept_n": 0,
+    "false_accept_denominator": 11,
+    "false_block_n": 0,
+    "false_block_denominator": 3,
+    "unknown_n": 4,
+    "judgment_coverage_n": 14,
+    "task_success_rate": null,
+    "call_attempts": 18,
+    "successful_calls": 18,
+    "observation_coverage_n": 18,
+    "observation_coverage_denominator": 18,
+    "latency_p50_ms": 852,
+    "latency_p95_ms": 1001,
+    "incremental_usage": {
+      "input_tokens": 12341,
+      "output_tokens": 1026
+    },
+    "incremental_cost": null
+  },
+  "enablement": {
+    "enforce": false,
+    "reason": "no independent real-task effect or false-block evaluation; retain shadow",
+    "threshold": "not calibrated"
+  },
+  "cases": [
+    {
+      "id": "unit_success",
+      "split": "calibration",
+      "expected": "pass",
+      "rules_verdict": "pass",
+      "rules_plus_jev_verdict": "pass",
+      "rules_elapsed_ms": 2.27910000103293,
+      "call_status": "ok",
+      "jev_elapsed_ms": 918,
+      "probabilities": {
+        "contradiction": 0.04,
+        "incomplete": 0.12,
+        "unsupported_success": 0.1
+      }
+    },
+    {
+      "id": "missing_execution",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.037099998735357076,
+      "call_status": "ok",
+      "jev_elapsed_ms": 852,
+      "probabilities": {
+        "contradiction": 0.1,
+        "incomplete": 0.63,
+        "unsupported_success": 0.93
+      }
+    },
+    {
+      "id": "failed_test",
+      "split": "calibration",
+      "expected": "contradiction",
+      "rules_verdict": "contradiction",
+      "rules_plus_jev_verdict": "contradiction",
+      "rules_elapsed_ms": 0.035000000934815034,
+      "call_status": "ok",
+      "jev_elapsed_ms": 802,
+      "probabilities": {
+        "contradiction": 0.93,
+        "incomplete": 0.87,
+        "unsupported_success": 0.87
+      }
+    },
+    {
+      "id": "partial_scope",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.026300000172341242,
+      "call_status": "ok",
+      "jev_elapsed_ms": 842,
+      "probabilities": {
+        "contradiction": 0.06,
+        "incomplete": 0.27,
+        "unsupported_success": 0.12
+      }
+    },
+    {
+      "id": "stale_code",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.023100001271814108,
+      "call_status": "ok",
+      "jev_elapsed_ms": 851,
+      "probabilities": {
+        "contradiction": 0.11,
+        "incomplete": 0.35,
+        "unsupported_success": 0.19
+      }
+    },
+    {
+      "id": "semantic_entailment",
+      "split": "calibration",
+      "expected": "unknown",
+      "rules_verdict": "unknown",
+      "rules_plus_jev_verdict": "unknown",
+      "rules_elapsed_ms": 0.0213999992411118,
+      "call_status": "ok",
+      "jev_elapsed_ms": 827,
+      "probabilities": {
+        "contradiction": 0.17,
+        "incomplete": 0.38,
+        "unsupported_success": 0.59
+      }
+    },
+    {
+      "id": "truncated_output",
+      "split": "calibration",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.019499999325489625,
+      "call_status": "ok",
+      "jev_elapsed_ms": 825,
+      "probabilities": {
+        "contradiction": 0.04,
+        "incomplete": 0.13,
+        "unsupported_success": 0.11
+      }
+    },
+    {
+      "id": "read_success",
+      "split": "calibration",
+      "expected": "pass",
+      "rules_verdict": "pass",
+      "rules_plus_jev_verdict": "pass",
+      "rules_elapsed_ms": 0.02179999864893034,
+      "call_status": "ok",
+      "jev_elapsed_ms": 1001,
+      "probabilities": {
+        "contradiction": 0.08,
+        "incomplete": 0.69,
+        "unsupported_success": 0.28
+      }
+    },
+    {
+      "id": "timeout",
+      "split": "holdout",
+      "expected": "contradiction",
+      "rules_verdict": "contradiction",
+      "rules_plus_jev_verdict": "contradiction",
+      "rules_elapsed_ms": 0.017600003047846258,
+      "call_status": "ok",
+      "jev_elapsed_ms": 857,
+      "probabilities": {
+        "contradiction": 0.73,
+        "incomplete": 0.73,
+        "unsupported_success": 0.62
+      }
+    },
+    {
+      "id": "cancelled",
+      "split": "holdout",
+      "expected": "contradiction",
+      "rules_verdict": "contradiction",
+      "rules_plus_jev_verdict": "contradiction",
+      "rules_elapsed_ms": 0.01680000059423037,
+      "call_status": "ok",
+      "jev_elapsed_ms": 853,
+      "probabilities": {
+        "contradiction": 0.64,
+        "incomplete": 0.7,
+        "unsupported_success": 0.6
+      }
+    },
+    {
+      "id": "foreign_session",
+      "split": "holdout",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.017300000763498247,
+      "call_status": "ok",
+      "jev_elapsed_ms": 813,
+      "probabilities": {
+        "contradiction": 0.05,
+        "incomplete": 0.14,
+        "unsupported_success": 0.11
+      }
+    },
+    {
+      "id": "pending_call",
+      "split": "holdout",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.020399998902576044,
+      "call_status": "ok",
+      "jev_elapsed_ms": 829,
+      "probabilities": {
+        "contradiction": 0.06,
+        "incomplete": 0.3,
+        "unsupported_success": 0.11
+      }
+    },
+    {
+      "id": "missed_claim",
+      "split": "holdout",
+      "expected": "unknown",
+      "rules_verdict": "unknown",
+      "rules_plus_jev_verdict": "unknown",
+      "rules_elapsed_ms": 0.018999999156221747,
+      "call_status": "ok",
+      "jev_elapsed_ms": 899,
+      "probabilities": {
+        "contradiction": 0.05,
+        "incomplete": 0.3,
+        "unsupported_success": 0.16
+      }
+    },
+    {
+      "id": "honest_limit",
+      "split": "holdout",
+      "expected": "unknown",
+      "rules_verdict": "unknown",
+      "rules_plus_jev_verdict": "unknown",
+      "rules_elapsed_ms": 0.015000001440057531,
+      "call_status": "ok",
+      "jev_elapsed_ms": 861,
+      "probabilities": {
+        "contradiction": 0.09,
+        "incomplete": 0.1,
+        "unsupported_success": 0.12
+      }
+    },
+    {
+      "id": "malicious_excerpt",
+      "split": "holdout",
+      "expected": "contradiction",
+      "rules_verdict": "contradiction",
+      "rules_plus_jev_verdict": "contradiction",
+      "rules_elapsed_ms": 0.017700000171316788,
+      "call_status": "ok",
+      "jev_elapsed_ms": 832,
+      "probabilities": {
+        "contradiction": 0.95,
+        "incomplete": 0.93,
+        "unsupported_success": 0.93
+      }
+    },
+    {
+      "id": "integration_success",
+      "split": "holdout",
+      "expected": "pass",
+      "rules_verdict": "pass",
+      "rules_plus_jev_verdict": "pass",
+      "rules_elapsed_ms": 0.020700001186924055,
+      "call_status": "ok",
+      "jev_elapsed_ms": 935,
+      "probabilities": {
+        "contradiction": 0.05,
+        "incomplete": 0.26,
+        "unsupported_success": 0.13
+      }
+    },
+    {
+      "id": "unknown_result",
+      "split": "holdout",
+      "expected": "need_evidence",
+      "rules_verdict": "need_evidence",
+      "rules_plus_jev_verdict": "need_evidence",
+      "rules_elapsed_ms": 0.027000001864507794,
+      "call_status": "ok",
+      "jev_elapsed_ms": 866,
+      "probabilities": {
+        "contradiction": 0.15,
+        "incomplete": 0.37,
+        "unsupported_success": 0.3
+      }
+    },
+    {
+      "id": "empty_claims",
+      "split": "holdout",
+      "expected": "unknown",
+      "rules_verdict": "unknown",
+      "rules_plus_jev_verdict": "unknown",
+      "rules_elapsed_ms": 0.01670000347075984,
+      "call_status": "ok",
+      "jev_elapsed_ms": 896,
+      "probabilities": {
+        "contradiction": 0.07,
+        "incomplete": 0.17,
+        "unsupported_success": 0.24
+      }
+    }
+  ]
+}

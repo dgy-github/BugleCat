@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "rank-inclusive",
+      "why": "rank counts elements <= x",
+      "file": "running_stats.py",
+      "old": "return bisect.bisect_left(self._data, x)\n",
+      "new": "return bisect.bisect_right(self._data, x)\n"
+    }
+  ]
+}

@@ -1,5 +1,165 @@
 use super::*;
 
+fn verification_config(mode: crate::verification::Mode) -> crate::verification::Config {
+    crate::verification::Config {
+        mode,
+        model_enabled: false,
+        experimental_jev: None,
+        enforce_categories: vec![crate::verification::types::ClaimKind::TestsPassed],
+    }
+}
+
+#[tokio::test]
+async fn jev_enforce_revises_before_final_commit_and_honest_unknown_can_finish() {
+    let ws = tmpdir("jev_revision");
+    let p = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: "All tests passed".into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: "Tests were not run; result unverified".into(),
+            ..Default::default()
+        },
+    ]);
+    let session = Session::with_log("system", Some(ws.join("s.jsonl")));
+    let mut agent = AgentLoop::new(
+        Box::new(p),
+        ToolRegistry::new(ToolContext::new(
+            ws.clone(),
+            SandboxPolicy::new(WORKSPACE_WRITE, &ws),
+        )),
+        session,
+    )
+    .with_max_iterations(4);
+    agent.verification = verification_config(crate::verification::Mode::Enforce);
+    let result = agent.run_turn(json!("Run tests"), None).await;
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.iterations, 2);
+    assert!(!agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed"));
+    let log = std::fs::read_to_string(ws.join("s.verification.jsonl")).unwrap();
+    assert_eq!(log.lines().count(), 2);
+    assert!(log.contains("missing_evidence"));
+}
+
+#[tokio::test]
+async fn jev_repeated_rejected_draft_exits_without_false_completed_state() {
+    let ws = tmpdir("jev_loop_limit");
+    let p = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: "All tests passed".into(),
+            ..Default::default()
+        };
+        4
+    ]);
+    let mut agent = build(&ws, Box::new(p)).with_max_iterations(4);
+    agent.verification = verification_config(crate::verification::Mode::Enforce);
+    let result = agent.run_turn(json!("Run tests"), None).await;
+    assert_eq!(result.stop_reason, "verification_failed");
+    assert_eq!(result.iterations, 2);
+    assert_eq!(agent.state(), crate::agent_state::AgentState::NeedsHuman);
+    assert!(!agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed"));
+}
+
+#[tokio::test]
+async fn jev_shadow_preserves_answer_and_mode_off_has_no_verification_log() {
+    for mode in [
+        crate::verification::Mode::Off,
+        crate::verification::Mode::Shadow,
+    ] {
+        let ws = tmpdir("jev_modes");
+        let p = ScriptedProvider::new(vec![ModelResponse {
+            content: "All tests passed".into(),
+            ..Default::default()
+        }]);
+        let session = Session::with_log("system", Some(ws.join("s.jsonl")));
+        let mut agent = AgentLoop::new(
+            Box::new(p),
+            ToolRegistry::new(ToolContext::new(
+                ws.clone(),
+                SandboxPolicy::new(WORKSPACE_WRITE, &ws),
+            )),
+            session,
+        );
+        agent.verification = verification_config(mode);
+        let result = agent.run_turn(json!("Run tests"), None).await;
+        assert_eq!(result.stop_reason, "completed");
+        assert_eq!(result.final_text, "All tests passed");
+        assert_eq!(
+            ws.join("s.verification.jsonl").exists(),
+            mode != crate::verification::Mode::Off
+        );
+    }
+}
+
+#[tokio::test]
+async fn jev_cancel_during_check_never_commits_candidate() {
+    let ws = tmpdir("jev_cancel");
+    let p = ScriptedProvider::new(vec![ModelResponse {
+        content: "All tests passed".into(),
+        ..Default::default()
+    }]);
+    let mut agent = build(&ws, Box::new(p));
+    agent.verification = verification_config(crate::verification::Mode::Shadow);
+    let cancelled = Rc::new(std::cell::Cell::new(false));
+    let flag = cancelled.clone();
+    agent.set_event_sink(Box::new(move |event| {
+        if matches!(event, LoopEvent::Verification { .. }) {
+            flag.set(true);
+        }
+    }));
+    let result = agent
+        .run_turn(json!("Run tests"), Some(&|| cancelled.get()))
+        .await;
+    assert_eq!(result.stop_reason, "cancelled");
+    assert!(!agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed"));
+}
+
+#[tokio::test]
+async fn restored_sessions_do_not_reuse_old_verification_turn_ids() {
+    let ws = tmpdir("jev_restore_turn");
+    let session = Session::with_log("system", Some(ws.join("s.jsonl")));
+    let mut agent = AgentLoop::new(
+        Box::new(ScriptedProvider::new(vec![ModelResponse {
+            content: "hello".into(),
+            ..Default::default()
+        }])),
+        ToolRegistry::new(ToolContext::new(
+            ws.clone(),
+            SandboxPolicy::new(WORKSPACE_WRITE, &ws),
+        )),
+        session,
+    );
+    agent.run_turn(json!("first"), None).await;
+    let first = agent.session.turn_id();
+    let session = Session::resume("system", Some(ws.join("s.jsonl")));
+    let mut agent = AgentLoop::new(
+        Box::new(ScriptedProvider::new(vec![ModelResponse {
+            content: "hello again".into(),
+            ..Default::default()
+        }])),
+        ToolRegistry::new(ToolContext::new(
+            ws.clone(),
+            SandboxPolicy::new(WORKSPACE_WRITE, &ws),
+        )),
+        session,
+    );
+    agent.run_turn(json!("second"), None).await;
+    assert!(agent.session.turn_id() > first);
+}
+
 #[tokio::test]
 async fn python_recheck_persists_new_failure_evidence() {
     struct BreakPython;
@@ -32,13 +192,32 @@ async fn python_recheck_persists_new_failure_evidence() {
             ..Default::default()
         },
     ]);
-    let mut agent = build(&ws, Box::new(p)).with_max_iterations(3);
+    let tools = ToolRegistry::new(ToolContext::new(
+        ws.clone(),
+        SandboxPolicy::new(WORKSPACE_WRITE, &ws),
+    ));
+    let session = Session::with_log("system prompt", Some(ws.join("s.jsonl")));
+    let mut agent = AgentLoop::new(Box::new(p), tools, session).with_max_iterations(3);
     agent.tools.register(Box::new(BreakPython));
     let result = agent.run_turn(json!("change file"), None).await;
     assert_eq!(result.stop_reason, "compile_failed");
-    assert!(serde_json::to_string(&agent.session.full_messages())
-        .unwrap()
-        .contains("IndentationError"));
+    // Evidence is durable provenance, recorded as a failed runtime check...
+    let records = agent.session.trace_store().unwrap().records();
+    assert!(
+        records.iter().any(|r| {
+            r.kind == crate::context_trace::SourceKind::RuntimeVerification
+                && r.status.as_deref() == Some("failed")
+                && r.text.contains("IndentationError")
+        }),
+        "{records:?}"
+    );
+    // ...and is never forged into the conversation as assistant speech.
+    assert!(!agent.session.full_messages().iter().any(|m| {
+        m["role"] == "assistant"
+            && m["content"]
+                .as_str()
+                .is_some_and(|c| c.contains("[Runtime syntax verification]"))
+    }));
 }
 
 #[tokio::test]
@@ -622,8 +801,8 @@ async fn stops_with_an_error_after_three_empty_responses() {
 }
 
 #[tokio::test]
-async fn exhausted_provider_budget_is_not_retried_by_agent_and_keeps_diagnostics() {
-    let diagnostic = "RequestError: read_timeout | {\"event\":\"provider_request\",\"attempts\":3}";
+async fn exhausted_provider_budget_is_not_retried_and_presents_read_timeout() {
+    let diagnostic = "StreamError: read_timeout | {\"event\":\"provider_request\",\"kind\":\"read_timeout\",\"attempts\":1}";
     let p = ScriptedProvider::new(vec![
         ModelResponse {
             content: diagnostic.into(),
@@ -640,12 +819,145 @@ async fn exhausted_provider_budget_is_not_retried_by_agent_and_keeps_diagnostics
     let result = agent.run_turn(json!("diagnose"), None).await;
     assert_eq!(result.iterations, 1);
     assert_eq!(result.stop_reason, "error");
-    assert_eq!(result.final_text, diagnostic);
+    assert!(result.final_text.contains("模型响应中断"));
+    assert!(result.final_text.contains("请重试本轮"));
+    assert!(!result.final_text.contains("provider_request"));
     assert!(agent
         .session
         .messages
         .iter()
-        .any(|m| m["content"] == diagnostic));
+        .any(|m| m["content"] == result.final_text));
+}
+
+#[tokio::test]
+async fn http_400_presents_a_readable_error_without_diagnostic_json() {
+    let diagnostic = "HTTP 400 | {\"event\":\"provider_request\",\"kind\":\"http_error\",\"http_status\":400,\"attempts\":1}";
+    let provider = ScriptedProvider::new(vec![ModelResponse {
+        content: diagnostic.into(),
+        finish_reason: "error".into(),
+        ..Default::default()
+    }]);
+    let ws = tmpdir("http_400_presentation");
+    let mut agent = build(&ws, Box::new(provider));
+    let result = agent.run_turn(json!("继续"), None).await;
+    assert_eq!(result.stop_reason, "error");
+    assert!(result.final_text.contains("HTTP 400"));
+    assert!(!result.final_text.contains("provider_request"));
+}
+
+#[tokio::test]
+async fn text_tool_calls_are_retried_as_native_calls_without_executing_the_text() {
+    let fake_call = "🦊 < | | DSML | | calls>\n< | | DSML | | invoke name=\"shell\">\n< | | DSML | | parameter name=\"command\">echo fake</ | | DSML | | parameter>\n</ | | DSML | | invoke>\n</ | | DSML | | calls>";
+    let patch = "*** Begin Patch\n*** Add File: scanned.txt\n+checked\n*** End Patch";
+    let provider = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+        assistant_toolcall(vec![tc("c1", "apply_patch", json!({"patch": patch}))]),
+        ModelResponse {
+            content: "扫描完成。".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("text_tool_call_recovery");
+    let mut agent = build(&ws, Box::new(provider));
+    let events = Rc::new(RefCell::new(Vec::<LoopEvent>::new()));
+    let sink = events.clone();
+    agent.set_event_sink(Box::new(move |event| sink.borrow_mut().push(event)));
+
+    let result = agent.run_turn(json!("扫描项目"), None).await;
+
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.iterations, 3);
+    assert!(result.tools_used.contains(&"apply_patch".to_string()));
+    assert_eq!(
+        std::fs::read_to_string(ws.join("scanned.txt")).unwrap(),
+        "checked\n"
+    );
+    assert!(!serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("DSML"));
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        LoopEvent::AssistantText { text, .. } if text.is_empty()
+    )));
+}
+
+#[tokio::test]
+async fn repeated_text_tool_calls_fail_without_claiming_execution() {
+    let fake_call = "<|DSML|calls><|DSML|invoke name=\"shell\"></|DSML|invoke></|DSML|calls>";
+    let provider = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("text_tool_call_exhausted");
+    let mut agent = build(&ws, Box::new(provider));
+
+    let result = agent.run_turn(json!("扫描项目"), None).await;
+
+    assert_eq!(result.stop_reason, "error");
+    assert_eq!(result.iterations, 2);
+    assert!(result.tools_used.is_empty());
+    assert!(result.final_text.contains("扫描命令未执行"));
+    assert!(!serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("DSML"));
+}
+
+#[tokio::test]
+async fn fullwidth_dsml_markers_are_not_shown_as_an_answer() {
+    let fake_call = "<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"shell\"><｜｜DSML｜｜ parameter name=\"command\">echo fake</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>";
+    let provider = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("fullwidth_dsml_recovery");
+    let mut agent = build(&ws, Box::new(provider));
+
+    let result = agent.run_turn(json!("扫描项目"), None).await;
+
+    assert_eq!(result.stop_reason, "error");
+    assert!(result.tools_used.is_empty());
+    assert!(result.final_text.contains("扫描命令未执行"));
+    assert!(!result.final_text.contains("DSML"));
+}
+
+#[tokio::test]
+async fn text_tool_call_recovery_cannot_claim_scan_without_native_tools() {
+    let fake_call = "<|DSML|calls><|DSML|invoke name=\"grep\"></|DSML|invoke></|DSML|calls>";
+    let provider = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: "扫描完成。".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("text_tool_call_false_finish");
+    let mut agent = build(&ws, Box::new(provider));
+
+    let result = agent.run_turn(json!("扫描项目"), None).await;
+
+    assert_eq!(result.stop_reason, "error");
+    assert_eq!(result.iterations, 2);
+    assert!(result.tools_used.is_empty());
+    assert!(result.final_text.contains("无法确认项目内容"));
+    assert!(!result.final_text.contains("扫描完成"));
 }
 
 #[tokio::test]

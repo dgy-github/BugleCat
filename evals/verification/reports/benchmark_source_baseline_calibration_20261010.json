@@ -1,0 +1,2986 @@
+{
+  "schema": "buglecat.verification.benchmark-source-baseline.v1",
+  "purpose": "oracle admission only; no main-model candidate or label exists",
+  "manifest_sha256": "aa23f4e1c9e84ae7259a67b78dc94a9d4fe11eb61393512a7a6f153bc3cf622d",
+  "paid_calls": 0,
+  "cases": [
+    {
+      "id": "mbpp-main-760",
+      "group_id": "mbpp-a9cf0c5bfacb7118d245ee1a",
+      "task_id": 760,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "fd546cd81c90f80bf1bed563bcdd11a4868957bf660f770274276ec2763a8bc4",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-780",
+      "group_id": "mbpp-16c45fbf9ab62919ab3e011f",
+      "task_id": 780,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "724bd5ddc83864456d76b6b9ea7a00a9d5f139a993f7fdd8ab22dc80a5c57d83",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-68",
+      "group_id": "mbpp-8fc9a0314c3333740b36e30f",
+      "task_id": 68,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "44981d44619cfa0ca5d99288bef9e192954d4bf088851315a138159886ffbd3c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-401",
+      "group_id": "mbpp-9fa51febbaeb13f7a8f3403c",
+      "task_id": 401,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "235eb7bf981093c3c5fd2722e992521059f15b02caa2f21f7c7bf201566f5be3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-589",
+      "group_id": "mbpp-6e7e66020028dd3f0622be0d",
+      "task_id": 589,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f4a95c791847e298ee9f23c24c08e487df1137b133d65e6d8c07e84fe0d09459",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-16",
+      "group_id": "mbpp-f0d0e023f9b1a4da91c19ac1",
+      "task_id": 16,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "7ee4af3e511b4d9faa18380e49e6d0b3e14ff0d6ce1221037e158e02059dee61",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-3",
+      "group_id": "mbpp-06d033ece6645de592db9736",
+      "task_id": 3,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "0acf5c2d670656864ea896131d878849bdab3db98bf54e2494259fb506d6e285",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-585",
+      "group_id": "mbpp-19c201a1adaebd5669933f12",
+      "task_id": 585,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "362a422e1e085b614bb47d56ace7fe7304c3f9d382e55ee8e363b192eb85ecee",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-104",
+      "group_id": "mbpp-614fcb0d009bbde79e77f822",
+      "task_id": 104,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5c8f2f9a14ebd62658f0a71d833ffa864d785e6bce208460f5deda4b7b5893ba",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-796",
+      "group_id": "mbpp-33d18c1345d56b4f3ec5d6ba",
+      "task_id": 796,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c993460b08c53c1d851400377dee7a89fb0474b82747e07dea48fd31fd91a1ff",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-103",
+      "group_id": "mbpp-cbacec60bc382722c359f28b",
+      "task_id": 103,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0a2d7af271f7754d4d71d0bce1a46204a8f3390ef118af6be555f422bdd7a7d3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-61",
+      "group_id": "mbpp-9adb1464d8e0a4fc5be50834",
+      "task_id": 61,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "6da294b388a309a882dd552c62b50f942a5c10d3722ed3dc04c9fe0f060d6c1d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-778",
+      "group_id": "mbpp-61dab6520eeb8021d6f1961b",
+      "task_id": 778,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d0092d15fc00f5588f1bbc4fe13afe555cbbb94cdced4abee3e674b2892b207b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-87",
+      "group_id": "mbpp-b897108c15c849e1944882fe",
+      "task_id": 87,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d071eb43df9f88c8f81d5ff73ba9f99f61387c76f91923e2a76fe5aa7b58b5d9",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-720",
+      "group_id": "mbpp-4d54f27ca8c78b2cd3c0328d",
+      "task_id": 720,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "66b5e2d2b01c1e907359002a76f03f91d4d3385a6d45d57ed72112c1cd2da2df",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-251",
+      "group_id": "mbpp-d62cec2cf733d7a15955a464",
+      "task_id": 251,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "4bba01f123e2a5b77d7493479e7d68dfab2ffcd5ce00e21eb5d3bc2f5781068a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-592",
+      "group_id": "mbpp-5f1013aa33963bd8047391d2",
+      "task_id": 592,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5f3dcf04a9520a0bb78d555f1c77a44fe8062ece1d54efe6ce15883ce1ae0b1d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-140",
+      "group_id": "mbpp-afddc5ba163c921d36ac88bf",
+      "task_id": 140,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "e13cb5d400f8015d40139a55db6857497c6027917b5bbccffec006e7823deaea",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-732",
+      "group_id": "mbpp-e2a08533c2de6bc96639db0b",
+      "task_id": 732,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "98265402aa51dec1c5be9b29b8ab48e6d75d86db497346909dc2c13d50a2c2a1",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-249",
+      "group_id": "mbpp-890b173b647060ecfe602300",
+      "task_id": 249,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5c8a938867583b12b4b5835499b882005de379e09fd881d031b36f677e165489",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-264",
+      "group_id": "mbpp-445d838f2ae9d7b6914f4416",
+      "task_id": 264,
+      "result": {
+        "reason": "unsupported_or_invalid_oracle_input",
+        "status": "unknown"
+      },
+      "task_sha256": "4d526e141535f995be1cbf88757428766e9f83540d5ee522c4dab912f635a493",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-755",
+      "group_id": "mbpp-ed7dfd5aac1d06fd9a845f20",
+      "task_id": 755,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "e84ac9224d9d98dd721c44bcee7b412900525e35d0b7238c352c361c754708a7",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-447",
+      "group_id": "mbpp-e8298a30469a981dbfd0da10",
+      "task_id": 447,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c8d55a2054133341965a633b4318a3dfa64f6637e7cec82393affd06b6694383",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-271",
+      "group_id": "mbpp-da8c326d8b17883e05109f85",
+      "task_id": 271,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d11707deb7a842c1c619d99f75a646ec6225b8ab107edbfc783db76dfc175574",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-420",
+      "group_id": "mbpp-a23c8127675543347eeec25a",
+      "task_id": 420,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "8e16f38a14257436596d2e92ae773b7b30dcd1d72a4a41cbedd87f2c3a249fbf",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-115",
+      "group_id": "mbpp-dc65bd84db846eebae67e1ba",
+      "task_id": 115,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "106e48024df231e1c2278bb3acc2a39012547b4c3fcfb3cc7c57fe35e87c728b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-6",
+      "group_id": "mbpp-fe94b827f0455bee6f4a6a26",
+      "task_id": 6,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 6
+        },
+        "status": "passed",
+        "tests_passed": 6
+      },
+      "task_sha256": "067283f35ac1b59b6edccfeeb0d060784f405ae90b9666e61bdc18485b70105e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-412",
+      "group_id": "mbpp-84b094214f37a0a4f7fc7108",
+      "task_id": 412,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "02e7ccef39ab68439a772949dc698de4a91e9591e29903d71e5918cb45c889b7",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-626",
+      "group_id": "mbpp-8fb6ff0f8a21e41d0c008250",
+      "task_id": 626,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "bbff050280594385d2958ad19a04a6b41b4a15ef20da3b2e26fe7ceba5c506d1",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-167",
+      "group_id": "mbpp-4bb5c2463b71910dffd008a0",
+      "task_id": 167,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "7835451de3946fb9a7cdc64fcc557405231b5ec6f5d79f399794c9a71e897e7e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-309",
+      "group_id": "mbpp-2909b563687eec06db96d9b3",
+      "task_id": 309,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "865e70955a2f1bf31a09089ba3ad878f9dea7faaa5e0b95c26cc312ccb018de5",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-448",
+      "group_id": "mbpp-7a1911e09cacdf0ea1b0a7e4",
+      "task_id": 448,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "12d0827aba251b6081fc77fe82a84c0eb69f00e78ed77a97d63f83b5e8f0e0b6",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-58",
+      "group_id": "mbpp-d1a8f22afc93fbba8b972464",
+      "task_id": 58,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "4bc03b60a287a4b7fda7587ebdf08e6a9ea91c13ff2c3159da1726b929784e69",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-106",
+      "group_id": "mbpp-0d9662163bebee71b60d9833",
+      "task_id": 106,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "550c3d8898592351f21b0fa3ba3ad5d6c8bdc5a84e7ca69e7df8570d4c20c922",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-88",
+      "group_id": "mbpp-a57d006bc402a3d86a78bb2c",
+      "task_id": 88,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "241016dd1d317165506f0dfa6b344dca3f171798bde6f908cf0a0ad45ecd539f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-421",
+      "group_id": "mbpp-7c79845a6ceee07aa0976b7d",
+      "task_id": 421,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "047fe63525cc7d1a35c8545fa5d1d82f7e4ee4f704790de7321c53ff0fa71ccb",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-594",
+      "group_id": "mbpp-41bf71d7d3fafa76acd9f2a8",
+      "task_id": 594,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "74f6d5d9eff124f6a3df8274685d4063342d6bf6f8133999eec5b9ca5a4f4b6d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-259",
+      "group_id": "mbpp-705cb79550ec2854646bfe44",
+      "task_id": 259,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "077499edb427d5264d1b5e2fe18606ef33cae8e0f9480e57eeaa16552698d022",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-82",
+      "group_id": "mbpp-0dcf125c707020d9131f8017",
+      "task_id": 82,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "781c5f418d37a084bbba2fc7268e7cdadd5785de1236dee93d025577e8796faf",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-85",
+      "group_id": "mbpp-9cc5d5f20f24afa64ce1e99f",
+      "task_id": 85,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ee9f2e607d42a0053fe2ce993fb229c8140b979f0f0d060ca28f052601f60a0f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-807",
+      "group_id": "mbpp-a60c23faffa38f4ca6a9ab3a",
+      "task_id": 807,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "9100afc4666e3c243b868dc6d4c8dbb82176e26abdc87494e81ea2081375fb62",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-67",
+      "group_id": "mbpp-f53e5f499ba7b7a728ac73b2",
+      "task_id": 67,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "95ec35648f84effc82fdc0d37309f9a27b6d725fa7aa72e88dd71a1b94384906",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-731",
+      "group_id": "mbpp-4dfee293579c134cb1def0a7",
+      "task_id": 731,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "491965f476c5541090cf355933004a6113fcd863cd10b338de4ade78cb4b28ad",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-18",
+      "group_id": "mbpp-5c43cd9d0adb3c014f9d7ce8",
+      "task_id": 18,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5c49dce7515ef2c6ee3c6130eef49ead5cbe8bd56ad523b007fb274d47f05ea4",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-425",
+      "group_id": "mbpp-1a7362c8c18bc78a4b20952f",
+      "task_id": 425,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "185044032acff957b79963b50b4987bbda6b9c5ff3950a2b6d8c5eeec01a0c0a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-637",
+      "group_id": "mbpp-1b0ca4f6ca693ba0232017be",
+      "task_id": 637,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d7e880377ad955fb94c1a5f764a1049b6d8991456f9a4a1c184558de7e6d2568",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-274",
+      "group_id": "mbpp-19df692230a5106aa2d96106",
+      "task_id": 274,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "baf5eae7ddf376eedb7f636f630e913fcd8306317e10fcd3c300840b0b4e1759",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-555",
+      "group_id": "mbpp-e636bdfc5fa95ac939e55f21",
+      "task_id": 555,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "19611e675dbc527c567524ce8ce591f307114891ead659767cd713e14bc0b35e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-607",
+      "group_id": "mbpp-3e5b471457bb36cfc902a656",
+      "task_id": 607,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f1f763e15a08f37b7e452335c1e9cdce5d6f6fc7547372940518586bbdef281a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-739",
+      "group_id": "mbpp-32fb1f8572b58b80a151c2ac",
+      "task_id": 739,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ee625a91fb069bf668ea18283561e8990ed7f6e101a1aaed343c53aac67f73ef",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-787",
+      "group_id": "mbpp-7647dfa2d6df921bb0e0f06b",
+      "task_id": 787,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "85bd05f21ca7444805307d5813002f1a8488ff7846a397a2c3f91d41a1cf8ac6",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-434",
+      "group_id": "mbpp-1602f2bc760e6c651775d70f",
+      "task_id": 434,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f6e1fbe86c525f71763e372a308f142692e6298d62a12120c36713af8ebc700f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-261",
+      "group_id": "mbpp-bf76a04f507c093def073b9e",
+      "task_id": 261,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "903154a2a79c7e1d8767db9febb1b058d4269fbc3c6363a5d8ec3a938ed23d7e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-17",
+      "group_id": "mbpp-fe3b7b3db0778380f48e04b7",
+      "task_id": 17,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ba9e517c54ef677da4897d8300a983a871d7682a1cacbe51b45b4f40ad33426c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-143",
+      "group_id": "mbpp-40957487610d92ca4dd2d37e",
+      "task_id": 143,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "71810914842ea03adad63f35bb77cc4df63d38d17135d37e8db1357c54ce207d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-584",
+      "group_id": "mbpp-1ba9676c289fddc7b6382448",
+      "task_id": 584,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b23361537c717afdac977df7aae3269bb7ad6bc9a127bf86bc504e625d2fa2a9",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-222",
+      "group_id": "mbpp-f41676530b59bdeeb95fe413",
+      "task_id": 222,
+      "result": {
+        "reason": "frozen_reference_does_not_pass",
+        "reference": {
+          "error_kind": "NameError",
+          "status": "failed",
+          "tests_passed_before_failure": 0
+        },
+        "status": "unknown"
+      },
+      "task_sha256": "9468ea129fb4aeddabb4cea459fe9c4019700420f923725b65b41f19ce7a0d00",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-809",
+      "group_id": "mbpp-90e75d274e5d8362568ff44e",
+      "task_id": 809,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "50ca83cad31b5f8073082c04d4b540e3213bc927998873eafe1ce3c86bacfc84",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-395",
+      "group_id": "mbpp-31296ff2dc410b4f296b4dab",
+      "task_id": 395,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "bd7eddf0c7c8a2e1cfddc563a17e508ed2f79d8482d8546bc4e1edac4cd1b48e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-405",
+      "group_id": "mbpp-a002f5b0afc9f604b0f6e843",
+      "task_id": 405,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ed74326b828b8ddffe71276ef24a30ef702089d5ad6e9cdbf17f249f9d3d0eec",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-596",
+      "group_id": "mbpp-d2f0330fe978eb14f8a155b2",
+      "task_id": 596,
+      "result": {
+        "reason": "unsupported_or_invalid_oracle_input",
+        "status": "unknown"
+      },
+      "task_sha256": "94be4d6e8e69f2c567f359f7429344d0056a36430e7cb3b92d1a3ff66d4bb1d4",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-612",
+      "group_id": "mbpp-067f898b814d981c3c2522ba",
+      "task_id": 612,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5a1c813a11f1b8f4b1c7d1473af9240dbf9ed62367d67e87afadf87a4164195b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-388",
+      "group_id": "mbpp-9c24ae6f61612679d6f91d2c",
+      "task_id": 388,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1cc552e3436eeb3664b64a13168326e6e2d5536f84598aa1f3eef589c9a425e9",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-244",
+      "group_id": "mbpp-909af4914299a60acb8a9235",
+      "task_id": 244,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "06f90a9c92b5a653a4a7d2c0118a3250faaf5b42e9dc7b6260a462f277fb4c05",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-582",
+      "group_id": "mbpp-d3822624ddc88ee7a4d9c939",
+      "task_id": 582,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f2017317fcb9548740442ef3c32640caeda1a1cdf7bb13ec71be9ddc84c23c24",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-794",
+      "group_id": "mbpp-0fc13a28bc5eb8ff91ae40ea",
+      "task_id": 794,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c652d068a1366e250b4888e240094b573f91bd87c5912cbb5c19ce3894f890d3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-120",
+      "group_id": "mbpp-28116cef450f97562adda3da",
+      "task_id": 120,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b22161bef1075c3b3360e7d3972821fe15199b23bb5fd769cc862d6d7f14cbcd",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-56",
+      "group_id": "mbpp-0494aeb56d68d0683dcdc285",
+      "task_id": 56,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b9d7d79693b931efe0628e196ec78d220a5bc17e2f4b4a4dc3372090a5a14e9e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-769",
+      "group_id": "mbpp-a04a9bd226d03918e9c7532b",
+      "task_id": 769,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "13d5a64b840c91921d4fc6e8dad723e72fdc0872eb5a19fba1ec796e87931d50",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-242",
+      "group_id": "mbpp-6859824d386b7443af1d03ac",
+      "task_id": 242,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "7b94b6e11d48e209da1816045efc23ee3f1dff7b83e781b322d136f8ecac2ef0",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-281",
+      "group_id": "mbpp-318a67a15fbcf266940d91cc",
+      "task_id": 281,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1493c0b31ed84e32d5effca449a0a8a0de3834b8ba9e8547c4956c6b10d7fd46",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-464",
+      "group_id": "mbpp-5e1e3fc2223923a88b6b56c0",
+      "task_id": 464,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a6d926046727ffb189e12c46059dd80ec2a3106555fd750e16636f7afec0eda3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-599",
+      "group_id": "mbpp-4a295a41d67bc943ce7ca0eb",
+      "task_id": 599,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "083c2f0894a2aaeaf0624d19b563df752068d835a0bd9717d30e1078dba24dd8",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-798",
+      "group_id": "mbpp-564e54e46d6fd0af5cc8af6e",
+      "task_id": 798,
+      "result": {
+        "reason": "unsupported_or_invalid_oracle_input",
+        "status": "unknown"
+      },
+      "task_sha256": "f735684168d6d9f40c1c0c5583a73102e16c4a6de01543ddd608f7702aaa5784",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-270",
+      "group_id": "mbpp-fef38f609880fc3cf7a4deaf",
+      "task_id": 270,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d08aee68e4f6b51e9b850a981fe2d1e821675084bc82cfb687fc0e36f7cb544a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-389",
+      "group_id": "mbpp-588bd9544cef697adb14a709",
+      "task_id": 389,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "bcacb746002f148c86d0b50751dc57e47719789544b545152e5c81dd03c5517a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-299",
+      "group_id": "mbpp-e95bb62662422c33e44622be",
+      "task_id": 299,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a9f83533fa9f419f6f05587e23bef47638edbfce204502c1480463b5ad154ec7",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-101",
+      "group_id": "mbpp-d45d39f3996478609d46956d",
+      "task_id": 101,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "31299c38c755244aa11128c4a7b3dfa31a15e5fb45f8f5c07b21143d7fd77a31",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-171",
+      "group_id": "mbpp-74b05b5903a2ec19ee447133",
+      "task_id": 171,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0fafe45c67f03e9d9816f003af0ff6970c9b12fc92576fef3fd1ea2274914958",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-99",
+      "group_id": "mbpp-c6dcb442b19ede93608de747",
+      "task_id": 99,
+      "result": {
+        "reason": "frozen_reference_does_not_pass",
+        "reference": {
+          "error_kind": "NameError",
+          "status": "failed",
+          "tests_passed_before_failure": 0
+        },
+        "status": "unknown"
+      },
+      "task_sha256": "021b021895a3dc43a4337f1e2742a3a4100341a92a2db067ccaead1307124e8b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-749",
+      "group_id": "mbpp-3b7d064a6fea895d1470f8c1",
+      "task_id": 749,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "14c7743eb5cf9027feda6da2786975c8d16b4bdf96b28920e162c555f46455bd",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-133",
+      "group_id": "mbpp-92e01eebbb25b670913615e2",
+      "task_id": 133,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "2fc35c6f1028e1a1f3683f15f5d34806ffe81150535edb3ad0eb1d2f2666beca",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-747",
+      "group_id": "mbpp-e0de8036d20e4c6338cefa96",
+      "task_id": 747,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b136a4d2a0d63cba0e8e2f3a0e3e5da79001152f42b67863dd58d597646ff642",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-723",
+      "group_id": "mbpp-d1d9ea22a112a2f6b5cdb285",
+      "task_id": 723,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "2de12d27f2f00df41606b53a026cd22efcd1f1ee2e4258b9a336cdb118bf95bb",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-296",
+      "group_id": "mbpp-e140d652b4878bbe0f420af8",
+      "task_id": 296,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c6a84bc250c568b652172ffa14af252b4401930b6cbec9e1366d19032802c496",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-94",
+      "group_id": "mbpp-d6d6dfaa75ccdcf8f78230b1",
+      "task_id": 94,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "dfd415c7de7e7b10372d0bbf0564683e4a4db0e9908e7f884b9ac6955bf3bc65",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-79",
+      "group_id": "mbpp-a7bca156bd51a87238b0e129",
+      "task_id": 79,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5767a546fa15120057e58c56b6a7abec7ba4bd80e0bdd1fbd5d4c836d9cb11bc",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-558",
+      "group_id": "mbpp-0307128dffc78162e6b5dc64",
+      "task_id": 558,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c7645e44d80052b4681d39cc171b67865da291fe9e547a78b4c87aa0c4ecc5ff",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-145",
+      "group_id": "mbpp-1a39fcb05545e74473610d21",
+      "task_id": 145,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "cce71fa553561b2802f9f63b5e57c359df9be5531850649c8a184608bad77b3a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-748",
+      "group_id": "mbpp-6b7d76a9540b8466e113526f",
+      "task_id": 748,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c1c595aceaa17895fd8ea16c4a637725af1fa360ce08a2d9bc4523e1b90105ef",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-444",
+      "group_id": "mbpp-c49fdd72c9995ef1c766df57",
+      "task_id": 444,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a4cfe3dd4e8df34cca12cd50119140ab57dae849a2f61c77fef0f1210c5fe1bb",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-294",
+      "group_id": "mbpp-dd1ee2a86a87752c7bb65023",
+      "task_id": 294,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "43bcfa89846b0ccdef6588ffdfc57f63969ffba32d8f04c67c1156740a793e83",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-9",
+      "group_id": "mbpp-16390873ae6b6a173fc894a8",
+      "task_id": 9,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "21b167ad222cfab06800307f6167b8593d1647b0e3cb2359d19345aeeb637ca3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-64",
+      "group_id": "mbpp-00f9f95c19f328a80a35f85d",
+      "task_id": 64,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "fdbd49d6b7c44319d64fff0f3b24e7f9310b94046bbce486edf7872cd754ee85",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-398",
+      "group_id": "mbpp-ca43e5898db3df479511506e",
+      "task_id": 398,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5fcf1b3403c78830e929022ada2c3e01e36fb7fa383794fd21a03d2c18dd0c64",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-804",
+      "group_id": "mbpp-afd019440127d313c2394e66",
+      "task_id": 804,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "237ee94401c573d61975312231ff579c7df16cbc0b67397a5db00060a27a71eb",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-455",
+      "group_id": "mbpp-1b71de613616077225dfa32c",
+      "task_id": 455,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "418017b3c72effceca06d20fbed4ba79a8f8c7e485b0e328b7cea09c5171b946",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-14",
+      "group_id": "mbpp-b8d52dc8aa20e6a056357c96",
+      "task_id": 14,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "85e7bc9e2e481cdd483d78e5a10a7a404bd12dc9f06470eab3f8a417b4ff0c50",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-641",
+      "group_id": "mbpp-857c17f4a8910063df2a4660",
+      "task_id": 641,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d2076d331f94531531a16ddbdfa3195a9b068a5b5569cb42111fa8cc3f21e0e1",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-415",
+      "group_id": "mbpp-ada1b3f558ee9cdc6c6da9a1",
+      "task_id": 415,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "eab01259d51a5ba018a3a18e2ce19397e19d25b7237193a39c696fbe748cf8f7",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-428",
+      "group_id": "mbpp-ed135ef7f995631a6cc523d2",
+      "task_id": 428,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "601e359a7ea0926727d8dfdd4b6b394db23ab93d19daa7ca19f2d94b6665f7bb",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-162",
+      "group_id": "mbpp-02fe25ed826fd17d6f02c469",
+      "task_id": 162,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "fa5127bbd91e89b5558b13133ce5346596b376ca77959587a5d1dc0fc399212f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-304",
+      "group_id": "mbpp-7b88a4ff54bcd6caf7f7fc15",
+      "task_id": 304,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0bcb354af84c4d43fd04628d85dfd5b58f50bdb1969f0dd60dd9243e40076018",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-579",
+      "group_id": "mbpp-cb08595957ea3cea82ab7d79",
+      "task_id": 579,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "9ca26bd810ab6f616b2ccfffbf8cdb0f1e9f5e28442427a7801b30b2982c177e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-554",
+      "group_id": "mbpp-520edad57378ee6907cf4614",
+      "task_id": 554,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "9b3dfc940b244785caa19c11151c75e601b17a340833ddc85516c97563710fee",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-437",
+      "group_id": "mbpp-221406fd6c7a9de93cc1311f",
+      "task_id": 437,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "6fca499cf2533aed55a63b9911abdac19b82e9a3c3c4762a3a51c7c87e0daae9",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-459",
+      "group_id": "mbpp-6504c78f38d98d20f8cd1af8",
+      "task_id": 459,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "77be55a0e4c97d86a61300063be4e2470ae06c4391fbf2926a17afc2a77a0e94",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-226",
+      "group_id": "mbpp-797270199529ffcb1112ebc2",
+      "task_id": 226,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "7de30abe86d587b67fea17f592fbf12a6be4660e8cc85fc08e9256918a7ed45b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-102",
+      "group_id": "mbpp-cb2128fa588a6c0496c6d771",
+      "task_id": 102,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b6c3e48ed4449eef89af2d883560e14f6681af6fc7197720b65b31d6a3d9379b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-473",
+      "group_id": "mbpp-4951fb063e2a11ce849df931",
+      "task_id": 473,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "6bbc84ee4f48c88106df5cc14efd4573a9b1283688dd2548673312e439e202b1",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-458",
+      "group_id": "mbpp-5e18e3bebd3acd811effaae9",
+      "task_id": 458,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "9bba67f6f7a1a6001434c01a765bdbd6284c5ed88719b890eca6932c539c7de2",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-124",
+      "group_id": "mbpp-a0e7ee310005c50a63df935d",
+      "task_id": 124,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d69422213fd76dba07df350183ddbaa1add572b30b5477234a734c4d792d2839",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-163",
+      "group_id": "mbpp-1b748b3c3fa6380768a50c3a",
+      "task_id": 163,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "e1289b0ab9bbab58b9d4959f89eb0a40d12a12854bf9e08fedceb3c3d40eab82",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-593",
+      "group_id": "mbpp-697fbdce5d3626c849aff9e1",
+      "task_id": 593,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "8035114c35d44dad0f2d7ab0cfc1b2edf6c53e33db379204060d6bb5b51d5283",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-141",
+      "group_id": "mbpp-51d59e4185275c32d493d99d",
+      "task_id": 141,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0cd272f696c9957be2a863184f6e3997ade40d3d9470c263343c87269ad2ef05",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-418",
+      "group_id": "mbpp-ef307878bac7b76452a7fa14",
+      "task_id": 418,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "fc4b0334d839b7a0ebb1dffe6f42e37c2edee7994e89a6eeaec717745677de87",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-764",
+      "group_id": "mbpp-b01ed6e5325a84d9753bafb1",
+      "task_id": 764,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "781788fc9a64894c719c709944a652463d8cd883f4bab7d9899223d51e8bfefc",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-108",
+      "group_id": "mbpp-ea8833e4cf9c0c9ac02998eb",
+      "task_id": 108,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "236d71f960cf7cceeaca596e5b24eb81c88f268489a280ad697eb1632304b716",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-255",
+      "group_id": "mbpp-8534a9c8fadb77f90fdbd15f",
+      "task_id": 255,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b743c4625811872dd8ecfd6b2d66179f35d020839540426383c7e90ba5820e9f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-312",
+      "group_id": "mbpp-dd16e738f947ae5e783a2fa9",
+      "task_id": 312,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "6a4e4fa074573526459f4be722d6d812f53b440157c37cc6627cd21dd5bf942d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-479",
+      "group_id": "mbpp-8c407b6ed0efe8729af52beb",
+      "task_id": 479,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "e4bc97b6db42be4c5a9ada8790300045d6359229f078e0c078c4d60b8c4bfe49",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-763",
+      "group_id": "mbpp-c673ab496215bde04857cc57",
+      "task_id": 763,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "11060f6baefa87112fe0b67635260b2a57a59c5076a6a8205ec965d281c754ff",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-580",
+      "group_id": "mbpp-8111fcad9f2e626f77040141",
+      "task_id": 580,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "819f2a94bd0adb9972a1417392aad0493f6ad75864ab0d5904bec2e48745aa90",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-781",
+      "group_id": "mbpp-d441155e705ff6eac479db28",
+      "task_id": 781,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "85b7c26bcad06431fb3df170461959cc01547ddea8633696e5c0e83b813e6e93",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-726",
+      "group_id": "mbpp-43312f23140478b33d195e5f",
+      "task_id": 726,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "694e15a7ec304d706144718964a574332b4addaf04b7c2abc3da95e7501b4a01",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-587",
+      "group_id": "mbpp-16ac59afe774f2a7e45c5d87",
+      "task_id": 587,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "73e3e0bd7f55cb93c8cf069fc4699091d3648f4bafc3cf81b75ea86908613339",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-624",
+      "group_id": "mbpp-a426a47da33ca0ceda8130af",
+      "task_id": 624,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a5b7ecb09d075e4f79ba29899150518b23e1a9633cd9cd52e441e990521ed5ec",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-311",
+      "group_id": "mbpp-489df53deac344168a6fbf31",
+      "task_id": 311,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "575670425ebbeb5ee77256f6d96d6df2f1c6334e41d181b746bb21d345771c3d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-113",
+      "group_id": "mbpp-f62f005a00f3d5d65e96a932",
+      "task_id": 113,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d33fcde9d9d8523f4bbf8321165bed3f688bdaf117ae4097a966d0d0e764e262",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-237",
+      "group_id": "mbpp-b6e5c9ce0c7a439db2f8e335",
+      "task_id": 237,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "e76b7502c94385b03f67be02028a36244f0d655404aaf7121f5f765349d69dc5",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-111",
+      "group_id": "mbpp-127309c873b897c7c23aeed4",
+      "task_id": 111,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "8b1e4d6374f835105ea2e141f618347fc4a71c410a8e678c048d2d378672c09f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-268",
+      "group_id": "mbpp-e533ee7560dcd02b2952c5e2",
+      "task_id": 268,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "2698a31f8304adf0ebc3472bbbce7e86f048d8977be91324c42f22afc5890f4e",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-417",
+      "group_id": "mbpp-8ccd89091bd6cab258e1d498",
+      "task_id": 417,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "803fda52c18434dfb1b5282ee52c1f778cc056ced06b47615fe8bca60708ccc8",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-750",
+      "group_id": "mbpp-a8adbc8992427458207570db",
+      "task_id": 750,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "846e14ed206c6496c98c09f6dff93503c977d5849673aec11bd078fb4e53e07a",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-98",
+      "group_id": "mbpp-db41c6194846e89df26b631d",
+      "task_id": 98,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "23301766e3fc2e0586e88ddb9e91972e11ef94b07b6724180e7f04c13bfea5b9",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-123",
+      "group_id": "mbpp-201add142419aaa1ff8bf4b2",
+      "task_id": 123,
+      "result": {
+        "status": "unknown",
+        "reason": "worker_timeout_or_invalid_output"
+      },
+      "task_sha256": "a8b05e0828f8c63fc453f4ecd7ac81f1b06946351a5a1b65140a101fc73b02fe",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-461",
+      "group_id": "mbpp-325d84497ed1581d01c0ad65",
+      "task_id": 461,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1694773472a126fe1942e4dbf13afb788459ce37ab8f05d8d49e68d5f10f8fb1",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-293",
+      "group_id": "mbpp-9306b075b48aa0954f8b0948",
+      "task_id": 293,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "7feb1bd2aad19548e023f5833a54773685fe9666605c531a16f350b46a8234ca",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-238",
+      "group_id": "mbpp-ff7ca45c76debaac3aca6e07",
+      "task_id": 238,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "99e87d0ef7373c9b310a9377b3df7f6b364a7e360f4b31640423c37cd0f9f464",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-744",
+      "group_id": "mbpp-0d9ce8021ae625e66eee3da3",
+      "task_id": 744,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b2266774d66e8b847d441e9ec7842852aa132fc577a94d444608d67293b5fda0",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-563",
+      "group_id": "mbpp-24fbe426109b7f65e4238a57",
+      "task_id": 563,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5784fb48d1d7f2fb5fc9cca960ffbd0cd16dd8c8a553efed0bd20e69581b9edd",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-635",
+      "group_id": "mbpp-72eb61ad254830a5ee63ad13",
+      "task_id": 635,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "3fa422d343481dec0c4f92bd7e46b3fa3c300dcb69fefe66459cfc12e34912c1",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-738",
+      "group_id": "mbpp-7ab6100237fda90ed1e5f403",
+      "task_id": 738,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f5af877dec468577512e9fa04aabaa4429bec84ba2aea45682fa4033c18b830d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-257",
+      "group_id": "mbpp-4ec308a86927b5455193f71e",
+      "task_id": 257,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d2d4b1458d9605f7495f347d5e0d1fb00bd77c5faa44ca6a82713fa3a98d71b6",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-20",
+      "group_id": "mbpp-49e165525ebdb26f765e7bba",
+      "task_id": 20,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "2c07c1d3a5ec25e99a43639b3b900cedfe28f85db7df25f067edc59db82316be",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-724",
+      "group_id": "mbpp-db97098b2d6eea54448ac66d",
+      "task_id": 724,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "14ea17d608e450d0c7931c33868239c359639ec5bb5f4e1965fc3ef6664e2886",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-116",
+      "group_id": "mbpp-ac87a3210b091afd14f18769",
+      "task_id": 116,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "e9eff55dc60fc1d0624d04c63127a1856c00c8669a5d571e71325679b8ec8cb0",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-802",
+      "group_id": "mbpp-df50058936439d3cd548a994",
+      "task_id": 802,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 5
+        },
+        "status": "passed",
+        "tests_passed": 5
+      },
+      "task_sha256": "8dc301ae96b51a95575d1075a9a62ea25c9672fe878db37cbf17de9c9575938c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-126",
+      "group_id": "mbpp-5e2883c1a7025a8a6630f05b",
+      "task_id": 126,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a9bb645035b91a186f74447fd657f45779ef2800a0eeb6c76811b69212b0bd9b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-597",
+      "group_id": "mbpp-3e7e3641bb031f4d61848a50",
+      "task_id": 597,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "83b80fc6462e3244a54fb441c100eb8f7df2fe0b25a5ab408217547fd0a33426",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-307",
+      "group_id": "mbpp-0c80bf122ad15dd2b6434f99",
+      "task_id": 307,
+      "result": {
+        "reason": "unsupported_or_invalid_oracle_input",
+        "status": "unknown"
+      },
+      "task_sha256": "7981d51043daff582932eb57c4e4678ce82d155fe646c58822330e0d22be8258",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-400",
+      "group_id": "mbpp-e8b9f345f7a25b45d04c1991",
+      "task_id": 400,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ffac6e6dc77d7132c241a25c38f7b625d75efdac3b3d368ecdb4e8c0fa0adb06",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-767",
+      "group_id": "mbpp-7fe47e275a8edac9dc7e1fd5",
+      "task_id": 767,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "fa29501c51ca77d1da9e645b8d443a04df82fc4b3ce3b049406a9a679e4ad209",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-762",
+      "group_id": "mbpp-79a2e2a22ed78b289fe41154",
+      "task_id": 762,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a6fb453efc0d4e8e73413d9214f3e6749c01b9998a6595a2b8eefde0c8626fd0",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-611",
+      "group_id": "mbpp-99e099de6b9a2f1c0753ad61",
+      "task_id": 611,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1fc92fd3f3902f94f57fc9b72c62e9f69d85ae6eb4988da11f98915b805ec14d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-441",
+      "group_id": "mbpp-3ac7a5effe91f6fa5c7fa315",
+      "task_id": 441,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "6a8fec81804fe92207c33e5327f81136d0ec9da83a45bfe2552b736644dfcbf3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-806",
+      "group_id": "mbpp-b35058b14a5dbe58cea42efb",
+      "task_id": 806,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "25f3dbf05288148b31188902aa0680021611669059e2d83cc8585fe4cf20a1e5",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-424",
+      "group_id": "mbpp-0c3ca502b1f19b18aa1ee433",
+      "task_id": 424,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a4df802c41cf82f7db89c32a8f7d51d8da95f876c2b23cb63e4614c922d2cc1c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-429",
+      "group_id": "mbpp-a4deae50c122c303613433cc",
+      "task_id": 429,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0b783fb8398ab8b293cd93eb6ec11d2b8e81e6466535aea39b3095be13608691",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-245",
+      "group_id": "mbpp-a3cd741d986dd1cee2cfff3b",
+      "task_id": 245,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0319bf426fb8f5345445e36352a75ef0af9d17c362bcf30158dcf30bfc186162",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-413",
+      "group_id": "mbpp-0c166b56923c9d438335d919",
+      "task_id": 413,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "4458c0f31e800eb9a3b20eed4dcee7b5b517a92199d9a7abd74ede34da0381fa",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-118",
+      "group_id": "mbpp-37b2bc0db85b37bd0134e908",
+      "task_id": 118,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d0e9c786006e3fe4d1e1744feb1a369e8a813bd352edf0589ca04e71e27fdf16",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-419",
+      "group_id": "mbpp-b29fcf84cb7d6c23cf6388fd",
+      "task_id": 419,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1e235a853b4b9d4260b61f0f6571ea82797fd8582d8b67b3c5700f350b58c176",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-730",
+      "group_id": "mbpp-542e36dfbdc506ab5f6eef4d",
+      "task_id": 730,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "5aa229690812f100a8bee83dca03d1f744529737cedc1752838188df666bfdb5",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-80",
+      "group_id": "mbpp-54c2bbec2c3453a499843d00",
+      "task_id": 80,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5ea7931dfbc89ffaaa2aa9589189d0e692ef617c704e439ad03de8c6e6079307",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-427",
+      "group_id": "mbpp-76be46b95da6490c98bf939c",
+      "task_id": 427,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b097fe93c224f2433690b3f5e95f923e00e1bdd267a1ebddfe9634594cb900c3",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-83",
+      "group_id": "mbpp-8e4e01a0ad408a616a33dd47",
+      "task_id": 83,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ccf432a08b0058bdf77a493a2f3f0dff49a9a2c34abdbe96f6dbcce79e787707",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-408",
+      "group_id": "mbpp-04f200f1e2407fd6d986dfa2",
+      "task_id": 408,
+      "result": {
+        "reason": "unsupported_or_invalid_oracle_input",
+        "status": "unknown"
+      },
+      "task_sha256": "fde4770ff310ad390c52510ba45e6c696c35048a031adcda2d413a7003c75f0b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-617",
+      "group_id": "mbpp-92e70e7fbbe2267d3469b90b",
+      "task_id": 617,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "8dae7959b22cda820bb76c84c9f3a4013355b3a0b7fc379c6130820e8dcfc9d5",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-74",
+      "group_id": "mbpp-5fb6526ed57d24d42814dce7",
+      "task_id": 74,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a77f8b236eb9cb3fec245c3b5f8c28a2763f1ed8c3cf4fa477b733195c487e77",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-305",
+      "group_id": "mbpp-de81519959ceb39b52f0737e",
+      "task_id": 305,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f86dc70102274966549c28282c6aeb54fd06884d3967c0aab1a907708c1b1e94",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-227",
+      "group_id": "mbpp-fce894e8386eaece9bdae021",
+      "task_id": 227,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1907c23f5ddb7e08ef642f22083d0a7ddaa093e779f02f9bee3718ec53e0c58c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-8",
+      "group_id": "mbpp-a8f2ecf6c811b67c05019017",
+      "task_id": 8,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d5d71f519cdaa51f65338b1347416a102d2c8191391803d9187c7477d7ae248c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-614",
+      "group_id": "mbpp-bb158f11217f0608e9d78170",
+      "task_id": 614,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "489e0e2af9a72a1e2499378e1a6c61f2bf796a1b623eeb2b3e7de4a7ade1f2be",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-430",
+      "group_id": "mbpp-e5a4c32775de3b7c9ee63255",
+      "task_id": 430,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5dfd4cb2b0d7635cb8c28a7330d83ae9137956764c23f8d6ca5972f2a4b0abaf",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-600",
+      "group_id": "mbpp-d1684b68e80b44cf92f116c4",
+      "task_id": 600,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5e37b0fcce821f6964b490ea433cb115448008a2da82b87421cd1ac3d4cfbdbf",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-438",
+      "group_id": "mbpp-faf1ac8997c2e3a8e7e7f072",
+      "task_id": 438,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f8ceb255f57384d57cda72cd38c6d40209fd02c83f52df24aa307bff8b47f933",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-606",
+      "group_id": "mbpp-c17bde14c12cd32e67fb4896",
+      "task_id": 606,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1717c57d5440cdeb0d850a81b22e1bf544c1d744c4becf81428b09b111f1dd7f",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-291",
+      "group_id": "mbpp-08f9a8e38aa3d42457ecef15",
+      "task_id": 291,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a04f0a9d5e5a88936039c42aa142efcbbefa3edabe459be9ff0821e4537a2b1c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-229",
+      "group_id": "mbpp-988d59b332b09971772e8c0c",
+      "task_id": 229,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "454aa1b9dff788c21c7406ff217d7a2c5f78961226d8ff1332407963cba6969d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-462",
+      "group_id": "mbpp-e6222a90dbf4f4fd0376e97d",
+      "task_id": 462,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "fef16e289fa36f739f6bd255bf1ced9e7424a46bc963ae01cdc70074a97b7098",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-446",
+      "group_id": "mbpp-b580cfb95b1c58607c76b34c",
+      "task_id": 446,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "b8da2fb618cf9e062ad9a02b19be78f097f6be7ea51f586fee11e5067e7ffcb6",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-569",
+      "group_id": "mbpp-6d8d29baaad6bdd0ddc1a5c7",
+      "task_id": 569,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "2d2e9fb6f7a31707975b0fe9f0861948d6c4ebe82591b1de3c2d7ffd5f3ba464",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-278",
+      "group_id": "mbpp-68226bceef4320c2888a9202",
+      "task_id": 278,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "29fd3e3dd43b7fbd849a62949758aef51a04eee1fb627b46249eea79bf635d7c",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-86",
+      "group_id": "mbpp-27f438ab546b170899fe39ab",
+      "task_id": 86,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d3c215111ba1fb21fcf19475b49410814a5e876353ae02b81c1aadc2fc870cd2",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-267",
+      "group_id": "mbpp-1511ec54d7879acf436ce290",
+      "task_id": 267,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "62321eae96341bf016f4c91870ab3e093a6da47363629053234b7d7b9aca7ce6",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-619",
+      "group_id": "mbpp-4d6e10cb146eb19abfc0dd95",
+      "task_id": 619,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5fe705258f515f69caea8d5507a97ae288c92204c670850faf1aac470fc8cd67",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-282",
+      "group_id": "mbpp-70ab809636c8ec8d76bcb965",
+      "task_id": 282,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "a22d50557e183abb784740283e7d7c94567bf731aeeb07aad9b09507879a56a6",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-451",
+      "group_id": "mbpp-3efd5b599168a816a662ca41",
+      "task_id": 451,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ce9267e64158f4e82f17f43cb9c0374a42583f4afd6fc1ca92c69f43b8821d49",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-391",
+      "group_id": "mbpp-1a822841ad9a52e02faff523",
+      "task_id": 391,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "21819ddc98534f8b14a52790ba08e89d4ed24f38162a627e17a3d36cbb91cf36",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-629",
+      "group_id": "mbpp-d5045f252cfa325184989513",
+      "task_id": 629,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "71a2ff2bf161ffe17abcb3215e96cacc4b4dddf0ada80f66918638be38854f38",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-290",
+      "group_id": "mbpp-c50a8608e80439198ace93c1",
+      "task_id": 290,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "f97c0df463ab06a0ab2c2f8f99c36c6d7fc977ee30053f873b35dbf6c2e1ad8d",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-19",
+      "group_id": "mbpp-691f362eb14915823efa2d8a",
+      "task_id": 19,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "925bfc80e5bd0c11a2dc56d529c9e531e4a08c7552392d8a4b9db29bf3616ba8",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-235",
+      "group_id": "mbpp-9040dc6685cd6de5cbd0af40",
+      "task_id": 235,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ab055ee951e41369d1abde4e02d85cb9d5ae44ad5a41b1b9b4552f562ddd06c0",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-308",
+      "group_id": "mbpp-993dec6df522229980c64f01",
+      "task_id": 308,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "ca16fd0abafca6a76f226165eb7bf69b1e279fef85f92aedc75be94740a86b35",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-578",
+      "group_id": "mbpp-938be59e99cb028088395534",
+      "task_id": 578,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "2470646dc7a53bd659e85bf52f1403e67d2f7b9adc4b04b8aba1fb65ef668394",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-295",
+      "group_id": "mbpp-f9b12b95ef3d785b8417784d",
+      "task_id": 295,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "e1adb88782d7e072b9ca45eea477ef08a7ceb1fe0397f2dcc87040c8b2f43747",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-766",
+      "group_id": "mbpp-172bc2f58eabe655062a93d8",
+      "task_id": 766,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "44d71a7ced5c5174d1d3688072a8a8bc532ce81aa7bea1368b1da730f8d2118b",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-773",
+      "group_id": "mbpp-9796522092602efe5f4b29b3",
+      "task_id": 773,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "2fce82211662364455d612053d31584abc75729b27f7bd8b04ff708ff1be95cd",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    },
+    {
+      "id": "mbpp-main-643",
+      "group_id": "mbpp-a13bd0174563e6db66e19832",
+      "task_id": 643,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "1a7295e4e2f0a018f845f004506e721db763459df51c664fa20c42e56b182193",
+      "oracle_worker_sha256": "5636f000fe0f75ae257a4b0f96c5a581f984a8be48b9a37053a378c31523f287"
+    }
+  ]
+}

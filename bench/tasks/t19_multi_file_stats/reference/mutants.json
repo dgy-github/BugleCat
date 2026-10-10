@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "revenue-ignores-qty",
+      "why": "revenue sums price instead of quantity*price",
+      "file": "store.py",
+      "old": "return sum(o.total() for o in orders)",
+      "new": "return sum(o.price for o in orders)"
+    }
+  ]
+}

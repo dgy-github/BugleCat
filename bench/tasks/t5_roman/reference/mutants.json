@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "no-subtractive-parse",
+      "why": "from_roman ignores subtractive pairs",
+      "file": "roman.py",
+      "old": "if i + 1 < len(s) and _VALUES[s[i + 1]] > v:",
+      "new": "if False:"
+    }
+  ]
+}

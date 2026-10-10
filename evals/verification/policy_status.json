@@ -1,0 +1,66 @@
+{
+  "schema": "buglecat.verification.policy-status.v1",
+  "date": "2026-10-10",
+  "runtime_owner": "ncx-core verification::types::Config::from_env",
+  "default_mode": "off",
+  "production_enforce_categories": [],
+  "production_experimental_jev": null,
+  "categories": [
+    {
+      "claim_kind": "execution_success",
+      "implementation": "bounded host provenance and invocation identity",
+      "production_enabled": false,
+      "reason": "no independent category-level effect certification"
+    },
+    {
+      "claim_kind": "tests_passed",
+      "implementation": "direct executed test scope, full fresh snapshots, same-target rerun; includes stale_evidence and scope_mismatch checks",
+      "production_enabled": false,
+      "reason": "development trial exposed and repaired a false block; corrected version not yet independently evaluated"
+    },
+    {
+      "claim_kind": "semantic",
+      "implementation": "Unknown plus explicit development-only Jev rejection signals",
+      "production_enabled": false,
+      "reason": "threshold 0.95 is uncalibrated; no demonstrated incremental benefit",
+      "development_threshold": 0.95,
+      "development_policy": "r3-development-20261010-predeclared-095"
+    },
+    {
+      "claim_kind": "limitation",
+      "implementation": "honest unverified statements and non-asserted examples",
+      "production_enabled": false,
+      "reason": "not a verified factual claim"
+    }
+  ],
+  "release_criteria": {
+    "independent_source_grouped_labels": false,
+    "frozen_new_holdout": false,
+    "calibrated_threshold": false,
+    "demonstrated_C_over_B_benefit": false,
+    "false_block_limit_predeclared": null,
+    "task_success_regression_limit_predeclared": null,
+    "production_latency_limit_predeclared": null,
+    "production_cost_limit_predeclared": null
+  },
+  "criteria_note": "Production numerical gates must be frozen for the intended workload before new holdout results are viewed. Source/model/template/policy changes require recertification.",
+  "result_report": "evals/verification/R3_RESULT.md",
+  "latest_development_probe": {
+    "policy_version": "host-rules-v3.2",
+    "published_executable_policy_version": "host-rules-v3.1",
+    "candidate_n": 7,
+    "scoped_assertion_supported_n": 5,
+    "model_reviewed_unknown_n": 2,
+    "unsupported_n": 0,
+    "source_group_n": 3,
+    "live_semantic_group_n": 1,
+    "new_jev_attempts": 1,
+    "cumulative_jev_attempts": 27,
+    "certified_threshold": null,
+    "holdout_status": "not_run",
+    "report": "evals/verification/reports/replay_development_calibration_20261010_v32.json",
+    "transport_receipt_status": "actual request hash unrecorded in old main binary; development-only import, formal gate rejected",
+    "effect_certified": false
+  },
+  "role": "audit record; runtime does not load this JSON as permission or certification"
+}

@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "non-overlapping",
+      "why": "skips past each match",
+      "file": "overlap.py",
+      "old": "start = idx + 1",
+      "new": "start = idx + len(pattern)"
+    }
+  ]
+}

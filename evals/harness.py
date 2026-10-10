@@ -102,22 +102,42 @@ def _benchmark(args: argparse.Namespace) -> dict[str, Any]:
     selected = bench.tasks(args.tasks)
     rows: list[dict[str, Any]] = []
     for task in selected:
-        passes = 0
+        passes = clean = timeouts = 0
         durations: list[float] = []
         for _ in range(max(1, args.repeats)):
             evidence = bench.run_once_detailed(args.agent, task, args.timeout)
             ok, elapsed = evidence["passed"], evidence["elapsed_s"]
+            timed_out = bool(evidence.get("timed_out", False))
             passes += int(ok)
+            clean += int(ok and not timed_out)
+            timeouts += int(timed_out)
             durations.append(elapsed)
-        rows.append({"task": task.name, "passes": passes, "runs": len(durations),
+        rows.append({"task": task.name, "passes": passes, "clean_passes": clean,
+                     "timeouts": timeouts, "runs": len(durations),
                      "mean_seconds": round(sum(durations) / len(durations), 3),
                      "last_failure_kind": evidence.get("failure_kind") if not ok else None,
                      "last_timed_out": evidence.get("timed_out", False)})
+    return {"benchmark": summarize_benchmark(args.agent, rows)}
+
+
+def summarize_benchmark(agent: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_runs = sum(r["runs"] for r in rows)
     total_passes = sum(r["passes"] for r in rows)
-    return {"benchmark": {"agent": args.agent, "tasks": rows,
-                          "task_success_rate": (round(total_passes / total_runs, 4) if total_runs else None),
-                          "runs": total_runs, "passes": total_passes}}
+    total_clean = sum(r.get("clean_passes", 0) for r in rows)
+
+    def rate(n: int) -> float | None:
+        return round(n / total_runs, 4) if total_runs else None
+
+    return {"agent": agent, "tasks": rows,
+            "task_success_rate": rate(total_passes),
+            # A run killed at the timeout may still leave a passing file behind;
+            # it did not finish. clean = passed AND exited on its own.
+            "clean_pass_rate": rate(total_clean),
+            "runs": total_runs, "passes": total_passes, "clean_passes": total_clean,
+            "timeouts": sum(r.get("timeouts", 0) for r in rows)}
+
+
+GATE_METRICS = {"clean": "clean_pass_rate", "pass": "task_success_rate"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,6 +168,11 @@ def main(argv: list[str] | None = None) -> int:
     bench.add_argument("--repeats", type=int, default=1)
     bench.add_argument("--timeout", type=int, default=240)
     bench.add_argument("--output", type=Path)
+    bench.add_argument("--min-pass-rate", type=float, default=1.0,
+                       help="exit non-zero when the gate metric is below this (0..1); "
+                            "an empty run always fails")
+    bench.add_argument("--gate-metric", choices=sorted(GATE_METRICS), default="clean",
+                       help="clean = passed and not timed out (default); pass = grader passed")
 
     args = parser.parse_args(argv)
     if args.command == "trace":
@@ -159,8 +184,28 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "generate":
         _write_report(_generate_compaction(args), None)
     else:
-        _write_report(_benchmark(args), args.output)
+        if not 0.0 <= args.min_pass_rate <= 1.0:
+            parser.error("--min-pass-rate must be within [0, 1]")
+        report = _benchmark(args)
+        gate = benchmark_gate(report["benchmark"], args.min_pass_rate, GATE_METRICS[args.gate_metric])
+        report["benchmark"]["gate"] = gate
+        _write_report(report, args.output)
+        if not gate["passed"]:
+            print(f"benchmark gate FAILED: {gate['reason']}", file=sys.stderr)
+            return 1
     return 0
+
+
+def benchmark_gate(summary: dict[str, Any], min_pass_rate: float,
+                   metric: str = "task_success_rate") -> dict[str, Any]:
+    """Fail closed: no executed runs (or a missing metric) never passes."""
+    rate = summary.get(metric)
+    base = {"metric": metric, "min_pass_rate": min_pass_rate}
+    if not summary.get("runs") or rate is None:
+        return {"passed": False, **base, "reason": f"no benchmark runs executed or {metric} missing"}
+    if rate < min_pass_rate:
+        return {"passed": False, **base, "reason": f"{metric} {rate} < min_pass_rate {min_pass_rate}"}
+    return {"passed": True, **base, "reason": "ok"}
 
 
 if __name__ == "__main__":

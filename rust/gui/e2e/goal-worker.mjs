@@ -224,7 +224,7 @@ try {
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const call = (method, params) => invoke("app_server_request", { request: { method, params } });
     const before = await call("threadReadVisible", { threadId });
-    await call("modelPresetApply", { providerId: "deepseek", modelId: "deepseek-v4-flash" });
+    await call("modelPresetApply", { providerId: "deepseek", modelId: "deepseek-flash" });
     const committed = await call("harnessDiagnosticsRead");
     const committedRoutes = await call("customProviderList");
     let failed = false;
@@ -243,7 +243,7 @@ try {
       routeAfterFailure: routesAfterFailure.response.payload.data.find((route) => route.id === "preset:deepseek"),
     };
   }, evidence.threadId);
-  if (presetEvidence.committed.active_provider_id !== "preset:deepseek" || presetEvidence.committedRoute?.selected_model !== "deepseek-v4-flash" || !presetEvidence.committedRoute?.active) {
+  if (presetEvidence.committed.active_provider_id !== "preset:deepseek" || presetEvidence.committedRoute?.selected_model !== "deepseek-flash" || !presetEvidence.committedRoute?.active) {
     throw new Error(`preset Route did not commit atomically: ${JSON.stringify(presetEvidence)}`);
   }
   if (!presetEvidence.failed || JSON.stringify(presetEvidence.routeAfterFailure) !== JSON.stringify(presetEvidence.committedRoute)) {

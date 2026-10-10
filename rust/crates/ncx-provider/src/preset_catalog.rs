@@ -36,7 +36,7 @@ pub struct CatalogProvider {
     pub models: Vec<CatalogModel>,
 }
 
-const UPDATED_AT: &str = "2026-08-27";
+const UPDATED_AT: &str = "2026-09-16";
 const DEEPSEEK_PRICING: &str = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing";
 const BAILIAN_PRICING: &str = "https://help.aliyun.com/zh/model-studio/qwen3-7-max";
 const ARK_PRICING: &str = "https://www.volcengine.com/product/ark";
@@ -112,14 +112,28 @@ fn aggregator_model(
 /// output rates only; provider billing may apply cache or long-context tiers.
 pub fn catalog() -> Vec<CatalogProvider> {
     vec![
-        CatalogProvider {
+        deepseek_provider(),
+        bailian_provider(),
+        ark_provider(),
+        zhipu_provider(),
+        moonshot_provider(),
+        minimax_provider(),
+        openai_provider(),
+        yunmo_provider(),
+        gemini_provider(),
+        openrouter_provider(),
+    ]
+}
+
+fn deepseek_provider() -> CatalogProvider {
+    CatalogProvider {
             id: "deepseek".into(),
             name: "DeepSeek".into(),
             models: vec![
                 with_pricing_note(model!(
                     "deepseek",
-                    "deepseek-v4-flash",
-                    "DeepSeek V4 Flash",
+                    "deepseek-flash",
+                    "DeepSeek Flash",
                     "https://api.deepseek.com",
                     3.0,
                     9.0,
@@ -150,225 +164,253 @@ pub fn catalog() -> Vec<CatalogProvider> {
                     Some(1_000_000),
                 ), "实验性视觉模型；显示高峰期缓存未命中价，空闲时段半价，缓存命中另计"),
             ],
-        },
-        CatalogProvider {
-            id: "bailian".into(),
-            name: "阿里百炼".into(),
-            models: vec![model!(
-                "bailian",
-                "qwen3.7-max",
-                "Qwen3.7 Max",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                12.0,
-                36.0,
-                "CNY",
-                BAILIAN_PRICING,
-                Some(1_000_000),
-            )],
-        },
-        CatalogProvider {
-            id: "ark".into(),
-            name: "火山方舟".into(),
-            models: vec![
-                model!(
-                    "ark",
-                    "doubao-seed-evolving",
-                    "豆包 Seed Evolving",
-                    "https://ark.cn-beijing.volces.com/api/v3",
-                    6.0,
-                    30.0,
-                    "CNY",
-                    ARK_PRICING,
-                    Some(1_000_000),
-                ),
-                model!(
-                    "ark",
-                    "doubao-seed-2.0-code",
-                    "豆包 Seed 2.0 Code",
-                    "https://ark.cn-beijing.volces.com/api/v3",
-                    3.2,
-                    16.0,
-                    "CNY",
-                    ARK_PRICING,
-                    None,
-                ),
-            ],
-        },
-        CatalogProvider {
-            id: "zhipu".into(),
-            name: "智谱 AI".into(),
-            models: vec![
-                model!(
-                    "zhipu",
-                    "glm-5.2",
-                    "GLM-5.2",
-                    "https://open.bigmodel.cn/api/paas/v4",
-                    8.0,
-                    28.0,
-                    "CNY",
-                    ZHIPU_PRICING,
-                    Some(1_000_000),
-                ),
-                model!(
-                    "zhipu",
-                    "glm-4.7-flash",
-                    "GLM-4.7 Flash（免费）",
-                    "https://open.bigmodel.cn/api/paas/v4",
-                    0.0,
-                    0.0,
-                    "CNY",
-                    ZHIPU_PRICING,
-                    None,
-                ),
-            ],
-        },
-        CatalogProvider {
-            id: "moonshot".into(),
-            name: "月之暗面 Kimi".into(),
-            models: vec![
-                model!(
-                    "moonshot",
-                    "kimi-k3",
-                    "Kimi K3",
-                    "https://api.moonshot.ai/v1",
-                    3.0,
-                    15.0,
-                    "USD",
-                    MOONSHOT_PRICING,
-                    Some(1_000_000),
-                ),
-                model!(
-                    "moonshot",
-                    "kimi-k2.7-code",
-                    "Kimi K2.7 Code",
-                    "https://api.moonshot.ai/v1",
-                    0.95,
-                    4.0,
-                    "USD",
-                    MOONSHOT_PRICING,
-                    Some(256_000),
-                ),
-            ],
-        },
-        CatalogProvider {
-            id: "minimax".into(),
-            name: "MiniMax".into(),
-            models: vec![
-                model!(
-                    "minimax",
-                    "MiniMax-M3",
-                    "MiniMax M3",
-                    "https://api.minimaxi.com/v1",
-                    2.1,
-                    8.4,
-                    "CNY",
-                    MINIMAX_PRICING,
-                    None,
-                ),
-                model!(
-                    "minimax",
-                    "MiniMax-M2.7-highspeed",
-                    "MiniMax M2.7 极速版",
-                    "https://api.minimaxi.com/v1",
-                    4.2,
-                    16.8,
-                    "CNY",
-                    MINIMAX_PRICING,
-                    Some(204_800),
-                ),
-            ],
-        },
-        CatalogProvider {
-            id: "openai".into(),
-            name: "OpenAI".into(),
-            models: vec![
-                model!(
-                    "openai",
-                    "gpt-5.6-sol",
-                    "GPT-5.6 Sol",
-                    "https://api.openai.com/v1",
-                    5.0,
-                    30.0,
-                    "USD",
-                    OPENAI_PRICING,
-                    Some(1_050_000),
-                ),
-                model!(
-                    "openai",
-                    "gpt-5.6-terra",
-                    "GPT-5.6 Terra",
-                    "https://api.openai.com/v1",
-                    2.0,
-                    12.0,
-                    "USD",
-                    OPENAI_PRICING,
-                    Some(1_050_000),
-                ),
-                model!(
-                    "openai",
-                    "gpt-5.6-luna",
-                    "GPT-5.6 Luna",
-                    "https://api.openai.com/v1",
-                    0.2,
-                    1.2,
-                    "USD",
-                    OPENAI_PRICING,
-                    Some(1_050_000),
-                ),
-            ],
-        },
-        CatalogProvider {
-            id: "yunmo".into(),
-            name: "云末 AI（中转）".into(),
-            models: vec![{
-                let mut preset = model!(
-                    "yunmo",
-                    "gpt-5.6-sol",
-                    "GPT-5.6 Sol（云末中转）",
-                    "https://api.yunmo-ai.com/v1",
-                    0.0,
-                    0.0,
-                    "USD",
-                    YUNMO_HOME,
-                    None,
-                );
-                preset.price_source = PriceSource::Aggregator;
-                preset.pricing_note =
-                    Some("中转站实际计费以云末控制台为准；模型 ID 已通过 /v1/models 实测。".into());
-                preset
-            }],
-        },
-        CatalogProvider {
-            id: "gemini".into(),
-            name: "Google Gemini".into(),
-            models: vec![with_pricing_note(
-                model!(
-                    "gemini",
-                    "gemini-3.7-flash",
-                    "Gemini 3.7 Flash",
-                    "https://generativelanguage.googleapis.com/v1beta/openai",
-                    0.75,
-                    3.75,
-                    "USD",
-                    GEMINI_PRICING,
-                    Some(1_000_000),
-                ),
-                "当前限时价格，至 2026-12-31；之后按官网标准价调整。",
-            )],
-        },
-        CatalogProvider {
-            id: "openrouter".into(),
-            name: "OpenRouter".into(),
-            models: vec![aggregator_model(
-                "openrouter/auto",
-                "OpenRouter 自动路由",
-                0.0,
-                0.0,
-                None,
-            )],
-        },
-    ]
+        }
 }
+
+fn bailian_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "bailian".into(),
+        name: "阿里百炼".into(),
+        models: vec![model!(
+            "bailian",
+            "qwen3.7-max",
+            "Qwen3.7 Max",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            12.0,
+            36.0,
+            "CNY",
+            BAILIAN_PRICING,
+            Some(1_000_000),
+        )],
+    }
+}
+
+fn ark_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "ark".into(),
+        name: "火山方舟".into(),
+        models: vec![
+            model!(
+                "ark",
+                "doubao-seed-evolving",
+                "豆包 Seed Evolving",
+                "https://ark.cn-beijing.volces.com/api/v3",
+                6.0,
+                30.0,
+                "CNY",
+                ARK_PRICING,
+                Some(1_000_000),
+            ),
+            model!(
+                "ark",
+                "doubao-seed-2.0-code",
+                "豆包 Seed 2.0 Code",
+                "https://ark.cn-beijing.volces.com/api/v3",
+                3.2,
+                16.0,
+                "CNY",
+                ARK_PRICING,
+                None,
+            ),
+        ],
+    }
+}
+
+fn zhipu_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "zhipu".into(),
+        name: "智谱 AI".into(),
+        models: vec![
+            model!(
+                "zhipu",
+                "glm-5.2",
+                "GLM-5.2",
+                "https://open.bigmodel.cn/api/paas/v4",
+                8.0,
+                28.0,
+                "CNY",
+                ZHIPU_PRICING,
+                Some(1_000_000),
+            ),
+            model!(
+                "zhipu",
+                "glm-4.7-flash",
+                "GLM-4.7 Flash（免费）",
+                "https://open.bigmodel.cn/api/paas/v4",
+                0.0,
+                0.0,
+                "CNY",
+                ZHIPU_PRICING,
+                None,
+            ),
+        ],
+    }
+}
+
+fn moonshot_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "moonshot".into(),
+        name: "月之暗面 Kimi".into(),
+        models: vec![
+            model!(
+                "moonshot",
+                "kimi-k3",
+                "Kimi K3",
+                "https://api.moonshot.ai/v1",
+                3.0,
+                15.0,
+                "USD",
+                MOONSHOT_PRICING,
+                Some(1_000_000),
+            ),
+            model!(
+                "moonshot",
+                "kimi-k2.7-code",
+                "Kimi K2.7 Code",
+                "https://api.moonshot.ai/v1",
+                0.95,
+                4.0,
+                "USD",
+                MOONSHOT_PRICING,
+                Some(256_000),
+            ),
+        ],
+    }
+}
+
+fn minimax_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "minimax".into(),
+        name: "MiniMax".into(),
+        models: vec![
+            model!(
+                "minimax",
+                "MiniMax-M3",
+                "MiniMax M3",
+                "https://api.minimaxi.com/v1",
+                2.1,
+                8.4,
+                "CNY",
+                MINIMAX_PRICING,
+                None,
+            ),
+            model!(
+                "minimax",
+                "MiniMax-M2.7-highspeed",
+                "MiniMax M2.7 极速版",
+                "https://api.minimaxi.com/v1",
+                4.2,
+                16.8,
+                "CNY",
+                MINIMAX_PRICING,
+                Some(204_800),
+            ),
+        ],
+    }
+}
+
+fn openai_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "openai".into(),
+        name: "OpenAI".into(),
+        models: vec![
+            model!(
+                "openai",
+                "gpt-5.6-sol",
+                "GPT-5.6 Sol",
+                "https://api.openai.com/v1",
+                5.0,
+                30.0,
+                "USD",
+                OPENAI_PRICING,
+                Some(1_050_000),
+            ),
+            model!(
+                "openai",
+                "gpt-5.6-terra",
+                "GPT-5.6 Terra",
+                "https://api.openai.com/v1",
+                2.0,
+                12.0,
+                "USD",
+                OPENAI_PRICING,
+                Some(1_050_000),
+            ),
+            model!(
+                "openai",
+                "gpt-5.6-luna",
+                "GPT-5.6 Luna",
+                "https://api.openai.com/v1",
+                0.2,
+                1.2,
+                "USD",
+                OPENAI_PRICING,
+                Some(1_050_000),
+            ),
+        ],
+    }
+}
+
+fn yunmo_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "yunmo".into(),
+        name: "云末 AI（中转）".into(),
+        models: vec![{
+            let mut preset = model!(
+                "yunmo",
+                "gpt-5.6-sol",
+                "GPT-5.6 Sol（云末中转）",
+                "https://api.yunmo-ai.com/v1",
+                0.0,
+                0.0,
+                "USD",
+                YUNMO_HOME,
+                None,
+            );
+            preset.price_source = PriceSource::Aggregator;
+            preset.pricing_note =
+                Some("中转站实际计费以云末控制台为准；模型 ID 已通过 /v1/models 实测。".into());
+            preset
+        }],
+    }
+}
+
+fn gemini_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "gemini".into(),
+        name: "Google Gemini".into(),
+        models: vec![with_pricing_note(
+            model!(
+                "gemini",
+                "gemini-3.7-flash",
+                "Gemini 3.7 Flash",
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                0.75,
+                3.75,
+                "USD",
+                GEMINI_PRICING,
+                Some(1_000_000),
+            ),
+            "当前限时价格，至 2026-12-31；之后按官网标准价调整。",
+        )],
+    }
+}
+
+fn openrouter_provider() -> CatalogProvider {
+    CatalogProvider {
+        id: "openrouter".into(),
+        name: "OpenRouter".into(),
+        models: vec![aggregator_model(
+            "openrouter/auto",
+            "OpenRouter 自动路由",
+            0.0,
+            0.0,
+            None,
+        )],
+    }
+}
+
+pub use crate::official_live::{live_official_model, merge_official_live_models};
 
 pub fn find_preset(provider_id: &str, model_id: &str) -> Option<CatalogModel> {
     catalog()
@@ -500,7 +542,7 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "deepseek-v4-pro",
                 "deepseek-v4-flash-vision-exp",
             ]

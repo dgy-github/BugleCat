@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:benchExit = 0
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $binary = Join-Path $repoRoot "rust\target\release\ncx.exe"
 $reportDir = Join-Path $repoRoot "evals\reports"
@@ -35,7 +36,7 @@ Step "Replay benchmark tasks" {
         $args += @("--tasks", $Tasks)
     }
     Push-Location $repoRoot
-    try { & python @args } finally { Pop-Location }
+    try { & python @args; $script:benchExit = $LASTEXITCODE } finally { Pop-Location }
 }
 
 Step "Generate compaction fixtures" {
@@ -49,4 +50,8 @@ Write-Host ""
 Write-Host "Report: $report" -ForegroundColor Green
 if ($OpenReport) {
     Invoke-Item -LiteralPath $report
+}
+if ($script:benchExit -ne 0) {
+    Write-Host "Benchmark gate FAILED (exit $script:benchExit); see report." -ForegroundColor Red
+    exit $script:benchExit
 }

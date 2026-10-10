@@ -1,0 +1,28 @@
+{
+  "schema": "buglecat.verification.paid-budget-authorization.v2",
+  "date": "2026-10-10",
+  "user_authorization": "那就跑400次",
+  "interpreted_against_prior_proposal": "最多400次新增Jev、最多400次新增主模型请求；每组最多各一次；先小批检查，无自动重试，失败计数",
+  "prior_jev_total_attempts": 27,
+  "new_jev_attempt_cap": 400,
+  "new_main_request_cap": 400,
+  "main_model": {
+    "max_attempts": 400,
+    "ledger_dir": "D:/github_dgy/BugleCat/evals/verification/reports/benchmark_400_budget_20261010/main"
+  },
+  "jev": {
+    "max_attempts": 400,
+    "ledger_dir": "D:/github_dgy/BugleCat/evals/verification/reports/benchmark_400_budget_20261010/jev"
+  },
+  "cumulative_jev_attempt_cap": 427,
+  "supersedes_unused_previous_new_budget": true,
+  "unused_previous_budget_not_added": 49,
+  "automatic_retries": 0,
+  "first_batch_main_cap": 8,
+  "first_batch_jev_cap": 8,
+  "formal_holdout_requires_qualified_calibration": true,
+  "failed_started_attempts_count": true,
+  "account_balance_checked": false,
+  "cost": null,
+  "production_authorized": false
+}

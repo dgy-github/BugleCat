@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "falsy-default",
+      "why": "falsy values replaced by default",
+      "file": "jsonpath.py",
+      "old": "    return cur\n",
+      "new": "    return cur if cur else default\n"
+    }
+  ]
+}

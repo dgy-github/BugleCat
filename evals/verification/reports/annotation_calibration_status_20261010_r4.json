@@ -1,0 +1,131 @@
+{
+  "installer_rebuilt": false,
+  "executable_rebuilt": false,
+  "date": "2026-10-10",
+  "production_categories": [],
+  "kind": "actual scoped annotation and development probe, not effect certification",
+  "replay": {
+    "original_cases_n": 6,
+    "source_policy": "host-rules-v3.2",
+    "same_group_arms_are_not_independent": true,
+    "report": "reports/replay-original6-packets-20261010-v32.jsonl",
+    "missing_transport_hash_receipt_retained": true,
+    "eligible_original_group_n": 1,
+    "published_binary_policy": "host-rules-v3.1",
+    "selected_development_claim_n": 1,
+    "handwritten_scope_or_evidence_used": false,
+    "eligible_n": 2,
+    "prepared_n": 6,
+    "negation_bug_fixed": true
+  },
+  "schema": "buglecat.verification.annotation-calibration-status.v2",
+  "holdout": {
+    "status": "not_run",
+    "independent_case_n": 0,
+    "reason": "insufficient independent supported/unsupported groups; no qualified threshold; development and missing actual transport hash receipt",
+    "probabilities_read": false,
+    "evaluation_receipt_created": false,
+    "current_guard_check": "exit1 development calibration cannot open holdout; nonexistent probability path remained unread and no receipt created"
+  },
+  "verification": {
+    "fmt": "passed",
+    "rust_core_passed": 412,
+    "main_entry_receipt_test": "passed 2 tests on actually rebuilt main; offline zero HTTP and zero paid attempts",
+    "rust_core_ignored": 1,
+    "strict_clippy": "passed",
+    "replay_tests_passed": 7,
+    "python_passed": 120,
+    "ruff": "passed",
+    "python_failed": 0,
+    "rust_core_failed": 0
+  },
+  "previous_status": "evals/verification/reports/annotation_calibration_status_20261010_r3.json",
+  "production_authorized": false,
+  "annotation": {
+    "assertion_receipts": "evals/verification/reports/assertion_receipts_20261010_r3.json",
+    "human_reviewed_n": 0,
+    "review_counts": {
+      "model_reviewed": 2,
+      "assertion_reviewed": 5
+    },
+    "source_file_n": 8,
+    "excluded_runtime_artifact_n": 4,
+    "original_queue_n": 11,
+    "label_counts": {
+      "unknown": 2,
+      "supported": 5
+    },
+    "all_split": "development",
+    "interpretation_reviewer": "Codex model",
+    "artifact_grader_receipts_n": 6,
+    "task_group_n": 3,
+    "reviewed_dataset": "evals/verification/reports/reviewed_candidates_20261010_r3.json",
+    "independent_blind": false,
+    "real_candidate_n": 7,
+    "queue": "evals/verification/reports/review_queue_20261010_r3.json",
+    "full_language_certified": false,
+    "artifact_grader_receipts_passed_n": 6,
+    "scores_seen_before_scope_freeze": false,
+    "manifest_binding_status": "original trial canonical manifest hash verified; six receipts rechecked, 5 supported/2 unknown unchanged; paid registration remains bound to prior r2 receipt, not rewritten"
+  },
+  "calibration": {
+    "minimum_supported_groups": 150,
+    "pass_probability_promotion": false,
+    "certified_threshold": null,
+    "unsupported_groups": 0,
+    "gate_reasons": [
+      "author_exposed_not_blind",
+      "too_few_supported_groups",
+      "too_few_unsupported_groups",
+      "false_block_confidence_bound_exceeds_limit",
+      "insufficient_paired_improvement",
+      "paired_improvement_not_significant",
+      "actual_transport_hash_unrecorded"
+    ],
+    "all_grid_decisions": "unknown",
+    "report": "evals/verification/reports/replay_development_calibration_20261010_v32.json",
+    "supported_groups": 1,
+    "false_block_confidence_upper_bound": 0.9500000000000001,
+    "original_framework_A": "unavailable",
+    "status": "development_gate_failed",
+    "probabilities": {
+      "incomplete": 0.22,
+      "unsupported_success": 0.15,
+      "contradiction": 0.07
+    },
+    "minimum_unsupported_groups": 50,
+    "threshold": 1.0,
+    "actual_request_hash_recorded": false
+  },
+  "budget": {
+    "actual_model": "jev-1.13.0",
+    "ledger": "evals/verification/reports/jev_call_ledger_20261010_r4.json",
+    "automatic_retries": 0,
+    "new_jev_attempts": 1,
+    "new_usage": {
+      "input_tokens": 888,
+      "output_tokens": 57
+    },
+    "holdout_reserved": 25,
+    "authorization": "evals/verification/reports/jev_budget_authorization_20261010.json",
+    "cumulative_attempts": 27,
+    "authorized_new_max": 50,
+    "maximum_cumulative": 76,
+    "exploration_remaining": 24,
+    "remaining_new": 49,
+    "elapsed_ms": 1011,
+    "new_successful_observations": 1,
+    "new_main_model_attempts": 0,
+    "cost": null
+  },
+  "example_rebuild": {
+    "old_exe_archive_sha256": "b9ba99046970923ec95133b5f1cf9cf56c546511dacf45d8f8b7c72daedf948d",
+    "offline_receipt": "reports/replay-binary-diagnostic-20261010/offline-main-receipt-final.jsonl",
+    "report": "reports/replay-implementation-20261010.md",
+    "new_paid_attempts": 0,
+    "published_executables_rebuilt": false,
+    "source_sha256": "6c65f2e7583e5c9ddb393103d0a4de8354c0fcfc9a4cdc4d8e2bb3ed5eaebe7f",
+    "offline_receipt_replaces_paid_receipt": false,
+    "exe_sha256": "7537b1144f0241ecdadfa9091ab19e50f86cd830f7da6e229a3ae90d01c59c23"
+  }
+}

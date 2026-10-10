@@ -24,7 +24,7 @@ use diagnostics::{transport_kind, RequestDiagnostic};
 const DEFAULT_STREAM_OPEN_TIMEOUT_S: u64 = 45;
 const STREAM_OPEN_TIMEOUT_MIN_S: u64 = 5;
 const STREAM_OPEN_TIMEOUT_MAX_S: u64 = 300;
-const DEFAULT_STREAM_IDLE_TIMEOUT_S: u64 = 30;
+const DEFAULT_STREAM_IDLE_TIMEOUT_S: u64 = 60;
 const STREAM_IDLE_TIMEOUT_MIN_S: u64 = 5;
 const STREAM_IDLE_TIMEOUT_MAX_S: u64 = 120;
 const MAX_SSE_LINE_BYTES: usize = 8 * 1024 * 1024;
@@ -819,11 +819,11 @@ mod tests {
 
     #[test]
     fn stream_idle_timeout_is_bounded_and_tolerates_garbage() {
-        assert_eq!(stream_idle_timeout_from(None), 30);
+        assert_eq!(stream_idle_timeout_from(None), 60);
         assert_eq!(stream_idle_timeout_from(Some("45")), 45);
         assert_eq!(stream_idle_timeout_from(Some("0")), 5);
         assert_eq!(stream_idle_timeout_from(Some("999")), 120);
-        assert_eq!(stream_idle_timeout_from(Some("bad")), 30);
+        assert_eq!(stream_idle_timeout_from(Some("bad")), 60);
     }
 
     #[test]

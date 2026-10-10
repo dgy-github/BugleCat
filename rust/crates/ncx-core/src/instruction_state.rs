@@ -284,6 +284,36 @@ impl InstructionLedger {
         id
     }
 
+    /// Host parsed an explicit instruction with an exact subject. This avoids
+    /// treating keyword overlap or quoted prose as permission to replace it.
+    pub fn record_exact(
+        &mut self,
+        text: &str,
+        scope: Option<String>,
+        polarity: Polarity,
+        subject: String,
+        created_at: u64,
+    ) -> String {
+        self.next_id += 1;
+        let id = format!("i{}", self.next_id);
+        let mut incoming = Instruction {
+            id: id.clone(),
+            text: text.into(),
+            polarity,
+            scope,
+            subject: vec![subject],
+            origin: Origin::CurrentSession,
+            created_at,
+            supersedes: vec![],
+            revoked_by: None,
+            status: InstructionStatus::Active,
+            conflicts_with: vec![],
+        };
+        self.resolve_against_existing(&mut incoming);
+        self.instructions.push(incoming);
+        id
+    }
+
     fn resolve_against_existing(&mut self, incoming: &mut Instruction) {
         let mut newly_conflicted = Vec::new();
         for existing in self.instructions.iter_mut() {

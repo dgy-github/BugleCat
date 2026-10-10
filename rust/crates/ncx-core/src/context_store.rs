@@ -27,6 +27,8 @@ pub enum EventType {
     ApprovalDecision,
     WriteProbe,
     Checkpoint,
+    RuntimeVerification,
+    VerificationSnapshot,
 }
 
 impl EventType {
@@ -39,6 +41,8 @@ impl EventType {
             Self::ApprovalDecision => "approval_decision",
             Self::WriteProbe => "write_probe",
             Self::Checkpoint => "checkpoint",
+            Self::RuntimeVerification => "runtime_verification",
+            Self::VerificationSnapshot => "verification_snapshot",
         }
     }
 
@@ -51,6 +55,8 @@ impl EventType {
             "approval_decision" => Self::ApprovalDecision,
             "write_probe" => Self::WriteProbe,
             "checkpoint" => Self::Checkpoint,
+            "runtime_verification" => Self::RuntimeVerification,
+            "verification_snapshot" => Self::VerificationSnapshot,
             _ => return None,
         })
     }
@@ -335,14 +341,16 @@ impl ContextStore {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT * FROM context_events
+                "SELECT e.* FROM context_events e
                  WHERE session_id = ?1
                    AND event_type IN ('tool_call', 'tool_result')
                    AND status IN ('started', 'unknown')
-                   AND (tool_call_id IS NULL OR tool_call_id NOT IN (
-                        SELECT tool_call_id FROM context_events
-                        WHERE session_id = ?1 AND tool_call_id IS NOT NULL
-                          AND status IN ('completed', 'failed', 'cancelled')))
+                   AND (tool_call_id IS NULL OR NOT EXISTS (
+                        SELECT 1 FROM context_events r
+                        WHERE r.session_id = e.session_id AND r.tool_call_id = e.tool_call_id
+                          AND r.turn_id IS e.turn_id AND r.workspace IS e.workspace
+                          AND r.sequence > e.sequence AND r.event_type = 'tool_result'
+                          AND r.status IN ('completed', 'failed', 'cancelled')))
                  ORDER BY sequence",
             )
             .map_err(|e| e.to_string())?;

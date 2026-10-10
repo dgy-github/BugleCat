@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "zero-minutes-shown",
+      "why": "shows 0m when only seconds are present",
+      "file": "utils/format.py",
+      "old": "    if minutes:\n",
+      "new": "    if minutes or rest:\n"
+    }
+  ]
+}

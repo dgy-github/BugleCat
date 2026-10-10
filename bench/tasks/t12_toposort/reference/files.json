@@ -1,0 +1,5 @@
+{
+  "files": {
+    "toposort.py": "def toposort(graph):\n    indegree = {node: len(deps) for node, deps in graph.items()}\n    dependents = {node: [] for node in graph}\n    for node, deps in graph.items():\n        for dep in deps:\n            dependents[dep].append(node)\n    ready = [node for node, deg in indegree.items() if deg == 0]\n    order = []\n    while ready:\n        node = ready.pop()\n        order.append(node)\n        for nxt in dependents[node]:\n            indegree[nxt] -= 1\n            if indegree[nxt] == 0:\n                ready.append(nxt)\n    if len(order) != len(graph):\n        raise ValueError(\"graph contains a cycle\")\n    return order\n"
+  }
+}

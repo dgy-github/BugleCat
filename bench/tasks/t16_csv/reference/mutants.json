@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "escaped-quote-dropped",
+      "why": "doubled quote is dropped instead of kept",
+      "file": "lineparser.py",
+      "old": "                        buf.append(quote)\n",
+      "new": ""
+    }
+  ]
+}

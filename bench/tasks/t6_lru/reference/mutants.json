@@ -1,0 +1,11 @@
+{
+  "mutants": [
+    {
+      "id": "get-no-refresh",
+      "why": "get does not refresh recency",
+      "file": "lru.py",
+      "old": "        self._data.move_to_end(key)\n        return self._data[key]",
+      "new": "        return self._data[key]"
+    }
+  ]
+}

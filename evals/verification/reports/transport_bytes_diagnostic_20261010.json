@@ -1,0 +1,12 @@
+{
+  "status": "original_transport_bytes_verified",
+  "request_hash": "25d193c3152db4b1416328dd9e7e69024fe8861a1d9f6e3dadad28b64d1f3c46",
+  "actual_request_hash": "25d193c3152db4b1416328dd9e7e69024fe8861a1d9f6e3dadad28b64d1f3c46",
+  "response_sha256": "5611dc7c92c97cc7d2b8f1971d791c19fa6f66df39ca068a38b8f25ea8328b3c",
+  "model": "offline-receipt-fixture",
+  "raw_response_file": "D:\\github_dgy\\BugleCat\\reports\\replay-binary-diagnostic-20261010\\offline-main-receipt-raw2xx.raw-response.json",
+  "raw_response_verified": true,
+  "offline": true,
+  "eligible_for_formal": false,
+  "paid_attempts": 0
+}

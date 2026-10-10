@@ -1,0 +1,5 @@
+{
+  "files": {
+    "wildcard.py": "def is_match(s, p):\n    i = j = 0\n    star = -1\n    mark = 0\n    while i < len(s):\n        if j < len(p) and (p[j] == \"?\" or p[j] == s[i]):\n            i += 1\n            j += 1\n        elif j < len(p) and p[j] == \"*\":\n            star = j\n            mark = i\n            j += 1\n        elif star != -1:\n            j = star + 1\n            mark += 1\n            i = mark\n        else:\n            return False\n    while j < len(p) and p[j] == \"*\":\n        j += 1\n    return j == len(p)\n"
+  }
+}

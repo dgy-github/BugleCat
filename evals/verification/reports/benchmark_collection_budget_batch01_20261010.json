@@ -1,0 +1,166 @@
+{
+  "schema": "buglecat.verification.collection-budget-status.v1",
+  "global_main_attempts": 6,
+  "remaining_main_attempts": 394,
+  "global_main_finished": 6,
+  "main_metadata": {
+    "authorization_sha256": "d1c5a4ccf695dbccc1777af5123441bbd19aebe39da2a4d3e848abf30f6af0f2",
+    "collection_settings_sha256": "bcf73bf3cc8c8d8d2681cb7a7dde3eed6f6ebf1acc6f7a289215d286e980c1dc"
+  },
+  "raw_2xx_responses": 6,
+  "receipt_statuses": [
+    {
+      "id": "mbpp-main-16",
+      "status": "response_content_invalid",
+      "attempt_ordinal": 6,
+      "receipt_sha256": "e74ab390d2cc0bf374e964473f34c70ee77f933f0dc0ee0890cc661a4237fec0"
+    },
+    {
+      "id": "mbpp-main-401",
+      "status": "ok",
+      "attempt_ordinal": 4,
+      "receipt_sha256": "655f7362f42cf7a15e921a88068e90c282315ba7898c4a5ea0c257e129388c28"
+    },
+    {
+      "id": "mbpp-main-589",
+      "status": "response_content_invalid",
+      "attempt_ordinal": 5,
+      "receipt_sha256": "c277f82dd339a61fad10640f1272a52a973ab0ea3e77850e9b6644c20656f3d9"
+    },
+    {
+      "id": "mbpp-main-68",
+      "status": "ok",
+      "attempt_ordinal": 3,
+      "receipt_sha256": "f9b3769453c67b11685df2d13999ed02692c84597a6eef0dc57c6b2ae0011330"
+    },
+    {
+      "id": "mbpp-main-760",
+      "status": "ok",
+      "attempt_ordinal": 1,
+      "receipt_sha256": "0986df8d1acbb45a95846783ea29820b28a084fa3085f845a2e992243ffa88dd"
+    },
+    {
+      "id": "mbpp-main-780",
+      "status": "response_content_invalid",
+      "attempt_ordinal": 2,
+      "receipt_sha256": "d6c79aa6be595c00ee994396fb9066ae01e40a6688816a6d7f28bba600889afc"
+    }
+  ],
+  "usage_including_truncated_failures": [
+    {
+      "id": "mbpp-main-16",
+      "status": "response_content_invalid",
+      "finish_reason": "length",
+      "usage": {
+        "prompt_tokens": 200,
+        "completion_tokens": 4096,
+        "total_tokens": 4296,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 4096
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 200
+      }
+    },
+    {
+      "id": "mbpp-main-401",
+      "status": "ok",
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 201,
+        "completion_tokens": 1443,
+        "total_tokens": 1644,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1265
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 201
+      }
+    },
+    {
+      "id": "mbpp-main-589",
+      "status": "response_content_invalid",
+      "finish_reason": "length",
+      "usage": {
+        "prompt_tokens": 186,
+        "completion_tokens": 4096,
+        "total_tokens": 4282,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 4096
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 186
+      }
+    },
+    {
+      "id": "mbpp-main-68",
+      "status": "ok",
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 190,
+        "completion_tokens": 1330,
+        "total_tokens": 1520,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1117
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 190
+      }
+    },
+    {
+      "id": "mbpp-main-760",
+      "status": "ok",
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 191,
+        "completion_tokens": 1504,
+        "total_tokens": 1695,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1330
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 191
+      }
+    },
+    {
+      "id": "mbpp-main-780",
+      "status": "response_content_invalid",
+      "finish_reason": "length",
+      "usage": {
+        "prompt_tokens": 214,
+        "completion_tokens": 4096,
+        "total_tokens": 4310,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 4096
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 214
+      }
+    }
+  ],
+  "usage_totals": {
+    "prompt_tokens": 1182,
+    "completion_tokens": 16565,
+    "total_tokens": 17747
+  },
+  "missing_usage_is_not_zero_cost": true,
+  "amount": null
+}

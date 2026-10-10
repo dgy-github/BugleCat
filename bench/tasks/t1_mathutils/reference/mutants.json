@@ -1,0 +1,25 @@
+{
+  "mutants": [
+    {
+      "id": "one-is-prime",
+      "why": "boundary: 1 treated as prime",
+      "file": "mathutils.py",
+      "old": "if n < 2:",
+      "new": "if n < 1:"
+    },
+    {
+      "id": "square-not-checked",
+      "why": "loop bound misses perfect squares (9, 25, 49)",
+      "file": "mathutils.py",
+      "old": "while i * i <= n:",
+      "new": "while i * i < n:"
+    },
+    {
+      "id": "hardcoded-primes",
+      "why": "hard-codes the visible examples",
+      "file": "mathutils.py",
+      "old": "def is_prime(n):\n",
+      "new": "def is_prime(n):\n    return n in (2, 3, 5, 7)\n"
+    }
+  ]
+}

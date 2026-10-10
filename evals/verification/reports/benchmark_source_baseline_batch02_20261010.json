@@ -1,0 +1,128 @@
+{
+  "schema": "buglecat.verification.benchmark-source-baseline.v1",
+  "purpose": "oracle admission only; no main-model candidate or label exists",
+  "manifest_sha256": "09f2b47af49d4937fd2b50ddc70bf0bbfb79193fccc63c96a2be1cd839bb4a0b",
+  "paid_calls": 0,
+  "cases": [
+    {
+      "id": "mbpp-main-3",
+      "group_id": "mbpp-06d033ece6645de592db9736",
+      "task_id": 3,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 4
+        },
+        "status": "passed",
+        "tests_passed": 4
+      },
+      "task_sha256": "0acf5c2d670656864ea896131d878849bdab3db98bf54e2494259fb506d6e285",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-585",
+      "group_id": "mbpp-19c201a1adaebd5669933f12",
+      "task_id": 585,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "362a422e1e085b614bb47d56ace7fe7304c3f9d382e55ee8e363b192eb85ecee",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-104",
+      "group_id": "mbpp-614fcb0d009bbde79e77f822",
+      "task_id": 104,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "5c8f2f9a14ebd62658f0a71d833ffa864d785e6bce208460f5deda4b7b5893ba",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-796",
+      "group_id": "mbpp-33d18c1345d56b4f3ec5d6ba",
+      "task_id": 796,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "c993460b08c53c1d851400377dee7a89fb0474b82747e07dea48fd31fd91a1ff",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-103",
+      "group_id": "mbpp-cbacec60bc382722c359f28b",
+      "task_id": 103,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "0a2d7af271f7754d4d71d0bce1a46204a8f3390ef118af6be555f422bdd7a7d3",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-61",
+      "group_id": "mbpp-9adb1464d8e0a4fc5be50834",
+      "task_id": 61,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "6da294b388a309a882dd552c62b50f942a5c10d3722ed3dc04c9fe0f060d6c1d",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-778",
+      "group_id": "mbpp-61dab6520eeb8021d6f1961b",
+      "task_id": 778,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d0092d15fc00f5588f1bbc4fe13afe555cbbb94cdced4abee3e674b2892b207b",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    },
+    {
+      "id": "mbpp-main-87",
+      "group_id": "mbpp-b897108c15c849e1944882fe",
+      "task_id": 87,
+      "result": {
+        "reference": {
+          "status": "passed",
+          "tests_passed": 3
+        },
+        "status": "passed",
+        "tests_passed": 3
+      },
+      "task_sha256": "d071eb43df9f88c8f81d5ff73ba9f99f61387c76f91923e2a76fe5aa7b58b5d9",
+      "oracle_worker_sha256": "e2dcdbc3b3ac44387dc06a6c8f5d8408043ca12484666ba6210e285dcab3b012"
+    }
+  ]
+}
