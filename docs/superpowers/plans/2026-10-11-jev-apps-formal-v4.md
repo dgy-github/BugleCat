@@ -51,4 +51,6 @@ Root注册事务23项回归覆盖原全数据、证据集合与预算在intake�
 6. 仅当来源、分组、断言范围、预注册与完整独立两阶段的预算可行后，提出可审查的全新固定方案。当前剩余主模型316不足以直接承诺新的至少200+200主模型样本；已批准预算不等于可更改本轮冻结来源。新的具体收费准入另行明确，按每组每服务一次、失败计数、无自动重试执行。
 7. 新研究须重新独立标注、达到150正/50负、校准原误拦/检出门槛，再一次全新留出；不能迁移本轮或开发概率/阈值、降低门槛或重开失败留出。合格后才公布限定范围认证；通用声明与整体agent收益仍需各自证据。
 
-本轮真实公开证据：`reports/artifact-v3-apps-formal-main-terminal-20261012.json`、`reports/artifact-v3-apps-independent-review-20261012.json`、`reports/artifact-v3-apps-package-20261012.json`。源码检查点7cd1013已实际推送，本节/上述新聚合待后续明确提交。
+本轮真实公开证据：`reports/artifact-v3-apps-formal-main-terminal-20261012.json`、`reports/artifact-v3-apps-independent-review-20261012.json`、`reports/artifact-v3-apps-package-20261012.json`。源码检查点7cd1013及交付记录/三个聚合23961a96df4cde04c4ff037da439a2da1aa0895b均已实际推送；运行ZIP保存在本地，不在Git仓库。
+
+现有来源免费元数据普查已完成：排斥整632个旧校准/未开留出后，剩1634个缓存合格组全为introductory，350个interview已全部固定到两阶段。不能据此保证继续扩量可补齐自然负例，也不能使用原留出。详见`reports/artifact-v3-apps-remaining-source-20261012.json`，这不是新的全来源准入。下一免费可行性验证的候选方向为APPS标准输入新轨道，或独立真实缺陷/修复产物轨道；已询问用户偏好，选择不触发收费，原契约/所有者/EXE保持封存。新的自然产物至少400个主模型请求相对当前余316最低缺84，来源及方案完整前不追加预算请求。

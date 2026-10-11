@@ -1,0 +1,35 @@
+{
+  "schema": "buglecat.verification.apps-remaining-source.metadata-census.v3",
+  "source_inventory_sha256": "d779a64b57445458b1b7a732c30806fb5d7cca91a95ef45c2ba4a295f6118237",
+  "original_source_proposal_sha256": "469a0c5c99c1d017e8d4cfbb0fd94f9c59345a59faa9aef843093780cafa60f3",
+  "original_fixed_cohort_sha256": "9743e41ae1fdadfbad950dfcbc430ecdc7c0f259696c02fbdf29651a816e55e8",
+  "pre_allocation_available_groups": 2266,
+  "excluded_entire_fixed_calibration_and_holdout_groups": 632,
+  "remaining_cached_source_and_packet_qualified_groups": 1634,
+  "remaining_difficulty_counts": {
+    "introductory": 1634
+  },
+  "remaining_source_kind_counts": {
+    "apps_call_based_solution_method": 122,
+    "apps_call_based_free_function": 1512
+  },
+  "all_available_interview_groups_in_original_fixed_calibration_or_holdout": true,
+  "original_holdout_reuse_permitted": false,
+  "candidate_labels_read": false,
+  "jev_probabilities_read": false,
+  "main_remaining": 316,
+  "phase_jev_remaining": 632,
+  "minimum_new_natural_model_groups_for_two_phases": 400,
+  "minimum_new_main_budget_shortfall": 84,
+  "minimum_group_count_is_not_a_sufficiency_guarantee": true,
+  "independent_negative_sufficiency_proven": false,
+  "metadata_census_is_not_fresh_full_source_admission": true,
+  "collection_authorized": false,
+  "model_calls": 0,
+  "jev_calls": 0,
+  "oracle_executions": 0,
+  "reservations": 0,
+  "formal_certification": false,
+  "certified_threshold": null,
+  "production_authorized": false
+}
