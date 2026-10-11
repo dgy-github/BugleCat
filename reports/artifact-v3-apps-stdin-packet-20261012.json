@@ -1,0 +1,47 @@
+{
+  "current_dependency_sha256": {
+    "contract": "65eb6cbf8c90eb7b20f7df6a6bf5e48bfefbf7aad863f03a4cb7f47f0adb1877",
+    "frozen_constants": "0468f0bd19e78f97661e3b2e3a679da83423e80f67dc8a219a6736931ee53bf2",
+    "numeric_checks": "8cb15b9f4e2e08672dbc773967d875fe2d493346ccf87b40a11bb33bdc46fced",
+    "numeric_primitive": "11ee9cea21ab848502508c2c6bd4c78b078082a14d98a01b7bb7a1c4f98a9e98",
+    "packet": "264115f82ba5f1fb93a2aeb4159594076c425d8f8d6f5ff0389fe9602892b6da",
+    "worker": "9bb92e8204e533f6a22858a33e52e10a85c4759c42ceed3d24304012d57ddb45",
+    "wrapper": "6ff0e72e91e0390b6391b4fd12cb2e9c1d40b5f331f5fa0b67d88c14e69cb6b8"
+  },
+  "exact_canonical_utf8_rebuild_required": true,
+  "formal_registration": false,
+  "full_code_and_original_io_retained": true,
+  "jev_calls": 0,
+  "main_prompt_uses_public_task_interface_and_policy_only": true,
+  "max_input_bytes": 48000,
+  "model_calls": 0,
+  "numeric_signal_only_no_http_proof": true,
+  "official_evaluator_parity": false,
+  "oracle_executions": 0,
+  "production_enabled": false,
+  "pytest_command": "python -m pytest tests/test_verification_apps_stdin_v1_packet.py -q",
+  "pytest_failed": 0,
+  "pytest_passed": 40,
+  "pytest_seconds": 0.59,
+  "question_count": 1,
+  "question_type": "noul",
+  "reference_label_or_oracle_result_fields_rejected": true,
+  "reservations": 0,
+  "ruff_command": "python -m ruff check evals/verification/apps_stdin_v1/packet.py tests/test_verification_apps_stdin_v1_packet.py",
+  "ruff_passed": true,
+  "runtime": {
+    "executable_sha256": "a2a4eff8d0b0c845284c607d50a3b5b966ac5a3121736a2e38e165bd6644d9fe",
+    "platform": "win32",
+    "version_info": [
+      3,
+      13,
+      12
+    ]
+  },
+  "schema": "buglecat.verification.apps-stdin-packet-development-summary.v1",
+  "source_admitted": false,
+  "status": "pure_packet_tests_complete",
+  "template_version": "jev-stdin-script-ordered-pairs-v1-development",
+  "test_sha256": "2eec95c45306e588587c2712ac354ba227c48121604922b6c77d40e6eb600ca2",
+  "threshold": null
+}

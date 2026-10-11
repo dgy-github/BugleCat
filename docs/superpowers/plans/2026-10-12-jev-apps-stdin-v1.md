@@ -63,3 +63,19 @@
 已修复孤立CR与CRLF的处理区别、import后磁盘源码漂移关联旧内存policy的问题；禁止Python泛型字符串参数绑定逃过保护规则。装载契约/原常量使用原bytes编译，wrapper核对加载图与当前函数字节码；参数/源码前后漂移拒绝。30秒无法启动的剩余原index保留Unknown，`pairs_executed`明确表示子进程启动尝试，包括超时，不表示每对已完成。
 
 新reviewer首版另禁issubclass与泛型TypeAlias/TypeVar/ParamSpec/TypeVarTuple语法。当前已开始对1734个新最早代表做固定reviewer的静态范围检查，仍不执行真实参考，不作source admission。B阶段真实本地单次参考准入入口及证据图尚待完成，收费方案尚未创建。
+
+## B阶段静态与首参考试验记录
+
+静态联合通过1131组（879 interview/173 competition/79intro），共3099原测试对；1组完整IO超过48KB。Root核对完整原2627绑定文件与新3owner当前字节一致，公开`reports/artifact-v3-apps-stdin-static-scope-20261012.json`。没有以静态通过授予packet或正式来源准入。
+
+首参考小试验在执行前固定完整8组计划、源码/runtime图、原code/IO/question SHA和原费用快照，以`SHA256('stdin-feasibility-v1:'+group_id)`每难度排序取4 interview/4 competition。筛选原question+原IO escaped envelope≤32000 bytes，完整原测试不裁剪。全8首参考index0各一次、create-new/fsync marker/receipt；7 passed/1 failed/0 Unknown，共37对。失败组6 OutputMismatch/1pass保留来源拒绝，不能作模型负例。Root只读重验原row/首参考/完整IO及收据图，无重执行。公开`reports/artifact-v3-apps-stdin-reference-feasibility-20261012.json`。
+
+正在进行完整来源池检查：固定新seed全静态/资源合格成员，先create-new/fsync完整plan，再执行未尝试首参考；pilot8的原一次结果全部只读引用，失败也保留。每组独占marker/receipt，每25组核对原图和全部费用元数据，崩溃不重跑。来源完整终态/合格难度分布及正式packet字节审查完成后，才能制定全新候选开发排斥与校准/留出名单。参考验证免费，不生成主模型候选或Jev概率，不改变原批准上限。
+
+全pool计划已实际冻结1130成员（879 interview/172 competition/79intro），另1资源拒绝。plan raw SHA `962e443beaba3435e5beda519322e8eefaf95b2a9688c3d798a00839982ac996`，包含原source/new3owner/runtime/费用与全部source members，在1122最多新增参考执行前create-new/fsync。已有pilot8全部只读复用，包括失败。575终态/497通过/77失败/1Unknown为途中快照；具体Unknown原因不超出原收据generic reason。
+
+## 新packet离线实现
+
+Root新增纯`apps_stdin_v1/packet.py`和独立packet测试，40 passed（0.59s）、Ruff通过。严格整体48,000 UTF8 bytes、完整原材料/候选、不发参考/标签/Oracle结果；复用原numeric primitive，单项NOUL，actual model与u64 usage校验，仅产生未认证数值信号。主模型public prompt声明新受限政策，不含hidden IO或参考。当前构造依赖图/加载image/原runtime和前后漂移核对，原测试材料无tuple→list投射；精确canonical rebuild拒绝caller字段变更。
+
+公开证据`reports/artifact-v3-apps-stdin-packet-20261012.json`。新builder不接入收费或正式资格化，候选reserve与全池真实packet资源门禁、未来收费collector/intake/阈值与一次留出管线仍需按新轨道建立；原API与已付费owner不修改。它不被当前首参考Oracle导入，当前参考池冻结图保持不变。

@@ -10,6 +10,16 @@
 
 旧316及原未开留出封存，25负例不足50的终态保持；原27.71MiB开发运行ZIP已验收，新STDIN原型尚未进入运行包。生产off、阈值null，整体目标active。下方记录为此前各阶段事实，当前新轨道进度以本节及实际新测试/收据为准。
 
+STDIN原型与108项fixture证据已实际提交并推送GitHub `fea3b077e6432d618bcbdfebe55cda9ef776bbcf`，Root核对本地与远端一致。新reviewer对原1734组静态联合通过1131（879 interview/173 competition/79intro），3099完整原对；仍有1组完整IO超48KB，不能把静态通过当packet准入。[静态范围聚合](reports/artifact-v3-apps-stdin-static-scope-20261012.json) SHA `5250c79897f75e019362d89873d68a71d11cf3482b8d0fb64cd7fdbf9dc947aa`；Root实际逐字复验原2627与新3owner图。
+
+随后固定4 interview+4 competition首参考免费试验：按预定哈希选8，完整question+原IO escaped envelope≤32000 bytes，全8计划create-new/fsync先于执行，每组独占start/receipt；7 passed/1 failed/0 Unknown，共37原测试对各执行一次。失败来源为原7对中的6 OutputMismatch/1pass，不改参考、不换成员、不重跑，不能作主模型自然负例。Root零重执行关联原train row/reference index0/code/完整IO及全部8 marker/receipt/源码图。[首参考可行性聚合](reports/artifact-v3-apps-stdin-reference-feasibility-20261012.json) SHA `1b655b37f57b85ab650da93ef21a4cf0e5f5aba9f65ab4119f6fcf45e03c2982`，原plan raw SHA `96e99081bdb8492d487edf7174bb3192e5aa3bdbde375325b757edad7e45705b`。新增Main/Jev/预约0，原834/229全账务及原图未变；参考通过是新受限契约可行性，不是正式source admission、自然标签或效果认证。
+
+下一免费步骤已交由同一6.1 Sol：对完整静态池按相同完整资源筛选，先冻结全pool计划和图，再串行首参考单次资格检查；原pilot8全部只读复用（包括失败），无重跑，剩余新参考最多各一次。每25组保存独占进度与源码/全账务核对；所有失败/Unknown/崩溃marker保留。完整pool实际成员数和终态尚待结果，不能据1131或pilot通过率宣称足量合格池。结束后才形成新的固定校准/留出和精确预算方案；目前收费请求仍未授权启动。
+
+完整首参考池已真实冻结：1130成员（879 interview/172 competition/79intro），1组完整escaped原材料超过32000 bytes资源拒绝；plan raw SHA `962e443beaba3435e5beda519322e8eefaf95b2a9688c3d798a00839982ac996`。pilot8全部引用原一次结果，最多1122新增免费参考执行。575/1130途中快照为497pass/77fail/1Unknown，不能替代后续全终态；Unknown原reason仅`unsupported_dependency_exit_or_resource`，不能猜测更细原因。原源图和834/229全费用元数据继续保持，模型/Jev/预约0。
+
+Root另完成独立纯STDIN请求构造`apps_stdin_v1/packet.py`：完整原code/question/starter/IO和实际runtime/受限契约，一项acceptance_violation NOUL，严格canonical UTF8整体≤48000 bytes，拒绝附加reference/Oracle/result/label/概率字段及契约变更，不裁剪原对。主模型prompt仅原public task/interface/政策；数值shape复用既有primitive并限定u64用量，低概率不标VerifiedPass，builder没有HTTP、准入或认证权限。40项限定packet回归（0.59s）与Ruff通过；当前实际图只读复核，[packet开发聚合](reports/artifact-v3-apps-stdin-packet-20261012.json) SHA `92ca85045f6db8481aaba2c765973e0eafe87305ea3eb8149a7c9e3c14510964`。新packet不被原首参考Oracle导入，不改变其冻结3owner图，正式packet资源准入仍须全来源材料和候选reserve实算。
+
 ### 2026-10-12：全316独立标注完成，配额不足终态与新运行包已验收
 
 **真实固定校准316/316已全部终态：263 supported /25 unsupported /28 Unknown，未发送0、校准pending0。** main297 ok/12 response_content_invalid/7 transport_error；每组一次、无收费重试，原历史main pending1保留。全部原request/session/event/receipt/候选/Oracle/源码及实际编译图已由原终态所有者只读重验，零Oracle重执行。final dataset raw SHA `5623b67151d30e6a6346c2fcd05987446639653a867d7095ac443b9c1ef32af2`；真实终态 raw SHA `7d657e86938f19f0966060fb01970c48301c50d9ac69ae2b3aa517748f2cd279`，body hash `df8a9500e100a719ab9ca2c73f49e512e2722d0df80fd2857cc413be9bccb899`；[公开终态聚合](reports/artifact-v3-apps-formal-main-terminal-20261012.json)。

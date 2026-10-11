@@ -1,0 +1,42 @@
+{
+  "attempted_groups": 8,
+  "by_difficulty": {
+    "competition": {
+      "failed": 1,
+      "passed": 3
+    },
+    "interview": {
+      "passed": 4
+    }
+  },
+  "candidate_labels_read": false,
+  "feasibility_only": true,
+  "fee_accounting_unchanged": true,
+  "formal_registration": false,
+  "full_original_pairs": 37,
+  "holdout_opened": false,
+  "jev_calls": 0,
+  "jev_probabilities_read": false,
+  "model_calls": 0,
+  "natural_candidate_labels": false,
+  "natural_negative_sufficiency_proven": false,
+  "official_evaluator_parity": false,
+  "original_source_owner_runtime_bytes_unchanged": true,
+  "paid_calls": 0,
+  "plan_sha256": "96e99081bdb8492d487edf7174bb3192e5aa3bdbde375325b757edad7e45705b",
+  "planned_groups": 8,
+  "private_evidence_sha256": "2126ef3f6a898c8a3e5083fad984c7f6b9c12004ec17b2c681cd157082a2e2a4",
+  "production_authorized": false,
+  "production_enabled": false,
+  "reference_executions": 8,
+  "reservations": 0,
+  "root_revalidated_original_reference_zero_and_all_receipt_bindings": true,
+  "schema": "buglecat.verification.apps-stdin-reference-feasibility-summary.v1",
+  "scope": "First-reference feasibility only. Failed reference is rejected source, never a main-model negative label.",
+  "source_admitted": false,
+  "status_counts": {
+    "failed": 1,
+    "passed": 7
+  },
+  "threshold": null
+}
