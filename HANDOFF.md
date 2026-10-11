@@ -1,5 +1,25 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：全316独立标注完成，配额不足终态与新运行包已验收
+
+**真实固定校准316/316已全部终态：263 supported /25 unsupported /28 Unknown，未发送0、校准pending0。** main297 ok/12 response_content_invalid/7 transport_error；每组一次、无收费重试，原历史main pending1保留。全部原request/session/event/receipt/候选/Oracle/源码及实际编译图已由原终态所有者只读重验，零Oracle重执行。final dataset raw SHA `5623b67151d30e6a6346c2fcd05987446639653a867d7095ac443b9c1ef32af2`；真实终态 raw SHA `7d657e86938f19f0966060fb01970c48301c50d9ac69ae2b3aa517748f2cd279`，body hash `df8a9500e100a719ab9ca2c73f49e512e2722d0df80fd2857cc413be9bccb899`；[公开终态聚合](reports/artifact-v3-apps-formal-main-terminal-20261012.json)。
+
+冻结门槛150正/50负：正例达标，**负例缺25**；最终状态 `independent_quotas_not_met`。不能将28 Unknown补成负例、拼接开发或历史已看概率样本、启用原留出补校准、重新发送失败组或修改原316名单。真实正式登记/Jev/留出均未启动，生产off、通用与APPS认证阈值null，整体目标仍未完成。累计main834/1150、阶段Jev229/861，分别仍余316/632；历史Jev27另保留。这是样本配额不足，不能据此推断key余额不足。
+
+Root人工复核全部9个有效正文的执行范围Unknown：restricted_import3、unsupported_construct3、unsupported_implicit_builtin1、restricted_name2。原候选SHA与最终全316逐一相同，ClassDef在Solution轨道本身受支持；限制分别来自array/sys、global/nonlocal、object及禁用名称。全部保留Unknown、不改候选/标签/执行规则；另19为传输/正文失败。零候选或Oracle重执行、零模型/Jev调用，未读Jev概率；[独立复核聚合](reports/artifact-v3-apps-independent-review-20261012.json)。
+
+**新运行包已实际stage并验收**：[运行ZIP](releases/jev-apps-v3-incomplete-20261012.zip)，29,059,565 bytes（27.71 MiB），SHA `53ec7f462e14c4aa3a4a1d7334b2fda42d331e887ae40b477a4bcb7739ffc3ec`；manifest SHA `4619e07b3cd8915492a89f43bf0c6bb4cd369e04744d7f0ecc6abc50416fd0fa`。包含经过审计的v3.3 GUI/CLI/安装包和全部四个新APPS校准/留出工具，291个内容文件另加manifest。四个实际复制工具的编译图/hash、offline-success，实际复制GUI/CLI的off/shadow/enforce与生命周期检查、全ZIP CRC/成员/原字节/source/费用前后闭包通过；打包新增收费0、原费用未变，未执行安装器。不包含key/真实收费账本/原题/候选/原始响应；工具复验依赖原仓库和私有证据，不能宣称独立给任意代码认证。生产Jev默认off、阈值null、enforce_categories[]。[实际交付聚合](reports/artifact-v3-apps-package-20261012.json)。
+
+交付记录与上述三个公开聚合待下一明确GitHub提交；先前完整管线代码已推送 `7cd1013e25989265e4b692a7ca0e559fc8f26436`。剩余开发次序：先做不收费的新独立来源可行性普查；明确新来源的任务分组、历史排斥、断言范围与足量来源后，再制定全新校准/留出冻结方案和精确预算。本轮316及未开启的原留出保持封存，不移用或重开；新研究也不能冒充本轮认证，未获新的具体准入不发送新收费请求。配额不足的运行包是可用开发交付，不是正式阈值认证完成。
+
+### 2026-10-12：正式316校准继续，最新流程已实际推送GitHub
+
+上一节九个新管线所有者、三个新EXE入口、原登记/终态/打包闭包修复、离线回归与公开聚合，已明确提交并实际推送 GitHub `7cd1013e25989265e4b692a7ca0e559fc8f26436`；推送后本地HEAD与实际远端相同。此提交是经过离线验证的开发流程，不是正式效果认证，也尚不是包含这些新工具的最终运行ZIP。
+
+第23批真实main终态：**123/316**已采集、193未发送，**101 supported /7 unsupported /15 Unknown**；main641/1150、阶段Jev229/861，校准pending0、原历史pending1保留。dataset raw SHA `620428173e5d495ec7de81ce4c3db7d04e2c1f01ccde61ebfe75a4c10becec0e`。本批第四次transport_error触发停止；Root无密钥DNS/HEAD检查可达（401），不据此猜测具体网络根因。失败组不重发、不转负例，随后只继续原名单未发送成员。此为途中快照，后续完整原账本和终态证据优先。
+
+正式Jev调用仍为0、真实登记和留出均未开启；冻结配额每阶段150正/50负未改变。目前负例缺43，必须等待全316原始独立标签才作正式终态判断；不得拼接开发样本、调整已冻结名单、改写Unknown或降低门槛。全批完成后以原始终态所有者重验并保存公开聚合；合格才登记/Jev校准，校准合格才一次全新留出。任何门槛不足需如实交付不足证据和经过实际复制程序/GUI/ZIP验证的运行包，生产off、通用阈值null，整体目标不宣称完成。后续文档与真实终态/最终包待下一明确提交。
+
 ### 2026-10-11：正式Jev与一次留出离线管线完成，真实316校准仍采集中
 
 6.1 Sol九个新管线所有者和三个新EXE已完成并封存，220项相关回归（254秒）、new-only build/Clippy -D warnings/限定rustfmt/Ruff通过。受控E2E为临时SQLite/共享预约目录、201个fixture outcomes（200 binary+1 Unknown）、200唯一slot、原request/raw/event关联及一次固定阈值结果；真实资格化来源与标签明确为fixture，不能当效果认证。新版calJev EXE SHA `4112630fa8c4abb2e1bbbb1567066b80dbfed7416a88eaa49b0653af7a65b7c4`，holdmain `97de62701af7a3f7825fb5fc40a5a4811c4b0d923065f2f0910b79501bd26359`，holdJev `69badc0816b3ae03985f3549f18537569dde3f0fa4a3305f3781c40711a2a55b`；三个旧付费EXE未改变。私有revision2 seal SHA `b947ad5156925fd5da4bda3c3b4095a13e6ffa19ee86577cd4a7b3e2d1be4cf0`，当前源字节=归档字节=实际编译内嵌SHA。

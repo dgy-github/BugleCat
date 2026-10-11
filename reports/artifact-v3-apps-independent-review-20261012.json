@@ -1,0 +1,28 @@
+{
+  "schema": "buglecat.verification.apps-independent-review.association.v3",
+  "original_dataset_sha256": "5623b67151d30e6a6346c2fcd05987446639653a867d7095ac443b9c1ef32af2",
+  "original_terminal_sha256": "7d657e86938f19f0966060fb01970c48301c50d9ac69ae2b3aa517748f2cd279",
+  "completed_manual_candidate_reviews": 9,
+  "all_scope_unknown_candidates_manually_reviewed": true,
+  "reviewed_unknown_reason_counts": {
+    "restricted_import": 3,
+    "unsupported_construct": 3,
+    "unsupported_implicit_builtin": 1,
+    "restricted_name": 2
+  },
+  "transport_or_response_unknowns": 19,
+  "original_review_binding_digest": "8b65e8593d93c89a7ae485a79e2d710e9661c9229b98338e1fa4cc5b29094302",
+  "candidate_edits": 0,
+  "label_changes": 0,
+  "candidate_executions": 0,
+  "oracle_executions": 0,
+  "model_calls": 0,
+  "jev_calls": 0,
+  "jev_probabilities_read": false,
+  "solution_class_itself_is_supported": true,
+  "unsupported_scope_is_not_a_negative": true,
+  "formal_certification": false,
+  "certified_threshold": null,
+  "production_authorized": false,
+  "scope": "APPS official train host split, restricted original ordered-call assertions"
+}
