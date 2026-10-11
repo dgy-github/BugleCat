@@ -10,7 +10,13 @@ Root 新增 `evals/verification/apps_v3/` 独立比较/worker/wrapper/source 所
 
 新完整源按新策略实际结构候选2004（相较静态2007，非有限JSON或比较资源限制等不适用）；Root一次执行首参考固定5秒，全真实测试对保留：**1972 passed /19 failed /13 Unknown**。13Unknown为3个不支持比较值、4个builtin shadow、6个缺受限内置函数。所有参考失败/Unknown不能作为模型负例，未换参考、未自动重试。全2004 source/first0/IO/code/receipt/pair/worker/runtime join实际重验通过，receipt hash集合 digest `869f4982d8987db7b31efcd8f4e71dd86bfe35a99e0cfc72d923abcbc3ea558e`。原main仍510/750，本阶段Jev仍222/750，新模型/Jev/预约0。公开 [筛选](reports/artifact-v3-apps-reference-screen-20261011.json)、[完整关联重验](reports/artifact-v3-apps-reference-recheck-20261011.json) 均保留source_admitted=0、认证false。
 
-下一步：完整历史原source/allocation/reserved集合核查、APPS组级重复聚类/历史排斥；参考通过1972不是独立准入数，不改变旧split，不创建正式cohort/标签。之后固定新模板/资源/协议及真实调用开发门禁，再讨论具体预算。现有main余240仍比新两阶段最低400短160，失败/Unknown/开发会增加需求；不自行突破750。生产off、阈值null、真实留出未开，整体目标仍active。具体 [新Oracle契约与后续闸口](docs/superpowers/plans/2026-10-11-jev-apps-oracle.md)。本节提交/推送仅以后续实际Git结果为准。
+上述15条明确公开源码/测试/文档/聚合路径已实际提交并推送 GitHub `33cc661ebb56be4821537e53d38a1e5395c5f79b`，分支`feat/context-association-memory`；Root实际ls-remote与本地HEAD相同。原题/参考/逐条Oracle/费用证据/密钥仍私有或ignored，没有发布到Git。此为免费扩源与Oracle阶段保存，整体目标未完成。
+
+随后实际source-only资源普查：1972 reference-pass原始difficulty为1923 introductory/49 interview，URL为1968 Codewars/4 Hackerrank，最大问题13959bytes、原IO94714bytes、1440pairs；这是原字段统计，没有模型标签或概率。自由函数池多数入门题，不能据此保证50个独立负例；先补核544 Solution-method行的复杂来源，若范围有效，建立新独立类方法Oracle并审查self重绑定/未绑定方法/type反射等边界，不能改已screen自由函数owner或只截取测试对。新owner完成并独立审查后，Root才能一次免费首参考筛选。
+
+6.1 Sol历史只读盘点已封存：974 MBPP原身份、164 Human；MBPP sanitized/full合计1400 distinct参考原文变体（426同ID代码不同、238提示不同），原expanded/mixed均精确覆盖，无额外变体。783保护group全部映射原source/catalog，若只排实际started/reserved会漏273 whole-allocation组；APPS5000 URL唯一不证明语义fresh，历史MBPP/Human无逐题URL。inventory rawSHA `b99856e8a59d7305894e310c9cd1a193cdc50485dcb60da70e3f04dccb727205`，零Oracle/模型/Jev/预约，未读候选/标签/概率。
+
+下一步：完成复杂来源Oracle范围验证、APPS组级重复聚类/完整历史排斥；参考通过1972不是独立准入数，不改变旧split，不创建正式cohort/标签。之后固定新模板/资源/协议及真实调用开发门禁，再讨论具体预算。现有main余240仍比新两阶段最低400短160，失败/Unknown/开发会增加需求；不自行突破750。生产off、阈值null、真实留出未开，整体目标仍active。具体 [新Oracle契约与后续闸口](docs/superpowers/plans/2026-10-11-jev-apps-oracle.md)。后续提交/推送以实际Git结果为准。
 
 ### 2026-10-11：固定 235 组采集与独立标注完成，负例不足，整体仍未完成
 

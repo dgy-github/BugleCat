@@ -26,6 +26,10 @@
 
 Root 新私有操作器一次读取完整固定源，静态筛选后每原任务只执行首参考一次；start/selection/每任务收据 create-new、flush/fsync，禁止重开已有目录或自动重试。所有通过索引仍 `source_admitted=false`，候选标签 null，正式 split 未创建。筛选的实际终态以单独聚合报告为准。
 
+实际终态为2004参考执行、1972通过/19不通过/13Unknown；完整source/first0/IO/全部receipt关联重验通过。收费计数仍main510/750、阶段Jev222/750。独立原字段资源普查发现1972通过池中1923 introductory、49 interview，最大原IO94714bytes/1440pairs；这些不是模型标签。先核查Solution-method行的原始复杂任务，必要时在新独立包支持受限类方法，不能编辑已执行筛选的自由函数owner或把入门池数量当作正式负例配额。
+
+历史独立盘点证明：MBPP full974与sanitized427需保留1400 distinct参考原文变体（426同ID代码不同）；Human164需原prompt+canonical_solution。所有783保护group映射原source/catalog，273 whole-allocation保护组未实际started，不能漏排；历史没有逐题URL，APPS5000 URL唯一不能代替代码/提示分组。
+
 接下来必须完成：
 
 1. 重验原行、首参考、IO、真实测试对、收据和整个源图；统计参考不通过/Unknown，保留全部原证据。
