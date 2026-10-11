@@ -1,12 +1,40 @@
 # HANDOFF — nanocodex (Rust 线)
 
-### 最新执行快照：等待网络恢复，整体未完成
+### 2026-10-11：固定 235 组采集与独立标注完成，负例不足，整体仍未完成
+
+网络恢复后，原固定队列235组全部终态：227有效正文、7正文无效、1transport_error，无请求重试、33个terminal批次。最终原始关联和独立断言为 **182 supported / 38 unsupported / 15 Unknown**，无未采集或unlabeled组；原正式门槛仍150正/50负，负例差12。原operator实际生成完整dataset后，正式registration因`independent group quotas not met`拒绝，未创建registration、未发本轮正式Jev、未打开留出。原失败/Unknown/费用不改变，不能把完整标签集冒充已认证阈值。
+
+Root独立只读重验完整原source/SQLite/receipt/raw/Oracle并封存`calibration/incomplete-result.json`（私有，rawSHA `7afb97fa3df902afc29451201551dd45383c6959f4b683368b46353317524dea`；canonical `d271f185d82b9831bc860e4f3360603f77a315b803820b4f56dfe4f49a2c6ae7`）。新记录工具默认只读，显式write才create-new；复核实际cohort raw/canonical hash、原freeze、prepared目录与actual collector，完整allocation无任何Jev预约，所有认证false、threshold null、overall_goal_complete false。旧原证据及冻结付费owner/EXE均保留，不编辑或重建。
+
+最终累计main **510/750**（509 finish、历史pending1）余240；本阶段Jev **222/750**余528，历史27另累计。当前没有收费进程。本轮仍不具备校准/留出资格，保持生产off。新v2运行包只读preflight及实际复制产物验收、封包均已完成；这是最新工具的安全阶段交付，不能作为整体目标完成证据。
+
+6.1 Sol独立最终审计重验全部235原始join，不执行新的Oracle/模型请求、不读取Jev概率。MBPP94正/37负/11Unknown，Human88正/1负/4Unknown；15Unknown为5个Oracle输入不适用、7个正文无效、1个transport、2个非唯一Python代码块。原180审计的173个Oracle SHA全部保留，当前Oracle/费用及原freeze current/archive字节均一致；私有final-audit rawSHA `b3b7a8c92c8e7067441c70a23bb7e48c94d2dfc32d2f3e6cc13d98fe2e53ec79`，公开聚合见 [最终独立审计](reports/artifact-v2-formal-final-audit-20261011.json)。
+
+新安全阶段包：`releases/jev-artifact-v2-incomplete-20261011`，ZIP `releases/jev-artifact-v2-incomplete-20261011.zip`，22.15 MiB。279个manifest文件和全部ZIP成员原字节已复验；原v3.3 GUI/CLI/installer加两原frozen v2 actual EXE，安装器未安装。实际复制GUI/CLI的off/shadow/enforce、恢复/取消与两个评测入口fake transport证明均通过，paid calls=0；打包前后1335个原费用authority文件字节一致。manifest SHA `6620b165d6f4e0a9b1c36ae879e997a6056c0486fdd37afbfba370eccd612d9b`，ZIP SHA `15a074c7158aaca8a639d06e9bd668597132347b811d65a403295b282e5bfd1b`。[公开真实结果](reports/artifact-v2-formal-result-20261011.json)、[封包与费用证明聚合](reports/artifact-v2-formal-delivery-20261011.json)保留认证false、threshold null、overall_goal_complete false；原会话、候选、付费台账和密钥不入包或Git。
+
+零费用源盘点确认fresh calibration已准入数0，原scope外269个reference-pass组全reserved holdout，不能搬来补12负例。下一迭代须新增独立外部来源，并在候选前固定新Oracle范围、reference准入、source/profile/cohort与原统计门槛。APPS仅为正在核查的候选源，不表示已兼容或足量。现有main余240不足全新两阶段至少400的理论最小量；后续收费不得自行突破750上限，也不能通过改旧split、造负例或降低门槛认证。
+
+APPS免费预检已固定官方repo commit `362aedc3c71cd7d9bd2fc96a6c80e11dbc38c7a5`与官方README指向镜像revision `21e74ddf8de1a21436da12e3e653065c5213e9d1`。仅下载小源码/manifest和固定train前64KiB格式片段（5个完整STDIN样本），未全库下载或验SHA、未执行远程代码/参考/候选。原APPS函数调用的持久状态、参数/字典转换及输出比较与旧worker不同，不能伪称兼容；已准入新组仍0，函数子集足量未证明。具体新source/worker/receipt/cohort/intake/template与零费语义回归方案见 [下一步实施计划](docs/superpowers/plans/2026-10-11-jev-apps-source-next.md)、[预检聚合](reports/artifact-v3-apps-source-preflight-20261011.json)。新增收费必须先证明可用来源和冻结新配置，再按原上限/明确追加授权执行；仅理论400main也比当前剩余短160，失败/Unknown/开发额外计数，不能保证配额或准确性。
+
+### 2026-10-11：180 组独立审计完成，继续固定剩余 55 组
+
+这是有时间边界的采集中快照，整体尚未完成。6.1 Sol 对当前完整 235 allocation 重验原始 source、SQLite、terminal、receipt、raw response 与 Oracle：180 已采集、55 未启动且均 unlabeled；136 supported / 33 unsupported / 11 Unknown。MBPP 为68正/33负/8Unknown，HumanEval为68正/0负/3Unknown；Unknown包含4个Oracle输入不适用、5个正文无效、1个transport_error和1个无唯一Python代码块。保留原44份Oracle字节，首次新增129份；费用台账、冻结源码/EXE及旧Oracle均未变，零费用、无Jev概率、未正式注册。私有dataset rawSHA `de1f72e30e6187155bcf10ba7791ffa789d74f9f8902a3257575eeb87b8eac2f`，audit rawSHA `7ea96a3f27be6923912e9e9444584e912e2f621276833a0552afcc30122ed63f`。
+
+第180组415正文为空且16384 completion均用于reasoning，与此前305、1000145、1000002、48四条同类失败及167 transport原始费用/失败一起保留；`six-fault-review.json`在新续采前独立封存，所有失败Unknown、禁止重试。审计时累计main455/750（454 finish、历史pending1）余295；本阶段Jev222/750余528，历史27另累计。Root在审计终态后仅继续原清单55个从未发送的组，保留240个main留出额度，不改source顺序、资源配置、统计配额/网格或冻结owner。实际最新计数以同一原台账为准。
+
+目前距150正/50负门槛仍差14正/17负；不是正式阈值认证，正式Jev调用0、留出未开、生产关闭。先完成全部235终态与独立标签，再决定是否具备正式登记资格；不足配额不得制造负例、改变Unknown或挪用留出来源。
+
+### 最近独立断言快照与续采记录：整体未完成
 
 新正式校准46次main启动，44有效/1正文无效/1transport_error；独立完整allocation审计为39 supported/4 unsupported/3 Unknown，189未启动均unlabeled。复用原8 Oracle、首次新增36，费用台账、旧Oracle、冻结source/EXE字节未变；没有正式Jev预约、没有读取概率或打开留出。私有partial dataset rawSHA `7bc8eb8e8b2071f9a2e841f3af384180e21235a705ac424cc8517ac6b81bb1a5`，audit rawSHA `688957dfafa567c3c3179a781565496eb763b6f0c4c1699989202e7a3006848f`；不是正式登记或认证终态。
 
 累计main321/750（320 finish、历史pending1），剩429；本阶段Jev222/750余528，历史27另累计。网络故障期间不发收费请求：原167 transport_error 11295ms，无rawresponse；随后零auth/零model HEAD失败，Python/Windows均见DeepSeek DNS11001/超时，GitHub解析也超时，本机有throne-tun接口。`two-fault-review.json`独立核对两原失败，V3 supervisor补充原response缺失的transport证明门禁，10项测试与新seal通过；原V1/V2及收费owner不改，等待健康探测成功后只续原未发送prefix。
 
 6.1 Sol完成新`package-artifact-evaluation-v2.py`与21项测试，包括两原frozen actual EXE复制后fake transport/rawbytes证明；零收费、无GUI、无重建。最终result尚未产生，尚未stage新包。缺原archive的legacy Rust依赖明确用原frozen EXE内嵌SHA证明，不伪称先前已归档；最终package仅公开源/聚合结果，原会话、候选、台账与密钥不入包。
+
+网络随后恢复，零auth/零model HEAD收到401，用户也确认网络恢复。Root重验后续采。第50组HumanEval1000145原响应同样finish length、16384全为reasoning且正文空，独立`three-fault-review.json`保留第三Unknown、不重试；原V3 supervisor继续未发送组，不改变原配置或顺序。
+
+Root审查后，新packager补齐readonly/stage的freeze→actual result cohort/rawSHA/canonical hash及九关键源角色关联，另用模块局部环境代理过滤真实KEY/TOKEN/SECRET后才调用旧runtime_smoke，父环境不修改、异常也恢复。33项测试/Ruff通过，尚未执行GUI或stage。公开源码与记录57路径已提交推送GitHub `c3fa9900b24255f3bdf8f8645c5274763bda4f38`，远端实际同SHA；最新环境隔离修正待下一提交。此为阶段代码保存，不代表认证、最终运行包或整体完成。
 
 ## 2026-10-11 正式 v2：首故障复核后继续未发送组
 

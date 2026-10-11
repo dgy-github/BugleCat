@@ -1,0 +1,55 @@
+{
+  "schema": "buglecat.verification.artifact-final-audit.aggregate.v2",
+  "time_utc": "2026-10-11T11:15:12.597839+00:00",
+  "allocated_groups": 235,
+  "collected_groups": 235,
+  "uncollected_groups": 0,
+  "labels": {
+    "supported": 182,
+    "unsupported": 38,
+    "unknown": 15
+  },
+  "main_status": {
+    "ok": 227,
+    "response_content_invalid": 7,
+    "transport_error": 1
+  },
+  "source_labels": {
+    "mbpp": {
+      "supported": 94,
+      "unsupported": 37,
+      "unknown": 11
+    },
+    "humaneval": {
+      "supported": 88,
+      "unknown": 4,
+      "unsupported": 1
+    }
+  },
+  "unknown_reasons": {
+    "unsupported_or_invalid_oracle_input": 5,
+    "response_content_invalid": 7,
+    "transport_error": 1,
+    "one_original_python_fence_required": 2
+  },
+  "previous_180_oracles_preserved": 173,
+  "original_dataset_join_verified": true,
+  "original_source_exe_current_archive_equal": true,
+  "fee_authority_before_after_equal": true,
+  "oracle_before_after_equal": true,
+  "global_main_started": 510,
+  "global_main_finished": 509,
+  "global_main_pending": 1,
+  "global_jev_reservations": 222,
+  "formal_jev_reservations": 0,
+  "holdout_opened": false,
+  "scope": "frozen mixed MBPP/HumanEval assertions, restricted CPython workers, candidate timeout 5s",
+  "new_oracle_runs": 0,
+  "jev_probabilities_read": false,
+  "new_paid_calls": 0,
+  "unsupported_shortfall": 12,
+  "formal_calibration_started": false,
+  "formal_certification": false,
+  "overall_goal_complete": false,
+  "artifact_hash": "b41953b5b1dfd09b1fe27b7d103ac9d7955c71383112a0b2a380952320664b80"
+}

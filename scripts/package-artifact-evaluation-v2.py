@@ -14,6 +14,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -59,6 +60,18 @@ def old_packager():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def isolated_runtime_smoke(module, output, manifest):
+    """Only the dynamically loaded old module receives a sanitized environment."""
+    original = module.os
+    environment = {key: value for key, value in os.environ.items()
+                   if not any(token in key.upper() for token in ("KEY", "TOKEN", "SECRET"))}
+    module.os = SimpleNamespace(environ=environment)
+    try:
+        return module.runtime_smoke(output, manifest)
+    finally:
+        module.os = original
 
 
 def verify_parent(parent):
@@ -336,7 +349,7 @@ def stage(parent, freeze, result, output):
             shutil.copy2(path, destination)
             attestations.append(offline_attest(destination, name, Path(private) / name, bindings, output))
     write_json(evidence / "sidecar-attestations.json", attestations)
-    runtime = old.runtime_smoke(output, parent_manifest)
+    runtime = isolated_runtime_smoke(old, output, parent_manifest)
     # Runtime fixture rows contain candidate transcripts; release only aggregate proof.
     records = evidence / "runtime-verification-records.json"
     records.unlink(missing_ok=True)

@@ -1,0 +1,43 @@
+{
+  "status": "incomplete_quotas_not_met",
+  "scope": "exact frozen mixed MBPP/HumanEval code acceptance assertions and restricted runtimes",
+  "original_result_sha256": "7afb97fa3df902afc29451201551dd45383c6959f4b683368b46353317524dea",
+  "original_result_hash": "d271f185d82b9831bc860e4f3360603f77a315b803820b4f56dfe4f49a2c6ae7",
+  "label_counts": {
+    "supported": 182,
+    "unsupported": 38,
+    "unknown": 15
+  },
+  "original_scope_binding": {
+    "original_freeze_sha256": "6997236333c8bd4c0b5c08e97b33225c8689bcf36851b45bb48ca47e79a222c2",
+    "cohort_hash": "8e721add049ac38a1889b7a11f6100a58b030d70894f54bffda3b10d0867dc3c",
+    "cohort_sha256": "1ba084b214a12185a5c99a5a3ad4d4b9158a0d63d3fe031fb561236cbf81d274",
+    "public_source_bindings": [
+      {
+        "role": "source",
+        "sha256": "1ce5ac6db60b5ea42fe1797ef1f48e52a8b4e82ae6c9a945e088582e8cdffd94"
+      },
+      {
+        "role": "catalog",
+        "sha256": "e72cfce8f4a223bfbe363f5e73e57c94b020edb7b137d5d1d78bbd446a6c8010"
+      },
+      {
+        "role": "protocol",
+        "sha256": "215ed253fc6dacc919b23bff4ebc48be2b0ab3e7669ccb4a29544e3330ad0770"
+      }
+    ]
+  },
+  "collected_groups": 235,
+  "uncollected_groups": 0,
+  "unlabeled_groups": 0,
+  "allocated_groups": 235,
+  "observations": 0,
+  "certified_artifact_threshold": null,
+  "grid_results": [],
+  "holdout_metrics": null,
+  "formal_artifact_certification": false,
+  "overall_goal_complete": false,
+  "native_claim_certification": false,
+  "overall_agent_benefit_certification": false,
+  "production_authorized": false
+}

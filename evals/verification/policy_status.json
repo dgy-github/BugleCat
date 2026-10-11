@@ -160,7 +160,7 @@
     "status": "in_progress",
     "reason": "user clarified that failed-calibration packaging does not complete threshold certification and final holdout evaluation",
     "historical_v1_calibration": "not_qualified",
-    "new_iteration": "formal_v2_source_frozen_main_calibration_in_progress",
+    "new_iteration": "formal_v2_complete_intake_quotas_not_met",
     "new_main_attempt_slots": 8,
     "new_jev_attempt_slots": 6,
     "development_main_transport_failures": 1,
@@ -175,7 +175,7 @@
     "final_holdout_completed": false,
     "fresh_two_stage_minimum_requests_per_service": 400,
     "approved_phase_request_cap_per_service": 750,
-    "approved_main_attempts_remaining_snapshot": 424,
+    "approved_main_attempts_remaining_snapshot": 240,
     "approved_jev_attempts_remaining_snapshot": 528,
     "authorization": "evals/verification/reports/jev_budget_extension_20261011_250.json",
     "authorization_sha256": "2baa8582e6021cabf161e1c1837c0e2fb270f9cc2ffe318e93151619777b475c",
@@ -190,20 +190,24 @@
     "formal_v2_holdout_source_opened": false,
     "formal_v2_reference_groups_checked": 751,
     "formal_v2_reference_unknown": 7,
-    "actual_main_started": 326,
-    "actual_main_finished": 324,
-    "actual_main_pending": 2,
+    "actual_main_started": 510,
+    "actual_main_finished": 509,
+    "actual_main_pending": 1,
     "actual_jev_reserved": 222,
-    "snapshot_utc": "2026-10-11T09:55:48.150795+00:00",
-    "formal_v2_main_started_snapshot": 46,
-    "formal_v2_main_valid_snapshot": 44,
-    "formal_v2_independent_partial_labels": {
-      "supported": 39,
-      "unsupported": 4,
-      "unknown": 3
+    "snapshot_utc": "2026-10-11T11:15:44.484463+00:00",
+    "formal_v2_main_started_snapshot": 235,
+    "formal_v2_main_valid_snapshot": 227,
+    "formal_v2_uncollected_groups_snapshot": 0,
+    "formal_v2_current_network_diagnostic": "DNS recovered; zero-auth HEAD completed with 401 before continuation",
+    "formal_v2_independent_labels": {
+      "supported": 182,
+      "unsupported": 38,
+      "unknown": 15
     },
-    "formal_v2_uncollected_groups_snapshot": 189,
-    "formal_v2_current_network_diagnostic": "DNS recovered; zero-auth HEAD completed with 401 before continuation"
+    "formal_v2_registration_status": "rejected_independent_negative_quota_shortfall_12",
+    "formal_v2_jev_requests": 0,
+    "formal_v2_certified_threshold": null,
+    "formal_v2_evaluation_completed": false
   },
   "role": "audit record; runtime does not load this JSON as permission or certification"
 }

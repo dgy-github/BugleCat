@@ -1,0 +1,62 @@
+{
+  "schema": "buglecat.verification.artifact-v2-stage-delivery.v1",
+  "overall_goal_complete": false,
+  "status": "incomplete_quotas_not_met",
+  "labels": {
+    "supported": 182,
+    "unsupported": 38,
+    "unknown": 15
+  },
+  "unsupported_shortfall": 12,
+  "formal_artifact_certification": false,
+  "certified_threshold": null,
+  "formal_jev_requests": 0,
+  "holdout_opened": false,
+  "production_authorized": false,
+  "native_claim_certification": false,
+  "overall_agent_benefit_certification": false,
+  "package": "releases/jev-artifact-v2-incomplete-20261011",
+  "manifest_sha256": "6620b165d6f4e0a9b1c36ae879e997a6056c0486fdd37afbfba370eccd612d9b",
+  "files_in_manifest": 279,
+  "zip": "releases/jev-artifact-v2-incomplete-20261011.zip",
+  "zip_sha256": "15a074c7158aaca8a639d06e9bd668597132347b811d65a403295b282e5bfd1b",
+  "zip_bytes": 23226794,
+  "runtime_validation": {
+    "actual_copied_runtime_smoke": true,
+    "policy_version": "host-rules-v3.3",
+    "modes": [
+      "enforce",
+      "off",
+      "shadow"
+    ],
+    "paid_calls": 0,
+    "installer_executed": false
+  },
+  "actual_copied_evaluation_entrypoints": [
+    "verification_artifact_v2_formal_collect",
+    "verification_artifact_v2_formal"
+  ],
+  "paid_package_calls": 0,
+  "installer_executed": false,
+  "original_fee_authority_files_unchanged": 1335,
+  "fee_before_artifact_hash": "2834f0991456ca3509b34835403e4dbcb01a20dc188b144a59eea745a80e4570",
+  "fee_after_artifact_hash": "2834f0991456ca3509b34835403e4dbcb01a20dc188b144a59eea745a80e4570",
+  "main_started": 510,
+  "main_finished": 509,
+  "historical_main_pending": 1,
+  "main_request_cap": 750,
+  "main_requests_remaining": 240,
+  "phase_jev_reserved": 222,
+  "phase_jev_request_cap": 750,
+  "phase_jev_requests_remaining": 528,
+  "historical_jev_calls_separate": 27,
+  "public_evidence": {
+    "reports/artifact-v2-formal-result-20261011.json": "cdc16777e05f0830a423e480a085e7a17befdb426d3564632072ad4fb198f15d",
+    "reports/artifact-v2-formal-final-audit-20261011.json": "1d608f7aa91a89efb1a1501a645618b8ca4f8964bbd43ebfc6619ad4a032fd85",
+    "reports/artifact-v3-apps-source-preflight-20261011.json": "e8fd3312303f674dd0a857ecddef13130dbfc36afb0a8a6725b59165133b772d",
+    "docs/superpowers/plans/2026-10-11-jev-apps-source-next.md": "2a5d40c7e72ee0df0488beda14ff46e1e589ab4fa7187743a5391cda18f90e7a"
+  },
+  "source_checkpoint_before_delivery": "c3fa9900b24255f3bdf8f8645c5274763bda4f38",
+  "staging_script_sha256": "e5f589bef640168a0ea65da8b4e326be478de57a8f2a8b02870f8a4fd84620a1",
+  "artifact_hash": "1752da7a659cb5c8e5a6bcdf850c8f155b663acb77ce31906830164e879cd714"
+}

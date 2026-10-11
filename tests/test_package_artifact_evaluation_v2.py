@@ -366,6 +366,41 @@ def test_actual_scope_binding_current_source_freeze_no_model_calls():
     assert actual['cohort_hash'] == cohort['artifact_hash']
 
 
+@pytest.mark.parametrize('raises', [False, True])
+def test_runtime_module_local_environment_filters_credentials_without_parent_mutation(monkeypatch, raises):
+    import os
+    from types import SimpleNamespace
+    sensitive = {'NCX_JEV_API_KEY': 'fixture-jev', 'NANOCODEX_API_KEY': 'fixture-main',
+                 'DEEPSEEK_API_KEY': 'fixture-deepseek', 'OPENAI_API_KEY': 'fixture-openai',
+                 'ACCESS_TOKEN': 'fixture-token', 'SERVICE_SECRET': 'fixture-secret',
+                 'mixedcaseApiKey': 'fixture-mixed'}
+    for key, value in {**sensitive, 'PATH': 'fixture-path', 'SystemRoot': 'fixture-windows'}.items():
+        monkeypatch.setenv(key, value)
+    before = dict(os.environ)
+    module = SimpleNamespace(os=os)
+    called = []
+    def callback(output, manifest):
+        called.append((output, manifest))
+        child_env = {key.upper(): value for key, value in module.os.environ.items()}
+        assert not any(key.upper() in child_env for key in sensitive)
+        assert child_env['PATH'] == 'fixture-path'
+        assert child_env['SYSTEMROOT'] == 'fixture-windows'
+        assert dict(os.environ) == before
+        module.os.environ['PATH'] = 'child-only-change'
+        if raises:
+            raise ValueError('runtime fixture rejected')
+        return {'paid_calls': 0}
+    module.runtime_smoke = callback
+    if raises:
+        with pytest.raises(ValueError, match='runtime fixture rejected'):
+            package.isolated_runtime_smoke(module, Path('output'), {})
+    else:
+        assert package.isolated_runtime_smoke(module, Path('output'), {}) == {'paid_calls': 0}
+    assert called == [(Path('output'), {})]
+    assert dict(os.environ) == before
+    assert module.os is os
+
+
 @pytest.mark.parametrize("name", ["existing", "outside"])
 def test_stage_bad_output_refused_before_proofs(tmp_path, monkeypatch, name):
     monkeypatch.setattr(package, "ROOT", tmp_path)
