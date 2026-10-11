@@ -1,0 +1,110 @@
+{
+  "actual_loaded_numeric_constants_and_import_aliases_checked": true,
+  "actual_loaded_policy_and_numeric_functions_checked": true,
+  "candidate_labels_read": false,
+  "collection_authorized": false,
+  "comparison_policy": "ordered-whitespace-tokens-v1",
+  "complete_public_and_original_io_retained": true,
+  "current_resource_recheck_oracle_executions": 0,
+  "current_resource_recheck_paid_calls": 0,
+  "current_runtime_package_contains_stdin_track": false,
+  "existing_pilot_receipts_reused": 8,
+  "fee_accounting_unchanged": true,
+  "first_reference_index": 0,
+  "fixed_reference_pool_groups": 1130,
+  "formal_cohort_created": false,
+  "formal_registration": false,
+  "formal_source_admitted": false,
+  "hard_candidate_json_literal_utf8_byte_limit": 16000,
+  "holdout_opened": false,
+  "jev_calls": 0,
+  "jev_probabilities_read": false,
+  "later_reference_substitution": false,
+  "main_request_cap": 1150,
+  "main_requests_remaining": 316,
+  "maximum_candidate_json_literal_utf8_bytes_reserved": 16000,
+  "maximum_resource_probe_packet_utf8_bytes": 35939,
+  "model_calls": 0,
+  "natural_negative_sufficiency_proven": false,
+  "new_reference_attempts": 1122,
+  "official_evaluator_parity": false,
+  "original_main_starts": 834,
+  "original_pairs_retained": 3027,
+  "original_phase_jev_reservations": 229,
+  "original_reference_pool_reused_without_execution": true,
+  "overall_goal_complete": false,
+  "packet_dependency_sha256": {
+    "contract": "65eb6cbf8c90eb7b20f7df6a6bf5e48bfefbf7aad863f03a4cb7f47f0adb1877",
+    "frozen_constants": "0468f0bd19e78f97661e3b2e3a679da83423e80f67dc8a219a6736931ee53bf2",
+    "numeric_checks": "8cb15b9f4e2e08672dbc773967d875fe2d493346ccf87b40a11bb33bdc46fced",
+    "numeric_primitive": "11ee9cea21ab848502508c2c6bd4c78b078082a14d98a01b7bb7a1c4f98a9e98",
+    "packet": "8e854531467011072044eef3168bd92ffe7f38e4132da72fce8cf105b1c67445",
+    "worker": "9bb92e8204e533f6a22858a33e52e10a85c4759c42ceed3d24304012d57ddb45",
+    "wrapper": "6ff0e72e91e0390b6391b4fd12cb2e9c1d40b5f331f5fa0b67d88c14e69cb6b8"
+  },
+  "packet_fixture_tests": {
+    "author": "jev_implementation_sol",
+    "command": "python -m pytest tests/test_verification_apps_stdin_v1_packet.py -q",
+    "elapsed_seconds": 4.38,
+    "passed": 81,
+    "root_independently_revalidated_current_source_and_test_bytes": true,
+    "ruff": "All checks passed",
+    "scope": "Development contract tests, not natural labels or effect certification",
+    "source_sha256": "cb4fa72f8eab15970f6e6463f95ec938b8f1134744fef8baed7e2e8d10f307d6"
+  },
+  "packet_resource_pass": 988,
+  "packet_resource_pass_difficulty": {
+    "competition": 137,
+    "interview": 778,
+    "introductory": 73
+  },
+  "packet_resource_rejected_after_reference_pass": 1,
+  "packet_source_sha256": "8e854531467011072044eef3168bd92ffe7f38e4132da72fce8cf105b1c67445",
+  "phase_jev_request_cap": 861,
+  "phase_jev_requests_remaining": 632,
+  "private_pool_plan_sha256": "962e443beaba3435e5beda519322e8eefaf95b2a9688c3d798a00839982ac996",
+  "private_root_resource_proof_sha256": "ab5d64c9b79c40193a0ac4c0c9f025995d3216c708a335d2f72e557f476c328c",
+  "private_terminal_aggregate_sha256": "b1ec05dbea9207f3bb6a9a635889f9e7b731f34dfc8fdeaceb2b52fbfbc1ab30",
+  "production_enabled": false,
+  "reference_status_by_difficulty": {
+    "competition": {
+      "failed": 33,
+      "passed": 138,
+      "unknown": 1
+    },
+    "interview": {
+      "failed": 99,
+      "passed": 778,
+      "unknown": 2
+    },
+    "introductory": {
+      "failed": 6,
+      "passed": 73
+    }
+  },
+  "reference_status_counts": {
+    "failed": 138,
+    "passed": 989,
+    "unknown": 3
+  },
+  "remaining_reference_groups": 0,
+  "reservations": 0,
+  "resource_excluded_before_reference_execution": 1,
+  "resource_probe_is_real_candidate": false,
+  "resource_rejection_reasons": {
+    "complete STDIN request exceeds input byte budget": 1
+  },
+  "root_reran_oracles": 0,
+  "root_revalidated_all_1130_original_reference_receipts": true,
+  "root_revalidated_source_runtime_graph_and_full_accounting": true,
+  "schema": "buglecat.verification.apps-stdin-reference-pool-resource-summary.v2",
+  "source_reference_qualified": 989,
+  "source_reference_qualified_difficulty": {
+    "competition": 138,
+    "interview": 778,
+    "introductory": 73
+  },
+  "status": "free_feasibility_and_packet_revision2_complete",
+  "supersedes_packet_resource_snapshot_sha256": "62f732f7151a82648227c58c24d2a52f4ee367b61611d04c5603428c190f3a39",
+  "threshold": null
+}

@@ -1,5 +1,23 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：STDIN免费可行性验证完成，988组通过完整请求资源检查
+
+**固定1130组首参考检查全部终态：989 passed /138 failed /3 Unknown。** 989通过组为778 interview/138 competition/73 introductory；原pilot8全部引用原收据（含1失败），新增1122次本地首参考执行，3027个原测试对完整保留。固定计划先于执行create-new/fsync；不换参考、成员或重跑。参考失败/Unknown是来源拒绝，不能作主模型自然负例。原始终态raw SHA `b1ec05dbea9207f3bb6a9a635889f9e7b731f34dfc8fdeaceb2b52fbfbc1ab30`，固定full-plan SHA `962e443beaba3435e5beda519322e8eefaf95b2a9688c3d798a00839982ac996`。此前575等途中快照由本次完整终态替代。
+
+Root零Oracle重执行，逐组复验1130原row/reference index0/code/完整IO、marker、receipt及全部原index/source/runtime关联；又对989参考通过组用当前纯packet构造完整原question/starter/IO，预留**候选JSON字符串字面量16000 UTF8 bytes**，不使用真实候选或参考代码作为Jev候选。**988组资源通过：778 interview/137 competition/73 introductory；1组完整请求超48000 bytes拒绝、不裁剪。** 合格请求探针最大35939 bytes。此为固定builder下的资源可行性，仍不是正式来源准入或模型标签。Root私有资源证明SHA `0241bfaa7b81e3cde74731a772fe1c8727572cbac1f072f573fd5aa3fc7b5766`。
+
+Root另只读重验原全部834笔main SQLite行与metadata、229份阶段Jev预约原bytes及整个冻结来源/源码/runtime图，与执行前一致。新增模型/Jev/预约0，没有候选标签或Jev概率。主模型834/1150余316；阶段Jev229/861余632，历史Jev27另保留。公开[完整来源与资源聚合](reports/artifact-v3-apps-stdin-reference-pool-20261012.json) SHA `62f732f7151a82648227c58c24d2a52f4ee367b61611d04c5603428c190f3a39`，保留source admission/正式cohort/收费准入/registration/holdout/production=false、threshold=null。
+
+6.1 Sol独立复核发现原packet未硬限候选16k，且只核磁盘numeric源码而缺实际loaded code/常量关联；已仅修订packet与其测试，3个首参考冻结owner和旧numeric源未变。当前硬限制候选JSON literal≤16000 bytes，核typed实际policy参数、所有声明函数（含nested code）、numeric常量/import alias、实际runtime及本地预算。限定**81 passed（4.38s）、Ruff通过**；Root复验当前packet SHA `8e854531467011072044eef3168bd92ffe7f38e4132da72fce8cf105b1c67445`及测试SHA `cb4fa72f8eab15970f6e6463f95ec938b8f1134744fef8baed7e2e8d10f307d6`。
+
+Root在修订后再次零Oracle/API执行复验完整1130原收据和当前989构造材料，**988资源通过及难度分布、最大35939 bytes不变**，原图/账务再次核对一致。修订资源proof SHA `ab5d64c9b79c40193a0ac4c0c9f025995d3216c708a335d2f72e557f476c328c`；[当前修订聚合](reports/artifact-v3-apps-stdin-reference-pool-revision2-20261012.json) SHA `21b2d2c145cd8c6bb06ebec7d63b59e33b36330a287f2dc6e21438133c0cae21`。先前40项packet和原资源报告保持开发快照，不能冒充当前revision2的加载证明；当前以81项和修订聚合为准。
+
+**下一阶段详细方案已写入[STDIN计划](docs/superpowers/plans/2026-10-12-jev-apps-stdin-v1.md)：** 先完成新source authority/profile/整组allocation、共享收费账本collector与原始intake、独立标注及新Jev/protocol/一次留出闭包；用受控fixture验证，再实际编译图/复制工具验收。旧收费owner/EXE和原留出保持封存。拟采用8开发组（4 interview/4 competition），校准400组和全新留出400组（各340 interview/60 competition）；988资源合格池能够满足这个配比，剩180组不作为本次不足时的替换样本。当前仅数量/开发方案，没有创建新正式名单或收费准入。
+
+拟定固定808组每服务每组最多一次，无重试；最多main808/Jev808。按当前剩额，未来需追加main最多492、Jev最多176才能覆盖该完整上限，**目前未请求或批准这笔追加，也未启动收费**。现有316组旧轨道负例比例不能外推新STDIN轨道；新400校准仍不保证50个自然负例。校准完整终态、150正/50负、固定统计门槛和Jev质量全部通过后，才一次打开预定留出；不足不换组、不降门槛、不挪用留出。正式阈值仍未认证，整体目标active。
+
+原27.71MiB开发运行ZIP已验收，但尚不含本次STDIN模块；本次源代码/免费证据的Git保存不代表新运行包或正式认证已完成。下一交付包必须等新增工具实际验收后封包。
+
 ### 2026-10-12：用户选定STDIN自然产物轨道，免费静态预检完成
 
 用户明确选择“扩展APPS标准输入轨道，继续评估主模型自然产物”。此选择不启动新收费请求。既有6.1 Sol只读完成来源普查：1734个新整组最早STDIN代表（1241 interview/360 competition/133 introductory），1728组完整文本IO共5057对；6组空或不等长，4组IO自身超过48KiB。首参考均有原index0，1730可解析AST。已知旧历史、开发8组、正式632组和实际收费启动/预约整组排斥；这不证明语义完全独立、无训练污染、可执行准入或自然负例充足。

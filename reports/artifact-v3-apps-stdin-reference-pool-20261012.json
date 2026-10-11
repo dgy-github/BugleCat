@@ -1,0 +1,83 @@
+{
+  "candidate_labels_read": false,
+  "collection_authorized": false,
+  "comparison_policy": "ordered-whitespace-tokens-v1",
+  "complete_public_and_original_io_retained": true,
+  "current_runtime_package_contains_stdin_track": false,
+  "existing_pilot_receipts_reused": 8,
+  "fee_accounting_unchanged": true,
+  "first_reference_index": 0,
+  "fixed_reference_pool_groups": 1130,
+  "formal_cohort_created": false,
+  "formal_registration": false,
+  "formal_source_admitted": false,
+  "holdout_opened": false,
+  "jev_calls": 0,
+  "jev_probabilities_read": false,
+  "later_reference_substitution": false,
+  "main_request_cap": 1150,
+  "main_requests_remaining": 316,
+  "maximum_candidate_json_literal_utf8_bytes_reserved": 16000,
+  "maximum_resource_probe_packet_utf8_bytes": 35939,
+  "model_calls": 0,
+  "natural_negative_sufficiency_proven": false,
+  "new_reference_attempts": 1122,
+  "official_evaluator_parity": false,
+  "original_main_starts": 834,
+  "original_pairs_retained": 3027,
+  "original_phase_jev_reservations": 229,
+  "overall_goal_complete": false,
+  "packet_resource_pass": 988,
+  "packet_resource_pass_difficulty": {
+    "competition": 137,
+    "interview": 778,
+    "introductory": 73
+  },
+  "packet_resource_rejected_after_reference_pass": 1,
+  "phase_jev_request_cap": 861,
+  "phase_jev_requests_remaining": 632,
+  "private_pool_plan_sha256": "962e443beaba3435e5beda519322e8eefaf95b2a9688c3d798a00839982ac996",
+  "private_root_resource_proof_sha256": "0241bfaa7b81e3cde74731a772fe1c8727572cbac1f072f573fd5aa3fc7b5766",
+  "private_terminal_aggregate_sha256": "b1ec05dbea9207f3bb6a9a635889f9e7b731f34dfc8fdeaceb2b52fbfbc1ab30",
+  "production_enabled": false,
+  "reference_status_by_difficulty": {
+    "competition": {
+      "failed": 33,
+      "passed": 138,
+      "unknown": 1
+    },
+    "interview": {
+      "failed": 99,
+      "passed": 778,
+      "unknown": 2
+    },
+    "introductory": {
+      "failed": 6,
+      "passed": 73
+    }
+  },
+  "reference_status_counts": {
+    "failed": 138,
+    "passed": 989,
+    "unknown": 3
+  },
+  "remaining_reference_groups": 0,
+  "reservations": 0,
+  "resource_excluded_before_reference_execution": 1,
+  "resource_probe_is_real_candidate": false,
+  "resource_rejection_reasons": {
+    "complete STDIN request exceeds input byte budget": 1
+  },
+  "root_reran_oracles": 0,
+  "root_revalidated_all_1130_original_reference_receipts": true,
+  "root_revalidated_source_runtime_graph_and_full_accounting": true,
+  "schema": "buglecat.verification.apps-stdin-reference-pool-resource-summary.v1",
+  "source_reference_qualified": 989,
+  "source_reference_qualified_difficulty": {
+    "competition": 138,
+    "interview": 778,
+    "introductory": 73
+  },
+  "status": "free_source_and_packet_feasibility_complete",
+  "threshold": null
+}
