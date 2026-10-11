@@ -174,3 +174,14 @@ Root新增纯`apps_stdin_v1/packet.py`和独立packet测试，40 passed（0.59s�
 C4a所有者和EXE现已冻结。后续C4b采用独立`calibration_originals/collection/intake`与新`verification_apps_stdin_v1_calibration_collect`，不得修改旧收费owner或借C3仅dev的验证器冒充校准权限。首请求前可验证实际opening；校准开始后必须同次fresh来源＋原开发main/Oracle/blind登记/Jev原transport archive重建opening历史baseline，然后核实际当前账本完整追加前缀。不得删原预约、抹原失败/pending、截main、投影零Jev或重选剩余来源。
 
 C4b只开放原400校准main，原400留出保持未启动、原开发8不再发送，本阶段不得增加校准Jev。独立新collector逐组写原start/finish/request/events/session/raw/endpoint与实际compiled EXE关联，终态失败保留后可下一固定新组，pending阻止续发。候选Oracle单次原marker/receipt，stranded不恢复重跑；完整原代码span与IO，Unknown不当负例。全808 dataset保留所有原分配状态；400均终态且原候选Oracle齐全后才提供独立标签准入。随后由独立正式登记所有者检查150正/50负门槛并固定binary名单，才可能发正式Jev和选择阈值。真实执行仍需未来具体收费授权。
+
+
+### C4b完成记录与C4c实现边界（2026-10-12）
+
+独立校准原archive/真实共享账本400追加前缀、actual 213角色main collector、完整808独立标签intake、Root全终态/配额报告和exclusive原blind登记均通过离线验收并冻结。采集端34 Python通过（186.58s），Root终态/登记39通过（183.70s），新Rust例子9通过，Ruff/Clippy/rustfmt通过；两次Python执行分开报告，不冒充一个联合run。Root新终态初版把真实非负int task_id误设为字符串，已修且实际新owner原临时链重验通过。actual新EXE SHA3512957b37552da57292e7f8b8d95076a348013c38feff8f0b9dc6763769f47d，11,593,728 bytes；复制成功/HTTP400/取消原始join及fixture live拒绝通过，8旧EXE和真实834 main/229阶段Jev/pending1完整账务不变。聚合`reports/artifact-v3-apps-stdin-calibration-offline-20261012.json` SHA1daadbbeb63f41bb4f94f62a43b244a7393b597fc7c9253dc2848e70de8d2e59。
+
+C4c由既有6.1 Sol实现新的formal archive/originals/sender/transport/observations和独立Rust正式Jev工具；Root实现formal_decision和一次holdout_opening。校准Jev开始后不能调用仅pre-score的C4b proof来拒绝再裁账/投影零Jev；新owner同次fresh C1重建原开发及全部400校准main/raw/Oracle、原完整808标签和实际blind marker，保持原完整SQL/main不变，实际当前Jev只能是原历史加固定binary请求前缀。已stranded/pending不可跳过/重发，终态failure保留后可下一固定新组，留出各400资金和全部allocation保留。原request含完整question/starter/code/IO/runtime，不含参考/标签/Oracle结果，actual model及JSON/NOUL/usage严格核对。
+
+observer.proof提供同次ephemeral `{pack,observations,directories,evidence,bindings}`，close再次核原source/loaded图、真实SQL/raw账务和全部dev/cal/formal目录集合bytes。Root只在真实原binary观察全终态且源与原标签认证后复用冻结protocol.calibrate_numbers；保存decision不授权。正式门槛通过后，独立opening重验decision/actual proof，在同一真实共享锁和main SQL短事务create-new固定400留出marker，并保存固定阈值及完整原证据；不能以纯数值、caller布尔或自签封存件打开留出。后续留出工具再独立重建archive/实际追加前缀，保持一次消费语义。
+
+本轮只做免费开发、临时fixture和复制工具验收；没有真实新授权/cohort/marker/主模型/Jev/候选Oracle，不补自然样本。原上限main1150/Jev861仍适用，拟新增main492/Jev176未批准，formalcert=false/productionoff/thresholdnull。实际新包交付尚待全offline校准→一次留出闭包与runtime复制验收，不能把旧27.71MiB包称已包含STDIN。

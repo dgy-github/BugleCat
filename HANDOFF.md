@@ -1,5 +1,23 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：固定400校准采集、独立标签和原盲登记离线验收完成
+
+C4a已实际提交、推送且远端核对一致：`9805ff0f91ac8a4c678f1ad3dc357456cfc4146b`。C4b新增5个Python所有者与独立Rust校准main工具，现已通过限定验收并冻结；**自然400组尚未采集，正式Jev、阈值认证、一次新留出和新运行包仍未完成。**
+
+6.1 Sol完成`calibration_originals/collection/intake`：同次fresh完整C1来源证明，独立重建原开发main/Oracle/blind登记/Jev raw archive及opening历史baseline，再核真实完整共享账本的固定400校准追加前缀；不裁账本、不抹原失败/pending、不投影零Jev。只开放校准main，原400留出关闭。每组一次，终态失败可下一固定组，pending/stranded阻止跳过。单原Python代码span不改，候选Oracle独占marker/receipt一次，缺失或stranded不自动重跑；完整808保留全部Unknown、失败和未启动项。
+
+Root完成`calibration_terminal.py/registration.py`：完整400 main终态且独立Oracle齐备后才检查150正/50负，开发8不计正式配额、Unknown不补负例。scope/resource Unknown正常完成；缺失/stranded Oracle保持labels_ready=false。保存report不授权；fresh实际intake读回后闭合source/rawSQL/原共享账务/目录集合及bytes。在原Jev namespace/锁与main独占短事务create-new原binary blind marker，完整原代码/IO packet，保留留出main400和Jev400资金；登记不预约/发送/认证阈值。`before_first_reservation`只适合校准Jev未开始，后续正式owner必须独立重建actual cal archive与真实新增前缀。
+
+限定验收分两次：采集端**34 passed（186.58s）**，Root终态/登记**39 passed（183.70s）**；9项新Rust测试、Clippy `-D warnings`、限定rustfmt/Ruff通过。Root实际新owner/EXE临时链覆盖原开发8归档→2校准（HTTP400和正文scope Unknown）→真实intake读回→不够配额拒绝登记，原SQL/账务不变。首轮联调发现Root误将APPS `task_id`要求成字符串；真实契约是非负int，已修复并复跑通过。其余synthetic400标签/预算/marker fixture只验证政策和生命周期，不计自然样本。
+
+实际新EXE **11,593,728 bytes**、SHA `3512957b37552da57292e7f8b8d95076a348013c38feff8f0b9dc6763769f47d`，213编译角色一致。Root复制实际EXE验证成功/HTTP400/提交后取消原始request/events/raw/receipt/SQLite与opening/endpoint join，fixture live在ordinal/HTTP前拒绝且目录不变。8旧EXE与完整真实834 main/229阶段Jev/历史pending1原账务不变。
+
+公开[校准离线验收聚合](reports/artifact-v3-apps-stdin-calibration-offline-20261012.json) SHA `1daadbbeb63f41bb4f94f62a43b244a7393b597fc7c9253dc2848e70de8d2e59`；Root复制revision2证明 SHA `61b2cbf5c47473eb411d5a1adc3625221ee5e5f51dd0a21f55d1062f1bbb3f2c`，Sol实施证明 SHA `dc1809d8f06b94369ab0da530ec3cf9bc089c4cf2e4713047043d1893ce76f96`。保留修复前复制证明，不覆盖其旧hash。Root terminal SHA `ee20f22ba9957634b4aaba5dd994a2870829d98c181077da5b58064016f49b6f`，registration SHA `43244367d166bbf0f15e87b840180438db74a39f95762531ac5c3f4c4b88273c`，后续owner不修改。
+
+**下一步C4c免费开发：**既有6.1 Sol实现独立正式Jev archive/全实际账本追加前缀、sender/transport/observer及新实际工具；Root实现只读阈值裁决及独占一次留出opening。保留41点网格和原150正/50负、误拦单侧95%上界≤2%、检错单侧95%下界≥50%；全binary Jev终态前不选阈值，失败留分母，合格校准后才可能打开固定400新留出，不换组、不重跑。然后实现留出main/标签/Jev与实际新包验收，最后提出可审查的具体收费授权。
+
+真实新增授权/cohort/marker/main/Jev/候选Oracle均0；预算仍main834/1150余316、阶段Jev229/861余632，拟追加main492/Jev176未获批。生产off、threshold=null；已交付27.71MiB ZIP尚未包含STDIN工具。本节不声称自然负例充足、正式认证或整体交付完成。
+
 ### 2026-10-12：STDIN开发Jev与校准开放离线验收完成，继续固定400组采集开发
 
 C3采集端已推送GitHub，上一提交`7d0417d8357e15c9b5656a8b70619538d0f16f41`。本节C4a新增7个Python所有者和独立Rust开发Jev sender，现已通过限定联调并冻结。**这是开发工具验收；正式校准、留出和新运行包仍未完成。**
