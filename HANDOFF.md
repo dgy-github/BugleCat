@@ -1,5 +1,15 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-11：开发 Jev 终态、原始关联与新正式方案
+
+7 个 binary eligible 开发候选各实际尝试 Jev 一次：6 ok、最后 1 transport_error，无重试；原完整8组独立标签仍6 supported/1 unsupported/1 Unknown。五个成功正例分数0.23–0.29，负例0.47，原0.5起点网格漏检该开发负例。失败正例概率null且保留分母，Unknown不晋升负例。Root只读重建全allocation并重新关联原request/rawresponse/model/usage、预约/start marker/events/receipt/actual EXE来源和原候选/Oracle字节；零新费用、零Oracle重执行。见 [实际开发Jev聚合](reports/artifact-v3-apps-development-jev-20261011.json)。
+
+主模型累计518/750余232（原pending1保留），阶段Jev229/750余521，历史27另累计。Root实际source-only提案核对fresh合格来源2266组（350 interview/1916 introductory），完整dev8及历史整组排斥；[316组/阶段提案](reports/artifact-v3-apps-sampling-proposal-316-20261011.json)和[252组/阶段提案](reports/artifact-v3-apps-sampling-proposal-252-20261011.json)均收费/Oracle/预约0、collection_authorized=false，不是已注册cohort。建议316方案最大632次/服务，尚需真实批准main+400/Jev+111；较小252方案最大504次/服务，尚需main+272/Jev+0。计数上限缺口不能解释为key余额不足，不保证自然负例或准确性。
+
+保留旧冻结protocol、付费owner和EXE字节。Root新增独立prospective v4协议：0.025步长完整量程加原网格，共41候选点；在新正式请求前固定，原150正/50负、95%误拦上界≤2%/检出下界≥50%要求保持。23项回归/Ruff通过，6.1 Sol独立审阅未见实质放行缺陷；没有开发阈值认证或迁移。新的source-only采样20项回归Root通过，formal纯契约演练108项回归曾通过，后续实际正式main管线仍在集成并暂不finalseal。所有纯数值接口不授予正式或生产权限。
+
+详细 [实施与交付顺序](docs/superpowers/plans/2026-10-11-jev-apps-formal-v4.md)：新授权必须与原750 source snapshot分开封存并真实桥接原完整历史；正式main采集/独立标注→满足配额再登记→Jev校准→原证据合格后一次留出→实际复制程序验收/新包/GitHub。实际正式cohort、登记、校准、留出与新运行包未完成，生产off、阈值null、整体active。原本轮已推送源码检查点`d0b91d9ff56f052c18243568f8188e6333920d92`，本节及新方案待下一明确提交。
+
 ### 2026-10-11：8 组开发 main 终态与独立标签完成
 
 实际新开发主模型8/8成功返回，固定 high/16384/120秒、无自动重试；完整 allocation 原 source/SQLite/events/receipt/raw response/candidate/Oracle join 已完成。一次独立本地候选执行为 **6 supported /1 unsupported /1 Unknown**；Unknown 是 `unsupported_implicit_builtin`，不修改冻结 worker 或晋升为负例。完整私有 dataset raw SHA `3713e884fb226e6264caef02d94fe3ffb9f4cda4ad15e0705427aa52526ec8f2`。随后 Root只读全8重验一致，8份原 Oracle字节保留、零重执行；review SHA `004a993fdcd77ebb04718b7b87a0f850c6c01f53f9fd2e799e4f556ef9adbf3d`。见 [实际开发聚合](reports/artifact-v3-apps-development-main-20261011.json)。

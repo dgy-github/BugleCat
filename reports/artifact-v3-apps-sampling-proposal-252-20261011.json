@@ -1,0 +1,86 @@
+{
+  "schema": "buglecat.verification.apps-formal-sampling-proposal.v3",
+  "artifact_hash": "0c4cc3957b86615c6857c0485e027063b1301070d309741a81e5302c08807405",
+  "count_per_stage": 252,
+  "available_strata": {
+    "groups": 2266,
+    "difficulty": {
+      "interview": 350,
+      "introductory": 1916
+    },
+    "source_kind": {
+      "apps_call_based_free_function": 1830,
+      "apps_call_based_solution_method": 436
+    },
+    "difficulty_source_kind": {
+      "interview:apps_call_based_free_function": 49,
+      "interview:apps_call_based_solution_method": 301,
+      "introductory:apps_call_based_free_function": 1781,
+      "introductory:apps_call_based_solution_method": 135
+    }
+  },
+  "stage_strata": {
+    "calibration": {
+      "groups": 252,
+      "difficulty": {
+        "interview": 175,
+        "introductory": 77
+      },
+      "source_kind": {
+        "apps_call_based_free_function": 106,
+        "apps_call_based_solution_method": 146
+      },
+      "difficulty_source_kind": {
+        "interview:apps_call_based_free_function": 31,
+        "interview:apps_call_based_solution_method": 144,
+        "introductory:apps_call_based_free_function": 75,
+        "introductory:apps_call_based_solution_method": 2
+      }
+    },
+    "holdout": {
+      "groups": 252,
+      "difficulty": {
+        "interview": 175,
+        "introductory": 77
+      },
+      "source_kind": {
+        "apps_call_based_free_function": 91,
+        "apps_call_based_solution_method": 161
+      },
+      "difficulty_source_kind": {
+        "interview:apps_call_based_free_function": 18,
+        "interview:apps_call_based_solution_method": 157,
+        "introductory:apps_call_based_free_function": 73,
+        "introductory:apps_call_based_solution_method": 4
+      }
+    }
+  },
+  "budget": {
+    "current_main_cap": 750,
+    "current_jev_cap": 750,
+    "current_main_started": 518,
+    "current_main_consumed_or_reserved": 518,
+    "current_jev_reservations": 229,
+    "remaining_main_attempts": 232,
+    "remaining_jev_reservations": 521,
+    "planned_main_maximum": 504,
+    "planned_jev_maximum": 504,
+    "holdout_main_earmark_only": 252,
+    "holdout_jev_earmark_only": 252,
+    "additional_main_authority_required": 272,
+    "additional_jev_authority_required": 0,
+    "budget_sufficient_for_maximum_allocation": false,
+    "worst_case_attempts_not_success_or_negative_guarantee": true,
+    "additional_authorization_created": false,
+    "budget_earmark_written": false
+  },
+  "collection_authorized": false,
+  "formal_cohort_created": false,
+  "natural_negative_sufficiency_proven": false,
+  "candidate_labels_read": false,
+  "jev_probabilities_read": false,
+  "model_calls": 0,
+  "jev_calls": 0,
+  "oracle_executions": 0,
+  "reservations": 0
+}

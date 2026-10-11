@@ -1,0 +1,34 @@
+{
+  "schema": "buglecat.verification.apps-development-aggregate.v3",
+  "allocated_groups": 8,
+  "independent_label_counts": {
+    "supported": 6,
+    "unsupported": 1,
+    "unknown": 1
+  },
+  "jev_attempted": 7,
+  "jev_ok": 6,
+  "stop_reason": "first_fault_no_retry_remaining_not_sent",
+  "phase_main_consumed_or_reserved": 518,
+  "phase_jev_reservations": 229,
+  "per_service_cap": 750,
+  "scores_by_independent_label": {
+    "supported": [
+      0.29,
+      0.24,
+      0.24,
+      0.29,
+      0.23,
+      null
+    ],
+    "unsupported": [
+      0.47
+    ]
+  },
+  "original_8_groups_excluded_from_formal": true,
+  "formal_certification": false,
+  "certified_threshold": null,
+  "holdout_opened": false,
+  "production_authorized": false,
+  "overall_goal_complete": false
+}
