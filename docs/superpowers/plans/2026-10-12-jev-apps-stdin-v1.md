@@ -17,9 +17,9 @@
 1. **入口与状态。** 原始Python脚本文本不修复、不重写为函数；执行环境`__name__='__main__'`。每个完整原测试对使用独立新子进程及namespace，顺序不变，不跨对共享状态。不能宣称与官方重写`code()`执行器一致。
 2. **原始输入。** 只接受str或list[str]；list以LF连接，不额外补LF。原始JSON及转换规则分别绑定收据。`input()`读一行，移除单个LF及紧邻CR；末行无LF仍可读，耗尽引发EOFError。首版不提供sys、open、buffer或文件描述符。
 3. **输出。** 只提供受控`print()`，捕获最多64KiB UTF-8文本，超出为Unknown；候选不能取得真实宿主stdout。比较固定为`ordered-whitespace-tokens-v1`：两侧`split()`所得token序列完全相等；只忽略空白布局，不提供浮点、数值格式、无序集合或四舍五入容差。标签仅表示是否满足这个新契约，不表示APPS官方全部容差下的正确性。
-4. **语言范围。** 基于既有受限导入与builtin规则建立明确新所有者，新增input/print和只读`__name__`语义。首版不支持class、global/nonlocal、动态代码、反射、OS/网络、导入越界、依赖属性写入或删除。新增例外须逐项测试，不能静默修改旧政策。受限语言审核不是OS安全沙箱。
-5. **资源。** 每对子进程5秒，整组30秒，完整原对数最多100；超时、资源不足、输出越界和不支持的依赖均为Unknown，不作负例。不声称内存隔离。不能截断原测试对或提前成功；因预算耗尽无法完成时保留已执行前缀并给出Unknown。
-6. **标签。** 完整范围内全部对通过为supported；语法错误、支持范围内程序异常或token不匹配为unsupported。任一对存在范围/资源Unknown则整组Unknown优先。SystemExit首版Unknown。失败对保留证据并继续后续对，完整收据才可形成二元标签。
+4. **语言范围。** 基于既有受限导入与builtin规则建立明确新所有者，新增input/print直接调用和只读`__name__`的精确main guard语义。input/print别名、传参和同名绑定拒绝；`__name__`写入拒绝。首版不支持class、global/nonlocal、装饰器、type、格式反射、动态代码、反射、OS/网络、导入越界、依赖属性写入或删除。新增例外须逐项测试，不能静默修改旧政策。受限语言审核不是OS安全沙箱。
+5. **资源。** 每对子进程5秒，整组30秒，完整原对数最多100；超时、资源不足、输出越界和不支持的依赖均为Unknown，不作负例。不声称内存隔离。不能截断原测试对或提前成功；因整组deadline耗尽无法启动的剩余对全部保留原index，记录Unknown和`child_started=false`，不伪称已经执行。
+6. **标签。** 完整范围内全部对通过为supported；语法错误、支持范围内程序异常或token不匹配为unsupported。任一对存在范围/资源Unknown则整组Unknown优先。NameError、ImportError与SystemExit首版保守Unknown。失败对保留证据并继续后续对，全部完成且无Unknown的收据才可形成二元标签。
 7. **证据。** 收据绑定原code、原IO、契约与参数、全部新owner源码及实际Python runtime；执行前后图不一致即拒绝。子进程只传必要Windows运行环境，移除凭据；输出JSON必须结构验证。原型不接入任何真实收费账本或自动重试。
 
 ## 分阶段开发与验收
@@ -55,3 +55,11 @@
 ## 交付约束
 
 更新既有HANDOFF、计划和脱敏聚合，按明确路径提交GitHub。原运行ZIP`releases/jev-apps-v3-incomplete-20261012.zip`已经验收，仍为开发交付。当前STDIN原型尚未进入该ZIP。认证未完成期间生产Jev保持off，阈值null，强制类别为空。
+
+## A阶段实际完成记录
+
+6.1 Sol完成3个新所有者和3个fixture测试文件；`python -m pytest tests/test_verification_apps_stdin_v1_contract.py tests/test_verification_apps_stdin_v1_worker.py tests/test_verification_apps_stdin_v1_oracle.py -q`实际108 passed（5.89s），限定新路径Ruff通过。Root复核当前三个源SHA与实施报告一致、9个旧核心文件与原提交文本一致；公开证据`reports/artifact-v3-apps-stdin-prototype-20261012.json`。这些测试为开发原型证据，不能替代真实首参考准入或自然候选标注。
+
+已修复孤立CR与CRLF的处理区别、import后磁盘源码漂移关联旧内存policy的问题；禁止Python泛型字符串参数绑定逃过保护规则。装载契约/原常量使用原bytes编译，wrapper核对加载图与当前函数字节码；参数/源码前后漂移拒绝。30秒无法启动的剩余原index保留Unknown，`pairs_executed`明确表示子进程启动尝试，包括超时，不表示每对已完成。
+
+新reviewer首版另禁issubclass与泛型TypeAlias/TypeVar/ParamSpec/TypeVarTuple语法。当前已开始对1734个新最早代表做固定reviewer的静态范围检查，仍不执行真实参考，不作source admission。B阶段真实本地单次参考准入入口及证据图尚待完成，收费方案尚未创建。

@@ -6,7 +6,7 @@
 
 原train及2627个source/owner绑定、834 main/229阶段Jev元数据前后未变；未读候选标签或Jev概率，真实参考/候选/Oracle/模型/Jev/预约0。Root复验私有报告raw SHA `af66f7e32c8faa771296616f59d56bc97407682234b58387c61bd75c194c897b`及9个当前核心源字节，发布[脱敏静态聚合](reports/artifact-v3-apps-stdin-static-preflight-20261012.json)，SHA `5ae95fa249499918b28ba09999533a70bc62b7ad24bd7bceabe9f2de51b28437`。
 
-新[开发契约与详细计划](docs/superpowers/plans/2026-10-12-jev-apps-stdin-v1.md)已记录：先实现input()/print()受限脚本原型，每对fresh child，完整原IO、明确EOF与资源Unknown，固定有序空白token比较；不默认兼容官方函数重写/浮点/无序容差。6.1 Sol正在新增独立模块和自制fixture测试，尚未完成原型验收；禁止改旧冻结owner/EXE或运行真实APPS参考。A阶段通过后才冻结新来源准入图并安排B阶段本地首参考单次验证，随后制定全新校准/留出名单、packet和预算方案。主模型余316不足两阶段理论最低400；当前没有新增收费预算或准入。
+新[开发契约与详细计划](docs/superpowers/plans/2026-10-12-jev-apps-stdin-v1.md)已记录：input()/print()受限原始脚本，每对fresh child，完整原IO、明确EOF与资源Unknown，固定有序空白token比较；不默认兼容官方函数重写/浮点/无序容差。6.1 Sol已完成3个新模块和3个自制fixture测试文件，实际108 passed（5.89s）、Ruff通过；覆盖5秒真实超时后继续下一对、fresh namespace、别名/绑定/泛型/反射限制、装载源码/参数漂移及typed收据。Root复验当前源SHA与实施报告一致，9旧核心文件与原Git已提交文本一致；[原型聚合](reports/artifact-v3-apps-stdin-prototype-20261012.json) SHA `98eef1adae043a4a977c662d02318755428e6cebdecb2495825cf53a09d81151`。原型API不授予来源准入、正式登记或收费权限；真实APPS参考尚未执行。当前正依据固定新reviewer进行静态来源范围检查，随后才冻结新来源准入图并安排B阶段本地首参考单次验证，再制定全新校准/留出名单、packet和预算方案。主模型余316不足两阶段理论最低400；当前没有新增收费预算或准入。
 
 旧316及原未开留出封存，25负例不足50的终态保持；原27.71MiB开发运行ZIP已验收，新STDIN原型尚未进入运行包。生产off、阈值null，整体目标active。下方记录为此前各阶段事实，当前新轨道进度以本节及实际新测试/收据为准。
 
