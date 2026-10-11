@@ -25,9 +25,23 @@
 - `artifact_formal_intake`：独立标注及原始 SQLite start/finish、请求、响应、编译源/程序、Oracle 复核。
 - `artifact_formal`：预测前标签登记、原始 Jev transport 重验和固定网格校准。
 - `artifact_holdout`：重验校准、一次新来源登记、冻结标签、消费固定阈值结果；`revalidate_evaluation` 重新从原始证据验证结果。
-- 独立 holdout main/Jev 程序须在发送前通过实际合格校准和原始 once-only lock；calibration 程序不接受伪造 split 的留出请求。
+- `verification_artifact_holdout_collect`：独立 holdout main。`check-gate <manifest>` 和 `prepare <manifest> <newdir>` 先重验实际合格校准、原始一次打开锁和未启动来源前缀；`live <prepared-dir> --live` 才发送。
+- `verification_artifact_holdout_formal`：独立 holdout Jev。`check-gate <prepared-jsonl> <id> <registration>` 与 `check-registration` 先重验完整原标签配额及固定阈值，再允许显式 `live`；calibration 程序不接受伪造 split 的留出请求。
 
 原始响应、候选、会话、收费 ledger 和已封存 cohort 留在本地。公开源码与测试可在新 checkout 运行；涉及真实收费证据的复核需原始本地文件，缺文件时不宣称复核成功。离线测试使用的成功数据只是门禁夹具。
+
+## 离线验证与中断恢复
+
+从仓库根目录构建四个 Rust example，之后运行相关实际程序测试。以下测试不访问真实模型接口：
+
+```powershell
+cargo build --manifest-path rust/Cargo.toml -p ncx-core --example verification_artifact_profile_collect --example verification_artifact_profile_formal --example verification_artifact_holdout_collect --example verification_artifact_holdout_formal
+python -m pytest tests/test_verification_artifact_profile_binary.py tests/test_verification_artifact_profile_formal_binary.py tests/test_verification_artifact_holdout_binary.py tests/test_verification_artifact_holdout_transport_guard.py -q
+```
+
+需要真实本地收费证据的测试在缺少原文件时显式 skip；fake transport 回归仍运行。新 checkout 不携带原预算授权的实际 ledger，不能用测试夹具申请正式认证。
+
+收费中断后先复核原 SQLite start/finish、reservation、事件和收据。已启动或已预约组不再发送；原收据缺失时保留 unresolved，并暂停审计。已完成的概率观察逐条保存，恢复只从原 bytes 重建。只有证明尚未启动的后续组才能按原顺序建立新批次，不能把失败组换名重发。
 
 ## 结果字段的范围
 

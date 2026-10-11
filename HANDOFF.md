@@ -4,9 +4,11 @@
 
 用户批准追加各100次，本阶段主模型/Jev上限各500；失败与历史启动仍计数、每组一次、无自动重试。新独立profile `deepseek-flash-high-16384-120-v1` 已在请求前冻结（profile rawSHA e0044b9de9e61ca55358a5081eba27a85c352f17ef3d74afa8ba028bc9064427），新cohort canonical `3b7407279f3ee8c00c75a0e0ca92af9a5098f63fad8b0cbf3642dfd9055d3549`；265个新校准组、保留至少200次main供一次留出。旧35已启动组排斥，旧ultra候选不混新分母。新main实际exe SHA `ae6d0cf59375fae0e31008eb9d384ce60a2364f4c28f30ed3d762cf0c7148b39`，提示词和冻结断言保持原样。
 
-快照 2026-10-11T01:59:08.150907+00:00：全局main 107启动/105完成/剩393；Jev本阶段1/剩499。已完成批次独立标签 47 supported、14 unsupported、3 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。Jev没有读取新样本概率；未达150正/50负不登记正式预测、不打开留出。连续同类故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
+快照 2026-10-11T02:21:05.644661+00:00：全局main 168启动/166完成/剩332；Jev本阶段1/剩499。已完成批次独立标签 91 supported、30 unsupported、7 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。Jev没有读取新样本概率；未达150正/50负不登记正式预测、不打开留出。连续同类故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
 
 6.1-Sol已完成并冻结新profile正式Jev入口和独立holdout main/Jev入口；旧发送器/exe/源原hash保留。Root新增compiled main/原始事件/SQLite finish重验、完整实际启动分母检查、新profile source dispatch；留出结果可重新从原始一次消费证据计算。原始来源证明在单次事务内复用，复用时重新校验源文件字节；不缓存标签、台账或概率。Python verification全量348 passed，另一次实际main/profile-Jev/holdout二进制复核58 passed；后续仅拆分可移植测试，未改变已冻结发送源。认证仅可限定冻结MBPP产物轨道，整体agent准确性与生产仍未认证。正式阈值null，实际留出未打开，生产false。新打包脚本已实现但尚未运行；最新运行包仍为此前v3.3，不含后续工具。GitHub阶段提交和最终交付分别记录，不把代码完成当作评测完成。
+
+阶段源码已提交并推送 GitHub `78ec764b0344ff98e86e9840ef2f4867a993cd70`，本地HEAD与远端分支 `feat/context-association-memory` 哈希一致。Sol额外完成本地编排 `reports/_artifact_holdout_operator.py`，7项mock门禁/中断保留测试通过，Root实际只读检查四个冻结exe成功；新helper未打开留出、未预约、未HTTP。Root `_holdout_with_existing_credential.py --probe` 确认现有主模型凭据可读；仅对子进程环境提供，不修改全局配置、不落盘凭据。Root合并工具 `_aggregate_artifact_calibration.py` 强制保留全部实际启动组，在途遗漏会拒绝；目前未运行合并。首15批6条Unknown已按原字节复核（3 restricted_name、1 restricted_import、1 transport_error、1 response_content_invalid），标签保持Unknown；不得由复核强行补负例。公开离线命令与恢复边界见 `evals/verification/ARTIFACT_EVALUATION.md`。
 
 ## 2026-10-11：ultra 输出资源耗尽已定位，纠正配置入口开发中（覆盖下方采集中状态）
 
