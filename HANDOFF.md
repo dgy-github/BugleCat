@@ -1,5 +1,17 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-11：网络复查恢复；APPS 新 Oracle 和免费参考筛选完成
+
+用户确认网络恢复后，Root 实际复查 DeepSeek DNS 成功、零密钥 HEAD 返回 401，GitHub `ls-remote` 成功并与当时 HEAD `a08992ff31a82ea0590af38e064a598ebd195505` 一致。没有发收费探测或重试原请求。
+
+6.1 Sol 单次完整获取 pinned APPS train：107101272 bytes，SHA `45e82ef22ed8e7c0c04d881a21b923e9dd233157896b0b8d5b3493e887499cae` 与原 LFS 元数据匹配；5000 原行全部 JSON/AST 普查及第二遍 JSON 重验通过。3062 call-based、1742 STDIN、196 IO 不可用；旧 AST 的 first-reference 静态候选2007不是已准入数。保留原 train，不下载1.29GB test，不发布原题/参考。公开聚合见 [完整源普查](reports/artifact-v3-apps-train-census-20261011.json)。
+
+Root 新增 `evals/verification/apps_v3/` 独立比较/worker/wrapper/source 所有者，原旧冻结文件/EXE不改。严格限定显式顶层 FunctionDef、首参考index0无fallback、原全部测试对连续调用；原数字字典转换/额外参数丢弃/expected[0]/有限tuple替代如实保留，无STDIN浮点容差。源码/IO策略拒绝、缺受限依赖/内置函数、类/别名/自定义比较为Unknown；实际初始化/调用异常分开。独立复核发现并修复4个边界，53项免费回归和Ruff通过，6.1 Sol最后复核记录 SHA `20a1e897038b7f55a5953bc53d85aac6cd46397bb72a7bf4a61702c1b99d2c55`。这仍是受限语言审查门禁，不宣称OS沙箱或完整APPS兼容。
+
+新完整源按新策略实际结构候选2004（相较静态2007，非有限JSON或比较资源限制等不适用）；Root一次执行首参考固定5秒，全真实测试对保留：**1972 passed /19 failed /13 Unknown**。13Unknown为3个不支持比较值、4个builtin shadow、6个缺受限内置函数。所有参考失败/Unknown不能作为模型负例，未换参考、未自动重试。全2004 source/first0/IO/code/receipt/pair/worker/runtime join实际重验通过，receipt hash集合 digest `869f4982d8987db7b31efcd8f4e71dd86bfe35a99e0cfc72d923abcbc3ea558e`。原main仍510/750，本阶段Jev仍222/750，新模型/Jev/预约0。公开 [筛选](reports/artifact-v3-apps-reference-screen-20261011.json)、[完整关联重验](reports/artifact-v3-apps-reference-recheck-20261011.json) 均保留source_admitted=0、认证false。
+
+下一步：完整历史原source/allocation/reserved集合核查、APPS组级重复聚类/历史排斥；参考通过1972不是独立准入数，不改变旧split，不创建正式cohort/标签。之后固定新模板/资源/协议及真实调用开发门禁，再讨论具体预算。现有main余240仍比新两阶段最低400短160，失败/Unknown/开发会增加需求；不自行突破750。生产off、阈值null、真实留出未开，整体目标仍active。具体 [新Oracle契约与后续闸口](docs/superpowers/plans/2026-10-11-jev-apps-oracle.md)。本节提交/推送仅以后续实际Git结果为准。
+
 ### 2026-10-11：固定 235 组采集与独立标注完成，负例不足，整体仍未完成
 
 网络恢复后，原固定队列235组全部终态：227有效正文、7正文无效、1transport_error，无请求重试、33个terminal批次。最终原始关联和独立断言为 **182 supported / 38 unsupported / 15 Unknown**，无未采集或unlabeled组；原正式门槛仍150正/50负，负例差12。原operator实际生成完整dataset后，正式registration因`independent group quotas not met`拒绝，未创建registration、未发本轮正式Jev、未打开留出。原失败/Unknown/费用不改变，不能把完整标签集冒充已认证阈值。

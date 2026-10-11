@@ -1,5 +1,13 @@
 # APPS source preflight — 2026-10-11
 
+## Superseding implementation status
+
+The full pinned train has now been acquired once and verified: 107101272 bytes, full SHA256 `45e82ef22ed8e7c0c04d881a21b923e9dd233157896b0b8d5b3493e887499cae`. All 5000 original rows were inventoried; 3062 call-based, 1742 STDIN, 196 unavailable IO. New `apps_v3/` owners implement the explicitly restricted top-level-function comparison/execution contract, with 53 passing local regressions and independent review. All old frozen owners and executables remain unchanged.
+
+Root's zero-model screening executed the first original reference exactly once for each of 2004 structurally eligible tasks: 1972 passed, 19 failed, 13 Unknown. The complete original source/receipt join was rechecked without re-execution. These are reference results, not model labels or independently admitted groups. Historical source exclusion, duplicate grouping, new protocol/template/resource freeze and paid intake remain required. No new model/Jev/reservation/split was created; current main510/750 and phase Jev222/750 are unchanged. Test download remains deferred.
+
+See [implemented Oracle and remaining gates](2026-10-11-jev-apps-oracle.md). The following sections preserve the earlier static-preflight evidence and proposal; their acquisition/execution counts apply to that historical preflight only.
+
 ## Actual status
 
 This is source inventory and static contract review, not collection preregistration or source admission. New model calls, Jev calls, reservations, remote-code execution, reference execution, candidate execution and dependency installations: **0**. No existing source/Oracle/EXE/cohort/split was changed. All new material lives beside this report.

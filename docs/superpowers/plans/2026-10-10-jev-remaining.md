@@ -6,7 +6,7 @@
 
 当前实际终态：新v2固定235组全部采集与独立标注完成，182正/38负/15Unknown，227有效正文/7正文无效/1transport；无重试、无未采集/unlabeled。原150/50门槛的负例差12，正式registration实际拒绝，正式Jev0、留出未打开、threshold null。累计main510/750余240（历史pending1保留），本阶段Jev222/750余528，历史27另累计。新22.15 MiB安全阶段包实际复制GUI/CLI/两评测入口及三模式lifecycle零费验收、279文件/全ZIP成员字节复验均通过；最终评测与整体认证尚未完成，不把阶段包或提交标成目标完成。
 
-下一独立迭代先免费扩源，不能挪旧holdout。APPS官方版本与镜像revision、小源码、格式片段和真实比较契约差异已静态核查，尚无已准入新组，也未全库验SHA或执行参考。参见 [具体source/Oracle/cohort实施方案](2026-10-11-jev-apps-source-next.md)。待完整源去重、reference准入、新Oracle语义/安全回归及资源支持检查完成后再冻结source/profile/cohort；之后才讨论不足的收费预算与新开发/正式调用。现有剩main240，不足新两阶段400理论最小量（最低缺160，Unknown与开发会增加需求），不自动收费或降低统计门槛。
+下一独立迭代先免费扩源，不能挪旧holdout。APPS完整107101272字节train已获取并与固定LFS SHA完全匹配，5000原行全部普查；新显式顶层函数Oracle及53项免费语义/隔离/结果完整性回归、独立复核通过。Root一次首参考筛选2004任务，1972参考通过/19不通过/13Unknown，完整原source/receipt关联已重验；已独立准入新组仍0，模型/Jev/预约0。参见 [具体source/Oracle/cohort实施方案](2026-10-11-jev-apps-source-next.md)、[新Oracle契约](2026-10-11-jev-apps-oracle.md)。下一步历史原source/allocation/reserved集合核查与组级去重排斥，再冻结source/profile/cohort及完整测试对资源/模板；之后才讨论不足的收费预算与新开发/正式调用。现有剩main240，不足新两阶段400理论最小量（最低缺160，Unknown与开发会增加需求），不自动收费或降低统计门槛。
 
 最新执行：正式校准前28次main为27有效/1正文空Unknown，首8独立标签为8 supported。首故障原响应全部16384输出token用于reasoning；原请求不重试。独立原始证据复核与V2 supervisor seal/8项拒绝测试后，继续固定235组中尚未发送的207组；实时请求以原台账为准。正式Jev0，留出未打开。新包工具由已有6.1 Sol开发，运行包验收在模型采集结束后由root执行。
 

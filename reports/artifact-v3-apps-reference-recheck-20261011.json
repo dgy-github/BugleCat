@@ -1,0 +1,31 @@
+{
+  "schema": "buglecat.verification.apps-reference-screen-join-recheck.v3",
+  "full_source_sha256": "45e82ef22ed8e7c0c04d881a21b923e9dd233157896b0b8d5b3493e887499cae",
+  "original_rows": 5000,
+  "actual_receipts_joined": 2004,
+  "actual_reference_results": {
+    "passed": 1972,
+    "unknown": 13,
+    "failed": 19
+  },
+  "receipt_hashes_digest": "869f4982d8987db7b31efcd8f4e71dd86bfe35a99e0cfc72d923abcbc3ea558e",
+  "source_graph_sha256": {
+    "worker": "7971cdb61d1289b5b0332b3c7740cadcd8abaec752d0c30f8e7168a563179d2e",
+    "comparison": "f3ea2f1f88bbdcc808868a713692b439503b7c87284c44615924a51139b5e753",
+    "ast_policy": "0468f0bd19e78f97661e3b2e3a679da83423e80f67dc8a219a6736931ee53bf2",
+    "wrapper": "7dc5ac0a9cb03f276eb58052309627d0b154ef18b26d3baf55b279e618501193",
+    "runtime": "a2a4eff8d0b0c845284c607d50a3b5b966ac5a3121736a2e38e165bd6644d9fe",
+    "source_owner": "e4d0468ca65f76a90290e5ac4bda6e2980335ad4e06cb82a79bccdcb0b401b9d",
+    "screen_operator": "c036c67fd4cf869e92a737c3b4fcda05b9409450fdde0dac30b43ddab2042414"
+  },
+  "screen_aggregate_sha256": "2bb14496273d20bd4ec2f633510c0600c2894a11bb0c503dfe1c6846ae5c19af",
+  "main_starts": 510,
+  "main_cap": 750,
+  "phase_jev_reservations": 222,
+  "phase_jev_cap": 750,
+  "model_calls": 0,
+  "jev_calls": 0,
+  "oracle_executions": 0,
+  "source_admitted_groups": 0,
+  "formal_certification": false
+}

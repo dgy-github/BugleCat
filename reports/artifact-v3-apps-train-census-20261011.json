@@ -1,0 +1,64 @@
+{
+  "schema": "buglecat.verification.apps-train-census.aggregate.v1",
+  "revision": "21e74ddf8de1a21436da12e3e653065c5213e9d1",
+  "full_source_bytes": 107101272,
+  "full_source_sha256": "45e82ef22ed8e7c0c04d881a21b923e9dd233157896b0b8d5b3493e887499cae",
+  "original_split": "train",
+  "actual_rows": 5000,
+  "call_modes": {
+    "stdin": 1742,
+    "call_based": 3062,
+    "unavailable_io": 196
+  },
+  "call_entry_point_kinds_across_references": {
+    "solution_method_only": 540,
+    "both_free_and_solution": 4,
+    "free_function_only": 2461,
+    "neither_matching_entry_point": 57
+  },
+  "call_schema_issues": {
+    "empty_pairs": 349,
+    "fn_name_not_public_identifier": 53
+  },
+  "all_schema_issues": {
+    "empty_pairs": 355,
+    "fn_name_not_public_identifier": 53,
+    "input_output_missing_or_empty": 195,
+    "input_output_json_parse_error": 1
+  },
+  "duplicate_raw_ids": 0,
+  "reference_strings_scanned": 117232,
+  "reference_ast_parse_failures": 2445,
+  "pair_stats": {
+    "stdin": {
+      "rows": 1742,
+      "total_pairs": 5065,
+      "min_pairs": 0,
+      "median_pairs": 1.0,
+      "max_pairs": 93
+    },
+    "call_based": {
+      "rows": 3062,
+      "total_pairs": 20744,
+      "min_pairs": 0,
+      "median_pairs": 4.0,
+      "max_pairs": 1440
+    }
+  },
+  "static_top_level_candidates_first_reference": 2007,
+  "static_top_level_candidates_any_reference": 2150,
+  "deduplicated_fresh_admitted_groups": null,
+  "reference_execution_count": 0,
+  "oracle_calls": 0,
+  "model_calls": 0,
+  "jev_calls": 0,
+  "reservations_created": 0,
+  "new_paid_calls": 0,
+  "semantic_compatibility_proven": false,
+  "formal_certification": false,
+  "recommend_test_download_now": false,
+  "next_gate": "new call-based Oracle conformance and deterministic train-only source admission before any candidates",
+  "census_raw_sha256": "01dfa2df415150a252f6593c7d6cdffc2dbbddceae38b33b3071dea7b8ea6fb5",
+  "census_recheck_raw_sha256": "dacedac3ba37eca1cce60219851d5443c4ac70a9e03eb69859f2b87346677158",
+  "artifact_hash": "0206c8e2070d85505b405e823ecc4bd9d2e5289e64ce0d509c79219f4482aa1c"
+}
