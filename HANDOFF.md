@@ -1,5 +1,25 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：正式 Jev 校准与一次留出开放离线验收完成，继续留出开发
+
+C4b 已推送 GitHub 并核对远端一致：`137888a3b4ddf9c53b4881c78f0c82537ac91a9c`。C4c 新增7个Python所有者、独立实际正式Jev工具及限定测试，现通过离线验收并冻结。**没有真实新STDIN模型样本；正式效果认证和一次新留出评测仍未完成。**
+
+6.1 Sol完成独立formal archive/originals/sender/transport/observations：同次fresh完整来源与原开发/全部400校准main、原代码span/Oracle、原blind登记和原请求重建，核实际完整SQL与固定binary Jev追加前缀。历史失败/pending、raw bytes和目录集合保留；不改旧所有者或旧EXE。原请求序号用于核对reservation前缀；同次每row原始join后统一merge新bindings，避免逐row重复解析整套原图，保留每row及最终闭包。
+
+Root完成formal_decision/holdout_opening：全固定binary原观察终态前不选阈值；失败保留分母，41网格和原150正/50负、误拦单侧95%上界≤2%、检错单侧95%下界≥50%不变。保存report不授权。合格校准必须fresh重建，固定400新留出未启动且两服务各400资金齐备，才可在实际共享锁/SQLite短事务create-new一次opening；已有或stranded marker拒绝重开，阈值冻结但尚不认证。
+
+限定测试分次记录：1 passed（889.97s，Initial whole400 archive diagnostic before formal200, explicit synthetic input）；70 passed（42.34s，Archive/prefix/temp transport and actual new EXE raw response gates）；53 passed（38.45s，Archive6+transport13+actualEXE33+one-merge1 necessary regression）；1 passed（555.25s，Reused400 inputs/full200 formal raw receipts/real Root guards/once opening/tamper rejection）；22 passed（7.2s，Root decision and once-opening policies with explicit fake observer temporary lifecycle）。新Rust例子5项、限定Ruff/Clippy/rustfmt通过。明确self-made Temp链包括完整400校准原main/Oracle/SQL、150正/50负/200Unknown、200原正式Jev终态（1个HTTP400保留分母）、真实新observer→Root决策→固定400一次opening。Root再次独立fresh读原记录和既有marker，重复开启拒绝，Temp及真实原账务均不变。它使用明确原source/旧generic main替身，标签和概率不计自然准确性；每action完整来源重建一次。
+
+实际正式工具 `7,099,392` bytes、SHA `c20513fcb3e9b8961e79a68ae55119bb6d4014419132f63a63b6ebf110a360b5`，225编译角色=current。Root复制后验证成功/HTTP400/取消原request/events/raw/receipt join和fixture live提前拒绝，9旧EXE/原213依赖图及完整真实834 main/229阶段Jev/pending1不变。revision1原复制证明SHA `54f1b8a9823b6fca6a8d9156a36398d49fd897d50ab1f71aa1518dfe9a7923e2`与旧225原输入/源码/EXE归档保留；最终revision2证明SHA `be08a521ede4c50466a29c0a6255397781441a9230df22509a48be056f700012`、Root完整Temp重读SHA `bcb921836af37ff3c1bd70894b890ae8ad1d7e1b96af57eccda415fc501d3cc9`。
+
+公开[正式校准离线验收聚合](reports/artifact-v3-apps-stdin-formal-offline-20261012.json) SHA `18a9e85618e7d51f966c0b6cad94e5d02d863f9f903008a5a9118ef9f1901d14`；Sol最终实施证明SHA `bdeb887d0d3f16e6725890acf327218ae888eb03b103e66e0d7c7c22e7c9d9af`。Root已冻结formal_decision SHA `c7d573d02d061e9891e73f8fb928372b037e940f08d5a9aa31af10d235e32c66`、holdout_opening SHA `e94c09619403dd9512bc250430cceef98704aabcab713b8cffa03a418e122982`；后续留出追加前缀由独立新owner认证，不对actual current裁账再调旧仅pre-holdout reader。
+
+性能边界：合成全链多次fresh证明共555.25s；Root独立3动作重读251.93s。多层完整raw/目录/SQL闭包仍有成本，未测试真实C1或生产吞吐，不将合成耗时当自然评测速度。
+
+**下一步仍免费开发：**独立holdout原archive/完整main与Jev追加前缀、实际main collector、完整808独立标签、全400终态/配额后盲登记、原始Jev发送/观察、冻结阈值最终一次消费。Root三草案holdout_terminal/registration/evaluation的32项纯政策测试分次通过（13/1.55s、6/0.95s、13/2.79s），完整原intake/observer尚待实现与联调；这些草案未冻结/未纳入本次C4c公开提交。原固定阈值只用protocol.numbers，留出不得重新选阈值，最终限定STDIN认证与通用声明/生产/整体agent收益分开。
+
+本轮真实新增收费/候选Oracle/授权/cohort/marker均0。原预算仍main834/1150余316、阶段Jev229/861余632；拟新增main492/Jev176未批准。生产off、threshold=null。新STDIN运行包脚本已准备，实际复制GUI/CLI与工具、全部ZIP字节验收尚待执行；旧27.71MiB包没有STDIN工具。
+
 ### 2026-10-12：固定400校准采集、独立标签和原盲登记离线验收完成
 
 C4a已实际提交、推送且远端核对一致：`9805ff0f91ac8a4c678f1ad3dc357456cfc4146b`。C4b新增5个Python所有者与独立Rust校准main工具，现已通过限定验收并冻结；**自然400组尚未采集，正式Jev、阈值认证、一次新留出和新运行包仍未完成。**

@@ -185,3 +185,14 @@ C4c由既有6.1 Sol实现新的formal archive/originals/sender/transport/observa
 observer.proof提供同次ephemeral `{pack,observations,directories,evidence,bindings}`，close再次核原source/loaded图、真实SQL/raw账务和全部dev/cal/formal目录集合bytes。Root只在真实原binary观察全终态且源与原标签认证后复用冻结protocol.calibrate_numbers；保存decision不授权。正式门槛通过后，独立opening重验decision/actual proof，在同一真实共享锁和main SQL短事务create-new固定400留出marker，并保存固定阈值及完整原证据；不能以纯数值、caller布尔或自签封存件打开留出。后续留出工具再独立重建archive/实际追加前缀，保持一次消费语义。
 
 本轮只做免费开发、临时fixture和复制工具验收；没有真实新授权/cohort/marker/主模型/Jev/候选Oracle，不补自然样本。原上限main1150/Jev861仍适用，拟新增main492/Jev176未批准，formalcert=false/productionoff/thresholdnull。实际新包交付尚待全offline校准→一次留出闭包与runtime复制验收，不能把旧27.71MiB包称已包含STDIN。
+
+
+### C4c完成记录与C4d实现边界（2026-10-12）
+
+独立正式Jev原档案、实际完整共享账务固定binary追加前缀、225角色实际sender/transport/observer、Root全终态阈值门槛及一次固定400留出opening均完成离线验收并冻结。聚合SHA `18a9e85618e7d51f966c0b6cad94e5d02d863f9f903008a5a9118ef9f1901d14`；实际EXE SHA `c20513fcb3e9b8961e79a68ae55119bb6d4014419132f63a63b6ebf110a360b5`、7,099,392 bytes。分次pytest记录见聚合，Rust5/Ruff/Clippy/rustfmt通过；Root复制revision2与完整400/200合成档案再读闭包证明完整原费用834/229/pending1不变，真实新收费0。
+
+C4d复用同次已认证formal_archive纯原始kernel和packet context，新独立holdout_originals/collection/intake核真正扩大后的actual current；原calibration/formal proof不允许holdout main追加，不能裁当前再调用。重建Root一次opening时必须关联完整原calibration labels/raw transports与固定阈值、原case名单/source/owner/native图。只有原400新holdout按固定顺序采集，failed/pending/stranded保留，候选Oracle一次，full808前408原历史outcome不改。Root终态只计新holdout配额，Unknown不当负例；全400终态和150/50满足才盲登记，固定阈值不从留出标签调节。
+
+新holdout Jev scorer独立重建原main/Oracle/盲登记和actual新增slots，不能调用仅before-first-score旧proof并伪装零JeV。observer全原binary终态后，Root holdout_evaluation仅调用protocol.numbers的已冻结阈值；固定shared stdin-holdout-evaluations/{cohort_hash}.json既是结果也是一次消费marker，已有/stranded不得重跑，numeric失败亦不能改阈值或换组。只有限定STDIN原顺序空白token断言scope可认证，通用cert/prod/native claim/overall agent benefit仍false。
+
+Root未来三owner纯政策32项分次通过，真实intake/observer与新actual工具接口尚待6.1 Sol实现及联合验收，暂不冻结、不计C4c已完成源码。新包脚本保持默认off/null，实际copy四STDIN工具及GUI/CLI本地fixture/生命周期和ZIP全成员hash验收，原keys/books/questions/code/raw responses/browser cache不入ZIP。用户最新选择仅免费验证；不创建新第五收费授权，完成可审查离线交付后才提出具体费用扩展，main492/JeV176尚未批准，不能保证自然负例配额或统计门槛通过。
