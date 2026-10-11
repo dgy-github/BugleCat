@@ -1,3 +1,32 @@
 # Unified diffs are replayable evidence; preserve bytes and context-only spaces.
 evals/self_repair/*.patch -text -whitespace
 evals/self_repair/results/**/*.patch -text -whitespace
+# New frozen verification inputs must keep their authenticated bytes on checkout.
+evals/verification/data/mbpp/mbpp-full-f82046ba5aabbbb427dbfd38a254d26bff08b533.jsonl -text
+evals/verification/data/mbpp/mbpp-expanded-20261011-v2.json -text
+evals/verification/reports/artifact_expanded_mbpp_catalog_20261011_v2.json -text
+evals/verification/reports/jev_budget_extension_20261011_100.json -text
+evals/verification/artifact_cohort.py -text
+evals/verification/budget_authorization.py -text
+evals/verification/extended_mbpp.py -text
+rust/crates/ncx-core/examples/verification_artifact_collect.rs -text
+rust/crates/ncx-core/examples/verification_artifact_collect/*.rs -text
+rust/crates/ncx-core/examples/verification_artifact_formal.rs -text
+rust/crates/ncx-core/examples/verification_artifact_formal/*.rs -text
+evals/verification/artifact_profile_cohort.py -text
+rust/crates/ncx-core/examples/verification_artifact_profile_collect.rs -text
+rust/crates/ncx-core/examples/verification_artifact_profile_collect/*.rs -text
+rust/crates/ncx-core/examples/verification_artifact_profile_formal.rs -text
+rust/crates/ncx-core/examples/verification_artifact_profile_formal/*.rs -text
+evals/verification/artifact_formal.py -text
+evals/verification/artifact_formal_intake.py -text
+evals/verification/artifact_formal_observations.py -text
+evals/verification/artifact_gate.py -text
+evals/verification/artifact_holdout.py -text
+evals/verification/artifact_holdout_transport_guard.py -text
+evals/verification/source_bindings.py -text
+rust/crates/ncx-core/examples/verification_artifact_holdout_collect.rs -text
+rust/crates/ncx-core/examples/verification_artifact_holdout_collect/*.rs -text
+rust/crates/ncx-core/examples/verification_artifact_holdout_formal.rs -text
+rust/crates/ncx-core/examples/verification_artifact_holdout_formal/*.rs -text
+rust/crates/ncx-core/examples/verification_artifact_holdout/*.rs -text

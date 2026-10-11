@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from evals.verification import source_bindings
 from evals.verification.calibration import digest
 from evals.verification.collection_manifest import file_hash
 from evals.verification.public_benchmark import catalog
@@ -93,3 +94,92 @@ def test_resource_adjustment_bound_to_nested_actual_cohort(tmp_path):
     original["resource_cohort"]["cohort_id"] = "other"
     with pytest.raises(ValueError, match="resource cohort mismatch"):
         bind_prepared(manifest, original)
+
+
+@pytest.mark.parametrize("name", ["source", "catalog", "protocol", "authorization"])
+def test_transaction_cache_rehashes_every_bound_file_on_hit(tmp_path, name):
+    manifest, paths = frozen(tmp_path)
+    with source_bindings.verified_sources():
+        verify_manifest(manifest)
+        paths[name].write_bytes(paths[name].read_bytes() + b" ")
+        with pytest.raises(ValueError, match="binding changed"):
+            verify_manifest(manifest)
+
+
+def test_transaction_is_nested_bounded_and_results_are_not_shared(tmp_path, monkeypatch):
+    manifest, _ = frozen(tmp_path)
+    original = source_bindings._verify_manifest
+    calls = []
+    def reconstruct(value):
+        calls.append(True)
+        return original(value)
+    monkeypatch.setattr(source_bindings, "_verify_manifest", reconstruct)
+    with source_bindings.verified_sources():
+        tasks, bindings = verify_manifest(manifest)
+        tasks[1]["code"] = "tampered"
+        bindings.clear()
+        with source_bindings.verified_sources():
+            restored, original_bindings = verify_manifest(manifest)
+        assert restored[1]["code"] == "def f(n): return n * 2"
+        assert len(original_bindings) == 4 and len(calls) == 1
+    with source_bindings.verified_sources():
+        verify_manifest(manifest)
+    assert len(calls) == 2
+    verify_manifest(manifest)
+    assert len(calls) == 3
+
+
+def test_exception_ends_transaction_and_changed_cases_need_full_proof(tmp_path):
+    manifest, _ = frozen(tmp_path)
+    with pytest.raises(RuntimeError):
+        with source_bindings.verified_sources():
+            verify_manifest(manifest)
+            raise RuntimeError("operation interrupted")
+    assert source_bindings._TRANSACTION.get() is None
+    with source_bindings.verified_sources():
+        verify_manifest(manifest)
+        manifest["cases"][0]["public_interface"] = ["def foreign(n):"]
+        with pytest.raises(ValueError, match="interface mismatch"):
+            verify_manifest(manifest)
+
+
+def test_source_transaction_does_not_share_cache_across_threads(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+    manifest, _ = frozen(tmp_path)
+    original = source_bindings._verify_manifest
+    lock, barrier, calls = Lock(), Barrier(2), []
+    def reconstruct(value):
+        with lock:
+            calls.append(True)
+        return original(value)
+    monkeypatch.setattr(source_bindings, "_verify_manifest", reconstruct)
+    @source_bindings.source_transaction
+    def operation():
+        barrier.wait(timeout=5)
+        verify_manifest(manifest)
+        verify_manifest(manifest)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = [executor.submit(operation) for _ in range(2)]
+        for result in results:
+            result.result(timeout=10)
+    assert len(calls) == 2 and source_bindings._TRANSACTION.get() is None
+
+
+def test_shared_catalog_proof_still_checks_each_distinct_manifest(tmp_path, monkeypatch):
+    manifest, _ = frozen(tmp_path)
+    original = source_bindings.catalog
+    calls = []
+    def reconstruct(*args):
+        calls.append(True)
+        return original(*args)
+    monkeypatch.setattr(source_bindings, "catalog", reconstruct)
+    with source_bindings.verified_sources():
+        verify_manifest(manifest)
+        other = {**manifest, "batch_id": "independent-next-batch"}
+        verify_manifest(other)
+        assert len(calls) == 1
+        other["cases"] = [{**manifest["cases"][0], "group_id": "foreign"}]
+        with pytest.raises(ValueError, match="split/group mismatch"):
+            verify_manifest(other)
+        assert len(calls) == 1

@@ -4,22 +4,21 @@ A reserved group cannot be retried, even after interruption. Reservations are
 not a claim that HTTP happened: actual attempts come from transport receipts.
 """
 
-import hashlib
 import json
 import os
 from pathlib import Path
 
+from .budget_authorization import resolve
 from .calibration import digest, load, require
 
 
 def reserve(authorization, kind, group, request_hash):
     require(kind in {"jev", "main_model"}, "unknown paid service")
     auth_path = Path(authorization).resolve()
-    auth_bytes = auth_path.read_bytes()
-    auth_hash = hashlib.sha256(auth_bytes).hexdigest()
-    auth = load(auth_path)
+    chain = resolve(auth_path)
+    auth_hash = chain["current_sha256"]
+    auth = chain["authorization"]
     settings = auth[kind]
-    require(settings["max_attempts"] == 400 and auth["automatic_retries"] == 0, "unsupported authorization")
     require(isinstance(group, str) and bool(group), "missing group")
     require(isinstance(request_hash, str) and len(request_hash) == 64
             and all(c in "0123456789abcdef" for c in request_hash), "invalid request hash")
@@ -34,9 +33,9 @@ def reserve(authorization, kind, group, request_hash):
         os.fsync(descriptor)
         metadata = root / "authorization.json"
         if metadata.exists():
-            require(load(metadata)["authorization_sha256"] == auth_hash, "authorization changed")
+            require(load(metadata)["authorization_sha256"] == chain["ledger_authorization_sha256"], "authorization changed")
         else:
-            durable_new(metadata, {"authorization_sha256": auth_hash, "kind": kind})
+            durable_new(metadata, {"authorization_sha256": chain["ledger_authorization_sha256"], "kind": kind})
         reservations = root / "reservations"
         reservations.mkdir(exist_ok=True)
         existing = list(reservations.glob("*.json"))

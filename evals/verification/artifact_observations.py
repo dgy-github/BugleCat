@@ -23,10 +23,10 @@ def raw_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def frozen_row(row):
+def frozen_row(row, expected_split="development"):
     sealed(row, "artifact_sha256")
     require(row["policy_version"] == POLICY and row["template_version"] == TEMPLATE
-            and row["split"] == "development", "artifact track/version mismatch")
+            and row["split"] == expected_split, "artifact track/version mismatch")
     for field in ("source", "collection_manifest", "main_receipt", "oracle_receipt", "protocol", "authorization"):
         require(raw_hash(row[f"{field}_file"]) == row[f"{field}_sha256"], "frozen artifact file changed")
     manifest = load(row["collection_manifest_file"])

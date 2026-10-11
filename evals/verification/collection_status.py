@@ -6,24 +6,24 @@ import json
 import sqlite3
 from pathlib import Path
 
+from .budget_authorization import resolve
 from .calibration import create, load, require
 
 
 def status(authorization, directories):
-    auth = load(authorization)
+    chain = resolve(authorization)
+    auth = chain["authorization"]
     cap = auth["main_model"]["max_attempts"]
-    require(type(cap) is int and cap == 400 and auth["automatic_retries"] == 0, "unsupported authorization")
-    auth_hash = hashlib.sha256(Path(authorization).read_bytes()).hexdigest()
     ledger = Path(auth["main_model"]["ledger_dir"]) / "main-attempts.sqlite3"
     with sqlite3.connect(ledger.resolve().as_uri() + "?mode=ro", uri=True) as connection:
         metadata = dict(connection.execute("SELECT key,value FROM metadata"))
         attempts = list(connection.execute("SELECT ordinal,group_id,started_json,finished_json FROM attempts ORDER BY ordinal"))
-    require(metadata.get("authorization_sha256") == auth_hash, "ledger authorization mismatch")
+    require(metadata.get("authorization_sha256") == chain["ledger_authorization_sha256"], "ledger authorization mismatch")
     require(len(attempts) <= cap, "global attempt budget exceeded")
     indexed = {ordinal: (group, json.loads(start), json.loads(end) if end is not None else None)
                for ordinal, group, start, end in attempts}
     for group, start, _ in indexed.values():
-        require(start["group_id"] == group and start["authorization_sha256"] == auth_hash, "ledger start binding mismatch")
+        require(start["group_id"] == group and start["authorization_sha256"] in chain["allowed_sha256"], "ledger start binding mismatch")
     receipts, response_usage = [], []
     seen = set()
     for directory in directories:

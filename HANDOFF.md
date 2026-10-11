@@ -1,5 +1,41 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-10-11：high 配置已封存并开始正式来源采集（当前进度）
+
+用户批准追加各100次，本阶段主模型/Jev上限各500；失败与历史启动仍计数、每组一次、无自动重试。新独立profile `deepseek-flash-high-16384-120-v1` 已在请求前冻结（profile rawSHA e0044b9de9e61ca55358a5081eba27a85c352f17ef3d74afa8ba028bc9064427），新cohort canonical `3b7407279f3ee8c00c75a0e0ca92af9a5098f63fad8b0cbf3642dfd9055d3549`；265个新校准组、保留至少200次main供一次留出。旧35已启动组排斥，旧ultra候选不混新分母。新main实际exe SHA `ae6d0cf59375fae0e31008eb9d384ce60a2364f4c28f30ed3d762cf0c7148b39`，提示词和冻结断言保持原样。
+
+快照 2026-10-11T01:59:08.150907+00:00：全局main 107启动/105完成/剩393；Jev本阶段1/剩499。已完成批次独立标签 47 supported、14 unsupported、3 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。Jev没有读取新样本概率；未达150正/50负不登记正式预测、不打开留出。连续同类故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
+
+6.1-Sol已完成并冻结新profile正式Jev入口和独立holdout main/Jev入口；旧发送器/exe/源原hash保留。Root新增compiled main/原始事件/SQLite finish重验、完整实际启动分母检查、新profile source dispatch；留出结果可重新从原始一次消费证据计算。原始来源证明在单次事务内复用，复用时重新校验源文件字节；不缓存标签、台账或概率。Python verification全量348 passed，另一次实际main/profile-Jev/holdout二进制复核58 passed；后续仅拆分可移植测试，未改变已冻结发送源。认证仅可限定冻结MBPP产物轨道，整体agent准确性与生产仍未认证。正式阈值null，实际留出未打开，生产false。新打包脚本已实现但尚未运行；最新运行包仍为此前v3.3，不含后续工具。GitHub阶段提交和最终交付分别记录，不把代码完成当作评测完成。
+
+## 2026-10-11：ultra 输出资源耗尽已定位，纠正配置入口开发中（覆盖下方采集中状态）
+
+前三批新main实际23启动/18有效；独立14 supported、5 unsupported、4已启动无效Unknown，另1组仅prepare未发。连续两条无效触发自动停止，当前无收费采集进程。四条无效的原始raw均 `finish_reason=length`、8192 completion全为reasoning、content为空；原始收费/失败保留且不重试。[资源诊断](reports/artifact-main-resource-diagnostic-20261011.md)。全局main35启动/34完成/剩465（旧暂停1未完成费用未知），Jev本阶段1开发调用/剩499，正式Jev未开始。
+
+将建立独立新resource profile：deepseek-flash/high/16384/120秒/0重试，保留原SYSTEM/user模板、Oracle和150正/50负统计门槛；旧ultra候选不混新配置正式分母，旧35已启动组全排斥。新profile在新main请求前封存，5个旧实际exe/源保持原hash；共享参数化collector/validator由6.1-Sol零HTTP开发，离线及原始来源join通过后root再开始小批。追加500上限不变，最多265新cal组且预留至少200hold；不保证足量自然正负例。
+
+留出零网络门禁已实现：原始校准/compiled runner/概率收据复核、全calibration allocation组互斥、锁阈值、按共享ledger固定marker一次消费，失败也不能重开。root独立26相关测试通过（19新增）。当前没有真实合格校准，真实holdout从未打开；现有旧发送入口只接受calibration，不能把mock成功路径当真实评测。正式阈值null、生产false、v3.3运行包仍未包含后续工具。用户要求项目完成后提交GitHub仍在执行中。
+
+## 2026-10-11：正式采集首两批已独立标注（当前执行中）
+
+追加授权上限为主模型/Jev各500次，旧调用和失败继续计数，无自动重试。正式source cohort在新主模型请求前冻结，独立collector实际exe SHA `b35f1f21d4c4aaaedd781bcf4e62fb2b32f6262976bf8016a3c03ddd533f9ef8`；原三个收费exe保持不变。前两批共16次新main请求，14个有效回答；独立冻结断言标注得到10 supported、4 unsupported、2 unknown。原始SQLite start、实际请求hash、原响应bytes、compiled source/exe及cohort raw/canonical hash独立join通过。unknown不改成正负标签，不重试。
+
+当前主模型全局28启动/27完成/剩472，旧暂停遗留1次未完成的费用仍未知；Jev本阶段仍只1次开发调用/剩499，正式Jev尚未启动。接下来按预登记顺序逐批最多8组采集，源参考先做环境准入，保留至少200主模型额度给留出；达到150 supported/50 unsupported才冻结正式预测前标签登记。每组仅一次，provider故障或取消停止后续批，最多288校准源组，不自动扩大预算。Jev概率不参与标签或源顺序选择。
+
+正式Jev独立入口 `verification_artifact_formal` 已实现零费门禁和原始transport记录；12个实际二进制离线测试通过，不足配额/旧development升级/授权错配均在HTTP前拒绝。root观察适配器继续核对注册raw/canonical hash、共享reservation序号与各编译helper源hash。Python verification全套 **253 passed**。正式阈值仍null，留出未开启，生产false；holdout门禁继续由6.1-Sol零HTTP开发。运行包仍是此前封存v3.3，后续sidecar尚未包含；本节不是最终交付或评测认证。
+
+## 2026-10-11：追加授权与正式来源扩充（当前，继续开发）
+
+用户已批准“各追加最多100次”：新增主模型/Jev本阶段上限各500，原400授权、SQLite原metadata和既有start/reservation均保留。新不可变授权 `evals/verification/reports/jev_budget_extension_20261011_100.json` rawSHA `11749a365bb3943fabccae8bc7eefdcdea685353508ae5427bba4e00ae3200e2` 绑定旧授权原hash、相同ledger根、无重试、每group一次。`budget_authorization.resolve` 验原链，旧账仍计入；主模型剩488、Jev剩499，未新增调用。追加授权本身不认证阈值，不开启生产。
+
+已从Google Research同冻结commit获取完整官方MBPP `mbpp.jsonl`（563743B/rawSHA `ccf64ceae9c5403bf50a044cb6d505bfd2a2963ee58338ba268fd65beab92a9f`）。`extended_mbpp.py` 从原sanitized+完整官方数据精确重建扩来源；旧427task的group/split不变，排斥旧ID/旧规范化solution/旧prompt和静态Oracle不支持项，新508task按独立固定seed分组。当前使用v2：`data/mbpp/mbpp-expanded-20261011-v2.json`、`reports/artifact_expanded_mbpp_catalog_20261011_v2.json`；935task/907group，新可用441cal/454hold。source registry真实检查无blockers，但真实正负标签尚未知。v1是此前构建的未注册源草稿，不用于采集。
+
+正式cohort/intake/校准入口开发中：`artifact_cohort.py` 预登记源码/Oracle/源split/group/授权链和SQLite逻辑快照；`artifact_formal_intake.py` 只接受实际start已有cohort raw/canonical hash的原candidate，再独立断言；旧104实际start缺绑定的升级请求被回归拒绝。`artifact_formal.py` 登记要求独立150正/50负且无概率，`artifact_gate.py` 与开发评分共用CI，数值合格只限定为待新留出的阈值，不认证生产。仍未有正式候选/正式Jev/留出结果。新正式main collector正在由6.1-Sol实现，三个旧paid exe和其来源保留。当前Python verification225 passed，新增授权链/扩来源7项及formal拒绝3项通过；未把代码夹具当真实评测样本。
+
+新正式来源已在主模型请求前独占注册：`reports/artifact-formal-cohort-expanded-20261011-v1.json` canonical `9e8528f164e5df4f7515fa6afac69c48ebb8fe882204479bdfd10496dbad327f`，登记288个新cal组、至少预留200 main/Jev给一次holdout，固定主模型deepseek-flash/ultra/8192/60秒/0重试与原SYSTEM hash，source/cat/auth/Oracle代码binding已封存。尚未有新收费，root不改绑定的Python源码或旧prompt。
+
+已完成GitHub阶段提交 `bad768b6b649dcc2fb52eb903bc87daf124a7b1e`（分支 `feat/context-association-memory`，远端ls-remote复核一致），包括v3.3修复、开发artifact sidecar与安全报告。当前追加授权/正式来源代码继续开发尚未全部提交；项目目标仍未完成，不标complete。最终仍需真实新候选、标签配额、Jev校准、一次留出与包含后续工具的最新运行包，之后再次提交GitHub。
+
 ## 2026-10-11：artifact sidecar 打通真实请求（覆盖下方进行中与账务）
 
 用户选择的代码产物轨道已实现开发入口：固定单NOUL问题、预测前注册、独立原始来源和Oracle绑定、共享付费预算、不可重复启动marker、原始request/response bytes与compiled source/exe收据。实际二进制12项回归通过；根独立validate与fake原bytes join通过，然后预算内只做1次预注册开发smoke104，无重试。实际Jev `jev-1.13.0`、1085ms、655/25 tokens、违例概率0.12；原始收据独立join通过。新模块成功/取消前/失败raw/usage篡改回归通过；全套Python verification **190 passed**。[真实开发报告](reports/artifact-development-smoke-20261011.md)。
