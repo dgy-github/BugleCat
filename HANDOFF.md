@@ -1,5 +1,15 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：用户选定STDIN自然产物轨道，免费静态预检完成
+
+用户明确选择“扩展APPS标准输入轨道，继续评估主模型自然产物”。此选择不启动新收费请求。既有6.1 Sol只读完成来源普查：1734个新整组最早STDIN代表（1241 interview/360 competition/133 introductory），1728组完整文本IO共5057对；6组空或不等长，4组IO自身超过48KiB。首参考均有原index0，1730可解析AST。已知旧历史、开发8组、正式632组和实际收费启动/预约整组排斥；这不证明语义完全独立、无训练污染、可执行准入或自然负例充足。
+
+原train及2627个source/owner绑定、834 main/229阶段Jev元数据前后未变；未读候选标签或Jev概率，真实参考/候选/Oracle/模型/Jev/预约0。Root复验私有报告raw SHA `af66f7e32c8faa771296616f59d56bc97407682234b58387c61bd75c194c897b`及9个当前核心源字节，发布[脱敏静态聚合](reports/artifact-v3-apps-stdin-static-preflight-20261012.json)，SHA `5ae95fa249499918b28ba09999533a70bc62b7ad24bd7bceabe9f2de51b28437`。
+
+新[开发契约与详细计划](docs/superpowers/plans/2026-10-12-jev-apps-stdin-v1.md)已记录：先实现input()/print()受限脚本原型，每对fresh child，完整原IO、明确EOF与资源Unknown，固定有序空白token比较；不默认兼容官方函数重写/浮点/无序容差。6.1 Sol正在新增独立模块和自制fixture测试，尚未完成原型验收；禁止改旧冻结owner/EXE或运行真实APPS参考。A阶段通过后才冻结新来源准入图并安排B阶段本地首参考单次验证，随后制定全新校准/留出名单、packet和预算方案。主模型余316不足两阶段理论最低400；当前没有新增收费预算或准入。
+
+旧316及原未开留出封存，25负例不足50的终态保持；原27.71MiB开发运行ZIP已验收，新STDIN原型尚未进入运行包。生产off、阈值null，整体目标active。下方记录为此前各阶段事实，当前新轨道进度以本节及实际新测试/收据为准。
+
 ### 2026-10-12：全316独立标注完成，配额不足终态与新运行包已验收
 
 **真实固定校准316/316已全部终态：263 supported /25 unsupported /28 Unknown，未发送0、校准pending0。** main297 ok/12 response_content_invalid/7 transport_error；每组一次、无收费重试，原历史main pending1保留。全部原request/session/event/receipt/候选/Oracle/源码及实际编译图已由原终态所有者只读重验，零Oracle重执行。final dataset raw SHA `5623b67151d30e6a6346c2fcd05987446639653a867d7095ac443b9c1ef32af2`；真实终态 raw SHA `7d657e86938f19f0966060fb01970c48301c50d9ac69ae2b3aa517748f2cd279`，body hash `df8a9500e100a719ab9ca2c73f49e512e2722d0df80fd2857cc413be9bccb899`；[公开终态聚合](reports/artifact-v3-apps-formal-main-terminal-20261012.json)。
