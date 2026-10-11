@@ -31,4 +31,10 @@ Root 实际生成两份零费用来源提案；均未读取正式候选标签或
 
 ## 当前未完成项
 
-实际新授权桥接、原来源重建、正式cohort与首8零HTTP prepare/intake已通过，首8正式calibration主模型采集已启动。新main实现180项Python/10项Rust及构建检查通过，真实EXE与完整owner图一致；其付费所有者与EXE冻结。全校准独立标注、真实登记、Jev校准、留出opening/consumption与最终新运行包仍待完成。注册事务15项隔离回归通过，Jev及留出新入口继续开发。生产off、正式阈值null、真实留出未打开，整体目标active。旧安全ZIP不包含本次APPS新工具。
+离线正式Jev/一次留出管线已完成：九新Python所有者、三个new-only EXE、220相关回归/构建/静态检查通过，归档与实际编译源码一致。Root修复独立审查复现的复制EXE投射漂移和ZIP后费用闭包，登记23/终态13/打包11回归通过，并实跑四工具复制后的纯fake入口。公开证明 `reports/artifact-v3-apps-offline-tools-20261011.json`；源码/EXE此后保持封存，不改任何原付费main图。受控fixture的200 slot E2E不等于真实效果认证。第18批终态100已采集/216未发送、83正/5负/12Unknown，实际队列继续；真实Jev/留出/新整包仍待下列原门槛。以下73组快照为先前记录。
+
+实际新授权桥接、原来源重建、正式cohort与首8零HTTP prepare/intake已通过；固定316队列继续采集。第13批终态73已采集/243未发送、61 supported/2 unsupported/10 Unknown，main591/1150、阶段Jev229/861；这是采集中快照，不是正式终态。5正文无效、2transport保留Unknown、不重试；3有效正文的Unknown经Root只读AST复核，分别使用受限array/sys导入及global，保持原Unknown，不修改候选、worker或标签。新main实现180项Python/10项Rust及构建检查通过，真实EXE与完整owner图一致；其付费所有者与EXE冻结。
+
+Root注册事务23项回归覆盖原全数据、证据集合与预算在intake前后变化、证明结束后变化仍被原捕获SHA拒绝；终态工具13回归、打包门禁9回归，共45项/Ruff通过。实际复制四个APPS校准/留出主模型与Jev EXE并调用其offline-success入口，编译源图/EXE原字节匹配，真实收费0；尚未实际stage运行包。Jev校准及一次留出新入口正完成原字节闭包、全allocation、blind registration、固定阈值消费和临时账本fake E2E，离线fixture不能作效果认证。
+
+先完成316原终态/独立标注，再按原150正/50负决定实际登记；不足即保留真实不足报告，正式Jev与留出不启动。配额足够才实际校准，通过原41点网格和误拦/检出要求后才打开原一次留出。最终认证只覆盖冻结APPS顺序断言，通用声明阈值和整体agent收益仍无证书，生产默认off。全校准、真实登记、Jev校准、留出opening/consumption与最终新运行包仍待完成。GitHub上次源码检查点`dc4ac30288c1b0f3e5b318f20b7c41a07f603cb2`已实际推送；新代码与终态后续按明确公开路径提交。旧安全ZIP不包含本次APPS新工具，整体目标active。

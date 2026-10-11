@@ -22,6 +22,7 @@ def _same(left, right):
 
 
 def _originals(dataset_file):
+    dataset_sha = file_hash(dataset_file)
     data = sealed(load(dataset_file))
     require(data['schema'] == formal_intake.SCHEMA and data['split'] == 'calibration'
             and all(data[k] is False for k in ('formal_registration', 'holdout_opened',
@@ -29,9 +30,20 @@ def _originals(dataset_file):
             and data['certified_threshold'] is None and data['scores_hidden'] is True
             and data['jev_probabilities_read'] is False, 'prediction_blind_original_dataset_required')
     directories = [row['directory'] for row in data['collection_bindings']]
+    before_cohort = sealed(load(data['cohort_file']))
+    evidence = _evidence_bindings(data, before_cohort)
+    authorization = next(b['file'] for b in before_cohort['bindings'] if b['role'] == 'authorization')
+    before_budget = formal_collection.budget_snapshot(authorization)
     actual = formal_intake.collect(data['cohort_file'], directories, data['collector_executable_file'])
     require(_same(actual, data), 'complete_original_main_and_oracle_dataset_changed')
-    cohort = formal_collection.validate_cohort(data['cohort_file'])
+    # collect has just verified the entire original source, owner, ledger and
+    # runtime graph. Rejoin those exact cohort bytes, rather than repeat that
+    # same full source transaction; a saved dataset alone never reaches here.
+    cohort = sealed(load(data['cohort_file']))
+    require(file_hash(data['cohort_file']) == data['cohort_sha256']
+            and cohort['artifact_hash'] == data['cohort_hash']
+            and all(file_hash(b['file']) == b['sha256'] for b in cohort['bindings']),
+            'actual_intake_cohort_bytes_or_graph_changed')
     fixed = [c for c in cohort['cases'] if c['split'] == 'calibration']
     require(len(data['cases']) == len(fixed) == data['allocated_groups'] == data['collected_groups']
             and data['uncollected_groups'] == data['pending_groups'] == 0,
@@ -49,7 +61,11 @@ def _originals(dataset_file):
     authorization = next(b['file'] for b in cohort['bindings'] if b['role'] == 'authorization')
     baseline, finished = formal_collection.budget_snapshot(authorization)
     require(all(finished.get(c['group_id']) is not None for c in fixed), 'original_main_finish_required')
-    return data, cohort, binary, counts, baseline
+    require(file_hash(dataset_file) == dataset_sha and _same(cohort, before_cohort)
+            and _same(evidence, _evidence_bindings(data, cohort))
+            and _same(before_budget, (baseline, finished)),
+            'original_registration_bytes_or_budget_changed_during_intake')
+    return data, cohort, binary, counts, baseline, evidence, dataset_sha
 
 
 def _owner_bindings():
@@ -77,7 +93,7 @@ def _evidence_bindings(data, cohort):
 
 def registration_value(dataset_file):
     """Pure pre-Jev construction; returned data alone grants no authority."""
-    data, cohort, binary, counts, baseline = _originals(dataset_file)
+    data, cohort, binary, counts, baseline, evidence, dataset_sha = _originals(dataset_file)
     groups = {row['group_id'] for row in data['cases']}
     require(not groups & {row['group_id'] for row in baseline['jev_reservations']},
             'allocation_jev_reservation_before_registration')
@@ -85,7 +101,7 @@ def registration_value(dataset_file):
     marker = root / NAMESPACE / (cohort['artifact_hash'] + '.json')
     require(not marker.exists(), 'formal_registration_already_consumed')
     body = {'schema': SCHEMA, 'split': 'calibration',
-            'dataset_file': str(Path(dataset_file).resolve(strict=True)), 'dataset_sha256': file_hash(dataset_file),
+            'dataset_file': str(Path(dataset_file).resolve(strict=True)), 'dataset_sha256': dataset_sha,
             'dataset_hash': data['artifact_hash'], 'cohort_file': data['cohort_file'],
             'cohort_sha256': data['cohort_sha256'], 'cohort_hash': cohort['artifact_hash'],
             'protocol_file': data['protocol_file'], 'protocol_sha256': data['protocol_sha256'],
@@ -96,7 +112,7 @@ def registration_value(dataset_file):
             'authorization_sha256': baseline['authorization_chain']['current_sha256'],
             'shared_ledger_authorization_sha256': baseline['authorization_chain']['ledger_authorization_sha256'],
             'registration_file': str(marker), 'source_bindings': _owner_bindings(),
-            'original_evidence_bindings': _evidence_bindings(data, cohort),
+            'original_evidence_bindings': evidence,
             'original_proof_verified': True, 'registered_before_allocation_jev': True,
             'whole_allocation_retained': True, 'scores_hidden': True, 'jev_probabilities_read': False,
             'formal_registration': True, 'formal_certification': False, 'certified_threshold': None,
@@ -155,7 +171,7 @@ def revalidate(registration_file):
             and value['certified_threshold'] is None
             and all(type(value[k]) is int and value[k] == 0 for k in ('model_calls', 'jev_calls', 'oracle_executions', 'reservations')),
             'genuine_prediction_blind_registration_required')
-    data, cohort, binary, counts, current = _originals(value['dataset_file'])
+    data, cohort, binary, counts, current, evidence, dataset_sha = _originals(value['dataset_file'])
     require(file_hash(value['dataset_file']) == value['dataset_sha256'] and data['artifact_hash'] == value['dataset_hash']
             and data['cohort_file'] == value['cohort_file'] and data['cohort_sha256'] == value['cohort_sha256']
             and cohort['artifact_hash'] == value['cohort_hash']
@@ -164,7 +180,7 @@ def revalidate(registration_file):
             and value['all_allocation_groups'] == [r['group_id'] for r in data['cases']]
             and counts == value['independent_label_counts'], 'original_registered_allocation_changed')
     require(_same(value['source_bindings'], _owner_bindings()), 'actual_registration_owner_changed')
-    require(_same(value['original_evidence_bindings'], _evidence_bindings(data, cohort)),
+    require(dataset_sha == value['dataset_sha256'] and _same(value['original_evidence_bindings'], evidence),
             'actual_registered_original_evidence_changed')
     root = _root(current)
     expected = root / NAMESPACE / (cohort['artifact_hash'] + '.json')
@@ -191,3 +207,25 @@ def revalidate(registration_file):
         if row['group_id'] in value['all_allocation_groups']:
             require(row['reservation_index'] > value['original_jev_reservation_count'], 'jev_started_before_registration')
     return value, data, binary
+
+
+def proof_transaction(registration_file):
+    """Fresh full original proof and task pack for this transaction only.
+
+    No persisted cache or caller-supplied proof is accepted. Downstream owners
+    may reuse the returned pack for individual byte joins in this transaction.
+    """
+    registered = revalidate(registration_file)
+    value, data, _ = registered
+    cohort = sealed(load(data['cohort_file']))
+    require(file_hash(data['cohort_file']) == data['cohort_sha256'], 'original_transaction_cohort_changed')
+    authorization = value['authorization_file']
+    baseline, finished = before = formal_collection.budget_snapshot(authorization)
+    authority = load(cohort['source_authority_file'])
+    tasks, train = formal_collection.development.original_tasks(authority, cohort['cases'])
+    require(all(file_hash(b['file']) == b['sha256']
+                for b in value['source_bindings'] + value['original_evidence_bindings'])
+            and file_hash(value['dataset_file']) == value['dataset_sha256']
+            and _same(formal_collection.budget_snapshot(authorization), before),
+            'originals_or_budget_changed_during_proof_transaction')
+    return registered, (cohort, tasks, train, baseline, finished)

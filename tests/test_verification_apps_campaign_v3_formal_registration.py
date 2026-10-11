@@ -41,13 +41,14 @@ def original(tmp_path, monkeypatch):
     for row in prior:
         write(root / 'reservations' / (digest(row['group_id']) + '.json'), row)
     write(root / 'authorization.json', {'authorization_sha256': 'original-shared', 'kind': 'jev'})
-    cohort = dict(cases=binary, bindings=[dict(role='authorization', file=str(auth), sha256=file_hash(auth))],
+    cohort = dict(cases=binary, source_authority_file=str(auth),
+                  bindings=[dict(role='authorization', file=str(auth), sha256=file_hash(auth))],
                   ledger_snapshot=copy.deepcopy(baseline))
     cohort = seal(cohort)
     write(cohort_file, cohort)
     data = dict(schema=owner.formal_intake.SCHEMA, split='calibration', cases=binary,
         collection_bindings=[dict(directory=str(evidence))], collector_executable_file=str(auth),
-        cohort_file=str(cohort_file), cohort_sha256=file_hash(cohort_file), protocol_file=str(protocol),
+        cohort_file=str(cohort_file), cohort_sha256=file_hash(cohort_file), cohort_hash=cohort['artifact_hash'], protocol_file=str(protocol),
         protocol_sha256=file_hash(protocol), allocated_groups=200, collected_groups=200,
         uncollected_groups=0, pending_groups=0, formal_registration=False, holdout_opened=False,
         formal_certification=False, production_authorized=False, certified_threshold=None,
@@ -79,6 +80,42 @@ def test_stale_lock_preserved_without_registration_or_paid_slots(original):
     with pytest.raises(FileExistsError):
         owner.register(original['dataset'])
     assert lock.read_text() == 'existing-owner'
+    assert not (original['root'] / owner.NAMESPACE).exists()
+
+
+@pytest.mark.parametrize('mutation', ['dataset_bytes', 'receipt', 'new_evidence', 'budget'])
+def test_mid_intake_original_changes_cannot_be_recaptured_as_valid(original, monkeypatch, mutation):
+    def changed_collect(*args, **kwargs):
+        data = copy.deepcopy(original['state']['data'])
+        if mutation == 'dataset_bytes':
+            with original['dataset'].open('a', encoding='utf-8') as handle:
+                handle.write('\n')
+        elif mutation == 'receipt':
+            write(original['evidence'] / 'receipt.json', {'raw': 'changed'})
+        elif mutation == 'new_evidence':
+            write(original['evidence'] / 'foreign.json', {'extra': True})
+        else:
+            original['state']['baseline']['new_reservation'] = 'changed'
+        return data
+    monkeypatch.setattr(owner.formal_intake, 'collect', changed_collect)
+    with pytest.raises(ValueError, match='original_registration_bytes_or_budget_changed_during_intake'):
+        owner.register(original['dataset'])
+    assert not (original['root'] / owner.NAMESPACE).exists()
+
+
+@pytest.mark.parametrize('mutation', ['receipt', 'dataset'])
+def test_after_proof_change_cannot_replace_captured_evidence(original, monkeypatch, mutation):
+    genuine_root = owner._root
+    def changed_root(baseline):
+        if mutation == 'receipt':
+            write(original['evidence'] / 'receipt.json', {'raw': 'changed_after_proof'})
+        else:
+            with original['dataset'].open('a', encoding='utf-8') as handle:
+                handle.write('\n')
+        return genuine_root(baseline)
+    monkeypatch.setattr(owner, '_root', changed_root)
+    with pytest.raises(ValueError, match='original_registration_input_changed'):
+        owner.register(original['dataset'])
     assert not (original['root'] / owner.NAMESPACE).exists()
 
 
@@ -149,3 +186,28 @@ def test_registration_stops_when_namespace_changes_between_proof_and_lock(origin
         owner.register(original['dataset'])
     assert not (original['root'] / 'reservation.lock').exists()
     assert not (original['root'] / owner.NAMESPACE).exists()
+
+
+def test_fresh_proof_transaction_calls_actual_intake_once_and_never_repeats_source_proof(original, monkeypatch):
+    value = owner.register(original['dataset'])
+    calls = []
+    def collect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return copy.deepcopy(original['state']['data'])
+    monkeypatch.setattr(owner.formal_intake, 'collect', collect)
+    monkeypatch.setattr(owner.formal_collection, 'validate_cohort', lambda *a: pytest.fail('duplicate full proof'))
+    monkeypatch.setattr(owner.formal_collection.development, 'original_tasks', lambda *a: ({0: 'original'}, original['auth']))
+    registered, pack = owner.proof_transaction(value['registration_file'])
+    assert len(calls) == 1 and not calls[0][1]
+    assert registered[0] == value and pack[1] == {0: 'original'}
+    assert pack[3] == original['state']['baseline']
+
+
+def test_transaction_budget_drift_rejected(original, monkeypatch):
+    value = owner.register(original['dataset'])
+    def tasks(*args):
+        original['state']['baseline']['jev_reservations'].append(dict(group_id='new', reservation_index=3))
+        return {}, original['auth']
+    monkeypatch.setattr(owner.formal_collection.development, 'original_tasks', tasks)
+    with pytest.raises(ValueError, match='changed_during_proof_transaction'):
+        owner.proof_transaction(value['registration_file'])

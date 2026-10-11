@@ -1,5 +1,21 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-11：正式Jev与一次留出离线管线完成，真实316校准仍采集中
+
+6.1 Sol九个新管线所有者和三个新EXE已完成并封存，220项相关回归（254秒）、new-only build/Clippy -D warnings/限定rustfmt/Ruff通过。受控E2E为临时SQLite/共享预约目录、201个fixture outcomes（200 binary+1 Unknown）、200唯一slot、原request/raw/event关联及一次固定阈值结果；真实资格化来源与标签明确为fixture，不能当效果认证。新版calJev EXE SHA `4112630fa8c4abb2e1bbbb1567066b80dbfed7416a88eaa49b0653af7a65b7c4`，holdmain `97de62701af7a3f7825fb5fc40a5a4811c4b0d923065f2f0910b79501bd26359`，holdJev `69badc0816b3ae03985f3549f18537569dde3f0fa4a3305f3781c40711a2a55b`；三个旧付费EXE未改变。私有revision2 seal SHA `b947ad5156925fd5da4bda3c3b4095a13e6ffa19ee86577cd4a7b3e2d1be4cf0`，当前源字节=归档字节=实际编译内嵌SHA。
+
+Root独立复核闭包后，登记23/终态13/打包11项回归通过。6.1 Sol复现新打包器复制sidecar在假传输后变化仍被接受的问题；Root已修复fake结束后再次校验实际复制EXE/hash/source、ZIP后复验原费用/结果/源，新增2项回归绿。Root再次实际复制全部四工具并调用offline-success，收费/网络0，完整实际编译图与原EXE字节匹配；[公开工具验证聚合](reports/artifact-v3-apps-offline-tools-20261011.json) SHA `2c54aa1959a949d9de003bb877c20716e338884721fe8b9ef02d0e6f4a261e1d`。尚未stage整包或此次GUI生命周期验收，不能把离线工具完成称为正式阈值完成。
+
+第18批真实main终态：**100/316**已采集、216未发送；**83 supported/5 unsupported/12 Unknown**，校准pending0；main618/1150、阶段Jev229/861，原历史pending1及历史Jev27保留。dataset raw SHA `5b1d939ccf718ed00d231e68f19a462df87257091e1c10dfe513c1290a071fc0`。Root唯一收费操作继续固定未发送队列，每组一次；三transport/六正文无效保留Unknown、不重试，AST复核三策略Unknown也保持原标签。正式Jev调用0，真实登记/留出未开，生产off、通用认证阈值null。全316独立标签后才按150正/50负判断登记，配额或校准效果不足则留出不开。整体仍未完成；最新代码/聚合待下一明确GitHub提交。
+
+### 2026-10-11：正式316采集中，原证据事务与交付门禁补齐
+
+截至第11批终态，完整316 allocation保留 **66已采集 /250未发送**，独立标签 **56 supported /2 unsupported /8 Unknown**，calibration pending0。main原总数584/1150、阶段Jev229/861，历史main pending1和历史Jev27另保留。dataset raw SHA `201b3e99c4c770512d4ca2a5d96a34e063ec5db29db4cfa8c614d8c58fd6e531`。第11批遇第二个transport_error后自动停止；Root无密钥HEAD/DNS检查成功（401），费用0，随后只继续原名单未发送成员；两传输失败和三正文无效保留Unknown，不重试。此为采集中快照，后续原账本/终态优先。
+
+Root原登记事务增加一次完整证明复用、intake前后原字节/集合/预算闭包和证明结束后捕获值保留，23隔离回归通过；新 `formal_terminal.py` 只接受全allocation终态、独立原候选/Oracle和完整原字节关联，13回归覆盖中途dataset/receipt/新增证据/预算变化拒绝。尚无真实正式登记或terminal不足报告。新打包程序 `scripts/package-apps-evaluation-v3.py` 接入校准/留出不足配额、校准失败、真正一次留出三类原始结果重验，限定APPS证书不能启用生产或通用声明认证；9交付门禁回归通过。实际复制四个APPS主模型/Jev校准/留出 EXE并逐一执行offline-success，实际编译源图/EXE字节匹配、收费0；尚未stage整包或GUI验收。上述Root45回归/Ruff通过是离线开发证据，不是准确性认证。
+
+6.1 Sol已实现独立正式Jev、一次source-opening/archive及新留出main/Jev工具，继续完成完整allocation、盲标签登记和固定阈值一次结果的离线测试/最后编译封存；原付费main所有者与EXE保持冻结。真实正式Jev调用0、留出未开、生产off、通用认证阈值null。上一检查点已实际提交并推送GitHub `dc4ac30288c1b0f3e5b318f20b7c41a07f603cb2`；本节与随后新增代码待下一明确提交。仍需完成316采集，根据冻结150正/50负门槛决定后续，再交付包含新工具的运行包，整体目标未完成。
+
 ### 2026-10-11：316 组方案获批，真实授权桥接与正式采集启动
 
 首8正式采集终态：7 ok、1 response_content_invalid；独立Oracle为7 supported/0 unsupported/1 Unknown，全316allocation保留308未启动。失败响应原finish_reason=length、16384 completion均为reasoning、正文0，不重发该组。Root只读重建原全allocation一致，原请求/raw/session/receipt/编译图和7原Oracle重新关联，零Oracle重执行；dataset raw SHA `669409a2972986c9e66a72917d338a0d5d51b8d7d37d789be777074f1b12a863`。一次私有operator汇总误读不存在的字段已在新只读报告中修复，原数据/费用/候选未变。当前正式main526、阶段Jev229，校准pending0；[公开首8聚合](reports/artifact-v3-apps-formal-first8-20261011.json)。Root继续固定未启动校准队列，最多每批8、任一已尝试组不重试，失败和Unknown均留在全allocation；配额/效果仍未达标。
