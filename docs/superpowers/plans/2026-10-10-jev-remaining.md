@@ -10,7 +10,7 @@
 2. [x] 请求前冻结独立 high/16384/120秒/0重试 profile 和265组新cohort，排斥旧35启动组，旧ultra候选不混新分母；原提示、Oracle、统计门槛和500/服务总上限保持。
 3. [x] 独立 main 实际程序与18个二进制回归、原始SQLite start/finish/compiled source/请求/响应复核通过。首两批16请求、15有效、11正3负2未知；根操作员按冻结顺序最多8组逐批采集。
 4. [x] 已达到独立标签门槛并完成预测前正式登记：162 supported／53 unsupported，共215 eligible；全部232个实际启动组及17 Unknown保留，标签阶段未读取Jev概率。原登记为 `reports/artifact-profile-high-calibration-registration-20261011.json`（canonical hash `04389d268fb437e017a93fee05540deb4b54dd1f401d89eda0b40ba4d06a3471`），`registered_before_jev=true`、`holdout_opened=false`、`production_authorized=false`。标签配额通过不等于阈值认证；下一步仍需原始发送收据复核、固定网格校准和合格后的一次新留出。
-5. [x] 新profile正式Jev程序零HTTP开发/回归/实际源收据复核完成并冻结。实际收费预测尚未开始：随后根操作员在已登记集合中每组至多一次收费；失败计数、无重试。固定网格、单侧95%置信门槛不变。
+5. [x] 新profile正式Jev程序零HTTP开发/回归/实际源收据复核完成并冻结。实际收费预测已开始：首批8条全部ok、实际模型jev-1.13.0、原始传输核验通过；根操作员继续已登记215条集合，每组至多一次收费，失败计数、无重试。固定网格、单侧95%置信门槛不变，校准结果尚未产生。
 6. [x] 一次留出零网络门禁：复核原校准字节和统计、排斥整个校准allocation、固定阈值、共享ledger持久marker；消费失败也禁止重开，最终结果可从原始证据重算。
 7. [x] 独立holdout main/Jev发送程序开发及实际二进制离线验证完成并冻结。实际留出未打开：只有真实校准合格才注册并采集新留出。两阶段各150正/50负，留出不调参、不再打开同一源集合。
 8. [ ] 新包封存：包含此前v3.3修复的GUI/CLI及新评测工具、源/程序hash、使用说明和实际结果。默认生产off；单独评测工具不能当GUI生产校验已认证。
