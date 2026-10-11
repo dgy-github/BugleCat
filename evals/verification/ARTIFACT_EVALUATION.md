@@ -50,3 +50,13 @@ python -m pytest tests/test_verification_artifact_profile_binary.py tests/test_v
 - Jev 只产生 reject signal 或维持 unverified；低违例概率不产生 Verified/Pass。
 - 生产默认 off，enforce 类别为空。基准阈值认证不会自动批准生产启用。
 - 原框架 A / 规则 B 没有对应真实执行基线时记 unavailable，不能伪造全放行基线来证明增量收益。
+
+## 2026-10-11 本轮实际结果与交付
+
+独立主模型232组中162 supported、53 unsupported、17 Unknown；预测前登记的215二元组Jev全部完成、无重试。九个冻结阈值全部不合格，qualified threshold为空，未打开留出，生产保持off。
+
+阈值0.5误拦6/162、检出29/53；95%误拦上界7.1788%、错误检测下界42.5531%，均不满足2%/50%门槛。阈值0.9误拦0，但只检出10/53，错误检测下界10.6097%仍未通过。没有根据本轮结果下调门槛或制造负例。
+
+公开原样结果：`reports/artifact_calibration_high_result_20261011.json`（本目录下）；交付清单：`reports/artifact_delivery_20261011.json`。新包 `releases/jev-artifact-calibration-20261011`，ZIP `releases/BugleCat-jev-artifact-20261011.zip`，30.24 MiB。GUI/CLI和4个评测程序均实际复验，installer未安装，原始证据/密钥留本地。公开JSON副本不携带原证据，在新checkout不能据此宣称重新认证。
+
+调用215次成功返回不代表代码全部正确或框架收益已认证；完整置信界、tokens及限定原始请求延迟范围见交付清单。后续修改需要新冻结来源和独立评测，本轮没有自动扩预算或继续收费。

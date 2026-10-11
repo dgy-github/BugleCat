@@ -1,10 +1,30 @@
 # HANDOFF — nanocodex (Rust 线)
 
-## 2026-10-11：high 配置已封存并开始正式来源采集（当前进度）
+## 2026-10-11 工程交付完成：正式校准未通过
+
+本轮源码实现、独立样本标注、正式固定网格校准与安全运行包交付已完成；实际效果认证失败，未开启留出、未启用生产。失败交付遵循本轮冻结计划第9项，不以程序测试通过冒充模型收益。
+
+- 完整校准allocation265，实际新主模型232，162 supported/53 unsupported/17 Unknown；33未采集单列，不作为Unknown。215个二元组在Jev预测前登记，215次原始Jev调用全部ok，每组一次、零自动重试。正式结果rawSHA `3fa4ec07331deeba2c4ac5c3a29c74f0a876dc88b048362b7e5f8d33b1d86a6e`，canonical `1734930717ab0d4dd4cf7a3f3d78a745a159007cc032831a8fcd746a1ff81b3d`；公开原样副本 `evals/verification/reports/artifact_calibration_high_result_20261011.json`。费用台账、候选、原会话仍本地；副本在新checkout不能代替原始证据重验。
+- 全9个预定阈值均不通过。0.5：正确组误拦6/162，单侧95%上界7.1788%>2%；错误组检出29/53，下界42.5531%<50%。0.9：误拦0/162，上界1.8322%达标；检出10/53，下界10.6097%不达标。qualified threshold为空，真实holdout not_run。native、整体agent收益及artifact认证均false，生产off。没有为结果改变样本/断言/门槛、重发或打开未合格留出。
+- 本阶段共享cap各500：main累计267启动（232新+35既有），266完成、历史1 pending保留，剩233；Jev本阶段216（215正式+1开发），剩284，历史27另保留，累计243。授权次数不是余额，不推算金额。正式215次Jev usage总计输入150219/输出5375 tokens；原始attempt elapsed_ms均值1065.92、中位1004、p95最近秩1323，排除compiled预检和证据重算开销。
+- 新包 `releases/jev-artifact-calibration-20261011`：v3.3 GUI/CLI/安装程序加4个独立产物评测exe。manifest SHA `03fc2676734953aa000c2d7a4297d79046f44c2ec553853561a6f891b6ce6270`，500文件全部字节重验。ZIP `releases/BugleCat-jev-artifact-20261011.zip`，30.24 MiB，SHA `706492a83e5bb6fbd768ed2c92c5ec102822573bfcb5052982bdd57e546a28b7`；逐member字节重验通过。4个真实exe零HTTP smoke及复制GUI/CLI localhost启动、恢复、取消和off/shadow/enforce生命周期均通过，零收费；安装程序未实际安装，不认证安装/升级流程。离线fixture自建的会话/ledger为fake证据，不含真实用户会话/收费ledger。
+- 最终终态工具23项回归通过，已实际重验原收费证据后写入；工具修正allocation/collected分离，最新SHA `bb70e5da849f99a628728543a2f2249720b36be299b317cd14681052cb2f222a`。写前两文档before/after精确bytes/SHA私有备份已保留，进行中快照工具拒绝覆盖终态。交付说明在包README及 `evals/verification/ARTIFACT_EVALUATION.md`，当前local release审计指向新包。
+
+GitHub最终公开源码/结果/文档提交与远端核对执行中；阶段 `db4bb4a` 已实际推送。下方旧进度仅为历史，不能覆盖本段实际失败终态和新包。未来修改模型/模板/策略需要新冻结来源与独立认证；本轮未自动开始额外收费。
+
+## artifact 独立评测终态（原始证据重验记录）
+
+快照 2026-10-11T05:09:46.677592+00:00：实际校准不合格；留出未运行。原始结果 `D:\github_dgy\BugleCat\reports\artifact-profile-high-calibration-result-20261011.json`，rawSHA `3fa4ec07331deeba2c4ac5c3a29c74f0a876dc88b048362b7e5f8d33b1d86a6e`，canonical `1734930717ab0d4dd4cf7a3f3d78a745a159007cc032831a8fcd746a1ff81b3d`。记录前已由冻结 owner 重验原始收据、来源、编译证据与固定统计。
+
+全局 main 267启动/266完成/1未完成/剩233；本阶段 Jev 216/剩284；预算cap main/Jev=500/500，Jev计数为预约预算位（216已启动，0预约未启动），不冒充全部HTTP已提交；失败与历史启动保留。预算次数不是账户余额。
+
+范围：frozen MBPP source groups, main resource profile, assertion Oracle and Jev template only。产物阈值 `None`；generic阈值null，native认证false，整体agent收益未认证，生产false。结果记录工具不生成或证明运行包，既有包状态保持原记录；最新包必须由实际构建/封存/生命周期证据另行记录。以下进行中快照作为历史保留，不覆盖本终态。
+
+## 2026-10-11：high 配置采集与校准（历史进行中快照，已结束）
 
 用户批准追加各100次，本阶段主模型/Jev上限各500；失败与历史启动仍计数、每组一次、无自动重试。新独立profile `deepseek-flash-high-16384-120-v1` 已在请求前冻结（profile rawSHA e0044b9de9e61ca55358a5081eba27a85c352f17ef3d74afa8ba028bc9064427），新cohort canonical `3b7407279f3ee8c00c75a0e0ca92af9a5098f63fad8b0cbf3642dfd9055d3549`；265个新校准组、保留至少200次main供一次留出。旧35已启动组排斥，旧ultra候选不混新分母。新main实际exe SHA `ae6d0cf59375fae0e31008eb9d384ce60a2364f4c28f30ed3d762cf0c7148b39`，提示词和冻结断言保持原样。
 
-快照 2026-10-11T04:03:38.044570+00:00：采集状态 completed；全局main 267启动/266完成/剩233；Jev本阶段97/剩403。已完成批次独立标签 162 supported、53 unsupported、17 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。新profile正式Jev预约尝试96，原始失败保留；预测前独立标签已登记，阈值仍待实际校准及一次新留出验证。 连续同类main故障、任何正式Jev故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
+快照 2026-10-11T05:03:14.509659+00:00：采集状态 completed；全局main 267启动/266完成/剩233；Jev本阶段216/剩284。已完成批次独立标签 162 supported、53 unsupported、17 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。新profile正式Jev预约尝试215，原始失败保留；预测前独立标签已登记，阈值仍待实际校准及一次新留出验证。 连续同类main故障、任何正式Jev故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
 
 6.1-Sol已完成并冻结新profile正式Jev入口和独立holdout main/Jev入口；旧发送器/exe/源原hash保留。Root新增compiled main/原始事件/SQLite finish重验、完整实际启动分母检查、新profile source dispatch；留出结果可重新从原始一次消费证据计算。原始来源证明在单次事务内复用，复用时重新校验源文件字节；不缓存标签、台账或概率。Python verification全量348 passed，另一次实际main/profile-Jev/holdout二进制复核58 passed；后续仅拆分可移植测试，未改变已冻结发送源。认证仅可限定冻结MBPP产物轨道，整体agent准确性与生产仍未认证。正式阈值null，实际留出未打开，生产false。新打包脚本已实现但尚未运行；最新运行包仍为此前v3.3，不含后续工具。GitHub阶段提交和最终交付分别记录，不把代码完成当作评测完成。
 

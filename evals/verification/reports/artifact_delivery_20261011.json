@@ -1,0 +1,58 @@
+{
+  "schema": "buglecat.verification.artifact-delivery.v1",
+  "package_directory": "releases/jev-artifact-calibration-20261011",
+  "package_manifest_sha256": "03fc2676734953aa000c2d7a4297d79046f44c2ec553853561a6f891b6ce6270",
+  "sealed_file_count": 500,
+  "all_release_bytes_verified": true,
+  "all_archive_bytes_verified": true,
+  "attested_offline_fixture_session_files": 6,
+  "real_user_sessions_included": false,
+  "archive_file": "releases/BugleCat-jev-artifact-20261011.zip",
+  "archive_sha256": "706492a83e5bb6fbd768ed2c92c5ec102822573bfcb5052982bdd57e546a28b7",
+  "archive_bytes": 31709030,
+  "archive_mib": 30.24,
+  "terminal_status": "calibration_not_qualified",
+  "terminal_result_hash": "1734930717ab0d4dd4cf7a3f3d78a745a159007cc032831a8fcd746a1ff81b3d",
+  "result_sha256": "3fa4ec07331deeba2c4ac5c3a29c74f0a876dc88b048362b7e5f8d33b1d86a6e",
+  "calibration_allocated_groups": 265,
+  "calibration_collected_groups": 232,
+  "calibration_unknown_groups": 17,
+  "jev_formal_observations": 215,
+  "jev_usage_integer_totals": {
+    "input_tokens": 150219,
+    "output_tokens": 5375
+  },
+  "jev_attempt_elapsed_ms": {
+    "count": 215,
+    "mean": 1065.92,
+    "median": 1004,
+    "p95_nearest_rank": 1323
+  },
+  "latency_scope": "original Jev attempt elapsed_ms; excludes compiled preflight and proof replay",
+  "main_attempts_started": 267,
+  "main_attempts_remaining": 233,
+  "phase_jev_attempts": 216,
+  "phase_jev_remaining": 284,
+  "cumulative_jev_attempts": 243,
+  "balance_or_cost_inferred": false,
+  "holdout_status": "not_run",
+  "certified_threshold": null,
+  "artifact_benchmark_certified": false,
+  "native_claim_certification": false,
+  "overall_agent_decision_benefit_certified": false,
+  "production_authorized": false,
+  "paid_package_calls": 0,
+  "installer_executed": false,
+  "runtime_validation": {
+    "actual_copied_runtime_smoke": true,
+    "policy_version": "host-rules-v3.3",
+    "modes": [
+      "enforce",
+      "off",
+      "shadow"
+    ],
+    "paid_calls": 0,
+    "installer_executed": false
+  },
+  "artifact_hash": "0df705170feb7791b0d6c1920aa68e9d7ed4c6d6051f8603aafdb3d9fc288193"
+}
