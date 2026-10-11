@@ -29,6 +29,10 @@ def interfaces(code):
         for default in [*args.defaults, *[d for d in args.kw_defaults if d]]:
             require(isinstance(default, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set, ast.UnaryOp)),
                     "public interface has nonliteral default; needs review")
+            try:
+                ast.literal_eval(default)
+            except (ValueError, TypeError):
+                raise ValueError("public interface has nonliteral default; needs review") from None
         result.append(f"def {function.name}({ast.unparse(args)}):")
     require(bool(result), "no public function interface")
     return result

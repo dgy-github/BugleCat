@@ -57,6 +57,11 @@ def main():
     parser.add_argument("directory", type=Path)
     args = parser.parse_args()
     directory = args.directory.resolve()
+    policy_source = (REPO / "rust/crates/ncx-core/src/verification/types.rs").read_text(encoding="utf-8")
+    policy_match = re.search(r'pub const POLICY_VERSION: &str = "(host-rules-v[0-9.]+)";', policy_source)
+    if not policy_match:
+        raise ValueError("missing explicit source policy version")
+    policy_version = policy_match.group(1)
     if not directory.is_relative_to(REPO / "releases"):
         parser.error("directory must stay under repository releases")
     directory.mkdir(parents=True, exist_ok=True)
@@ -105,15 +110,15 @@ def main():
     session_directory = Path(smoke["root"]) / "workspace/.nanocodex/sessions"
     runtime_records = [json.loads(line) for name in smoke["logs"]
                        for line in (session_directory / name).read_text(encoding="utf-8").splitlines() if line.strip()]
-    if not runtime_records or any(row["result"]["policy_version"] != "host-rules-v3.2"
+    if not runtime_records or any(row["result"]["policy_version"] != policy_version
                                   or row["result"].get("attempted_calls", 0) != 0 for row in runtime_records):
         raise ValueError("actual runtime policy differs or attempted Jev")
     create_json(directory / "evidence/runtime-verification-records.json", runtime_records)
-    manifest = {"schema": "buglecat.jev.local-release.v3.2", "built_at": datetime.now(timezone.utc).isoformat(),
+    manifest = {"schema": f"buglecat.jev.local-release.{policy_version.removeprefix('host-rules-')}", "built_at": datetime.now(timezone.utc).isoformat(),
                 "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip(),
                 "dirty_sources_included": True, "source_sha256": frozen["sha256"], "source_snapshot": "source-snapshot.json",
                 "source_snapshot_sha256": digest(snapshot_path),
-                "files": artifacts, "policy_version": "host-rules-v3.2", "package_version": "0.1.0",
+                "files": artifacts, "policy_version": policy_version, "package_version": "0.1.0",
                 "default_mode": "off", "production_enforce_categories": [], "production_jev_threshold": None,
                 "paid_build_smoke_calls": 0, "installer_built": True, "installer_executed": False,
                 "runtime_policy_versions": sorted({row["result"]["policy_version"] for row in runtime_records}),

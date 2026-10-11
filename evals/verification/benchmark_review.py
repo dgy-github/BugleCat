@@ -13,6 +13,7 @@ from pathlib import Path
 from .benchmark_oracle import audit
 from .calibration import create, digest, load, require
 from .collection_receipts import read_lines, verify
+from .source_bindings import bind_prepared, check_unchanged, verify_manifest
 
 
 def code_block(candidate):
@@ -23,11 +24,12 @@ def code_block(candidate):
 
 
 def source_baseline(manifest):
-    tasks = {t["task_id"]: t for t in load(manifest["source_file"])}
+    tasks, bindings = verify_manifest(manifest)
     rows = []
     for case in manifest["cases"]:
         task = tasks[case["task_id"]]
         receipt = audit(task, task["code"])
+        check_unchanged(bindings)
         rows.append({"id": case["id"], "group_id": case["group_id"],
                      "task_id": task["task_id"], "result": receipt["result"],
                      "task_sha256": digest(task), "oracle_worker_sha256": receipt["oracle_worker_sha256"]})
@@ -52,11 +54,14 @@ def audit_candidate(task, candidate):
 def review_collection(directory, executable, output):
     directory = Path(directory).resolve()
     manifest = load(directory / "collection-manifest.json")
-    tasks = {t["task_id"]: t for t in load(manifest["source_file"])}
+    tasks, bindings = verify_manifest(manifest)
     prepared = read_lines(directory / "prepared.jsonl")
     events = read_lines(directory / "attempt-events.jsonl")
     rows = []
+    require(len({r["id"] for r in prepared}) == len(prepared), "duplicate prepared case")
+    require({r["id"] for r in prepared} == {r["id"] for r in manifest["cases"]}, "prepared case set mismatch")
     for original in prepared:
+        bind_prepared(manifest, original)
         receipt_path = directory / original["id"] / "receipt.json"
         if not receipt_path.exists():
             rows.append({"id": original["id"], "status": "not_finished", "label": "unlabeled"})
@@ -68,8 +73,14 @@ def review_collection(directory, executable, output):
         receipt = verify(original, receipt_path, events, executable)
         result = receipt["result"]
         assertion = audit_candidate(tasks[original["task_id"]], result["candidate"])
-        oracle_path = directory / original["id"] / "independent-assertion.json"
-        create(oracle_path, assertion)
+        check_unchanged(bindings)
+        # A new oracle version produces an additional immutable receipt; it
+        # must not overwrite an earlier worker's acceptance facts.
+        oracle_path = directory / original["id"] / f"independent-assertion-{assertion['artifact_hash']}.json"
+        if oracle_path.exists():
+            require(load(oracle_path) == assertion, "original assertion receipt changed")
+        else:
+            create(oracle_path, assertion)
         decisions = {d["claim_id"]: d for d in result["host_B"]["decisions"]}
         eligible = [c for c in result["claims"] if c["kind"] == "semantic"
                     and c["context"] == "narrative" and c["polarity"] == "positive"
@@ -87,6 +98,7 @@ def review_collection(directory, executable, output):
     value = {"schema": "buglecat.verification.benchmark-review-queue.v1", "cases": rows,
              "scores_hidden": True, "jev_probabilities_read": False,
              "purpose": "independent assertion facts; exact original claim scope still needs review"}
+    check_unchanged(bindings)
     create(output, {**value, "artifact_hash": digest(value)})
     print(json.dumps({"cases": len(rows), "original_transport_verified": sum("acceptance_result" in r for r in rows),
                       "eligible_native_claims": sum(len(r.get("eligible_native_claims", [])) for r in rows),

@@ -1,6 +1,6 @@
 {
   "schema": "buglecat.verification.policy-status.v1",
-  "date": "2026-10-10",
+  "date": "2026-10-11",
   "runtime_owner": "ncx-core verification::types::Config::from_env",
   "default_mode": "off",
   "production_enforce_categories": [],
@@ -61,6 +61,35 @@
     "report": "evals/verification/reports/replay_development_calibration_20261010_v32.json",
     "transport_receipt_status": "actual request hash unrecorded in old main binary; development-only import, formal gate rejected",
     "effect_certified": false
+  },
+  "current_local_release": {
+    "policy_version": "host-rules-v3.3",
+    "package_directory": "releases/jev-v33-20261010-235623",
+    "report": "reports/release-v33-20261010.md",
+    "effect_certified": false,
+    "installer_executed": false
+  },
+  "artifact_acceptance_track": {
+    "user_selected_date": "2026-10-11",
+    "policy_version": "artifact-acceptance-v1",
+    "template_version": "jev-artifact-acceptance-v1",
+    "statement_origin": "host_artifact_hypothesis",
+    "category": "artifact_acceptance",
+    "development_original_code_n": 7,
+    "development_live_jev_n": 1,
+    "phase_jev_attempts": 1,
+    "phase_jev_remaining": 399,
+    "cumulative_jev_attempts": 28,
+    "live_report": "reports/artifact-development-smoke-20261011.md",
+    "sidecar_in_current_local_release": false,
+    "formal_supported_n": 0,
+    "formal_unsupported_n": 0,
+    "certified_threshold": null,
+    "holdout_status": "not_run",
+    "native_claim_certification": false,
+    "production_enabled": false,
+    "budget_expanded": false,
+    "protocol": "evals/verification/ARTIFACT_ACCEPTANCE_PROTOCOL.md"
   },
   "role": "audit record; runtime does not load this JSON as permission or certification"
 }

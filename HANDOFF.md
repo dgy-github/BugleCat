@@ -1,5 +1,39 @@
 # HANDOFF — nanocodex (Rust 线)
 
+## 2026-10-11：artifact sidecar 打通真实请求（覆盖下方进行中与账务）
+
+用户选择的代码产物轨道已实现开发入口：固定单NOUL问题、预测前注册、独立原始来源和Oracle绑定、共享付费预算、不可重复启动marker、原始request/response bytes与compiled source/exe收据。实际二进制12项回归通过；根独立validate与fake原bytes join通过，然后预算内只做1次预注册开发smoke104，无重试。实际Jev `jev-1.13.0`、1085ms、655/25 tokens、违例概率0.12；原始收据独立join通过。新模块成功/取消前/失败raw/usage篡改回归通过；全套Python verification **190 passed**。[真实开发报告](reports/artifact-development-smoke-20261011.md)。
+
+最新预算：新增Jev **1/400、剩399、历史累计28**；主模型 **12启动/11完成/剩388**，未完成费用未知。首个开发请求不是正式样本；正式阈值null、holdout未运行、生产off、native认证false，原框架A/规则B unavailable。v3.3已封存运行包保持原hash，新sidecar不在包内。原始收据/台账/raw保留本地，不提交凭证或会话内容。
+
+下一步：先实现新正式来源在主模型请求前封存的cohort/intake；核对独立分组、已启动/已查看来源排斥、预测前标签和原transport join，再决定逐批采集。原400次授权的剩余预算无法保证两阶段400个正式组，不降低每阶段150正/50负门槛，不制造负例，不重复收费。详见 [剩余开发计划](docs/superpowers/plans/2026-10-10-jev-remaining.md)。
+
+已增加 `artifact_source_registry.py` 零费只读源盘点（2项回归）：按真实SQLite启动组和Jev reservation排斥全部已启动组，包括失败/未完成。实际原MBPP池剩calibration **194组**、holdout **207组**；校准独立来源自身也少于200，不能用剩余预算数量假装来源足够。[源盘点](evals/verification/reports/artifact_source_inventory_20261011.json) 明确三项缺口：主模型388、Jev399、fresh校准194。需要补独立来源及明确后续收费授权才能完成400正式样本；不会在已知不满足完整计划的源池上盲目扩批。
+
+## 2026-10-11：用户选择新增代码产物轨道，v3.3 包已交付（当前）
+
+用户明确选择“新增代码产物校验轨道（推荐）”。原自然语言声明轨道保留，新增轨道仅判断真实模型代码是否满足冻结断言：宿主命题 origin `host_artifact_hypothesis`、category `artifact_acceptance`，不是原生肯定完成声明。参考算法、Oracle标签/执行结果不发Jev；任务/代码/断言都是不可信数据。独立标签、模型问题和统计门槛见 [新契约](evals/verification/ARTIFACT_ACCEPTANCE_PROTOCOL.md)、[固定协议](evals/verification/reports/artifact_protocol_20261011_v1.json)。此选择没有扩大预算，没有批准生产启用。
+
+- **v3.3包已完成**：`releases/jev-v33-20261010-235623`，435输入图 `a28456dc6fed1b59c5b42c6bd60476bead49b844acd15caa1ada1b7d76f52625` freeze→stage→seal一致。CLI 8,115,712B/hash `960487179d75d838b972e9af2012870804e9652c42a35142fefa48beba356a37`；GUI 14,642,688B/hash `518e2e77ce7cc3d722584c4ab31fdab7a98eefbcd3690485cf9ebda8b7010b1b`；NSIS 4,896,669B/hash `c56de6cc3abc9f10aab18a0ab6226270dee54c191841bab5b56383dafb9f67ea`；manifest hash `16fab536149aae8e7d1e8645d2b5b63cbc9ad02e47f7a195b715444b53c5819b`。root实际复核并查看enforce故障截图。实际新CLI exit0/GUI恢复/off-shadow-enforce取消、断网、日志故障通过，每组durable write恰一次、无Pass；15localhost请求，0收费。Core415/Provider68/GUI138/protocol5、Clippy/fmt/前端通过。[交付报告](reports/release-v33-20261010.md)。默认off、生产类别空、阈值null，安装器只构建未安装。包不包含随后新建的artifact sidecar，不能扩大包的封存范围。
+- **新轨道零费准备**：`artifact_acceptance.py` 从真实原始candidate唯一Python fence构造代码命题，强绑定源码/manifest/main收据/独立Oracle/protocol/auth/code/request bytes。源参考先通过，接受断言全过→supported、实际失败→unsupported、越界/超时/歧义→unknown，未知不发请求。原两批7条有效代码已准备并按新版Oracle执行，均supported；它们已经被查看，只能development，不改名为正式数据。
+- **独立注册与开发评分**：`artifact_scoring.py` 在任何概率前封存dataset/prepared/protocol，禁止标签逆转、重复group、原生轨道混用、实际模型错配、缺发送/原响应验证和缺失结果。单NOUL `acceptance_violation`，达到阈值只产生reject signal，其他保持unverified，失败仍入分母。即使开发完美分类也不认证threshold或打开holdout；原框架A/规则B记unavailable，不伪造全放行baseline。新模块10项回归通过、Ruff通过。
+- **独立transport入口开发中**：6.1-Sol实现真实main离线fixture、原始request/response hash、编译源/exe收据、8秒/48KB输入/32KB响应限制与取消；每次显式live仅1组，需共享400 Jev全局reservation并create_new启动marker防重复。root控制任何收费，未开始新调用。旧collector/replay exe和旧收费来源不重建、不改写。
+- **最新账务复核**：`collection_status.py` 只读核对预算授权原hash、SQLite每组start/finish、原收据/响应bytes，拒绝脱离台账的收据和重复计数。[重新验证台账](evals/verification/reports/benchmark_collection_resume_verified_20261010.json)：主模型12启动/11完成/7有效/4无效/1未完成，授权剩388；Jev本阶段0/400、历史27。未完成费用未知，金额/账户余额未查询。此模块3项回归通过，数据库字节未改。
+
+**后续门禁**：先让artifact真实二进制入口与原始transport bytes join通过零费回归，再做预算内最多1次开发协议smoke（不能补正式分母）；随后实现新正式来源在主模型请求前冻结的intake和独立artifact calibration/one-time holdout。原400主模型尝试最多396有效，即使更换轨道也不能保证正式400有效组；不跳过门槛、不自动追加预算，不保证能自然得到50负组。新轨道的误拒绝上界≤2%、错误产物拒绝率下界≥50%、每阶段150正/50负已在看新Jev概率前固定；不宣称框架闭环收益或整个任务语义已认证。
+
+## 2026-10-10：恢复开发，v3.3 否定抽取修复与评测来源加固（最新）
+
+用户已明确“继续开发”。暂停期间提交 `c04f411c182bfbf47598c9f35d0ff891219031f5` 已推送并独立确认 GitHub `origin/feat/context-association-memory` 一致；下方 GitLab 待提供地址的记录为历史状态。继续使用用户指定的 GPT-6.1-Sol，root 独立审阅来源与入库边界；尚未新增任何收费调用。
+
+- **真实缺陷已修复**：v3.2 的 `No tests were executed` 被误抽为肯定 TestsPassed。先新增回归证明失败，再修复显式 no-tests 和 not-run/executed 否定；抽取与规则共用执行否定语义。无证据诚实否定保持 Unknown，权威记录显示确实执行过（成功或失败）时否定为 Contradiction。源码策略显式升 **host-rules-v3.3**，模板 v2 未变。verification 31 passed/1收费 opt-in ignored，全 Core **415 passed/1 ignored**，strict lib Clippy/fmt 通过。[实现证据](reports/extraction-negation-implementation-20261010.md)。旧收费 packet/策略 v3.2 和原 collector exe 保留，不以新源码回填旧结果。
+- **来源审计加固**：新增 `source_bindings.py`，Oracle 前后核对源文件、catalog、协议、预算授权和资源调整的原始 bytes/hash；重建原 catalog 核对 task/group/split，再核对公开接口和 prepared 绑定。`collection_receipts.py` 额外核对实际响应 model/usage、UTF-8 claim span、宿主策略和实际嵌套 resource_cohort。Oracle 收据按内容 hash 新建，保留旧 worker 版本，不覆盖原事实。接口默认值递归禁止容器内藏可执行表达式。直接相关 Python **30 passed**，Ruff 通过。
+- **实际复审**：原首批3条、第二批4条有效候选均重新通过加强后的传输/来源/Oracle检查；共7条接受断言 passed，但仍 **0条合格肯定 narrative Semantic**，独立 scoped 标签不能由产物通过自动生成。[首批新审计](evals/verification/reports/benchmark_review_batch01_20261010_r2.json)、[第二批新审计](evals/verification/reports/benchmark_review_batch02_20261010_r2.json)。
+- **下一批不直接收费**：[入库准备检查](evals/verification/reports/benchmark_readiness_resume_20261010.json) 保留12次已启动、11已完成、4无效响应、1未完成；可确认主模型预算余388，新增 Jev 0/400、历史累计27。即使剩余及未完成全部成功，乐观有效样本上限396，低于正式校准+留出至少400组；现有合格肯定声明又为0。`benchmark_readiness.py` 拒绝重复已完成组、篡改审计和台账错配，旧未调用 prepare 不算新增样本。正式阈值仍 null，留出 not_run。预算次数不是账户余额，未知请求用量不记零。
+- **运行包**：6.1-Sol 正在独立构建 `releases/jev-v33-20261010-235623`，源码图 freeze 为435输入 / SHA256 `a28456dc6fed1b59c5b42c6bd60476bead49b844acd15caa1ada1b7d76f52625`。尚待实际新产物启动/恢复/取消故障验收与 manifest seal；不能将构建中称已交付。旧 v3.2 包保留。默认off、生产类别空、实验生产阈值null。
+
+**剩余执行顺序**：完成 v3.3 实机运行包并封存 → 固定新的策略/任务路线（与原 v3.2 原始观察分开）→ 先零费用验证可取得原生肯定且范围可独立判定的真实任务来源，补齐完整 formal intake/原始 transport join → 预算内小批采集，隐藏 Jev 概率先冻结独立 scoped 标签 → 足量才校准、合格才一次留出 → 认证成立才考虑分级启用。当前 MBPP 单响应路线未提供有效目标声明，不盲目用完400次、不造正负样本、不降低统计门槛。新收费上限如需扩展，仍须用户明确批准；工程修复和零费验证继续推进。
+
 ## 2026-10-10：用户暂停开发，保存 Git 提交（当前状态）
 
 用户要求“暂停下把目前做的东西提交到gitlab 上”。已中断开发代理，停止实际 `verification_collect.exe` 进程；复查无采集进程运行，后续收费调用暂停。Git 当前分支为 `feat/context-association-memory`，现有 origin 指向 GitHub；GitLab 仓库地址待用户提供，不把 GitHub 当作 GitLab 推送。

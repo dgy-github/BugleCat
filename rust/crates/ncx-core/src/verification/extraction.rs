@@ -1,5 +1,18 @@
 use super::types::*;
 use regex::Regex;
+use std::sync::OnceLock;
+
+/// Explicit absence of execution, shared with policy so a truthful denial is
+/// not mistaken for a success claim or for evidence that a failed run happened.
+pub(super) fn denies_execution(text: &str) -> bool {
+    static NO_TEST_EXECUTION: OnceLock<Regex> = OnceLock::new();
+    let low = text.to_lowercase();
+    NO_TEST_EXECUTION.get_or_init(|| {
+        Regex::new(r"\bno\s+(?:(?:unit|integration)\s+)?tests?\s+(?:(?:were|was)\s+)?(?:run|executed)\b").unwrap()
+    }).is_match(&low)
+        || ["not run", "not executed", "did not run", "未运行", "未执行", "没有运行"]
+            .iter().any(|phrase| low.contains(phrase))
+}
 
 pub fn claims(candidate: &str) -> Vec<Claim> {
     let target_pattern =
@@ -34,21 +47,10 @@ pub fn claims(candidate: &str) -> Vec<Claim> {
             if !text.is_empty() {
                 let low = text.to_lowercase();
                 let negative = denied_success.is_match(&low)
-                    || [
-                        "not passed",
-                        "did not pass",
-                        "没通过",
-                        "not run",
-                        "not executed",
-                        "未运行",
-                        "未执行",
-                        "did not run",
-                        "没有运行",
-                        "failed",
-                        "失败",
-                    ]
-                    .iter()
-                    .any(|s| low.contains(s));
+                    || denies_execution(&low)
+                    || ["not passed", "did not pass", "没通过", "failed", "失败"]
+                        .iter()
+                        .any(|s| low.contains(s));
                 let limitation = [
                     "unverified",
                     "not verified",

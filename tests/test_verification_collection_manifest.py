@@ -12,3 +12,9 @@ def test_public_interface_contains_no_reference_body_or_annotation():
 def test_executable_defaults_require_review():
     with pytest.raises(ValueError, match="nonliteral default"):
         interfaces("def f(x=helper()): return x")
+
+
+@pytest.mark.parametrize("default", ["[helper()]", "{'key': helper()}", "(helper(),)", "-helper()"])
+def test_containers_cannot_hide_executable_reference_defaults(default):
+    with pytest.raises(ValueError, match="nonliteral default"):
+        interfaces(f"def f(x={default}): return x")

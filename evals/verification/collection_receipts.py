@@ -33,6 +33,7 @@ def verify(prepared, receipt_path, attempt_events, executable):
     for field in ("resource_adjustment_sha256", "resource_cohort_id"):
         if field in prepared:
             require(receipt.get(field) == prepared[field], f"receipt {field} mismatch")
+    require(receipt.get("resource_cohort") == prepared.get("resource_cohort"), "receipt resource cohort mismatch")
     root = Path(receipt_path).resolve().parent
     request_hash = file_hash(root / "request.json")
     require(request_hash == receipt["request_hash"] == receipt["actual_request_hash"], "actual main request mismatch")
@@ -49,6 +50,9 @@ def verify(prepared, receipt_path, attempt_events, executable):
     require(file_hash(root / "raw-response.json") == receipt["response_sha256"] == result["response_sha256"],
             "original response bytes changed")
     raw = load(root / "raw-response.json")
+    require(raw.get("model") == result["confirmed_model"] == receipt["settings"]["model"],
+            "actual main model mismatch")
+    require(raw.get("usage") == result["usage"], "actual main usage mismatch")
     require(len(raw["choices"]) == 1 and raw["choices"][0]["message"]["content"] == result["candidate"],
             "candidate is not original model response")
     candidate = (root / "candidate.txt").read_bytes()
@@ -63,6 +67,13 @@ def verify(prepared, receipt_path, attempt_events, executable):
     require(file_hash(root / "packet.json") == result["packet_sha256"], "native packet bytes changed")
     packet = load(root / "packet.json")
     require(packet["candidate"] == result["candidate"] and packet["claims"] == result["claims"], "native candidate/claims changed")
+    require(result["host_B"]["policy_version"] == prepared["build_info"]["policy_version"],
+            "native host policy mismatch")
+    require(len({c["id"] for c in packet["claims"]}) == len(packet["claims"]), "duplicate native claim ID")
+    for claim in packet["claims"]:
+        begin, end = claim["start"], claim["end"]
+        require(type(begin) is int and type(end) is int and 0 <= begin < end <= len(candidate), "native claim span bounds")
+        require(candidate[begin:end].decode() == claim["text"], "native claim span mismatch")
     require(not result["agent_loop_executed"] and not result["assertions_executed"]
             and result["tools_executed"] == 0, "single response scope was misreported")
     return receipt

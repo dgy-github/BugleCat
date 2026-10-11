@@ -1,5 +1,23 @@
 # Jev 核验：当前交付、真实开发对照与离线基线
 
+## 2026-10-11：新增代码产物轨道，原声明轨道保留
+
+用户已选择独立 `artifact_acceptance` 轨道，判断模型原始代码能否满足冻结断言，宿主命题明确标记 `host_artifact_hypothesis`，不要求模型声称测试执行过。[契约](ARTIFACT_ACCEPTANCE_PROTOCOL.md) 已固定；`artifact_acceptance.py` 完成原始来源与独立Oracle绑定，`artifact_scoring.py` 完成预测前注册与仅开发评分，7条已查看代码保持development。参考解/标签/Oracle结果不发Jev；失败/未知保留，不凑正式负例。正式阈值仍null，holdout未运行，native A/B unavailable，生产不启用。
+
+新sidecar真实开发请求已打通，`artifact_observations.py` 独立复核原始transport与收费reservation；1次成功、无重试、NOUL0.12，实际655/25 tokens。新增授权Jev已用1/400，主模型12/400；全套verification Python190 passed。[开发报告](../../reports/artifact-development-smoke-20261011.md)。旧来源只做development，正式intake/校准/留出仍待完成。
+
+v3.3运行包已封存并实机验收，见 [新交付报告](../../reports/release-v33-20261010.md)。随后新增artifact example不在该包封存图内，sidecar另构建。调用入口先做零网络回归，收费仍与原轨道共享授权上限；新版包不意味着两个轨道已认证。
+
+## 2026-10-10 恢复开发：v3.3 与来源审计（当前）
+
+源码策略为 `host-rules-v3.3`：修复实际 `No tests were executed` 的肯定误抽；诚实未执行保持Unknown，权威运行记录可识别错误否认。新运行包正在构建，实际产物状态以 [HANDOFF](../../HANDOFF.md) 顶部和新交付报告为准；旧v3.2付费packet和运行包保留，不能混算版本。
+
+真实来源复审新增 `source_bindings.py`（源文件/协议/授权/group/split/接口前后核对），原始收据额外核对model/usage/span/策略/resource cohort。Oracle升级另存内容寻址收据，旧事实不覆盖。`benchmark_readiness.py` 在扩大付费批次前核对原始审阅队列与全局台账，不生成新标签或概率。
+
+当前12主模型启动/11完成/7有效候选/0合格肯定Semantic，新Jev0；正式阈值null、留出未运行。[当前入库检查](reports/benchmark_readiness_resume_20261010.json) 显示剩余预算即使全部成功也不足400有效组；未完成请求费用未知。接受断言通过只认证有界产物事实，不能改写自然语言声明或凑supported标签。当前生产默认off、类别空，源码修复不代表效果已认证。
+
+零费用回归：`python -m pytest tests/test_verification_source_bindings.py tests/test_verification_benchmark_readiness.py tests/test_verification_benchmark_review.py tests/test_verification_collection_manifest.py tests/test_verification_benchmark_oracle.py tests/test_verification_transport_receipts.py tests/test_verification_paid_budget.py -q`。
+
 ## 当前评测阶段：独立标签与校准/留出工具
 
 用户已批准最多50次新增Jev尝试，无自动重试；累计预算上限76。断言标注已运行：修正宿主提示/DSML/HTTP错误污染后，**7有效候选/3任务组，5条限定事实supported、2条Unknown、0负例**。范围复核为model_reviewed，真实人工标签0。原来源回放另发现 `not success` 被当肯定，已回归修复，策略源码升v3.2；旧发布exe仍v3.1。

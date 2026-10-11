@@ -129,11 +129,7 @@ fn check(input: &VerificationInput, claim: &Claim) -> (Verdict, &'static str) {
         return (Verdict::Unknown, "semantic_review_required");
     }
     if claim.evidence_ids.is_empty() {
-        if claim.polarity == "negative"
-            && ["not run", "未运行", "未执行"]
-                .iter()
-                .any(|s| claim.text.to_lowercase().contains(s))
-        {
+        if claim.polarity == "negative" && super::extraction::denies_execution(&claim.text) {
             return (Verdict::Unknown, "honest_unexecuted_limitation");
         }
         return (
@@ -182,10 +178,7 @@ fn check(input: &VerificationInput, claim: &Claim) -> (Verdict, &'static str) {
                 .contains(&e.status.as_str()))
     };
     if claim.polarity == "negative" {
-        if ["not run", "did not run", "未运行", "未执行"]
-            .iter()
-            .any(|s| claim.text.to_lowercase().contains(s))
-        {
+        if super::extraction::denies_execution(&claim.text) {
             return if evidence
                 .iter()
                 .any(|e| e.authoritative && (e.exit_code.is_some() || provenance::success(e)))

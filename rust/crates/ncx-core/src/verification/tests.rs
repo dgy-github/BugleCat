@@ -4,6 +4,116 @@ use serde_json::json;
 use std::{cell::Cell, rc::Rc};
 
 #[test]
+fn honest_unexecuted_tests_are_negative_with_exact_spans() {
+    for candidate in [
+        "No tests were executed",
+        "No tests were run",
+        "Tests were not executed",
+        "Tests were not run",
+        "No unit tests were executed",
+        "No tests were executed successfully",
+    ] {
+        let extracted = claims(candidate);
+        assert_eq!(extracted.len(), 1, "{candidate}");
+        let claim = &extracted[0];
+        assert_eq!(claim.kind, ClaimKind::TestsPassed, "{candidate}");
+        assert_eq!(claim.polarity, "negative", "{candidate}");
+        assert_eq!(claim.context, "narrative");
+        assert_eq!(&candidate[claim.start..claim.end], claim.text);
+    }
+    let candidate = "No tests were executed, so I cannot confirm that the implementation passes the frozen benchmark acceptance criteria.";
+    let extracted = claims(candidate);
+    assert_eq!(extracted[0].polarity, "negative");
+    assert_eq!(extracted[1].kind, ClaimKind::Limitation);
+    let dir = tempfile::tempdir().unwrap();
+    let result = policy::evaluate(&packet(
+        &session(dir.path()),
+        dir.path(),
+        candidate,
+        &Default::default(),
+    ));
+    assert!(result
+        .decisions
+        .iter()
+        .all(|decision| decision.verdict == Verdict::Unknown));
+    assert_eq!(
+        result.decisions[0].reason_code,
+        "honest_unexecuted_limitation"
+    );
+    assert_eq!(result.policy_version, "host-rules-v3.3");
+}
+
+#[test]
+fn negated_execution_does_not_hide_a_separate_positive_or_promote_a_quote() {
+    let candidate =
+        "No tests were executed [call:old]; but unit tests passed [call:new] and 测试未执行";
+    let extracted = claims(candidate);
+    assert_eq!(
+        extracted
+            .iter()
+            .map(|claim| claim.polarity.as_str())
+            .collect::<Vec<_>>(),
+        ["negative", "positive", "negative"]
+    );
+    assert_eq!(extracted[0].text, "No tests were executed [call:old]");
+    assert_eq!(extracted[1].text, "unit tests passed [call:new]");
+    for claim in &extracted {
+        assert_eq!(&candidate[claim.start..claim.end], claim.text);
+    }
+    for candidate in [
+        "> No tests were executed",
+        "\"No tests were run\"",
+        "```text\nNo tests were executed\n```",
+        "If no tests were executed then the result is unverified",
+    ] {
+        let extracted = claims(candidate);
+        assert!(extracted
+            .iter()
+            .all(|claim| claim.kind == ClaimKind::Limitation));
+        assert!(!extracted
+            .iter()
+            .any(|claim| claim.kind == ClaimKind::TestsPassed && claim.polarity == "positive"));
+    }
+    for candidate in [
+        "Tests were executed",
+        "Unit tests passed",
+        "No tests failed; unit tests passed",
+    ] {
+        let extracted = claims(candidate);
+        assert_eq!(
+            extracted.last().unwrap().polarity,
+            "positive",
+            "{candidate}"
+        );
+    }
+}
+
+#[test]
+fn denial_of_execution_conflicts_with_observed_failure_as_well_as_success() {
+    for outcome in ["Exit code: 0\n3 passed", "Exit code: 1\nfailed"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = session(dir.path());
+        let before = workspace_snapshot(&session, dir.path());
+        tool(&mut session, "run", "cargo test --lib", outcome);
+        let after = workspace_snapshot(&session, dir.path());
+        session.record_verification_snapshot("run", &before, &after);
+        let value = packet(
+            &session,
+            dir.path(),
+            "No tests were executed [call:run]",
+            &Default::default(),
+        );
+        let result = policy::evaluate(&value);
+        assert_eq!(
+            result.decisions[0].verdict,
+            Verdict::Contradiction,
+            "{outcome}"
+        );
+        assert_eq!(result.decisions[0].reason_code, "denied_observed_execution");
+    }
+}
+
+#[test]
 fn explicit_success_denials_remain_negative_in_authentic_and_mixed_reports() {
     for phrase in ["not success.", "not a success."] {
         let extracted = claims(phrase);
