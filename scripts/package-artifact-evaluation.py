@@ -24,6 +24,11 @@ from evals.verification.calibration import create, load, require  # noqa: E402
 PARENT_SHA = "16fab536149aae8e7d1e8645d2b5b63cbc9ad02e47f7a195b715444b53c5819b"
 NAMES = {"verification_artifact_profile_collect", "verification_artifact_profile_formal",
          "verification_artifact_holdout_collect", "verification_artifact_holdout_formal"}
+PUBLIC_MBPP_FILES = (
+    "mbpp-expanded-20261011-v2.json",
+    "mbpp-full-f82046ba5aabbbb427dbfd38a254d26bff08b533.jsonl",
+    "sanitized-mbpp-f82046ba5aabbbb427dbfd38a254d26bff08b533.json",
+)
 SECRET = re.compile(r"apikey_[0-9a-f]{20,}|sk-[A-Za-z0-9_-]{24,}|(?i:bearer)\s+[A-Za-z0-9_.-]{30,}")
 
 
@@ -93,8 +98,8 @@ def stage(parent, component_file, result_file, output):
     shutil.copy2(parent / "source-snapshot.json", output / "parent-source-snapshot.json")
     # Only code, public benchmark sources and fixed protocols; no session/ledger.
     sources = list((ROOT / "evals/verification").glob("*.py"))
-    sources += list((ROOT / "evals/verification/data/mbpp").glob("*.json"))
-    sources += list((ROOT / "evals/verification/data/mbpp").glob("*.jsonl"))
+    # A directory glob can include abandoned drafts or private local additions.
+    sources += [ROOT / "evals/verification/data/mbpp" / name for name in PUBLIC_MBPP_FILES]
     sources += [ROOT / "evals/verification/data/mbpp/ATTRIBUTION.md",
                 ROOT / "evals/verification/ARTIFACT_EVALUATION.md",
                 ROOT / "evals/verification/ARTIFACT_ACCEPTANCE_PROTOCOL.md",
