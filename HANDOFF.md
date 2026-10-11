@@ -1,5 +1,19 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：STDIN主模型开发采集端离线验收完成，正式校准仍未启动
+
+既有6.1 Sol完成新`cohort.py/collection.py/intake.py/compiled_sources.py`与独立Rust `verification_apps_stdin_v1_collect`。真实preregister必须消费封存808来源方案和获批的新5链，保留原共享账本/metadata/失败/pending；仅固定开发8可进入main，校准/留出拒绝caller split或布尔字段。cohort锚定实际collector EXE/hash/build-info；当前190个编译依赖角色包含新owner、9个本地crate显式源码/Cargo输入及15个实际include资产，不依靠未来目录glob。
+
+Root独立复核并闭合了几项实质问题：原`durable_new`接收dict而不是bytes，现有独占Oracle marker/receipt可以实际落盘；全部prepared文件集合和bytes双向核对，新Oracle仅允许本轮独占创建的两个预定文件；HTTP400等非2xx保存private原bounded响应/body SHA和status，endpoint SHA贯穿prepared/events/receipt/SQLite（**仅每batch target冻结，不宣称全808 provider endpoint已固定**）。模型原SYSTEM要求代码后自评，因此提取器允许唯一Python代码块外普通assessment，但仅取原UTF8内部span，保留CRLF/末行/完整assistant，绝不strip或改代码；无块、多块、嵌套/假fence拒绝。标签仍只依据代码原IO，不借外部成功声明赋标签，冻结prompt/profile/名单/门槛不改。
+
+Root新增只读`development_review.py`和纯`development_packets.py`：前者必须以actual intake重建保存dataset，保留完整808/开发8/未开800、所有原失败与Unknown，并锁定原目录集合、EXE和全费用前后闭包；未记录Oracle或只有crash marker的批次不能称完整。后者在同次fresh原始review之后用authority原13字段病例与原train读取任务，仅为原binary候选的完整代码span和原IO构造新packet；完整开发结果保留，不发reference/label/Oracle结果。**这两层均不授予预约、校准、正式登记、Jev发送或认证权限**，当前没有真实开发dataset/packet。
+
+最终限定联合验收实际**134 passed /1 skipped（27.72s）**，skip为Windows symlink创建权限；限定Ruff通过。6.1 Sol的新例子8项Rust测试、Clippy `-D warnings`与限定rustfmt通过。Root复制实际新EXE另验build-info全部190角色、HTTP400原响应与endpoint关联、prepare fixture不能进入live；真实旧4链对完整原808 source proof的preregister被拒绝，审计钩子禁止该拒绝过程socket/DNS/subprocess。新EXE SHA `1d23d3e05a3739d9178ff3bd3ec78b545aaed3b83fda3058d0b857ebd17e7fb6`；Root copied proof SHA `738d9a9ac95b7fe2f2a0174beb8643abc95aafa333cf24da74cf09a11d808a99`，pure owners真实旧预算proof SHA `df6bc60d816ed8830783111bc45aa740acfe5746a26c79590d51ec9c7453a249`。Root operator先后修正build-info wrapper取值及fixture scenario名称，前两次未产生有效证明或真实收费，不覆盖任何原证据。
+
+公开[开发采集端离线验收聚合](reports/artifact-v3-apps-stdin-development-offline-20261012.json) SHA `363dd2252207bedea324b118e72d6c2b3b74741c7c8051a3cda3d9357d85c4ec`。6旧APPS EXE和3冻结基础owner前后SHA一致；完整原834 main/229阶段Jev/pending1账务与原封存快照一致，新增真实main/Jev/候选Oracle/预约均0。临时自制Oracle与fake transport证明开发管线，不充当自然样本或认证。
+
+**接下来继续免费C4：** 新开发Jev blind登记、同原Jev预约根的新sender/原transport观察，再建立真正开发验收→校准400→独立标签全终态配额→Jev校准→一次新留出的owner闭包。当前C3 `verified_pack`有意只认尚未新增Jev预约的dev main前缀，不能用caller flags放宽或在新预约之后直接借用；新owner必须核原source/archive及真正before-Jev binary登记。随后做实际运行包验收。main余316/Jev余632，拟追加main492/Jev176仍未批准；没有新实际auth/cohort、校准、留出或阈值认证。生产off、threshold=null，27.71MiB已交付ZIP仍未包含STDIN工具。
+
 ### 2026-10-12：STDIN采集后来源与共享账务验证完成，实际collector/intake开发中
 
 新增`frozen.py/history.py/budget.py`三个独立所有者，旧收费owner/EXE及STDIN已封存source/packet不改。`frozen.load_pack`硬绑定原revision2 proposal/raw baseline/authority/旧授权/profile，完整当次C1证明后读取808原任务，来源选择仅复现原baseline，不读取当前账本或重选剩余池；新收费后的账务验证与原来源证明分开。legacy prompt模块含事务decorator，实际只调用的plain `system_prompt`声明单独比较loaded bytecode；其余使用的新/旧读取器按完整声明核对。

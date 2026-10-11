@@ -1,5 +1,17 @@
 # Jev APPS 标准输入轨道：免费可行性验证与后续门禁
 
+## C3最新验收与C4入口
+
+主模型开发采集工具已完成离线验收：限定六份新测试同进程134 passed/1 Windows symlink权限skip（27.72s），限定Ruff通过；新Rust例子8 tests、Clippy、限定rustfmt通过。实际新EXE SHA `1d23d3e05a3739d9178ff3bd3ec78b545aaed3b83fda3058d0b857ebd17e7fb6`，Root复制后逐角色验证190个实际编译依赖、HTTP400原body/status/sha/endpoint关联、fixture live拒绝，并对真实旧4链跑完整source proof后的preregister拒绝检查。公开证据`reports/artifact-v3-apps-stdin-development-offline-20261012.json`；原834/229/pending1全账务与原封存snapshot相等，6旧EXE和3基础owner不改。
+
+实际cohort锚定编译EXE，只开放原固定开发8；main请求只有public题目/starter/policy。intake保存全808原allocation、failed/pending/unstarted/Unknown，不重发；默认不执行Oracle。独占Oracle用原dict durable落盘，完整prepared文件图双向闭包；原HTTP失败body仅private，target hash绑定每prepared batch，不宣称whole-cohort endpoint固定。
+
+提取规则以实际冻结prompt为准：原SYSTEM要求代码后assessment，故允许唯一Python fence外普通自评/uncertainty，仅取原UTF8内部span，保留原CRLF与完整assistant；不strip、不修改代码、不把外部声明当代码标签。没有/多个/嵌套/假fence拒绝。这是修正提取实现与原冻结模板的冲突，不修改原source proposal、prompt、profile或配额/质量门槛。
+
+Root新增开发只读review与pure Jev packet preparation，验证actual saved intake、全808/原开发终态、原candidate span/完整IO和费用/目录/源前后闭包；crash marker没有Oracle receipt不可称完整。尚没有真实开发材料可review，这些结果不授预约/发送/登记/校准/留出权限。
+
+C4继续独立新owner：先原binary开发标签blind登记与共享JeV预约/actual sender/observer，再真正main校准opening和独立标注、完整400 quota、固定41阈值校准与一次新holdout。C3的dev-only prefix在出现new Jev reservations后拒绝；不要直接借C3 validate或caller eligible flags作为C4权限。须用真实before-Jev登记以及未改的source/原main archive/账务prefix重连。C4正式代码与运行包验收完成后才申请既定main492/Jev176收费扩展；当前未批准，没有新收费、真实cohort或自然标签/概率。
+
 ## 最新验收状态（完整终态，取代下方途中快照）
 
 A原型完成：限定108项fixture通过；纯packet初版40项通过，独立复核补修后81项通过（4.38s），限定Ruff通过。B免费完整首参考检查完成：固定1130组、989通过/138失败/3Unknown，pilot8仅引用、新增1122次执行、3027原对保留。Root零重执行逐组复验原row/首参考/完整IO及全部收据、source/runtime。
