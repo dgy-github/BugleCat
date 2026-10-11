@@ -151,7 +151,10 @@
     "account_balance_checked": false,
     "delivery_status": "sealed_delivery_calibration_not_qualified",
     "public_calibration_result": "evals/verification/reports/artifact_calibration_high_result_20261011.json",
-    "public_delivery_report": "evals/verification/reports/artifact_delivery_20261011.json"
+    "public_delivery_report": "evals/verification/reports/artifact_delivery_20261011.json",
+    "github_delivery_commit": "2cf1c6e7767077d38fe99da82c788ab01a2f0e0f",
+    "github_delivery_branch": "feat/context-association-memory",
+    "github_source_push_verified": true
   },
   "role": "audit record; runtime does not load this JSON as permission or certification"
 }

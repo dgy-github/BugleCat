@@ -10,7 +10,7 @@
 - 新包 `releases/jev-artifact-calibration-20261011`：v3.3 GUI/CLI/安装程序加4个独立产物评测exe。manifest SHA `03fc2676734953aa000c2d7a4297d79046f44c2ec553853561a6f891b6ce6270`，500文件全部字节重验。ZIP `releases/BugleCat-jev-artifact-20261011.zip`，30.24 MiB，SHA `706492a83e5bb6fbd768ed2c92c5ec102822573bfcb5052982bdd57e546a28b7`；逐member字节重验通过。4个真实exe零HTTP smoke及复制GUI/CLI localhost启动、恢复、取消和off/shadow/enforce生命周期均通过，零收费；安装程序未实际安装，不认证安装/升级流程。离线fixture自建的会话/ledger为fake证据，不含真实用户会话/收费ledger。
 - 最终终态工具23项回归通过，已实际重验原收费证据后写入；工具修正allocation/collected分离，最新SHA `bb70e5da849f99a628728543a2f2249720b36be299b317cd14681052cb2f222a`。写前两文档before/after精确bytes/SHA私有备份已保留，进行中快照工具拒绝覆盖终态。交付说明在包README及 `evals/verification/ARTIFACT_EVALUATION.md`，当前local release审计指向新包。
 
-GitHub最终公开源码/结果/文档提交与远端核对执行中；阶段 `db4bb4a` 已实际推送。下方旧进度仅为历史，不能覆盖本段实际失败终态和新包。未来修改模型/模板/策略需要新冻结来源与独立认证；本轮未自动开始额外收费。
+GitHub最终公开源码/结果/文档交付提交 `2cf1c6e7767077d38fe99da82c788ab01a2f0e0f` 已推送并实际核对远端相同SHA；分支 `feat/context-association-memory`。本确认记录另行归档，不把源码提交当作阈值认证。下方旧进度仅为历史，不能覆盖本段实际失败终态和新包。未来修改模型/模板/策略需要新冻结来源与独立认证；本轮未自动开始额外收费。
 
 ## artifact 独立评测终态（原始证据重验记录）
 
