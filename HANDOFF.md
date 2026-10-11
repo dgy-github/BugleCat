@@ -1,5 +1,19 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：STDIN开发Jev与校准开放离线验收完成，继续固定400组采集开发
+
+C3采集端已推送GitHub，上一提交`7d0417d8357e15c9b5656a8b70619538d0f16f41`。本节C4a新增7个Python所有者和独立Rust开发Jev sender，现已通过限定联调并冻结。**这是开发工具验收；正式校准、留出和新运行包仍未完成。**
+
+6.1 Sol完成`development_originals/registration/jev/transport/observations`：同次fresh完整来源证明，核原8候选/Oracle/原登记、完整请求与原始events/raw/receipt/EXE；在同一预算根预约/claim，失败保留后可下一固定新组，pending或同组重发拒绝。Jev发送完整原代码和IO，不送reference/标签/Oracle结果；严格拒绝重复JSON键、非有限数值、错误actual model/usage。HTTP400保留private原bounded响应，fixture请求不能进入live。预约后未claim的stranded状态保留费用且拒绝伪造终态恢复，不允许重发。
+
+Root新增`development_acceptance.py`只读重建真实开发观察；保留8/400/400固定名单、失败、Unknown和全部原账务。开发概率不选阈值、开发组不计正式配额；保存review不授予阶段权限。`calibration_opening.py`从fresh review，在原Jev锁与main SQLite独占短事务中create-new固定400校准marker；留出400未开。锁内核已认证原raw/SQL image，不移除活锁来调用普通snapshot。`before_first_request`刻意只适合校准尚未采集时；付费后须由新的校准所有者证明原开发archive和当前真实追加前缀，不能裁账本或投影零Jev。
+
+限定联合**78 passed（256.41s）**；6.1 Sol新Rust例子5项测试、Clippy `-D warnings`、限定rustfmt/Ruff通过，Root新增两owner及测试Ruff通过。完整临时链覆盖8原main/Oracle→blind登记→原Jev预约/claim/raw（首组HTTP400、后7组ok）→只读review→一次固定校准marker；所有原账务前后不变。实际新EXE **6,757,888 bytes**、SHA `cf5dfa1cc84942a1267aad589d6ba977e34d18df16d6085ce6d91dffe1d1ca85`，202编译角色一致。Root复制实际EXE验证成功/HTTP400/提交后取消原始join与fixture live拒绝，7旧EXE不变；完整真实834 main/229阶段Jev/pending1仍等于原封存账务。
+
+公开[开发Jev离线验收聚合](reports/artifact-v3-apps-stdin-development-jev-offline-20261012.json) SHA `681c2b6dbd4ddbb3b6038fb4aa8ed01f090138c9f0daf85be2ee320b12d046e5`。Root复制证明 SHA `6b3fc9e6a219e41936cf4146132aaaeeb7a9577caf46dfe02cef82040ec1aba2`，Sol实施证明 SHA `9bcb3658b47aca536bab340757f7635882e8b0628b33ae300065671205433aa5`；这些fixture不补自然正负样本、不认证阈值。Root acceptance SHA `a694f688284af5e6e247f7f98c9b5798ac9ae5d581138c511bcc69c4cdda2332`，opening SHA `32fb35f86b98116d9621912ee04df13077b900ded4eba33058d19ddb72a9e5ae`，后续新owner不修改它们。
+
+**下一步C4b由既有6.1 Sol免费实现：** 独立校准原archive/实际追加前缀所有者、新main采集工具与独立标签intake；固定400全终态后才检查150正/50负配额。再接正式blind Jev、阈值门禁及一次新400留出，最后实际运行包验收。当前真实新增授权/cohort/marker/main/Jev/候选Oracle均0；预算仍main余316/阶段Jev余632，拟追加main492/Jev176未批准。生产off、threshold=null；已交付27.71MiB ZIP尚未包含STDIN工具。
+
 ### 2026-10-12：STDIN主模型开发采集端离线验收完成，正式校准仍未启动
 
 既有6.1 Sol完成新`cohort.py/collection.py/intake.py/compiled_sources.py`与独立Rust `verification_apps_stdin_v1_collect`。真实preregister必须消费封存808来源方案和获批的新5链，保留原共享账本/metadata/失败/pending；仅固定开发8可进入main，校准/留出拒绝caller split或布尔字段。cohort锚定实际collector EXE/hash/build-info；当前190个编译依赖角色包含新owner、9个本地crate显式源码/Cargo输入及15个实际include资产，不依靠未来目录glob。

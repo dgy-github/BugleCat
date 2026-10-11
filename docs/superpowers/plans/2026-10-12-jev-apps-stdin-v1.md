@@ -166,3 +166,11 @@ Root新增纯`apps_stdin_v1/packet.py`和独立packet测试，40 passed（0.59s�
 - 用临时账本和fake transport走开发、校准配额不足、Jev失败、合格阈值、一次留出完整闭包。fixture可证明管线，不计真实来源/自然标签/效果认证。
 - 实际复制工具离线调用，验证GUI/CLI off/shadow/enforce和会话生命周期，再生成新manifest/ZIP并逐字复验所有成员、源码/结果/费用前后闭包。不含key、账本、原题、候选或原响应；正式认证未通过时production默认off、threshold=null。
 - 逐阶段记录开发、窄测试、费用与认证状态到HANDOFF.md，按明确公开路径提交GitHub并验证实际远端。现有27.71MiB运行ZIP保持旧阶段交付，完成新包验收后才称包含STDIN工具。
+
+### C4a完成记录与C4b实现边界（2026-10-12）
+
+开发Jev原始盲登记、原共享预算预约/claim、202角色实际独立sender、原始观察重建、只读开发review及独占校准opening已完成离线验收：限定78 Python通过（256.41s），新例子5 Rust通过，Ruff/Clippy/rustfmt通过。完整临时8组中保留首组HTTP400后继续其余7组；成功、HTTP400、提交后取消实际复制EXE原始join通过，fixture live拒绝；原真实账本和7旧EXE未变。聚合见`reports/artifact-v3-apps-stdin-development-jev-offline-20261012.json`。这不代表真实开发已运行、校准已开启、自然负例充足、阈值通过或新包已交付。
+
+C4a所有者和EXE现已冻结。后续C4b采用独立`calibration_originals/collection/intake`与新`verification_apps_stdin_v1_calibration_collect`，不得修改旧收费owner或借C3仅dev的验证器冒充校准权限。首请求前可验证实际opening；校准开始后必须同次fresh来源＋原开发main/Oracle/blind登记/Jev原transport archive重建opening历史baseline，然后核实际当前账本完整追加前缀。不得删原预约、抹原失败/pending、截main、投影零Jev或重选剩余来源。
+
+C4b只开放原400校准main，原400留出保持未启动、原开发8不再发送，本阶段不得增加校准Jev。独立新collector逐组写原start/finish/request/events/session/raw/endpoint与实际compiled EXE关联，终态失败保留后可下一固定新组，pending阻止续发。候选Oracle单次原marker/receipt，stranded不恢复重跑；完整原代码span与IO，Unknown不当负例。全808 dataset保留所有原分配状态；400均终态且原候选Oracle齐全后才提供独立标签准入。随后由独立正式登记所有者检查150正/50负门槛并固定binary名单，才可能发正式Jev和选择阈值。真实执行仍需未来具体收费授权。
