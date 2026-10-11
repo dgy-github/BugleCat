@@ -1,5 +1,31 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-11：完整 APPS 请求与新采集程序验收，8 组开发采集启动
+
+Root 新来源事务实际终态通过：5000 原行、1565 历史原记录重新聚类，2494 原参考收据关联，2517 数据绑定/64 本地所有者 before-after 核对；2278 固定代表参考合格组。authority raw SHA `6fab7f355a9de9c5f83102b3a99938d54216cca33ccccda3d6e5c4789a20c625`。原 grouping 图不完整的历史记录保留，新事务不倒填原证明。见 [来源事务](reports/artifact-v3-apps-source-authority-20261011.json)。
+
+新 Jev packet 固定全部顺序测试对、真实 Python runtime、free/Solution 持续状态及原比较规则；不发送参考、断言结果或标签。完整请求 48000 UTF8 bytes 上限，候选 JSON 字符串预留16000 bytes，2278组中2274资源合格，4组超限排除；354 interview/1920 introductory，440 Solution/1834 free。不裁剪原测试对或候选。资源 inventory raw SHA `d779a64b57445458b1b7a732c30806fb5d7cca91a95ef45c2ba4a295f6118237`。见 [资源普查](reports/artifact-v3-apps-resources-20261011.json)。
+
+新的 source-only admission guard 保留已冻结来源 owner 字节并严格拒绝 reseal 后夹带收费/阈值/留出授权。新 protocol 复用原150正/50负每阶段、误拦95%上界≤2%/检出95%下界≥50%和原九阈值网格，不迁移旧概率或认证。参考失败/Unknown不能成为模型负例。
+
+6.1 Sol 完成独立开发 main collector，复用原共享 SQLite/预算链并显式禁止 HTTP 默认重试。新编译 EXE SHA `3e104ec0a485f7067fd6622faa67c35c155819ed51dba35dbaf8e0dbfd2144cb`，development owner SHA `b361fc9ac59160e396cf264dd9a2f339f4bc2625f89d0712412ff80eae4c3193`。原冻结 paid owner/EXE不改；新 source/template/admission guard/collector graph 均通过实际 build-info 比对。免费233项核心回归以及新采集/原始intake62项回归分别通过，Ruff/clippy/rustfmt通过；非正式效果认证。
+
+Root 实际 create-new 8 组纯开发 allocation（原difficulty各4），真实 EXE prepare 后原来源/完整 request/body/manifest/编译所有者/路径/预算关联全部通过；8 未启动且 unlabeled、原 main510/phaseJev222 未变。prepare dataset raw SHA `283f9edd1c82d0f0722e36eceb0bf9d676d866a82e0ccbb0b6d99bc9202ff7c8`。随后 Root 按既有各750上限启动一次8组开发采集；本节为启动快照，终态/费用/独立标签以其后实际结果为准，不能重发已启动组。
+
+下一步：原 main 终态后重验所有 allocated 组原 SQLite/events/receipt/raw response，再一次本地候选 Oracle 独立标注。Jev新开发 sender 仍在离线实现，未调用 Jev。whole development allocation 排斥未来正式集；生产off、正式阈值null、真实留出未开。至少全新400 main两阶段理论需求仍超当前240剩余（开发后更少），后续额外收费须另获明确预算授权。这不是 key 余额判断。新 APPS owner/工具尚不在原安全ZIP内，整体目标 active。
+
+### 2026-10-11：网络恢复后继续免费开发，类方法与新来源聚类完成
+
+在前节已推送 `a722b72bc3b941170985481b02e85ad56ca18ea5` 的基础上，新增独立 `apps_solution_v3/`，Root 审查后一次首参考筛选490任务，488通过/1不通过/1Unknown，完整原行/首参考/全部IO/pair/receipt/runtime关联重验通过。收据集合digest `dbc13331303229d1948306db1b85c4854dd8dd2c56e0844c8a197cf7107a93f5`。原free五所有者及旧付费owner/EXE字节保持。
+
+新 `apps_v3/dedup.py` 对5000原任务/全部参考和1565条MBPP/Human原历史记录聚类，4789组、66重复组件、最大组件119行；27历史匹配组整组排斥，代表先固定原最早行。全部原组记录SHA `5ef40c673407d09e52da819e43713e29289d2b284ca7ad57297adea290687e5a`。无效AST参考2446仍参与原文/问题暴露匹配；不宣称没有语义近重复。Root固定代表与真实首参考证据关联，得到2278参考合格组：1838free/440Solution，354interview/1924introductory。3个组件不能用后面通过的成员替换最早不通过代表，实际保留排除。此数不是模型标签、正式配额或收费准入数。
+
+原grouping图四角色依赖不足；6.1 Sol只追加补证，实际原记录及原source record set重建一致，source/oracle/runtime current与先前free-screen冻结SHA相同。补证SHA `44e1fb850db81d339ba22fbdea6fa2970004749b7314562237df6c042e2830cc`，明确原before-load完整证明false，不覆盖原文件或冒充收费准入。Root新增 `apps_campaign_v3/source_authority.py`，在新完整owner/data before-after事务重新构造全部分组并重验2494条原参考收据；不执行新的Oracle。终态以其独立聚合为准，运行期间禁止编辑已冻结所有者。
+
+当前免费回归：两类Oracle+dedup 121项、Root source门禁14项通过；Ruff通过。6.1 Sol新 ordered-pair Jev模板正在实现，保留48KB完整请求门槛，不裁剪测试对，不发送reference/Oracle结果/标签；主模型只接收原public字段。下一步模板独立审查和完整资源普查，再固定新profile/cohort/实际collector及独立标签管线，之后才做预算内新开发组，正式两阶段不足的预算需另获明确追加。
+
+原main510/750余240、阶段Jev222/750余528、历史Jev27另累计；本次新增模型/Jev/预约0。原全部费用、失败和旧allocation保留，生产off、阈值null、真实留出未打开、整体目标active。新代码尚不在前节旧安全ZIP内，Git保存及新包只按实际执行证据记载。
+
 ### 2026-10-11：网络复查恢复；APPS 新 Oracle 和免费参考筛选完成
 
 用户确认网络恢复后，Root 实际复查 DeepSeek DNS 成功、零密钥 HEAD 返回 401，GitHub `ls-remote` 成功并与当时 HEAD `a08992ff31a82ea0590af38e064a598ebd195505` 一致。没有发收费探测或重试原请求。

@@ -1,5 +1,34 @@
 # APPS 新 Oracle：实现与交付边界
 
+## 当前执行闸口：完整来源、资源与开发采集
+
+Root 已完成新的完整来源重建：2278 固定代表参考合格组，2517 原数据绑定和64源码/runtime绑定核对；authority raw SHA `6fab7f355a9de9c5f83102b3a99938d54216cca33ccccda3d6e5c4789a20c625`。新完整 packet 资源普查2274合格/4超限，保留全部测试对，48000 bytes上限/候选JSON预留16000 bytes。旧 grouping不完整依赖图不倒填为完整。
+
+6.1 Sol 新 main collector 与 Root 原始 intake 已完成免费验收；实际 EXE SHA `3e104ec0a485f7067fd6622faa67c35c155819ed51dba35dbaf8e0dbfd2144cb`，62项相关测试、实际 fake transport、编译所有者比对通过。Root真实8组 prepare/intake通过，0收费、8 unlabeled；现仅按原750累计上限启动开发采集。主模型只收到原公开题面/starter/入口/调用方式，禁止参考或IO答案泄露。
+
+剩余顺序：
+
+1. 完整开发终态原始join → 一次本地候选执行独立标签，未启动保持unlabeled，失败/资源不适用保持Unknown。
+2. 新 APPS Jev开发入口离线实现/actualfake证明 → 原body/bytes/一次预算slot核对 → Root预算内单次发送 → 全 allocation 观测，不认证开发阈值。
+3. 开发通过后，固定全新正式 cohort/profile/协议与400+请求的具体预算；先校准达到原150正/50负及误拦/检出门槛，才能开一次全新留出。现 main余240不足理论最低400，不自行突破750。
+4. 根据真实结果完成最终运行包、复制后验收与GitHub保存；目前生产off、阈值null、留出未开，旧安全ZIP不包含本次新工具。
+
+## 2026-10-11 后续：类方法与完整来源排斥
+
+新独立 `apps_solution_v3/` 支持唯一顶层 `Solution`、普通实例方法、单实例持续执行原顺序测试对。拒绝继承、装饰器、类变量、私有属性访问、`self` 重绑定、未绑定类方法调用及 `type` 反射；只允许真实实例方法体中的直接公开 `self` 属性写入。执行原 AST，不执行审查投影。自由函数的五个已筛选所有者和旧付费 EXE 保持原字节。两类 Oracle 和去重模块的 121 项回归、Ruff 通过；Root 另新增来源门禁 14 项回归通过。
+
+Root 实际一次执行 490 个类方法任务首参考：**488 passed /1 failed /1 Unknown**，Unknown 为 builtin shadow。全 490 source/first0/IO/pair/receipt/runtime 只读关联重验通过；receipt hash 集合 digest `dbc13331303229d1948306db1b85c4854dd8dd2c56e0844c8a197cf7107a93f5`。参考不通过或 Unknown 不算模型负例。
+
+完整 5000 原任务与 1565 条历史原文记录按问题、原 URL、全部参考原文和两种既有规范化指纹聚类：4789 个组、66 个重复组件、最大组件119行、27个历史匹配组整组排斥。无效 AST 原文仍保留原文/问题暴露匹配，2446份参考无法计算完整指纹；未声称无语义近重复。代表固定为原最早行，不根据参考结果挑代表。
+
+对固定代表作原首参考证据 join：**2278 个参考合格组**，1838自由函数、440类方法；原difficulty为354 interview/1924 introductory。3个组件的最早代表不通过而后面存在通过成员，全部保留排除，没有换代表。原始最大问题13959bytes、IO94714bytes、1440pairs；48KB请求资源门槛仍需用新完整模板评估，不能裁剪测试对。
+
+原 grouping 图只有四个角色；追加补证证明 source/oracle/runtime 当前字节与较早 free-screen 冻结值相同，并重建原 source record set。补证 SHA `44e1fb850db81d339ba22fbdea6fa2970004749b7314562237df6c042e2830cc`，不伪称原 before-load 图完整。新 `apps_campaign_v3/source_authority.py` 用独立完整 before/after 事务重新计算所有组并重验两类全部原收据，不重执行参考、不发收费请求；只有实际终态报告才能证明该新事务完成。
+
+6.1 Sol 正在实现新 ordered-pair 单 NOUL 模板，主模型仅接收原问题/starter/入口名和调用方式，Jev 接收完整测试对及原候选；参考、Oracle结果、标签和概率不进入模板。模板/资源/新cohort/实际collector/独立标签管线未冻结前没有付费采集授权。原统计配额和九阈值网格不降低，旧概率和旧阈值不迁移。
+
+费用仍 main510/750、阶段Jev222/750，原历史Jev27另累计；本节 source/Oracle/grouping 新增模型/Jev/预约为0。生产off、threshold null、留出未运行、整体目标未完成。
+
 ## 已实现、已验证
 
 新所有者为 `evals/verification/apps_v3/`，没有编辑旧冻结的评测源码或 EXE。它复用原受限 AST 策略，通过新比较、执行、源读取模块实现 APPS **显式顶层函数**的原始测试对契约。53 项免费回归及 Ruff 通过，6.1 Sol 独立复核发现的缺失内置函数、初始化异常分类、畸形子进程证据和 bool/int 混淆均已修复。

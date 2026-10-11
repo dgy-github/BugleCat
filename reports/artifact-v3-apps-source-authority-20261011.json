@@ -1,0 +1,37 @@
+{
+  "schema": "buglecat.verification.apps-source-authority.aggregate.v3",
+  "authority_sha256": "6fab7f355a9de9c5f83102b3a99938d54216cca33ccccda3d6e5c4789a20c625",
+  "authority_hash": "2cdd7cacd35003aab683a61e555f6dbb28ae1f0f58f557cb8616f3d4cb1d1a0b",
+  "source_rows": 5000,
+  "source_groups": 4789,
+  "reference_qualified_groups": 2278,
+  "historical_original_rows": 1565,
+  "historical_excluded_groups": 27,
+  "original_difficulty_counts": {
+    "interview": 354,
+    "introductory": 1924
+  },
+  "source_kind_counts": {
+    "apps_call_based_solution_method": 440,
+    "apps_call_based_free_function": 1838
+  },
+  "all_data_bindings_rechecked": 2517,
+  "local_owner_bindings_rechecked": 64,
+  "new_complete_transaction_before_after_verified": true,
+  "original_grouping_graph_retroactively_complete": false,
+  "full_original_grouping_rebuilt_without_reference_reexecution": true,
+  "semantic_uniqueness_proven": false,
+  "source_only": true,
+  "collection_authorized": false,
+  "formal_cohort_created": false,
+  "candidate_labels_assigned": false,
+  "formal_certification": false,
+  "main_starts": 510,
+  "main_cap": 750,
+  "phase_jev_reservations": 222,
+  "phase_jev_cap": 750,
+  "model_calls": 0,
+  "jev_calls": 0,
+  "oracle_executions": 0,
+  "overall_goal_complete": false
+}
