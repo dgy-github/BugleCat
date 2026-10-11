@@ -1,5 +1,15 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-11：316 组方案获批，真实授权桥接与正式采集启动
+
+首8正式采集终态：7 ok、1 response_content_invalid；独立Oracle为7 supported/0 unsupported/1 Unknown，全316allocation保留308未启动。失败响应原finish_reason=length、16384 completion均为reasoning、正文0，不重发该组。Root只读重建原全allocation一致，原请求/raw/session/receipt/编译图和7原Oracle重新关联，零Oracle重执行；dataset raw SHA `669409a2972986c9e66a72917d338a0d5d51b8d7d37d789be777074f1b12a863`。一次私有operator汇总误读不存在的字段已在新只读报告中修复，原数据/费用/候选未变。当前正式main526、阶段Jev229，校准pending0；[公开首8聚合](reports/artifact-v3-apps-formal-first8-20261011.json)。Root继续固定未启动校准队列，最多每批8、任一已尝试组不重试，失败和Unknown均留在全allocation；配额/效果仍未达标。
+
+用户已明确批准“批准316组方案：主模型+400、Jev+111（推荐）”。Root create-new 授权 `evals/verification/reports/jev_budget_extension_20261011_apps316.json` raw SHA `d25cf26ab40a3548e16bd8195b19aec1ae73dc1d28922b9ff8c44226fbfd1422`；主模型总上限1150、阶段Jev861，历史Jev27另保留。真实只读桥接保留原518 main/229 Jev/历史pending1、原400→500→750链、同SQLite与预约目录，扩展后各余632。没有重置账本或修改原来源提案。
+
+6.1 Sol 新预算桥接/正式main实现180项Python、10项Rust、build/Clippy/Ruff通过。Root 实际新EXE build-info与完整所有者匹配，EXE SHA `1a8f171906134a5957ea831e81fa975090bf25c59eebeedbaff2ffe2a02deb86`，9,589,248bytes。实际原来源重建通过并固定完整calibration316/holdout316，cohort canonical `20da10b80658f553049d34b38fb0e35d6490d7306a0c502e3e718be43129a150`。实际EXE首8 prepare和全316只读intake通过；零HTTP准备dataset SHA `cb364b9e02dee811ea6ccffa70f7c0a54a9a74946ebcb3390df85c56851852ac`，费用前后未变。随后Root启动首8正式calibration主模型，每组一次、无自动重试，实际终态和独立标签待后续记录。
+
+正式main paid所有者、来源图和EXE自首请求起冻结。Root新增真实同JeV目录注册事务，必须重建全校准原候选/Oracle并满足150正/50负；15隔离事务回归/Ruff通过，尚未真实注册。6.1 Sol继续实现新正式Jev发送/observer及资格化校准后的一次留出新入口；不得修改已付费main所有者。真实留出未开，生产off、认证阈值null，最新运行包仍待完成。前一源码检查点已实际推送GitHub `ba583c49c5e08d77dc08fb5d2fcbd2244e8c6afb`；本节与新正式实现尚待下一提交。
+
 ### 2026-10-11：开发 Jev 终态、原始关联与新正式方案
 
 7 个 binary eligible 开发候选各实际尝试 Jev 一次：6 ok、最后 1 transport_error，无重试；原完整8组独立标签仍6 supported/1 unsupported/1 Unknown。五个成功正例分数0.23–0.29，负例0.47，原0.5起点网格漏检该开发负例。失败正例概率null且保留分母，Unknown不晋升负例。Root只读重建全allocation并重新关联原request/rawresponse/model/usage、预约/start marker/events/receipt/actual EXE来源和原候选/Oracle字节；零新费用、零Oracle重执行。见 [实际开发Jev聚合](reports/artifact-v3-apps-development-jev-20261011.json)。
