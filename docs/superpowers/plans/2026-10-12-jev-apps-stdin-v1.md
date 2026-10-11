@@ -6,7 +6,17 @@ A原型完成：限定108项fixture通过；纯packet初版40项通过，独立�
 
 989参考通过组逐一构造完整Jev请求，候选JSON字符串预留16000 UTF8 bytes，988资源通过：778 interview/137 competition/73 introductory；1组超过48000 bytes拒绝，不截断。独立复核补上实际loaded参数/numeric code/常量/alias闭包与候选硬限16k；修订后Root重验全1130原收据，并用当前packet重做989资源构造，仍988通过、最大35939 bytes，无参考重执行。原冻结源码和834笔main行/metadata、229份预约原bytes前后未变，新增收费0。当前公开证据：`reports/artifact-v3-apps-stdin-reference-pool-revision2-20261012.json`（SHA `21b2d2c145cd8c6bb06ebec7d63b59e33b36330a287f2dc6e21438133c0cae21`）；原报告保留历史快照。
 
-这已证明首版受限STDIN执行和完整请求有可用复杂来源，不能证明主模型自然负例足量、官方APPS兼容或Jev收益。source authority、收费collector/intake、独立正式登记、新阈值及一次留出闭包仍待开发；当前生产off、阈值null，原运行包不含STDIN工具。
+这已证明首版受限STDIN执行和完整请求有可用复杂来源，不能证明主模型自然负例足量、官方APPS兼容或Jev收益。C1 source authority与C2固定来源方案现已完成（如下）；收费collector/intake、独立正式登记、新阈值及一次留出闭包仍待开发。当前生产off、阈值null，原运行包不含STDIN工具。
+
+### C1/C2实际完成记录
+
+独立新source authority真实重建全部原来源及首参考收据，不执行Oracle或请求模型；988组准入仅限首版受限STDIN/完整原顺序对/完整请求资源，qualified为778 interview/137 competition/73 introductory。固定来源方案8开发+400校准+400新留出，全808原任务及public prompt实际核对，旧dev8/完整旧正式632与实际start/reservation整组排除；每阶段配比与seed按下方原计划固定，余180不补换。formal_cohort/collection/registration/holdout/production仍false，threshold=null。
+
+source/source_authority 94 fixture passed（1.35s），protocol/sampling 78 passed（4.83s），限定Ruff通过。独立复核补修pending/unstarted冒充终态分母、proof结束到原文件SHA捕获之间漂移两个边界，随后在新的revision2目录只读重建真实完整事务；原开发快照不覆盖。新protocol固定原150/50和2%/50%置信门槛、41点网格、失败分母、无Pass晋升，纯数字结果不能授予认证。
+
+当前authority raw SHA `f3f757e568980a2d59aacbfd28360b22110753cc7d50bd7e13f69ef4ff6e731d`；revision2来源方案raw SHA `7429e274a44472b4b3f6a2262cde8e45646f86cd02982515641fe5352a2f603e`，Root完整事务proof SHA `a2d32d94e17c2a51bfeda3b8813f9ab153992c906a2a87e7b525f539852fd36f`。公开`reports/artifact-v3-apps-stdin-source-authority-20261012.json` SHA `c8b4e633acf33e98ebf3a718a8c55257497acd7d26b0cdfd979c99477f1a3de0`。全部原834 main行/metadata、229阶段Jev预约原bytes未变；新增收费/Oracle/预约0。
+
+`sampling.validate`仅为采集前校验，不能在新start后重建当前剩余池。C3须消费已封存完整方案/原baseline，并验证真正共享账本允许的append-only前缀、旧pending/失败/预约与同一授权链；新增budget/cohort所有者完成前不收费。808每服务缺main492/Jev176仍未批准，不能由本次免费方案选择自行突破。
 
 ## 授权与当前状态
 
@@ -103,7 +113,7 @@ Root新增纯`apps_stdin_v1/packet.py`和独立packet测试，40 passed（0.59s�
 
 新固定seed建议`stdin-natural-400-v1`，每难度按`SHA256(seed + ':' + group_id)`与group_id稳定排序，先开发，再校准，再留出；同一整组成员全程同split。正式名单必须在任何新候选/概率前create-new/fsync，绑定完整source authority、固定profile/protocol、源码/runtime和原账务快照。参考试验只决定来源资格；不能按主模型效果或Jev概率选择正式成员。所有开发allocation（无论是否真正发送）整组排斥正式阶段。
 
-本方案是待审查的数量与算法，不是实际allocation或收费授权。正式freeze前还须重验整个历史/旧正式632组/新旧实际启动与预约排斥，若有效复杂池不足808则停止制定该名单，不偷偷改配比或挪用旧留出。
+上述数量与算法已落成封存的source-only proposal，真实完整历史/旧正式632/实际start与预约排斥验证通过。正式cohort与收费授权仍未创建；将来必须消费这份固定完整方案，不在观察候选后重新选择、偷偷改配比或挪用旧留出。
 
 ### C3. 共享预算采集与原始intake
 

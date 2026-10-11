@@ -1,5 +1,19 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：STDIN来源准入与固定808组来源方案完成，仍无收费准入
+
+在完整首参考及当前revision2资源证明基础上，新增独立`source.py/source_authority.py`。真实准入重建逐一核对1130组的原train row、最早整组成员、原index0参考、全部原IO/marker/receipt、实际source/runtime和完整资源构造；不重执行参考。**988来源组准入：778 interview/137 competition/73 introductory**，只授予受限STDIN首参考与完整请求资源范围，不授予采集、登记、阈值或生产权限。私有authority raw SHA `f3f757e568980a2d59aacbfd28360b22110753cc7d50bd7e13f69ef4ff6e731d`。
+
+新`sampling.py`在任何新候选/概率前固定完整**8开发+400校准+400全新留出**来源方案：开发4 interview/4 competition，校准与留出各340 interview/60 competition；seed=`stdin-natural-400-v1`，稳定整组哈希排名。旧开发8、完整旧正式632（包括未启动留出）及所有当前实际start/reservation整组排斥。全部808组唯一、原任务和public prompt真实重验；剩180组不能补换不足/失败。此为封存的来源方案，**不是正式cohort或收费授权**。当前revision2 proposal raw SHA `7429e274a44472b4b3f6a2262cde8e45646f86cd02982515641fe5352a2f603e`；原全账务snapshot raw SHA `9cdf3c6b460f17e17817051a0f1f1e2501c537a6f879ed489e74972d6601d7a1`；Root真实事务proof SHA `a2d32d94e17c2a51bfeda3b8813f9ab153992c906a2a87e7b525f539852fd36f`。
+
+新`protocol.py`复用原置信区间计算与150正/50负、误拦单侧95%上界≤2%和检出单侧95%下界≥50%门槛；单独绑定STDIN契约/packet，固定41点网格与tie规则，真实失败保留二元分母，低概率不晋升VerifiedPass。6.1 Sol只读复核发现并已修复：pending/not_started不能算终态失败；authority/profile/auth原文件须在proof入口锁raw SHA、各验证后及末尾核对，并沿用入口SHA投射。旧来源方案保留开发快照；当前以revision2纯只读重建为准，不覆盖原证明。
+
+**新来源fixture94 passed（1.35s）+协议/分组78 passed（4.83s），限定Ruff通过；独立复核两项修复闭合。** Root实际事务与发布前后再次核对834笔main行/metadata、229份阶段Jev预约原bytes，全部未变；新增main/Jev/Oracle/预约0，无候选标签/概率。公开[来源准入与固定方案聚合](reports/artifact-v3-apps-stdin-source-authority-20261012.json) SHA `c8b4e633acf33e98ebf3a718a8c55257497acd7d26b0cdfd979c99477f1a3de0`。发布器首次读取JSON快照时发现SQLite tuple与JSON list的表示比较差异，未写公开文件；改为原canonical JSON比较后完成发布，原私有证明和费用未变。
+
+**下一步C3继续免费开发：** frozen原方案/原始baseline＋允许append-only收费前缀的新cohort所有者、共享SQLite/预约预算桥接、新collector与原始intake；之后独立盲登记、新Jev和一次留出闭包、实际工具/交付验收。`sampling.validate`明确仅适用采集前，任何付费后不得重选当前剩余来源或重建这个方案冒充原名单。保留同一账本、原失败/pending与累计费用，旧已付费owner/EXE不修改。
+
+主模型834/1150余316；阶段Jev229/861余632，历史27另保留。808每服务完整上限缺main492/Jev176，仍为**未批准方案**，不能由用户免费路线选择推导新收费授权。离线工具与整套门禁验收、完整方案可审查后才提出具体授权。自然负例是否够50、新Jev效果和一次留出均未评估；生产off、阈值null。原运行ZIP不含新STDIN工具，整体目标尚未完成。
+
 ### 2026-10-12：STDIN免费可行性验证完成，988组通过完整请求资源检查
 
 **固定1130组首参考检查全部终态：989 passed /138 failed /3 Unknown。** 989通过组为778 interview/138 competition/73 introductory；原pilot8全部引用原收据（含1失败），新增1122次本地首参考执行，3027个原测试对完整保留。固定计划先于执行create-new/fsync；不换参考、成员或重跑。参考失败/Unknown是来源拒绝，不能作主模型自然负例。原始终态raw SHA `b1ec05dbea9207f3bb6a9a635889f9e7b731f34dfc8fdeaceb2b52fbfbc1ab30`，固定full-plan SHA `962e443beaba3435e5beda519322e8eefaf95b2a9688c3d798a00839982ac996`。此前575等途中快照由本次完整终态替代。
