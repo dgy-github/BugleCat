@@ -4,7 +4,7 @@
 
 用户批准追加各100次，本阶段主模型/Jev上限各500；失败与历史启动仍计数、每组一次、无自动重试。新独立profile `deepseek-flash-high-16384-120-v1` 已在请求前冻结（profile rawSHA e0044b9de9e61ca55358a5081eba27a85c352f17ef3d74afa8ba028bc9064427），新cohort canonical `3b7407279f3ee8c00c75a0e0ca92af9a5098f63fad8b0cbf3642dfd9055d3549`；265个新校准组、保留至少200次main供一次留出。旧35已启动组排斥，旧ultra候选不混新分母。新main实际exe SHA `ae6d0cf59375fae0e31008eb9d384ce60a2364f4c28f30ed3d762cf0c7148b39`，提示词和冻结断言保持原样。
 
-快照 2026-10-11T03:51:16.840470+00:00：采集状态 completed；全局main 267启动/266完成/剩233；Jev本阶段72/剩428。已完成批次独立标签 162 supported、53 unsupported、17 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。新profile正式Jev预约尝试71，原始失败保留；预测前独立标签已登记，阈值仍待实际校准及一次新留出验证。 连续同类main故障、任何正式Jev故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
+快照 2026-10-11T04:03:38.044570+00:00：采集状态 completed；全局main 267启动/266完成/剩233；Jev本阶段97/剩403。已完成批次独立标签 162 supported、53 unsupported、17 unknown；在途请求不算完成标签。首两批16请求/15有效，11正3负2未知（其中1传输失败）。新profile正式Jev预约尝试96，原始失败保留；预测前独立标签已登记，阈值仍待实际校准及一次新留出验证。 连续同类main故障、任何正式Jev故障、取消、预算预留不足或独立标签配额在冻结分配内不再可能时停止；不制造负例，不自动追加预算。
 
 6.1-Sol已完成并冻结新profile正式Jev入口和独立holdout main/Jev入口；旧发送器/exe/源原hash保留。Root新增compiled main/原始事件/SQLite finish重验、完整实际启动分母检查、新profile source dispatch；留出结果可重新从原始一次消费证据计算。原始来源证明在单次事务内复用，复用时重新校验源文件字节；不缓存标签、台账或概率。Python verification全量348 passed，另一次实际main/profile-Jev/holdout二进制复核58 passed；后续仅拆分可移植测试，未改变已冻结发送源。认证仅可限定冻结MBPP产物轨道，整体agent准确性与生产仍未认证。正式阈值null，实际留出未打开，生产false。新打包脚本已实现但尚未运行；最新运行包仍为此前v3.3，不含后续工具。GitHub阶段提交和最终交付分别记录，不把代码完成当作评测完成。
 
@@ -29,6 +29,8 @@ Root本地正式Jev编排 `_artifact_profile_jev_campaign.py` 已实现，Sol只
 现有凭据桥接已适配该编排：`_holdout_with_existing_credential.py --campaign -- ... --phase main --live --main-key-env DEEPSEEK_API_KEY`，只允许main phase，剥离一枚命令分隔符并传原参数；原operator send-main入口保留。实际只读--probe成功、21项新mock验证通过，子进程环境传key、父环境/全局配置不修改、不落盘/输出key。wrapper SHA `b42f961837c7cf29811f2ed712a7b365043f402ee96b4046405f4d4b043138e6`；命令和恢复边界见 `reports/_artifact_holdout_campaign_report.py`，当前仍未实际open/register/holdout HTTP。最新打包集成验证修改已提交并推送GitHub `e029de45fbaf80c8ff0c3d9facc35acafe5acf91`，本地与远端哈希实际一致；这仍为阶段提交，最终结果/运行包未完成。
 
 新打包脚本已把实际复制GUI/CLI的localhost runtime与三模式lifecycle检查纳入最终seal前：Root零费用预演终端exit0，实际policy host-rules-v3.3，off/shadow/enforce全部通过，paid_calls=0，installer未安装。原始预演收据 `reports/artifact-package-runtime-preflight-20261011/receipt.json`，绑定打包源SHA `3454d22bafefa55de9267ae849b808f09a1345fa020d599f8730b6946df29e61` 与原v3.3封存parentSHA；这只是复制运行程序的实际集成验证，最终带实际评测结果的新包仍未封存，阈值认证不由GUI测试推出。
+
+最终结果记录工具已完成并由Root独立复测：`_record_artifact_final_result.py` SHA `9421a1b896152a869c15b42e4f31aaf936e9538a99769a99434a3ef7bc23a462`，23项窄回归通过。默认仅preview；真实owner原始证据重验后，只接受实际校准不合格或实际一次留出通过/未通过，拒绝把合格校准但尚未留出记为终态。写前固化两文档原文和投射稿的精确bytes/SHA；模拟第二份文档写入失败后原文可精确恢复。真实全局预算lineage一致核验，generic/native/整体收益与生产维持原契约，包字段保持不虚报；正在运行的快照工具也拒绝覆盖已有实际终态。目前尚未运行真实终态写入。
 
 ## 2026-10-11：ultra 输出资源耗尽已定位，纠正配置入口开发中（覆盖下方采集中状态）
 
