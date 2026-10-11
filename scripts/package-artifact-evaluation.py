@@ -53,6 +53,49 @@ def main_sources(name):
     return files
 
 
+def runtime_smoke(output, parent_manifest):
+    """Run the copied GUI/CLI against existing localhost fixtures before seal."""
+    evidence = output / "evidence"
+    env = {**os.environ, "NCX_JEV_API_KEY": "", "NANOCODEX_API_KEY": "",
+           "NCX_JEV_GUI_EXE": str(output / "BugleCat.exe"),
+           "NCX_JEV_CLI_EXE": str(output / "ncx.exe"),
+           "NCX_JEV_SMOKE_REPORT": str(evidence / "runtime-smoke.json"),
+           "NCX_JEV_LIFECYCLE_REPORT": str(evidence / "lifecycle.json")}
+    env.pop("NCX_JEV_RESTORE_ROOT", None)
+    for name in ("verification.mjs", "verification-lifecycle.mjs"):
+        run = subprocess.run(["node", str(ROOT / "rust/gui/e2e" / name)], cwd=ROOT, env=env,
+                             capture_output=True, encoding="utf-8", timeout=480)
+        require(run.returncode == 0, f"copied runtime localhost smoke failed: {name}")
+    smoke = load(evidence / "runtime-smoke.json")
+    lifecycle = load(evidence / "lifecycle.json")
+    require(smoke["cliExit"] == 0 and smoke["newLiveJevCalls"] == 0
+            and smoke["liveJevCalls"] == 0 and smoke["guiTranscriptRestored"] is True
+            and smoke["unverifiedLabelVisible"] is True, "copied runtime smoke incomplete or paid")
+    require(Path(smoke["cliExe"]).resolve() == output / "ncx.exe"
+            and Path(smoke["guiExe"]).resolve() == output / "BugleCat.exe",
+            "runtime smoke used other executables")
+    require(lifecycle["paidCalls"] == 0 and lifecycle["exeSha256"] == sha(output / "BugleCat.exe")
+            and Path(lifecycle["exe"]).resolve() == output / "BugleCat.exe",
+            "lifecycle used another GUI or made paid calls")
+    scenarios = lifecycle["scenarios"]
+    require(len(scenarios) == 3 and {row["mode"] for row in scenarios} == {"off", "shadow", "enforce"}
+            and all(row["cancelCompleted"] and row["restoredWithoutPass"]
+                    and row["durableWriteCalls"] == 1 and row["newJevAttempts"] == 0
+                    and row["passedLabels"] == 0 for row in scenarios), "copied lifecycle incomplete")
+    sessions = Path(smoke["root"]) / "workspace/.nanocodex/sessions"
+    records = [json.loads(line) for name in smoke["logs"]
+               for line in (sessions / name).read_text(encoding="utf-8").splitlines() if line.strip()]
+    require(records and all(row["result"]["policy_version"] == parent_manifest["policy_version"]
+                            and row["result"].get("attempted_calls", 0) == 0 for row in records),
+            "copied runtime policy changed or attempted Jev")
+    create(evidence / "runtime-verification-records.json", records)
+    for name, metadata in parent_manifest["files"].items():
+        require(sha(output / name) == metadata["sha256"], "copied parent bytes changed during smoke")
+    return {"actual_copied_runtime_smoke": True, "policy_version": parent_manifest["policy_version"],
+            "modes": sorted(row["mode"] for row in scenarios), "paid_calls": 0,
+            "installer_executed": False}
+
+
 def stage(parent, component_file, result_file, output):
     parent, output = Path(parent).resolve(), Path(output).resolve()
     require(output.is_relative_to(ROOT / "releases") and not output.exists(), "fresh releases directory required")
@@ -141,6 +184,7 @@ def stage(parent, component_file, result_file, output):
                              "compiled_source_bindings": [{"field": field, "file": path.relative_to(ROOT).as_posix(), "sha256": sha(path)}
                                                           for field, path in bindings.items()],
                              "staged_actual_offline_smoke": True, "paid_calls": 0})
+    runtime = runtime_smoke(output, manifest)
     files = [{"path": path.relative_to(output).as_posix(), "sha256": sha(path), "bytes": path.stat().st_size}
              for path in sorted(output.rglob("*")) if path.is_file()]
     package = {"schema": "buglecat.artifact-evaluation-package.v1", "parent_manifest_sha256": PARENT_SHA,
@@ -150,6 +194,7 @@ def stage(parent, component_file, result_file, output):
                "production_authorized": False, "native_claim_certification": False,
                "production_jev_threshold": None, "production_enforce_categories": [],
                "installer_executed": False, "paid_package_smoke_calls": 0,
+               "runtime_validation": runtime,
                "staging_script_sha256": sha(__file__), "files": files}
     create(output / "manifest.json", package)
     print(json.dumps({"package": str(output), "manifest_sha256": sha(output / "manifest.json"),
