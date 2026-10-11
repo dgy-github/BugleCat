@@ -1,6 +1,67 @@
 # HANDOFF — nanocodex (Rust 线)
 
-## 2026-10-11 工程交付完成：正式校准未通过
+### 最新执行快照：等待网络恢复，整体未完成
+
+新正式校准46次main启动，44有效/1正文无效/1transport_error；独立完整allocation审计为39 supported/4 unsupported/3 Unknown，189未启动均unlabeled。复用原8 Oracle、首次新增36，费用台账、旧Oracle、冻结source/EXE字节未变；没有正式Jev预约、没有读取概率或打开留出。私有partial dataset rawSHA `7bc8eb8e8b2071f9a2e841f3af384180e21235a705ac424cc8517ac6b81bb1a5`，audit rawSHA `688957dfafa567c3c3179a781565496eb763b6f0c4c1699989202e7a3006848f`；不是正式登记或认证终态。
+
+累计main321/750（320 finish、历史pending1），剩429；本阶段Jev222/750余528，历史27另累计。网络故障期间不发收费请求：原167 transport_error 11295ms，无rawresponse；随后零auth/零model HEAD失败，Python/Windows均见DeepSeek DNS11001/超时，GitHub解析也超时，本机有throne-tun接口。`two-fault-review.json`独立核对两原失败，V3 supervisor补充原response缺失的transport证明门禁，10项测试与新seal通过；原V1/V2及收费owner不改，等待健康探测成功后只续原未发送prefix。
+
+6.1 Sol完成新`package-artifact-evaluation-v2.py`与21项测试，包括两原frozen actual EXE复制后fake transport/rawbytes证明；零收费、无GUI、无重建。最终result尚未产生，尚未stage新包。缺原archive的legacy Rust依赖明确用原frozen EXE内嵌SHA证明，不伪称先前已归档；最终package仅公开源/聚合结果，原会话、候选、台账与密钥不入包。
+
+## 2026-10-11 正式 v2：首故障复核后继续未发送组
+
+- 新正式校准固定235组、留出240组；协议、模板、源顺序、high/16384/120秒资源配置及原统计门槛均保持封存字节。正式Jev仍0，留出未打开，整体任务未完成。
+- 前28个新正式main实际启动：27个有效回答、1个`response_content_invalid`。第28组`artifact-v2-formal-305`原始响应`finish_reason=length`，16384 completion全部为reasoning，content为空；该组Unknown、费用保留且不重试。此前首8组独立断言为8 supported；后续有效回答尚未最终标注，不能据此宣称满足正负配额。
+- 原响应/receipt/SQLite/terminal与完整来源重新核对后，独立`first-fault-review.json`封存，明确只继续原固定顺序尚未发送组，不读Jev概率、不改标签、配置或源。新私有supervisor V2在继续前逐批重新核对所有历史原始证明，8项零费用拒绝路径测试通过并提前seal；原V1和原收费owner保持不变。
+- 复核时累计main303 start/302 finish/历史pending1，余447/750；本阶段Jev222预约且已start，余528/750，历史27另累计。随后已启动未发送组续采，实时计数以同一原台账为准。额度是请求上限，不是账户余额。
+- 下一步：完成235组终态采集与独立断言；至少150 supported/50 unsupported才可做预测前正式登记与Jev校准。新故障仍立即停止，保留原证据；不重发已启动组、不将Unknown改为正负、不调用未合格留出。
+
+## 2026-10-11 继续开发：整体目标尚未完成
+
+用户指出“还没做完”。此前完成的是一次失败校准的记录和安全包交付，不能作为“阈值认证、独立留出评测及效果交付”的完成证据。下面原始 v1 失败结果和封存包保留；整体任务恢复进行。
+
+- 待完成：定位误拦/漏判的原因，完成有版本隔离的改进与离线回归；新校准达到原门槛后，才执行一次全新留出；认证后重新封存并验收运行包。
+- 已完成零收费诊断，进入最多 8 组新开发验证。旧 215 个 Jev 组不重发、不改标签、不改结果；旧校准与整个 265 组 allocation 不进入新留出。不得通过降低门槛、改名旧样本或回填证据获得认证。
+- 用户随后明确批准“各追加最多250次”：上限各从 500 到 750，原始预算仍累计计数。当前 main 已启动 267（历史 pending 1），余 483；本阶段 Jev 已占用并启动 216，余 534。授权文件 `evals/verification/reports/jev_budget_extension_20261011_250.json`，raw SHA `2baa8582e6021cabf161e1c1837c0e2fb270f9cc2ffe318e93151619777b475c`；旧 400→500 链、根目录、metadata、费用不清零。自然正负比例、Unknown 和失败仍可能使配额不足，这不是账户余额报告。
+- 由已有 6.1 Sol 实施代理进行实际请求/评分/失败分布的离线交叉审查；根操作员负责当前计划、版本边界及后续收费门禁。正式结果必须来自冻结的新协议和原始收据，不能把失败交付审核当作效果认证。
+- 当前 `production_enabled=false`、阈值 null、真实留出未启动；整体完成条件仍未满足。后续按剩余计划顶部的未完成清单执行。
+
+本轮实现增量（下方另记实际请求，离线测试不是准确性认证）：
+
+- 原 215 收据完整重验；请求 1099–6201 bytes，未发现候选/断言/imports 缺失、截断或概率反向。53 负例中 47 AssertionError、4 TypeError、1 ValueError、1 NameError；类型/literal/顺序判别是改进假设，不据此宣称根因或模型收益已证明。
+- 新开发模板 `artifact_request_v2.py`：一次 body 中 setup 与每条完整断言前缀问题，显式 candidate→builtin admission→imports→共享 namespace 顺序；不发送参考、标签或执行结果。max 聚合可能增加误拦，旧阈值不可复用。
+- 新 `artifact_v2_development` Python/Rust 单次传输与原字节入库门禁：原请求、原响应、receipt/finish、共享预约/marker、输出路径及编译所有者绑定。actual binary 的取消/超时/缺答案/版本错配/一次性回归已验证。开发工具不是正式认证入口。
+- `budget_authorization_v2.py` 接入同一预约交易，旧 resolver 字节不变；旧费用、失败、pending、不重试约束均保留。18 项新旧预算测试通过。
+- 完整旧 265 allocation 加所有旧启动/预约排斥后，MBPP fresh calibration 153、holdout 454。官方 HumanEval 原 164 条及完整测试保留，参考环境 155 可执行/9 Unknown；保守去除 3 个跨套件参考重复后可补 152 个独立来源。原 MBPP split 未改变；新源仍未正式分组登记，公开数据训练污染与跨套件分布限制保留。
+- 旧 allocation 剩 33 不能继续采集：新 start 会使封存 232 数据集“包含同 cohort 全部 start”门禁失效。独立 dev-only fresh cohort/main 入口正开发，禁止为 8 组伪填旧正式 ≥200 门禁。
+
+### 新开发批次实际执行记录（进行中）
+
+- 源/主模型/Jev 开发发送器及所有者已经冻结原 bytes；61 项请求、原收据 join、共享预算、真实 binary fake 路径及编排故障回归通过，零收费测试不代替模型评测。
+- 首 8 组新 MBPP 开发 allocation 已在请求前登记。首 task646 在第 268 次主模型 start 后 `transport_error`，批次自动停止，后 7 组未发送、Jev 未预约。免费连接探测先出现 DNS 11001，随后 Python 与实际 Rust unauthenticated HEAD `/models` 均收到 401，TLS 未绕过。原失败、原完整 8 intake、原 SQLite 只读 evidence-only backup 已封存，副本不是收费台账。
+- 使用同一冻结 owner 在新 followup 目录登记原来未发的 7 组；新登记断言 group/ID 恰好等于原未发 suffix、旧 646 永久排斥、原 global268 保留。实际 7/7 main `ok`，global275（本轮8含失败1），余475/750；没有重试任一已开始组。
+- 跨新 scope 启动后，旧 8 owner 的当前全台账重验会拒绝重复 scope，不能谎称旧入口仍兼容。历史首失败以之前封存的原 intake/baseline 和原 receipt/events 证明；新 7 由新原 scope 全链验证。正式分配排斥旧完整265及开发完整8。
+- Root 曾提前启动 0费用标签进程，已停止；它产生的部分标签登记/packet 原文件保留为不完整草稿、不得收费准入，没有 Jev 调用。新增 finalizer 必须验证原 7 全部 main 已完成，复用原有效独立 Oracle bytes，仅对尚无 Oracle 的原候选首次 audit5；从完整原证据另写新 final 标签与 packet 并冻结。未覆写任何原标签或主模型响应。
+- 正式 v2 固定数值门槛已在独立文件实现，21 项统计回归通过；mixed-source intake/collector 与正式 Jev 源证明尚在开发。规划 HumanEval90校准/62留出（未生成候选前分源），原 MBPP split 不动；暂定235校准/240留出，需根据实际余额和源准入冻结，不能按概率或成败换组。尚无正式 v2 校准/留出结果。
+- 最终原 7 标签为4 supported/2 unsupported/1 Unknown，6个eligible首次Jev均ok。正例max NOUL为0.03/0.17/0.33/0.08，负例0.93/0.39；仍有漏判，不能从小样本认证收益。Jev首原response曾因Rust canonical `\\?\D:`与Python正常路径的词法比较拒绝入库；原frozen sender/intake不改，新`artifact_v2_development_observations.py`按Windows路径身份核对并重验原字节，4个路径回归通过，第一笔没有重发。独立continuation只预约原后5个未预约组，保留原一次marker、receipt/events、原失败和premature草稿；最终结果在私有`artifact-v2-development-followup-20261011/path-fixed-development-result.json`。
+- 最新实际台账：main275 start/274 finish/历史pending1，余475/750；本阶段Jev222预约且已start，余528/750（旧27另累计、不清零），本轮新费用为main8/Jev6。下一步正式source-only reference准入、runtime provenance和全新mixed cohort冻结。整体目标仍active，正式阈值null、留出未开、生产off。
+
+### 新正式 v2 冻结前准备（尚未收费采集）
+
+- 完整公开来源 reference-only CPU 审计751组：fresh MBPP calibration145为142 passed/3 Unknown，fresh MBPP holdout454为450 passed/4 Unknown，HumanEval152全部passed。全部原收据与7 Unknown保留，未打开未来候选或Jev预测；reference10秒与candidate5秒区别明确。
+- 原未收费v2设计Human90/62不足235校准来源。新独立协议 `evals/verification/reports/artifact_protocol_20261011_v2_r2.json`（rawSHA `215ed253fc6dacc919b23bff4ebc48be2b0ab3e7669ccb4a29544e3330ad0770`）在候选前改为Human93/59，原MBPP split不变；计划235校准/240留出，原150正/50负、95%置信、误拦上界2%/检出下界50%与9阈值固定网格未改。仅依据公开参考准入分组，不以真实标签或概率换源。
+- 正式模板绑定实际Python解释器文件SHA、版本和worker；发给Jev的runtime信息不含本地可执行路径。Root正式统计/原传输观察/固定共享ledger留出evaluation marker新增回归通过，私有操作员8项故障门禁通过。实际main/Jev二进制还需完成最终来源绑定和零HTTP验收。
+- 留出源消费门禁正在接入：真实新校准合格后，先写共享ledger固定一次marker，再允许固定留出prefix。输出换路径不能重开来源或重复评测；失败/取消/预算和历史pending继续累计。
+- 当前台账仍main275/Jev222，剩475/528；正式v2主模型/Jev调用均0，正式阈值null、holdout not_run、生产off。上述实现和测试不是准确性认证，也不是整体agent收益证明。
+
+### 正式 v2 已封存并开始首批采集
+
+- 6.1 Sol 完成mixed-source主模型/独立intake/holdout source-once入口，47项测试与实际binary fake/clippy/格式检查通过。main EXE SHA `916b79e2c5d040ad45ed11f85d2772d100b4da19d371ae621ab423d18dbbe202`。Root正式Jev EXE SHA `dd681bc627b5c068c56c73112e505acd465e451bc478f4637a6361edc9365d8f`，11项实际binary fake回归及Clippy通过；Root契约/统计/原传输/once/操作门禁合并68项通过。
+- 新完整cohort在任何候选前写入 `reports/.nanocodex/artifact-v2-formal-20261011-r2/cohort.json`，rawSHA `1ba084b214a12185a5c99a5a3ad4d4b9158a0d63d3fe031fb561236cbf81d274`；固定235 calibration/240 holdout、Human93/59、同原MBPP split、原数值门槛。完整owner、原排斥scope、所有Python依赖及actual exe归档，freeze rawSHA `6997236333c8bd4c0b5c08e97b33225c8689bcf36851b45bb48ca47e79a222c2`。封存基线main275/Jev222；后续收费继续同台账累计，不修改这些owner或旧版本。
+- 来源不可变重建采用事务内缓存，每次命中仍重hash完整source/pool/official/worker/实际解释器；不缓存候选、台账或概率。整批统计先重验唯一原数据登记，再逐笔核对原传输，避免235×235重复候选proof；统计门槛与结果含义未改变。
+- 首8个正式主模型请求进行中；待真实批次terminal后才独立CPU断言，不提前注册或调用Jev。当前认证仍未完成，留出未开启，生产off。实际计数以原SQLite/预约slot为准，不把进行中快照冒充终态。
+
+## 2026-10-11 阶段交付记录：正式校准未通过
 
 本轮源码实现、独立样本标注、正式固定网格校准与安全运行包交付已完成；实际效果认证失败，未开启留出、未启用生产。失败交付遵循本轮冻结计划第9项，不以程序测试通过冒充模型收益。
 

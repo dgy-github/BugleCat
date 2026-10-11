@@ -8,7 +8,7 @@ import json
 import os
 from pathlib import Path
 
-from .budget_authorization import resolve
+from .budget_authorization_v2 import resolve
 from .calibration import digest, load, require
 
 

@@ -1,5 +1,24 @@
 # 代码产物校验评测操作契约
 
+## 当前正式 V2 路径（2026-10-11）
+
+新的正式迭代使用独立冻结的 mixed MBPP/HumanEval 来源、`artifact_protocol_20261011_v2_r2.json`、235 校准组及 240 留出组。模板版本是 `jev-artifact-assertion-specific-v2`：每条完整断言前缀对应一个违例概率，max 只生成拒绝信号；低概率保持 unverified。原每阶段至少150正/50负、单侧95%误拦上界2%及检出下界50%不变。旧失败校准、旧完整分配及开发组全部排斥，不迁移旧阈值。
+
+- `artifact_v2_formal_cohort`：候选前冻结公开来源、解释器/worker、完整分组、资源配置、编译程序和共享授权；按原顺序选择尚未启动的组。
+- `verification_artifact_v2_formal_collect`：两个 split 共用的实际主模型采集程序。留出必须携真实合格校准及固定共享消费锁；`prepare` 零收费，显式 `live` 每组一次，首故障停止。
+- `artifact_v2_formal_intake`：重验终态批次、SQLite实际start/finish、原请求/响应/receipt、源码和解释器；独立受限worker执行原断言。未发送为unlabeled，已启动无效或越界为Unknown，二者不混淆。
+- `artifact_v2_formal` / `artifact_v2_formal_observations`：概率前完整登记、实际Jev传输证明、固定网格校准及一次留出结果；所有预测收据重新核对原bytes，失败计入分母。
+- `artifact_v2_formal_holdout`：新校准合格后，先写共享main ledger固定source消费marker，再允许新留出采集；共享Jev ledger另有固定evaluation marker，换输出路径不能重新消费。
+- `verification_artifact_v2_formal`：实际Jev程序，`validate`零网络；`live`要求原packet、registration、同一原预约及显式live。缺原证据或配额时在HTTP前拒绝。
+
+当前累计授权为每服务750次：保留400→500→750原链、所有失败及历史pending，历史27次Jev另累计。授权次数不等于账户余额。原收费源码和实际EXE在候选前封存；审计和中断恢复不能修改或重建原owner。新checkout的离线构建与fake transport测试不会恢复原本地收费证据，也不授予付费权限。
+
+当前正式V2评测进行中，尚未认证阈值或打开留出。新`scripts/package-artifact-evaluation-v2.py`默认只读重验原最终结果；`--stage`才复制已审计v3.3运行程序、两原V2评测EXE及公开源，做零收费localhost生命周期验证并封存ZIP。合格校准但缺真实留出不能作为最终结果打包。公开包不含真实收费ledger、候选、会话或原provider响应；安装器提供但未安装。基准认证范围仅限冻结断言和运行环境，生产默认off，不自动认证整体agent收益。
+
+## 历史 V1 操作与失败结果
+
+以下保留此前MBPP单一来源、500次上限及四程序运行包的原操作记录；不覆盖上方当前V2协议、授权或认证状态。
+
 本轨道判断主模型生成的 Python 代码是否满足冻结 MBPP 断言。它不证明主模型执行了测试，也不认证自然语言声明、任意项目正确性或整体 agent 决策收益。统计门槛以请求前冻结的 `reports/artifact_protocol_20261011_v1.json` 为准。
 
 ## 阶段与前置证据

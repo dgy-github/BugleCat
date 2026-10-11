@@ -1,0 +1,43 @@
+{
+  "schema": "buglecat.verification.artifact-protocol.v2",
+  "policy_version": "artifact-assertion-specific-v2",
+  "template_version": "jev-artifact-assertion-specific-v2",
+  "model": "jev-1.13.0",
+  "categories": ["artifact_acceptance"],
+  "score": "maximum_exact_question_noul",
+  "threshold_grid": [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.975, 0.99, 1.0],
+  "min_supported": 150,
+  "min_unsupported": 50,
+  "max_false_block_rate": 0.02,
+  "confidence": 0.95,
+  "min_error_rejection_lower_bound": 0.5,
+  "source_kinds": ["mbpp", "humaneval"],
+  "candidate_oracle_timeout_s": 5,
+  "reference_admission_timeout_s": 10,
+  "source_split_design": {
+    "mbpp": "preserve original calibration/holdout membership; exclude all old allocation and development groups",
+    "humaneval": "90 new groups for calibration, 62 for holdout, deterministic source-only assignment before new candidates",
+    "initial_calibration_allocation": 235,
+    "initial_holdout_allocation": 240,
+    "final_allocation_requires_actual_remaining_budget_and_complete_source_admission": true
+  },
+  "unknown_is_binary": false,
+  "unstarted_is_oracle_unknown": false,
+  "retain_all_actual_attempts_and_failures": true,
+  "automatic_retries": 0,
+  "per_group_max_attempts": 1,
+  "holdout_requires_qualified_new_calibration": true,
+  "holdout_consumptions": 1,
+  "holdout_threshold_tuning": false,
+  "old_threshold_migration": false,
+  "production_authorized": false,
+  "native_claim_certification": false,
+  "limitations": [
+    "Public benchmark training contamination is not ruled out.",
+    "Calibration and holdout source proportions differ; certification scope is the exact frozen evaluation population.",
+    "Restricted Python execution is an assertion Oracle, not a production sandbox certification.",
+    "A non-rejection never constitutes a verified Pass.",
+    "This track cannot certify framework-level decision accuracy or native narrative claim verification.",
+    "Fresh sources and request budget do not guarantee sufficient independent positive/negative groups or qualifying accuracy."
+  ]
+}
