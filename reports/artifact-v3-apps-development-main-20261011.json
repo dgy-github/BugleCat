@@ -1,0 +1,39 @@
+{
+  "schema": "buglecat.verification.apps-development-main.aggregate.v3",
+  "allocated_groups": 8,
+  "successful_main_responses": 8,
+  "independent_label_counts": {
+    "supported": 6,
+    "unsupported": 1,
+    "unknown": 1
+  },
+  "unknown_reasons": {
+    "unsupported_implicit_builtin": 1
+  },
+  "original_difficulty_counts": {
+    "interview": 4,
+    "introductory": 4
+  },
+  "source_kind_counts": {
+    "apps_call_based_solution_method": 4,
+    "apps_call_based_free_function": 4
+  },
+  "whole_allocation_read_only_join_verified": true,
+  "original_oracle_files_unchanged": 8,
+  "main_executable_sha256": "3e104ec0a485f7067fd6622faa67c35c155819ed51dba35dbaf8e0dbfd2144cb",
+  "dataset_sha256": "3713e884fb226e6264caef02d94fe3ffb9f4cda4ad15e0705427aa52526ec8f2",
+  "main_started": 518,
+  "main_finished": 517,
+  "main_cap": 750,
+  "phase_jev_reservations": 222,
+  "phase_jev_cap": 750,
+  "new_main_calls": 8,
+  "new_jev_calls": 0,
+  "automatic_paid_retries": 0,
+  "whole_development_allocation_excluded_from_formal": true,
+  "formal_certification": false,
+  "threshold": null,
+  "holdout_opened": false,
+  "production_enabled": false,
+  "overall_goal_complete": false
+}

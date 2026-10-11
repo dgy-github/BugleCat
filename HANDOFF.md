@@ -1,5 +1,13 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-11：8 组开发 main 终态与独立标签完成
+
+实际新开发主模型8/8成功返回，固定 high/16384/120秒、无自动重试；完整 allocation 原 source/SQLite/events/receipt/raw response/candidate/Oracle join 已完成。一次独立本地候选执行为 **6 supported /1 unsupported /1 Unknown**；Unknown 是 `unsupported_implicit_builtin`，不修改冻结 worker 或晋升为负例。完整私有 dataset raw SHA `3713e884fb226e6264caef02d94fe3ffb9f4cda4ad15e0705427aa52526ec8f2`。随后 Root只读全8重验一致，8份原 Oracle字节保留、零重执行；review SHA `004a993fdcd77ebb04718b7b87a0f850c6c01f53f9fd2e799e4f556ef9adbf3d`。见 [实际开发聚合](reports/artifact-v3-apps-development-main-20261011.json)。
+
+累计 main **518/750**（517 finish、原历史pending1）余232；阶段Jev **222/750**余528，历史27另累计。8组全为开发样本，不进入未来正式校准/留出；Jev新开发入口正在离线完成，仅7个binary eligible候选可各调用一次。尚未发送本轮Jev，不认证阈值，不打开留出。
+
+前节34条公开源码/测试/聚合和HANDOFF已实际提交推送GitHub `17802275b33c5a7039ef428405892dae03f2d086`，Root实际远端与本地HEAD相同；原题、候选、逐条Oracle、台账与密钥未提交。上述新main终态为后续证据，待下一实际提交。旧运行ZIP仍不含本次新APPS工具，整体目标未完成。
+
 ### 2026-10-11：完整 APPS 请求与新采集程序验收，8 组开发采集启动
 
 Root 新来源事务实际终态通过：5000 原行、1565 历史原记录重新聚类，2494 原参考收据关联，2517 数据绑定/64 本地所有者 before-after 核对；2278 固定代表参考合格组。authority raw SHA `6fab7f355a9de9c5f83102b3a99938d54216cca33ccccda3d6e5c4789a20c625`。原 grouping 图不完整的历史记录保留，新事务不倒填原证明。见 [来源事务](reports/artifact-v3-apps-source-authority-20261011.json)。
