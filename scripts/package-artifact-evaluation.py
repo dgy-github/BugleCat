@@ -96,6 +96,34 @@ def runtime_smoke(output, parent_manifest):
             "installer_executed": False}
 
 
+def package_readme(output, result):
+    """Plain startup instructions with the actual result's bounded scope."""
+    if result["schema"] == "buglecat.verification.artifact-holdout-evaluation.v1":
+        status = "留出门槛通过" if result["artifact_benchmark_certified"] else "留出门槛未通过"
+    elif result["schema"] == "buglecat.verification.artifact-formal-calibration.v1":
+        status = "校准门槛未通过，未打开留出"
+    else:
+        status = "本次正式评测未完成"
+    text = f"""# BugleCat 本地运行包
+
+本包包含 v3.3 GUI/CLI 修复及四个独立代码产物评测程序。
+
+## 启动
+
+- 双击 `BugleCat.exe` 启动桌面应用；使用已有应用设置配置主模型。
+- 命令行入口为 `ncx.exe`，运行 `ncx.exe --help` 查看参数。
+- `BugleCat_0.1.0_x64-setup.exe` 为 v3.3 桌面安装程序。独立评测工具保存在本包 `rust/target/debug/examples/`，使用说明见 `evals/verification/ARTIFACT_EVALUATION.md`。
+
+## 本次评测
+
+状态：{status}。完整结果见 `evidence/evaluation-result.json`。
+结论范围为冻结 MBPP 代码产物断言。原生声明及整体 agent 决策收益仍未认证，生产校验默认关闭，未自动启用评测阈值。
+实际复制 GUI/CLI 的启动、恢复、取消和三模式故障检查见 `evidence/runtime-smoke.json` 及 `evidence/lifecycle.json`；检查使用本地夹具，零收费。安装程序未实际安装。
+`manifest.json` 记录程序、源、结果和验证文件的 SHA256。费用台账、原始会话、候选及密钥保留本地。
+"""
+    (output / "README.md").write_text(text, encoding="utf-8")
+
+
 def stage(parent, component_file, result_file, output):
     parent, output = Path(parent).resolve(), Path(output).resolve()
     require(output.is_relative_to(ROOT / "releases") and not output.exists(), "fresh releases directory required")
@@ -185,6 +213,7 @@ def stage(parent, component_file, result_file, output):
                                                           for field, path in bindings.items()],
                              "staged_actual_offline_smoke": True, "paid_calls": 0})
     runtime = runtime_smoke(output, manifest)
+    package_readme(output, result)
     files = [{"path": path.relative_to(output).as_posix(), "sha256": sha(path), "bytes": path.stat().st_size}
              for path in sorted(output.rglob("*")) if path.is_file()]
     package = {"schema": "buglecat.artifact-evaluation-package.v1", "parent_manifest_sha256": PARENT_SHA,
