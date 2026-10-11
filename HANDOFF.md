@@ -12,6 +12,8 @@ Root独立只读重验完整原source/SQLite/receipt/raw/Oracle并封存`calibra
 
 新安全阶段包：`releases/jev-artifact-v2-incomplete-20261011`，ZIP `releases/jev-artifact-v2-incomplete-20261011.zip`，22.15 MiB。279个manifest文件和全部ZIP成员原字节已复验；原v3.3 GUI/CLI/installer加两原frozen v2 actual EXE，安装器未安装。实际复制GUI/CLI的off/shadow/enforce、恢复/取消与两个评测入口fake transport证明均通过，paid calls=0；打包前后1335个原费用authority文件字节一致。manifest SHA `6620b165d6f4e0a9b1c36ae879e997a6056c0486fdd37afbfba370eccd612d9b`，ZIP SHA `15a074c7158aaca8a639d06e9bd668597132347b811d65a403295b282e5bfd1b`。[公开真实结果](reports/artifact-v2-formal-result-20261011.json)、[封包与费用证明聚合](reports/artifact-v2-formal-delivery-20261011.json)保留认证false、threshold null、overall_goal_complete false；原会话、候选、付费台账和密钥不入包或Git。
 
+上述源码与环境隔离修正、独立审计/结果/封包聚合、进度和下一源计划10条公开路径已提交并推送GitHub `39d1b26faa6e6f8351b1cfeda0763b1f489c8872`（`feat/context-association-memory`），实际`ls-remote`同SHA；此确认随后归档。本地ZIP交付，未把二进制、原始付费证据或密钥提交Git。该提交是阶段保存，整体认证与最终留出目标仍active；下一步免费扩源及新Oracle兼容性证明，不自行突破现有750收费上限。
+
 零费用源盘点确认fresh calibration已准入数0，原scope外269个reference-pass组全reserved holdout，不能搬来补12负例。下一迭代须新增独立外部来源，并在候选前固定新Oracle范围、reference准入、source/profile/cohort与原统计门槛。APPS仅为正在核查的候选源，不表示已兼容或足量。现有main余240不足全新两阶段至少400的理论最小量；后续收费不得自行突破750上限，也不能通过改旧split、造负例或降低门槛认证。
 
 APPS免费预检已固定官方repo commit `362aedc3c71cd7d9bd2fc96a6c80e11dbc38c7a5`与官方README指向镜像revision `21e74ddf8de1a21436da12e3e653065c5213e9d1`。仅下载小源码/manifest和固定train前64KiB格式片段（5个完整STDIN样本），未全库下载或验SHA、未执行远程代码/参考/候选。原APPS函数调用的持久状态、参数/字典转换及输出比较与旧worker不同，不能伪称兼容；已准入新组仍0，函数子集足量未证明。具体新source/worker/receipt/cohort/intake/template与零费语义回归方案见 [下一步实施计划](docs/superpowers/plans/2026-10-11-jev-apps-source-next.md)、[预检聚合](reports/artifact-v3-apps-source-preflight-20261011.json)。新增收费必须先证明可用来源和冻结新配置，再按原上限/明确追加授权执行；仅理论400main也比当前剩余短160，失败/Unknown/开发额外计数，不能保证配额或准确性。
