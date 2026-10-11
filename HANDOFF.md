@@ -1,5 +1,19 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12：STDIN采集后来源与共享账务验证完成，实际collector/intake开发中
+
+新增`frozen.py/history.py/budget.py`三个独立所有者，旧收费owner/EXE及STDIN已封存source/packet不改。`frozen.load_pack`硬绑定原revision2 proposal/raw baseline/authority/旧授权/profile，完整当次C1证明后读取808原任务，来源选择仅复现原baseline，不读取当前账本或重选剩余池；新收费后的账务验证与原来源证明分开。legacy prompt模块含事务decorator，实际只调用的plain `system_prompt`声明单独比较loaded bytecode；其余使用的新/旧读取器按完整声明核对。
+
+`history.validate_prefix`保留原main starts/全部finished（包括失败及None）、同funded授权链/metadata/SQLite路径/原预约；new main必须按真实owner开放阶段的固定source prefix、同campaign/id/task/新授权且不能跳过pending。new Jev只按已完成main对应的独立二元注册prefix预约，不把Unknown当二元。这个helper仅验证关联，caller phase/label不能自证真实opening或登记，输出不授予采集或认证。后续cohort/registration必须提供真正原始依据。
+
+6.1 Sol新增预算resolver/snapshot/caps-only bridge，支持未来唯一4→5原链扩展（main1642/阶段Jev1037），但**没有创建真实新授权**。未来exact quote与原proposal/snapshot须共同验证；旧1150/861默认继续使用，同SQLite/预约根和原metadata origin保留。新读事务关闭SQL原JSON字符串、sqlite_sequence、全部预约/marker/metadata原bytes及parsed投射，拒最高ordinal删除、空账本、孤立spent marker、重复/越cap、错误quote/raw drift/再次扩展；旧失败/pending计费用。literal嵌套数值检查严格type，不接受492.0冒充492。
+
+Root限定三个新owner与测试的同进程联合回归：**139 passed（2.72s）、限定Ruff通过**；6.1 Sol独立复核frozen/history未发现实质缺陷。Root真实`load_pack(...with_tasks=True)`重新验证808原任务和4913个完整绑定，在审计钩子拒绝socket connect/DNS/subprocess下完成，Oracle/模型/收费0；proof SHA `459f2eba4f2a0fed6a3f7bfb5886ecf34c89ad92d7f686b18a3e73fa67a95c78`。新预算读取器真实结果与原读取器及原封存JSON snapshot一致，834 main/229阶段Jev/历史pending1、完整原SQL与预约bytes不变；actual budget/history proof SHA `f9f00599e3afd6ac8685d68a4a4fdccb1cab58f08b3dc437d57465cf4cc54d20`。实际仅验旧4链；新扩展bridge仍是隔离fixture证据，不能称实际获批或实际收费桥接完成。
+
+公开[采集基础验证聚合](reports/artifact-v3-apps-stdin-collection-foundation-20261012.json) SHA `d0730ae4e0523a37f3aa6db9fc16719e82fcbf8505bc503b8b47deb7903e90ab`。现有808来源方案和主模型余316/阶段Jev余632不变；拟追加main492/Jev176仍未批准。没有新cohort、主模型候选/Oracle标签、Jev概率或留出。生产off、阈值null，原运行包未包含STDIN。
+
+**继续由既有6.1 Sol开发实际C3：** 新cohort/collection/intake Python所有者及独立Rust `verification_apps_stdin_v1_collect`工具，真实preregister须完整808 funded和真实新授权，默认只开放固定开发8；cal/hold在后续真实opening owner闭合前禁止live。main只投射public question/starter/policy，完整原请求/compiled EXE/start/finish/events/session/raw response闭包；单原Python fence不改正文、唯一Oracle marker/receipt、Unknown优先，完整808未启动项保持unlabeled。受控offline fixture仅临时根且live拒绝fixture；当前没有实际完成新EXE或intake，不提前宣称C3/整体完成。随后接独立盲登记、新Jev/一次留出与实际运行包验收，再提出可审查的具体收费授权。
+
 ### 2026-10-12：STDIN来源准入与固定808组来源方案完成，仍无收费准入
 
 在完整首参考及当前revision2资源证明基础上，新增独立`source.py/source_authority.py`。真实准入重建逐一核对1130组的原train row、最早整组成员、原index0参考、全部原IO/marker/receipt、实际source/runtime和完整资源构造；不重执行参考。**988来源组准入：778 interview/137 competition/73 introductory**，只授予受限STDIN首参考与完整请求资源范围，不授予采集、登记、阈值或生产权限。私有authority raw SHA `f3f757e568980a2d59aacbfd28360b22110753cc7d50bd7e13f69ef4ff6e731d`。

@@ -18,6 +18,16 @@ source/source_authority 94 fixture passed（1.35s），protocol/sampling 78 pass
 
 `sampling.validate`仅为采集前校验，不能在新start后重建当前剩余池。C3须消费已封存完整方案/原baseline，并验证真正共享账本允许的append-only前缀、旧pending/失败/预约与同一授权链；新增budget/cohort所有者完成前不收费。808每服务缺main492/Jev176仍未批准，不能由本次免费方案选择自行突破。
 
+### C3基础验证实际完成记录
+
+新frozen/history/budget已实现并独立审查，联合隔离fixture 139 passed（2.72s）、限定Ruff通过。frozen硬绑定原封存proposal/snapshot及完整当次C1/source/profile/protocol，重验808原任务时不读当前账本、不重选剩余池。history严格保留原failed/pending/meta/链及来源prefix，Jev仅关联completed binary注册prefix；它不认证caller phase/label，也不授予opening、费用或效果认证。
+
+budget默认原4链，未来唯一5链必须exact quote、原proposal/raw baseline与同ledger root，typed追加492/176；目前未创建新授权。snapshot关闭原SQL行字符串/sequence和全部预约/metadata/marker rawbytes及解析投射，caps-only bridge不能改旧记录或清零费用。新增actual proof只有原4链与零新增prefix，新扩展是fixture证据。
+
+Root真实frozen source proof（808任务、4913bindings）SHA `459f2eba4f2a0fed6a3f7bfb5886ecf34c89ad92d7f686b18a3e73fa67a95c78`；真实新预算读取器=原读取器=原snapshot，834main/229阶段Jev/历史pending1及全SQL/预约原bytes未变，proof SHA `f9f00599e3afd6ac8685d68a4a4fdccb1cab58f08b3dc437d57465cf4cc54d20`。审计钩子禁止网络/DNS/子进程，新收费/Oracle0。公开`reports/artifact-v3-apps-stdin-collection-foundation-20261012.json` SHA `d0730ae4e0523a37f3aa6db9fc16719e82fcbf8505bc503b8b47deb7903e90ab`。
+
+实际cohort/collector/intake由既有6.1 Sol继续开发，当前尚无新EXE或genuine cohort。真实cohort要求完整808 funded和新批准授权，默认只开放固定开发8，calibration/holdout须后续独立原始opening owner；offline fixture临时根、live拒绝fixture。主模型public-only投射、原响应/编译图/事件/SQL/候选单fence/唯一Oracle与盲标签须完成实际工具闭包，再实现正式阶段登记、Jev与一次留出。不能把三个底座helper和fixture当作完整C3或准确性认证。
+
 ## 授权与当前状态
 
 用户已选择扩展 APPS 标准输入轨道，继续评估主模型自然产物。本次选择只授权免费可行性验证，不启动新的收费请求。由既有 6.1 Sol 实施代理实现开发原型，Root 审查契约、来源证据与交付记录。
