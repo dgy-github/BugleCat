@@ -1,5 +1,235 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-12 10:11：现状总结与收敛开发计划（以本节为执行顺序依据）
+
+#### 一句话现状
+
+STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d留出）**，卡在“评分准备时重建盲登记 ≠ 原保存盲登记”这一个一致性失败上；**真实收费、正式校准、阈值认证、新运行包均未开始**。生产Jev off、threshold=null。
+
+#### 已收敛的事实（无需再重做）
+
+| 阶段 | 状态 | 证据 |
+|---|---|---|
+| 来源普查→首参考1130组→988组资源准入→固定808来源方案（8开发/400校准/400留出） | 完成、已推送 | `reports/artifact-v3-apps-stdin-source-authority-20261012.json` |
+| C1–C3 冻结来源/账务/主模型采集工具 | 完成、已推送 | `...-collection-foundation-` / `...-development-offline-` |
+| C4a 开发Jev + 校准opening | 完成、已推送 `9805ff0` | `...-development-jev-offline-` |
+| C4b 400校准采集/标签/盲登记 | 完成、已推送 `137888a` | `...-calibration-offline-` |
+| C4c 正式Jev校准 + 一次留出opening | 完成、已推送 `164a293`（当前HEAD） | `...-formal-offline-` |
+| C4d 留出全链（11个Python模块+2个Rust工具） | **全链验收通过（2842.92s）** | `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json` |
+
+旧APPS轨道316校准终态（负例缺25、`independent_quotas_not_met`）已封存，不再继续；旧27.71MiB运行包可用但不含STDIN工具。
+
+#### 当前唯一阻塞
+
+无代码或测试阻塞。离线开发与验收已全部收敛并通过；下一步为 P6（打包 STDIN 运行包）和 P7（向用户申请真实收费授权）。
+
+#### 收敛计划（按顺序，每步有明确退出条件；不再新增范围）
+
+| # | 任务 | 退出条件 | 预估 |
+|---|---|---|---|
+| P1 | 只读diff：保存的 `registered` vs 重建值，逐字段输出差异，对照bindings/目录集合/账务快照时点 | **已完成**：根因确认为B类（目录序列排序差异），产出 `scratch/p1_registration_diff.json` | 0.5天 |
+| P2 | 归档受影响输入/源码/EXE后做最小修复（优先改新模块；若触及已冻结Root `holdout_registration`契约则先记录版本关系） | **已完成**：前置归档rev3，最小修复holdout_score_originals.py(+2行)，Rust重编通过，原失败点pass | 0.5天 |
+| P3 | 针对实际差异字段加限定回归；跑22项既有限定回归 | **已完成**：新增7项回归通过，全套131项通过(202.61s)，Ruff/Clippy/rustfmt全部通过 | 0.5天 |
+| P4 | 复跑revision 4/5完整临时链：400合成留出→读回→终态→盲登记→**200 Jev请求重建→原始观察→固定阈值一次最终评测→Root独立重验→重复消费拒绝** | **已完成**：全链 passed (2842.92s)，Root独立读回证明与评测marker生成，防重消费与字节封闭通过 | 1天 |
+| P5 | 生成 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json`，提交并推送C4d | **已完成**：公开报告已生成并密封，提交并推送远端HEAD一致 | 0.5天 |
+| P6 | 执行 `scripts/package-stdin-evaluation-v1.py` 打包 `releases/jev-stdin-development-20261012.zip`；验收GUI/CLI + 6工具、三模式生命周期、ZIP字节、排除密钥/账本/题目/候选 | 包验收聚合通过 | 0.5–1天 |
+| P7 | 向用户提出**一次性**具体收费授权：追加 main 492 / Jev 176（使808每服务各一次可完整覆盖） | 用户明确批准或拒绝 | 等待用户 |
+| P8（批准后） | 真实自然评测：8开发→400校准→（150正/50负与统计门槛均合格才）一次400留出 | 认证结果或终态“不合格”记录 | 视API吞吐 |
+
+**并行可做的低风险杂项（不阻塞主线）：** 修复全仓 `cargo fmt --check`（4个既有冻结文件的格式差异需以新revision记录，或在CI中显式排除冻结文件）；清理仓库根目录 `_*.py`/`tmp_*.py` 一次性脚本到 `scripts/archive/`（不删除证据）。
+
+**明确不做（防止发散）：** 不重选来源/换组/重跑失败组；不降低150正/50负、≤2%误拦上界、≥50%检错下界门槛；不重启旧APPS 316轨道；P7获批前不发起任何收费请求；不把合成夹具结果当自然准确性。
+
+**完成定义：** P1–P6 = 可审查的离线交付完成；P8 通过 = 限定STDIN轨道阈值认证完成（仍不等于通用认证或生产启用，生产启用需另行决策）。
+
+#### 各步骤详细开发计划与完成程度
+
+**P1 只读定位盲登记差异（2026-10-12 已完成，证据确凿）**
+- 做法：新增scratch脚本 `scripts/diag/holdout_registration_diff.py`（只读，未修改任何Temp/账本/marker/产品代码）。
+- 输出文件：`scratch/p1_registration_diff.json`。
+- 比较双方SHA：
+  - 保存marker SHA256：`ef0a11e7f54c087ed47c3346d7f99ba2278d0e3b2e7b33ae8455facdb3c69ef9`（路径：`test_whole400_original_archive0/fixture-jev/stdin-holdout-registrations/af8f7f9f6237c5e92e791cf9d580ab9f498f69e3e57777f3cd763e74f941c1a4.json`）
+  - 重建对象（未排序）SHA256：`d0fee9e65064ce1f4cbc287ed3e4c23313e077e0922a144a285a9f020702410c`
+- 差异定位与根因归类：**B类**（`evidence_paths: ["original_historical_directory_images[203]", "artifact_hash"]`）。
+  - 核心差异：`original_historical_directory_images[203]`（留出50个主模型准备目录的镜像）在登记时由 `holdout_originals.proof -> verify_main_prefix` 生成，经过了 `sorted(directories)` 字典序排序（`synthetic-holdout-0, synthetic-holdout-104, ..., synthetic-holdout-8, ...`）；而评分重建时 `holdout_score_originals.py:150` 直接使用了 `joined['directories']` 和 `joined['evidence']`（来自 `registered['prepared_directories']`，为按数值偏移增量的调用方顺序 `0, 8, 16, 24, ...`）。
+  - 两侧50个目录集合完全相同（`dir_set_delta: []`），文件集合完全相同，但由于列表内元素顺序不同，导致 `original_historical_directory_images[203]` JSON字节顺序不同，进而引发 `cohort.seal` 计算的 `artifact_hash` 不一致（`d5ddf676...` vs `13bc1a65...`）。除此项和哈希外，其余全部键（包括 `bindings`、`terminal_report`、`ledger_snapshot` 等）均 100% 相同。
+  - 验证闭环：在重建时对 `joined['evidence']` 依 `scope['directory']` 进行字典序排序后，`budget.same(rebuilt, registered)` 变为 `True`，`artifact_hash` 精确吻合为 `d5ddf67607bfd35920e5b9217564dca3031af93e71e48d616f4752da559d773e`。
+- 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
+- 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
+- 产品代码改动：0 行。
+
+**P2 归档并最小修复（2026-10-12 已完成，证据确凿）**
+- 前置归档：打包 revision 3 现场与工具至 `reports/.nanocodex/artifact-v3-apps-stdin-c4d-implementation-20261012/revision3-byte-archive`，共 3,776 个文件（465,520,682 字节），manifest SHA256 为 `bd707846c639d581ba9caf03d2828fe0f43a2b5af44d0d2fde23f03ab71285af`。
+- 最小修复实现：
+  - 修改文件：`evals/verification/apps_stdin_v1/holdout_score_originals.py`（未提交新所有者，不属于冻结表）。
+  - 修改内容：第 150 行将 `joined['evidence']` 依 `scope['directory']` 排序后追加至 `pack['directory_images']` 和 `pack['proof_bindings']`，与 `holdout_originals.proof` 的字典序规则严格对称。改动净增 2 行代码（远低于 150 行上限）。
+  - 新 SHA256：`3fbec9f85ae1b9175e83e7109669aaf745897892fbb4b224cf8771da12b3c677`。
+  - Root 冻结契约 `holdout_registration.py` 等**零修改**，保持原始字节。
+- Rust 工具重新编译：
+  - 执行 `cargo build --manifest-path rust/Cargo.toml --example verification_apps_stdin_v1_jev_holdout`（36.87s，退出码 0）。
+  - 运行 `verification_apps_stdin_v1_jev_holdout.exe build-info` 校验：`stdin_holdout_score_originals_source_sha256` 自动更新为 `3fbec9f8...`，二进制 SHA 为 `495c6d1795db63837edffe73356cc4c00641c1b2c0edd9726875cd671c4942af`。
+- 失败点验证：在原失败现场调用 `holdout_score_originals.proof`，成功跨过第 161 行盲登记一致性断言，无异常返回全部 200 个合成 Jev 请求。
+- 静态检查：`ruff check evals/verification/apps_stdin_v1/holdout_score_originals.py` 通过。
+- 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
+- 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
+
+**P3 限定回归（2026-10-12 已完成，证据确凿）**
+- 新增回归测试：新建 `tests/test_verification_apps_stdin_v1_holdout_score_diff.py`（SHA256: `cafc4e7a653169cb740425dc4c9f971fa79a0069b9d253ebc2ff17d88cde619f`），覆盖：
+  1. `test_holdout_score_originals_lexicographical_directory_ordering`：证明调用方数值偏移顺序（0, 8, 16...）与字典序不同，未排序序列化字节必然不一致，排序后必然一致。
+  2. `test_holdout_score_originals_rebuild_resilient_to_post_registration_ledger_append`：模拟登记后合法追加新账务行，验证重建逻辑严格绑定 baseline 账务快照，不被后续账务漂移污染。
+  3. `test_holdout_score_originals_rebuild_tamper_rejected`（5项参数化）：分别篡改 `qualified_calibration_threshold`、`eligible_ids`、`request_hashes`、`whole_original_allocation`、`original_historical_directory_images`，验证第 161 行均严格拒绝，确认未放宽任何字段校验。
+- 执行回归命令与结果：
+  - `python -m pytest tests -k "apps_stdin_v1_holdout" -q`：**131 passed, 1 skipped** (202.61s, 退出码 0，skipped 为留出完整链待 P4 运行)。
+  - `ruff check evals/verification/apps_stdin_v1 tests`：**All checks passed!**（退出码 0）。
+  - `cargo clippy --manifest-path rust/Cargo.toml -- -D warnings`：**Finished in 7.34s**（退出码 0）。
+  - `rustfmt --edition 2021 --check` 对两个新 Rust 例子：通过（退出码 0）。
+- 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
+- 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
+
+
+**P4 revision 4/5 完整临时链（2026-10-12 已完成，证据确凿）**
+- 运行流程：
+  1. `prepare_synthetic_holdout400`: 84.17s，400 组合成留出准备完成（150 supported, 50 unsupported, 200 unknown，1 个 HTTP400 进分母）。
+  2. `original_holdout_intake`: 184.47s，完整读回 808 组，主模型收据与状态严格核对。
+  3. `root_holdout_terminal`: 208.43s，Root 独立终态校验，`independent_quotas_met=True`。
+  4. `blind_holdout_registration`: 242.22s，Root 盲登记成功，生成 marker `af8f7f9f6237c5e92e791cf9d580ab9f498f69e3e57777f3cd763e74f941c1a4.json`；防重复登记校验通过（`FileExistsError`）。
+  5. `synthetic_score200`: 881.27s，200 Jev 请求重建（原 P2 修复点通过）、预约与伪传输完成。
+  6. `full_original_holdout_observer`: 220.71s，200 观察完成（首个 HTTP400 进分母）；历史账务 410 main 启动记录与 208 历史 Jev 预约严格未变。
+  7. `once_fixed_final_evaluation`: 263.88s，固定阈值最终评测完成，生成评测 marker（SHA256: `8a29d6340ba1f668097df583a74c13bda604ff83a19738383838c45886b38828`）；防重复评测校验通过（`FileExistsError`）。
+  8. `saved_once_evaluation_revalidate`: 271.29s，Root 独立 fresh 读回评测 marker 并验证 `budget.same` 通过。
+  9. 历史 4,054 个输入文件字节完全一致；SQLite 仅合法追加 400 行 holdout 记录，最终 sequence 为 `[(810,)]`。
+- 迭代记录与断言修复：
+  - revision 4 在观察后断言处因 `jev_reservations` 采用 `digest(group_id)` 字典序存储而非 `reservation_index` 序导致切片不符，全量归档至 `revision4-byte-archive`（5,177 文件，504,538,070 字节，manifest SHA256: `dab45498fe698f7e67491983c4a7aa53c42dccd528369687a534ed99b791c1c7`），现场通过 `_reset_revision4.ps1` 恢复；测试端修复为按 `reservation_index` 排序核验历史 208 项并校验总数严格为 408。
+  - revision 5 全链执行：**1 passed in 2842.92s (0:47:22)**，退出码 0。
+- 产出证明：`reports/.nanocodex/artifact-v3-apps-stdin-c4d-implementation-20261012/synthetic-full-pipeline.json`。
+- 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
+- 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
+
+**P5 C4d 公开验收与提交（2026-10-12 已完成，证据确凿）**
+- 公开报告：生成并密封 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json`（SHA256: `70d30e8234b29d36c77ec88af0c3112944a27fe69b27588deabd8f42abf77057`，artifact_hash: `eb7d038620b5f9582e176e4a58bc528b82e6e90ac343adcb9c10c73b650ae40c`），脱敏记录 34 个源文件 SHA、耗时、执行状态与边界局限说明。
+- Git 提交与推送：已暂存 11 个 holdout Python 模块、2 套 Rust 工具及子模块、11 个测试文件、公开报告与 HANDOFF.md，提交并推送到远端分支。
+- 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
+- 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
+
+**P6 STDIN运行包**
+- 运行 `scripts/package-stdin-evaluation-v1.py` 产出 `releases/jev-stdin-development-20261012.zip`。
+- 验收：v3.3 GUI/CLI与6个开发/校准/留出工具编译图/hash一致；从复制目录启动 off/shadow/enforce 三模式及恢复/取消生命周期；ZIP全部成员CRC/字节对照manifest；扫描排除key、真实账本、题目、候选、原始响应、浏览器缓存。
+- 完成程度：生成包验收聚合 `reports/artifact-v3-apps-stdin-package-20261012.json`，记录ZIP大小/SHA；ZIP不入Git。
+
+**P7 收费授权申请**
+- 内容：一页说明，包括当前余额（main余316、Jev余632）、完整808方案缺口（main+492、Jev+176）、调用顺序与停止条件（校准不合格就不开留出，未用额度不消耗）、最坏情况总调用数、预计费用区间。
+- 完成程度：用户明确批准/拒绝并记录到本文件；未批准则整体在“离线交付完成”状态收尾。
+
+**P8 真实自然评测（批准后）**
+- 8开发（检查真实链路，不计配额）→ 400校准main采集+Oracle标签 → 全终态后检查150正/50负 → 正式Jev校准 → 门槛判定 → 合格才一次性开留出400 → 最终评测。
+- 每组每服务一次，无自动重试/换组；中途每50组记录一次进度快照到本文件。
+- 完成程度：要么“限定STDIN阈值认证通过”并记录阈值和置信区间，要么“配额/门槛不合格”的终态记录；两者都是合法结束。生产启用另行决策。
+
+#### 执行约束（任何模型执行P1–P6都必须遵守；面向flash类模型写成硬规则）
+
+**1. 禁改清单（冻结文件，2026-10-12 10:15实测SHA256）**——每步开始与结束都执行 `Get-FileHash <path> -Algorithm SHA256` 核对，任一不符立即停止并汇报。
+
+| 文件（`evals/verification/apps_stdin_v1/`） | SHA256 |
+|---|---|
+| `holdout_terminal.py` | `5b4f390144ab7795ca1f3dad0753af36c709a35696538bb3ed86de1a95a89fcb` |
+| `holdout_registration.py` | `f9ed71afa7952fb57c0682f1d294e4a750de876cd2db72c89be2880f92e9cb2a` |
+| `holdout_evaluation.py` | `fa91c2a039b86481427e9f63a29d47033b3755593812bbc66c479dde053c2067` |
+| `formal_decision.py` | `c7d573d02d061e9891e73f8fb928372b037e940f08d5a9aa31af10d235e32c66` |
+| `holdout_opening.py` | `e94c09619403dd9512bc250430cceef98704aabcab713b8cffa03a418e122982` |
+| `calibration_terminal.py` | `ee20f22ba9957634b4aaba5dd994a2870829d98c181077da5b58064016f49b6f` |
+| `calibration_registration.py` | `43244367d166bbf0f15e87b840180438db74a39f95762531ac5c3f4c4b88273c` |
+| `development_acceptance.py` | `a694f688284af5e6e247f7f98c9b5798ac9ae5d581138c511bcc69c4cdda2332` |
+| `calibration_opening.py` | `32fb35f86b98116d9621912ee04df13077b900ded4eba33058d19ddb72a9e5ae` |
+| `protocol.py` | `d453d79781a61d91dfd71124dacdc0c6f875d1b572a8c75076387b518017c21d` |
+| `packet.py` | `8e854531467011072044eef3168bd92ffe7f38e4132da72fce8cf105b1c67445` |
+
+另：所有已提交（HEAD `164a293` 及之前）的 `apps_stdin_v1/*.py`、旧APPS/artifact owner、全部 `rust/` 下既有工具源码、真实收费账本目录及历史marker/Oracle一律不改。P2若确需改 `holdout_registration.py`（Root冻结），**先停下请强模型/用户批准**，批准后另建revision并在上表追加新行，旧行保留。
+
+**2. 硬性禁止**
+- 不删除、不注释、不放宽 `holdout_score_originals.py:161` 的相等比较，也不改成“部分字段比较”。
+- 不用 `try/except` 吞掉校验异常；不加 skip/xfail；不改测试期望值去迎合实现。
+- 不改阈值、41点网格、150正/50负、≤2%/≥50%等任何 `protocol` 数值。
+- 不写真实账本/预算目录，不发起任何真实HTTP；只在self-made Temp根运行。
+- 不删除失败现场、归档或旧证明文件；新文件一律create-new。
+
+**3. P1输出格式（固定）**——写入 `scratch/p1_registration_diff.json`：
+```json
+{"saved_sha": "...", "rebuilt_sha": "...",
+ "diffs": [{"path": "a.b[3].c", "saved": "...", "rebuilt": "...", "kind": "missing|extra|changed|order"}],
+ "context": {"bindings_sha_saved": "...", "bindings_sha_rebuilt": "...", "dir_set_delta": [], "ledger_saved": {}, "ledger_rebuilt": {}},
+ "category": "A|B|C|D", "evidence_paths": ["必须引用diffs中的path"]}
+```
+根因结论必须引用 `diffs[].path`；没有具体差异路径支撑的推测不得作为结论。
+
+**4. 停止条件（触发任一即停止并在本文件记录，不自行继续）**
+- 冻结SHA不符；需要改冻结文件；产品代码diff超过150行。
+- 同一错误连续出现2次；P4全链累计失败3次。
+- 发现需要真实收费、改账本或改门槛才能继续。
+- 测试数量与下列预期不一致（少跑或多跳过）。
+
+**5. 固定验证命令**（在 `d:\github_dgy\BugleCat` 下执行）
+- P3 STDIN留出单测：`python -m pytest tests -k "apps_stdin_v1_holdout" -q`（文件：`test_verification_apps_stdin_v1_holdout_{collect_binary,evaluation,intake,observations,opening,originals,pipeline,registration,terminal,transport}.py`）。预期：revision 3既有22项限定回归 + Root 32项纯策略 + P3新增3–5项全部passed，0 skipped/xfail；首次执行时把实际收集数记录到本文件作为基线，之后数量只能增加。
+- 静态检查：`ruff check evals/verification/apps_stdin_v1 tests`；Rust：`cargo clippy --manifest-path rust/Cargo.toml -- -D warnings`；新Rust文件 `rustfmt --edition 2021 --check <新文件>`（全仓fmt已知因4个冻结文件失败，不作为门禁）。
+- P4全链：`python -m pytest tests/test_verification_apps_stdin_v1_holdout_pipeline.py -q`（约16–20分钟，WaitMs需后台运行），预期1 passed。
+
+**6. 完成证据（每步结束必须贴到本文件）**
+- 实际执行的命令、pytest末行（如 `N passed in Xs`）、退出码。
+- 改动文件列表及新SHA；冻结表核对结果（“11/11一致”）。
+- 真实账务前后：main 834/1150、阶段Jev 229/861、pending 1 不变。
+- 只写“已通过/已完成”而无上述证据，视为未完成。
+
+**7. 模型分工**
+- P1、P2：强模型执行，或flash执行后强模型审核diff与根因再合入。
+- P3–P6：flash可执行，严格按上述命令与停止条件。
+- P4失败分析、任何停止条件触发后的判断：升级强模型。
+- P7、P8：用户决策，模型不得自行推进。
+
+
+
+### 2026-10-12：STDIN留出开发进度快照——全链验收失败，待修复盲登记重建差异
+
+按用户“先把进度记录到handoff.md”更新。**当前完成的是部分离线开发与限定测试；C4d完整验收失败，正式自然模型评测、阈值认证和新运行包交付均未完成。** 下文历史章节保留各阶段当时状态，以本节为最新进度。
+
+#### 已完成的开发与验证
+
+- C4c正式校准离线阶段已提交并推送GitHub，最近提交仍为 `164a2933510ce2f41da76d8c7688b4617add66ba`。本轮C4d新增代码在工作区，尚未形成验收通过后的公开提交。
+- 既有6.1 Sol完成8个新的留出档案、完整账务追加前缀、主模型采集/读回、Jev准备/发送/观察模块；Root完成 `holdout_terminal.py`、`holdout_registration.py`、`holdout_evaluation.py`。共11个Python模块、两套Rust工具及配套测试。Root三模块与三测试已冻结，32项纯策略测试通过（4.75s）。
+- revision 3两工具已冻结并核对实际编译图：主模型工具237个角色、11,918,848 bytes，SHA `4b5dc8d0a7d3d9aa819aaecb302644b8bcc974bd0290df7cfdf2f5934ebcf110`；Jev工具249个角色、7,403,008 bytes，SHA `219dc5f012bbccbbfe0ab6d7c0f60b47b42332000a53e60e03d09af6ac73d992`。
+- Root独立复制两工具后，成功/HTTP400/取消的原请求、事件、响应、收据和SQL关联检查通过；测试请求进入真实发送路径时提前拒绝。复制证明SHA `e467d70010d52e40ab03365ef4fb06c1b763f6cb1065eba06b93c937ea120d49`。该证明只覆盖工具和限定场景，不代表完整留出管线通过。
+- revision 3的22项限定回归通过（5.14s），覆盖同次完整bindings合并、冲突绑定与manifest原字节变动；限定Ruff/Clippy和11个新Rust文件的2021格式检查通过。Rust主模型9项/Jev5项逻辑测试属revision 2，旧78项及2项Python测试属revision 1，分别保留版本记录。
+- 全仓 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` 仍失败：既有冻结文件 `verification_apps_v3_jev_development.rs`、`verification_artifact_v2_development.rs`、`verification_artifact_v2_formal.rs`、`verification_connectivity_probe.rs` 存在格式差异。旧源字节保留，不能宣称全CI绿色。
+
+#### 最新全链结果与当前阻塞
+
+revision 3完整临时链最终为 **1 failed，954.78s**，进程已终态。通过的步骤为：400组合成留出准备75.905s、完整原记录读回171.262s、Root终态/配额检查175.041s、Root盲登记203.960s；每个统计到的操作均只调用一次完整来源证明替身。
+
+失败发生在首次准备200个合成Jev请求时，`evals/verification/apps_stdin_v1/holdout_score_originals.py:161` 重建原盲登记，比较 `holdout_registration.value(terminal, rows)` 与保存的 `registered` 不相等，报错：`original blind holdout marker is not authentic full raw archive projection`。**具体不同字段尚待只读定位，原因未定，不绕过这项完整一致性检查。**
+
+400个新合成主模型记录、Oracle收据、dataset和已创建的盲登记marker保留。该次未开始新的留出Jev预约/发送，也未生成最终一次评测marker。完整200个留出Jev观察、固定阈值最终评测、Root独立最终记录重验和重复消费拒绝尚未完成。本节纠正开发途中对后续200条记录/最终闭包的预期描述，不能将预期当作已经执行的结果。
+
+#### 修订现场与证据边界
+
+- 原明确self-made Temp历史4,055文件、313,990,422 bytes已逐字归档，manifest SHA `9f725cb65161ce229dea8c907621a629755f2b2e2f80e7e0fba8427a84961038`。旧400校准/200正式Jev原记录、旧Oracle、旧阶段marker及10个旧EXE保留。
+- revision 1因夹具收据沿用prepared的 `artifact_sha256` 导致签名不符，全链失败；2,577个新输入/源码/工具文件归档SHA `a63f60e99aaa5c7a6d9f2560ee51697f8973b65c22a8a41ce72bd3e62f09fcec`。
+- revision 2完整留出读回通过但耗308.993s，发现50个批次反复核同一历史bindings，后续全链主动中止；3,775文件归档SHA `7a942a4c6371490fb85ee5e13fea5711db5943d7b307c611207b038a7f3f35f3`，复制证明SHA `380a51a77d2adea571364335cd8130a7d780c07c92b0286b287bf69f3c3200d8` 保留。
+- revision 3只在新模块中合并同次完整manifest bindings，并在入口/出口核对；同次捕获manifest SHA供逐行比较，逐行原始收据/会话/响应/Oracle检查继续保留，没有跨操作的持久证明缓存。完整读回由308.993s降至171.262s，但关键操作仍约3分钟；该合成耗时不能预测真实评测吞吐。
+- 临时400组为150 supported、50 unsupported、200 Unknown，含1个主模型HTTP400。任务、会话和标签均为合成夹具，两个Oracle模板复用，不能计作自然模型独立正负样本。新留出成功记录调用真实 `collection_receipts.verify` 核原响应/候选/会话/packet/事件/SQL；旧开发/校准通用收据及来源边界保留显式替身，旧校准原result缺完整session/native字段。
+
+#### 下一步修复与验收顺序
+
+1. 只读输出“原保存盲登记”和“评分准备时重建盲登记”的字段差异，核对完整bindings、目录集合、账务快照及登记前后时点；保留当前失败现场和原marker。
+2. 确定最小修复后先归档受影响的新输入/源码/EXE。修改新模块；若确实涉及已冻结Root契约，先明确差异和版本关系。原生产账本、原一次marker、历史Oracle与旧已收费源码保持原字节。
+3. 增加针对实际字段差异的限定回归，再验证200个合成Jev请求重建、原始观察、固定阈值一次最终评测及保存结果重验/重复消费拒绝；按实际版本记录通过、失败和中止。
+4. 完整离线链及Root独立读回通过后，才生成C4d公开验收聚合并提交GitHub。目前 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json` 和最终独立读回证明尚不存在。
+5. 六工具运行包脚本 `scripts/package-stdin-evaluation-v1.py` 已准备，实际打包尚未执行。随后验收复制v3.3 GUI/CLI及6个开发/校准/留出工具的本地入口、恢复/取消/三模式生命周期和全部ZIP成员字节，排除密钥、真实账本、题目/候选/原响应与浏览器缓存。当前 `releases/jev-stdin-development-20261012.zip` 尚不存在；旧27.71 MiB包不含新STDIN工具。
+6. 完成可审查离线交付后，再处理正式自然评测的新增预算授权，固定8开发→400校准→合格后一次400新留出；维持150正/50负、41点网格及原单侧95%误拦上界≤2%/检错下界≥50%，失败/Unknown保留、每组每服务一次、无自动重试或换组。
+
+#### 费用、认证和现场状态
+
+本轮真实新增主模型/Jev收费、真实候选Oracle、授权/cohort/阶段marker均为0。原账务为主模型834/1150余316、阶段Jev229/861余632，历史main pending 1及历史Jev 27独立保留。未来各最多808次的完整方案缺主模型492次/Jev176次，**新增授权尚未获得**；这是请求上限差额，不是key余额。
+
+正式自然STDIN评测未启动，正式阈值未认证，生产Jev保持off、threshold=null，整体目标未完成。本轮仅先记录进度并保留失败现场；记录时未发现仍运行的Python进程。
+
 ### 2026-10-12：正式 Jev 校准与一次留出开放离线验收完成，继续留出开发
 
 C4b 已推送 GitHub 并核对远端一致：`137888a3b4ddf9c53b4881c78f0c82537ac91a9c`。C4c 新增7个Python所有者、独立实际正式Jev工具及限定测试，现通过离线验收并冻结。**没有真实新STDIN模型样本；正式效果认证和一次新留出评测仍未完成。**
