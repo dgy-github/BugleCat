@@ -15,13 +15,14 @@ STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d�
 | C4a 开发Jev + 校准opening | 完成、已推送 `9805ff0` | `...-development-jev-offline-` |
 | C4b 400校准采集/标签/盲登记 | 完成、已推送 `137888a` | `...-calibration-offline-` |
 | C4c 正式Jev校准 + 一次留出opening | 完成、已推送 `164a293`（当前HEAD） | `...-formal-offline-` |
-| C4d 留出全链（11个Python模块+2个Rust工具） | **全链验收通过（2842.92s）** | `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json` |
+| C4d 留出全链（11个Python模块+2个Rust工具） | 完成、已推送 `acc6e0d` | `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json` |
+| C4e / P6 STDIN 运行包与交付验收 | **验收通过（33.42 MiB ZIP）** | `reports/artifact-v3-apps-stdin-package-20261012.json` |
 
 旧APPS轨道316校准终态（负例缺25、`independent_quotas_not_met`）已封存，不再继续；旧27.71MiB运行包可用但不含STDIN工具。
 
 #### 当前唯一阻塞
 
-无代码或测试阻塞。离线开发与验收已全部收敛并通过；下一步为 P6（打包 STDIN 运行包）和 P7（向用户申请真实收费授权）。
+全部离线开发、全链验证、公开报告与运行包验收已全部收敛（P1–P6 闭环达成）；离线交付状态完成。当前处于 P7：向用户申请收费授权。等待用户人工审核并决定是否批准追加真实收费额度（main 492 / Jev 176），未获批准前严禁发起任何真实网络调用。
 
 #### 收敛计划（按顺序，每步有明确退出条件；不再新增范围）
 
@@ -31,9 +32,9 @@ STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d�
 | P2 | 归档受影响输入/源码/EXE后做最小修复（优先改新模块；若触及已冻结Root `holdout_registration`契约则先记录版本关系） | **已完成**：前置归档rev3，最小修复holdout_score_originals.py(+2行)，Rust重编通过，原失败点pass | 0.5天 |
 | P3 | 针对实际差异字段加限定回归；跑22项既有限定回归 | **已完成**：新增7项回归通过，全套131项通过(202.61s)，Ruff/Clippy/rustfmt全部通过 | 0.5天 |
 | P4 | 复跑revision 4/5完整临时链：400合成留出→读回→终态→盲登记→**200 Jev请求重建→原始观察→固定阈值一次最终评测→Root独立重验→重复消费拒绝** | **已完成**：全链 passed (2842.92s)，Root独立读回证明与评测marker生成，防重消费与字节封闭通过 | 1天 |
-| P5 | 生成 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json`，提交并推送C4d | **已完成**：公开报告已生成并密封，提交并推送远端HEAD一致 | 0.5天 |
-| P6 | 执行 `scripts/package-stdin-evaluation-v1.py` 打包 `releases/jev-stdin-development-20261012.zip`；验收GUI/CLI + 6工具、三模式生命周期、ZIP字节、排除密钥/账本/题目/候选 | 包验收聚合通过 | 0.5–1天 |
-| P7 | 向用户提出**一次性**具体收费授权：追加 main 492 / Jev 176（使808每服务各一次可完整覆盖） | 用户明确批准或拒绝 | 等待用户 |
+| P5 | 生成 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json`，提交并推送C4d | **已完成**：提交 `acc6e0d` 并推送至 `origin/feat/context-association-memory`，远端 HEAD 一致 | 0.5天 |
+| P6 | 执行 `scripts/package-stdin-evaluation-v1.py` 打包 `releases/jev-stdin-development-20261012.zip`；验收GUI/CLI + 6工具、三模式生命周期、ZIP字节、排除密钥/账本/题目/候选 | **已完成**：产出 33.42 MiB 运行包，6 工具 attestation 通过，三模式生命周期通过，268 成员 CRC 与密钥/缓存排除核验通过，交付聚合报告已生成 | 0.5天 |
+| P7 | 向用户提出**一次性**具体收费授权：追加 main 492 / Jev 176（使808每服务各一次可完整覆盖） | 申请说明已就绪，等待用户明确批准或拒绝 | 等待用户 |
 | P8（批准后） | 真实自然评测：8开发→400校准→（150正/50负与统计门槛均合格才）一次400留出 | 认证结果或终态“不合格”记录 | 视API吞吐 |
 
 **并行可做的低风险杂项（不阻塞主线）：** 修复全仓 `cargo fmt --check`（4个既有冻结文件的格式差异需以新revision记录，或在CI中显式排除冻结文件）；清理仓库根目录 `_*.py`/`tmp_*.py` 一次性脚本到 `scripts/archive/`（不删除证据）。
@@ -107,18 +108,51 @@ STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d�
 
 **P5 C4d 公开验收与提交（2026-10-12 已完成，证据确凿）**
 - 公开报告：生成并密封 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json`（SHA256: `70d30e8234b29d36c77ec88af0c3112944a27fe69b27588deabd8f42abf77057`，artifact_hash: `eb7d038620b5f9582e176e4a58bc528b82e6e90ac343adcb9c10c73b650ae40c`），脱敏记录 34 个源文件 SHA、耗时、执行状态与边界局限说明。
-- Git 提交与推送：已暂存 11 个 holdout Python 模块、2 套 Rust 工具及子模块、11 个测试文件、公开报告与 HANDOFF.md，提交并推送到远端分支。
+- Git 提交与推送：已完成提交 `acc6e0d`（`feat: verify STDIN holdout pipeline offline`，35 文件变更，+6210 行），包含 11 个 holdout 模块、2 套 Rust 工具及子模块、11 个测试文件、公开报告与 HANDOFF.md，已推送到远端 `origin/feat/context-association-memory`，远端 HEAD 与本地严格一致。
 - 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
 - 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
 
-**P6 STDIN运行包**
-- 运行 `scripts/package-stdin-evaluation-v1.py` 产出 `releases/jev-stdin-development-20261012.zip`。
-- 验收：v3.3 GUI/CLI与6个开发/校准/留出工具编译图/hash一致；从复制目录启动 off/shadow/enforce 三模式及恢复/取消生命周期；ZIP全部成员CRC/字节对照manifest；扫描排除key、真实账本、题目、候选、原始响应、浏览器缓存。
-- 完成程度：生成包验收聚合 `reports/artifact-v3-apps-stdin-package-20261012.json`，记录ZIP大小/SHA；ZIP不入Git。
+**P6 STDIN 运行包与交付验收（2026-10-12 已完成，证据确凿）**
+- 运行命令：`python scripts/package-stdin-evaluation-v1.py --parent releases/jev-v33-20261010-235623 --output releases/jev-stdin-development-20261012 --stage`（退出码 0，耗时 133s）。
+- 产出运行包：
+  - ZIP 文件：`releases/jev-stdin-development-20261012.zip`（大小 35,041,209 字节，33.42 MiB，SHA256: `7e574ea5f84ffc8fd0598cf27812ea272ebbb1c8a66a926569fc07f58707597e`）。
+  - 清单文件：`releases/jev-stdin-development-20261012/manifest.json`（SHA256: `f1c8e58c8494c36c046fbba4ed0116e37eae51dcba5774bc046b435c6ceef65a`，含 267 个内容文件与 6 个工具证明）。
+  - 继承父包：`releases/jev-v33-20261010-235623`（manifest SHA256: `16fab536149aae8e7d1e8645d2b5b63cbc9ad02e47f7a195b715444b53c5819b`，政策版本 `host-rules-v3.3`）。
+- 6 个复制工具 Attestation 证明通过：
+  1. `verification_apps_stdin_v1_collect`: `1d23d3e05a3739d9178ff3bd3ec78b545aaed3b83fda3058d0b857ebd17e7fb6` (11,278,848 字节)
+  2. `verification_apps_stdin_v1_jev_development`: `cf5dfa1cc84942a1267aad589d6ba977e34d18df16d6085ce6d91dffe1d1ca85` (6,757,888 字节)
+  3. `verification_apps_stdin_v1_calibration_collect`: `3512957b37552da57292e7f8b8d95076a348013c38feff8f0b9dc6763769f47d` (11,544,064 字节)
+  4. `verification_apps_stdin_v1_jev_formal`: `c20513fcb3e9b8961e79a68ae55119bb6d4014419132f63a63b6ebf110a360b5` (7,099,392 字节)
+  5. `verification_apps_stdin_v1_holdout_collect`: `4b5dc8d0a7d3d9aa819aaecb302644b8bcc974bd0290df7cfdf2f5934ebcf110` (11,918,848 字节)
+  6. `verification_apps_stdin_v1_jev_holdout`: `495c6d1795db63837edffe73356cc4c00641c1b2c0edd9726875cd671c4942af` (7,470,592 字节)
+  - 全部 6 个工具离线测试 `actual_copied_entrypoint=True`，formal/holdout 成功完成原始请求/响应 join 验证，`paid_calls=0`。
+- 本地 GUI/CLI 运行时验证通过：
+  - `runtime-smoke.json`: cliExit 0, guiTranscriptRestored True, unverifiedLabelVisible True, liveJevCalls 0
+  - `lifecycle.json`: off / shadow / enforce 三模式全通过，cancelCompleted True, restoredWithoutPass True, durableWriteCalls 1, newJevAttempts 0, passedLabels 0
+- 封闭性与排除验证：
+  - ZIP 内 268 个成员全部通过 CRC32 校验与 manifest 字节比对；
+  - 密钥扫描：无任何密钥/Token/Secret；真实收费账本、题目、候选与 `BugleCat.exe.WebView2` 浏览器缓存全部被排除；
+  - 打包过程中收费账本前后校验通过：paid_calls = 0, fee_snapshot_unchanged = True。
+- 交付聚合报告：生成 `reports/artifact-v3-apps-stdin-package-20261012.json`（SHA256: `7054a20838d5ebf702eeaad99159edd4dbb2427dd2dcbd93deb054151bf3a3bd`）。ZIP 文件按规则保留本地 releases 目录，不入 Git。
+- 禁改表核对：11/11 冻结文件 SHA256 100% 一致。
+- 真实账务核对：main 834/1150、阶段 Jev 229/861、pending 1 保持不变。
 
-**P7 收费授权申请**
-- 内容：一页说明，包括当前余额（main余316、Jev余632）、完整808方案缺口（main+492、Jev+176）、调用顺序与停止条件（校准不合格就不开留出，未用额度不消耗）、最坏情况总调用数、预计费用区间。
-- 完成程度：用户明确批准/拒绝并记录到本文件；未批准则整体在“离线交付完成”状态收尾。
+**P7 收费授权申请（当前阶段：申请说明就绪，等待用户审批）**
+- 申请背景与必要性：
+  - 来源固定方案为 808 组（8 开发 / 400 校准 / 400 留出）。每组每个服务仅调用一次，绝无重复调用或换组重试。
+  - 目前真实账本状态：main 已调用 834 / 上限 1150（剩余可用额度 316）；Jev 已预约 229 / 上限 861（剩余可用额度 632）；pending 1。
+  - 完整执行 808 方案所需总额度：main 共需 808 次调用，Jev 共需 808 次调用。
+  - 额度缺口：
+    1. main 主模型：现有可用 316，缺口为 `808 - 316 = 492` 次调用（需将 main 上限从 1150 调整至 1642）；
+    2. Jev 验证模型：现有可用 632，缺口为 `808 - 632 = 176` 次调用（需将 phase Jev 上限从 861 调整至 1037）。
+- 严格门槛与止损条件（短路保护机制）：
+  1. 8 组开发集测试通过后才启动 400 组校准采集；
+  2. 400 组校准主模型采集完成后，经独立 Oracle 打标，若满足 ≥150 正例 且 ≥50 负例，方可启动正式 Jev 校准；若不满足则直接终态退出，不发起 Jev 校准调用；
+  3. 400 组正式 Jev 校准完成后进行门槛裁决：必须在 41 点网格中存在满足误拦率 ≤2% 且检错率 ≥50% 的合格阈值，方可开启一次性 400 组留出评测；若未达到门槛，立即终态退出，**绝不开启留出集评测**（400 组留出额度将完整保留，不产生消耗）。
+- 预估费用区间与最坏情况：
+  - 若校准未达标提前终止：main 最多消耗 408 次，Jev 最多消耗 200 次（仅消耗既有额度，新追加额度几乎不消耗）；
+  - 最坏情况（全部 808 组跑通）：额外消耗 main 492 次（deepseek-flash 官标千 token 厘级，预计 < $1.50）与 Jev 176 次（预计 < $0.80），总增量费用预计在 $2 - $5 之间。
+- 当前状态：等待用户人工审查。未获得明确授权指令前，严禁发起任何真实网络付费调用，系统停留在离线交付完成状态。
 
 **P8 真实自然评测（批准后）**
 - 8开发（检查真实链路，不计配额）→ 400校准main采集+Oracle标签 → 全终态后检查150正/50负 → 正式Jev校准 → 门槛判定 → 合格才一次性开留出400 → 最终评测。
