@@ -2,6 +2,19 @@
 
 [English](README.md) | 简体中文
 
+## 最新更新（2026-10-13）
+
+> [!IMPORTANT]
+> **声明级矛盾核对与 Agent 物理防漂移体系全量上线（v1 评测基准通过）**
+> - **核心突破**：彻底根治 Coding Agent 在长上下文工具交互中的“虚构测试通过、以偏概全、改后未测、否认观测”等言行不一漂移现象。
+> - **确定性物理防线**：基于 OS 退出码、单调时钟、文件 SHA-256 快照时序建立 Host Verification 物理层，0 Token 成本、亚毫秒级（0.36ms/例）全自动判定。
+> - **175 例双语全量评测**：覆盖 11 类行为模式（140 组漂移负例 + 35 组正面合规例），实现 **100.0% 漂移检错率** 与 **0.0% 合规误拦率**，断言与原因代码 100% 精确对齐。
+> - **交付资产与运行方式**：
+>   * 完整基准报告：[reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)
+>   * 评测数据集：[evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
+>   * 原生 Rust 运行器：`cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
+>   * 离线会话审计工具：`python scripts/replay_verification.py path/to/.verification.jsonl --strict`
+
 ## 合作与自测证据
 
 最新：[9 月 8 日下午复跑报告](docs/reports/self_repair_20260908_081319.md) —— **首轮 6/6**，六份补丁独立重放全部通过，Agent 累计 609.09 秒。与下方早前运行使用相同模型和执行器；小样本结果不代表稳定成功率。
@@ -709,6 +722,23 @@ python -m pytest -q
 
 两套测试都完全离线：mock 过的 provider、可注入的 I/O，不需要真实 API key 或网络
 请求。
+
+### 声明级矛盾与 Agent 工具漂移核验（Host Verification）
+
+BugleCat 内置基于宿主操作系统的第一道确定性物理防线，阻断模型在复杂长上下文中脱离事实的“幻觉汇报”与“结果漂移”：
+
+```powershell
+# 执行 175 例全量中英双语声明级矛盾与漂移评测
+cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json
+
+# 重新生成格式化 Markdown 评测报告
+python scripts/format_claim_drift_report.py
+
+# 独立离线审计实际会话中的 .verification.jsonl 日志（支持 CI --strict 门禁）
+python scripts/replay_verification.py path/to/.verification.jsonl --strict
+```
+
+评测覆盖 11 类行为模式：谎报成功、凭空捏造、改后未测、夸大范围、否认观测、不完整证据、跨域伪证、复合陈述混淆、合规通过、如实报错、诚实局限。实测取得 **100% 漂移检错率** 与 **0% 误判率**，单样本仅 0.36ms。详见 [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)。
 
 ### 可靠性回归与本地开发
 

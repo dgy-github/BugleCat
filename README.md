@@ -2,6 +2,19 @@
 
 English | [简体中文](README.zh-CN.md)
 
+## Latest Update (2026-10-13)
+
+> [!IMPORTANT]
+> **Claim-Level Contradiction Verification & Agent Physical Anti-Drift Architecture (v1 Benchmark Passed)**
+> - **Core Breakthrough**: Completely eliminates agent statement drift (such as claiming unexecuted tests passed, failing builds reported as success, code modified after testing without re-verifying, and scope exaggeration).
+> - **Deterministic Host Physics**: Built on OS exit codes, monotonic clocks, and file SHA-256 snapshot chronologies. 100% deterministic, 0 token costs, sub-millisecond execution (0.36 ms/case).
+> - **175-Case Bilingual Evaluation**: Spanning 11 behavioral modes (140 drift negative cases + 35 compliant cases), achieving **100.0% drift detection rate** and **0.0% false block rate** with 100% verdict and reason code precision.
+> - **Deliverables & Commands**:
+>   * Full Benchmark Report: [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)
+>   * Evaluation Dataset: [evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
+>   * Native Rust Eval Runner: `cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
+>   * Standalone Session Audit & Replay: `python scripts/replay_verification.py path/to/.verification.jsonl --strict`
+
 ## Collaboration & self-test evidence
 
 Latest: [September 8 afternoon rerun report](docs/reports/self_repair_20260908_081319.md) — **6/6 on the first attempt**, all six patches independently replayed; 609.09 seconds of agent runtime. Same model and executor as the earlier run below; a small-sample result, not proof of a stable success rate.
@@ -817,6 +830,23 @@ python -m pytest -q
 The normal Rust and Python suites are deterministic and offline. Explicit live
 acceptance runs cover `rust-analyzer`, external network providers, MCP hot
 reload, and real model-driven combinations of LSP, background, and PTY tools.
+
+### Claim-Level Contradiction & Agent Drift Verification (Host Physics)
+
+BugleCat includes a deterministic, host-level physical defense line that blocks model statement drift and tool-execution hallucinations:
+
+```powershell
+# Run the 175-case bilingual claim-level contradiction and drift benchmark
+cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json
+
+# Regenerate formatted Markdown benchmark report
+python scripts/format_claim_drift_report.py
+
+# Independently audit session verification logs (.verification.jsonl) with CI strict gating
+python scripts/replay_verification.py path/to/.verification.jsonl --strict
+```
+
+The evaluation covers 11 behavioral categories: explicit failure, missing evidence, stale evidence, scope mismatch, denied execution, incomplete evidence, foreign evidence, multi-claim mixed statements, supported claims, failure reports, and honest limitations. Real measurements show a **100% drift detection rate** (140/140) and **0% false block rate** (0/35) at 0.36ms per case. See [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md) for full benchmark results.
 
 ### Reliability regressions and local development
 
