@@ -90,6 +90,9 @@ def protocol(value):
     for field in ("max_false_block_rate", "confidence"):
         require(probability(value.get(field)), f"invalid {field}")
     require(0 < value["confidence"] < 1, "confidence must be between 0 and 1")
+    if "min_detection_rate" in value:
+        require(probability(value["min_detection_rate"]) and value["min_detection_rate"] > 0,
+                "invalid minimum detection rate")
     for field in ("min_supported", "min_unsupported", "min_paired_improvements"):
         require(type(value.get(field)) is int and value[field] >= 1, f"invalid {field}")
     require(value["min_supported"] >= 30 and value["min_unsupported"] >= 20,
@@ -282,6 +285,15 @@ def score(cases, rows, threshold, spec):
     augmented = {i: apply(r, threshold) for i, r in rows.items()}
     c_metrics = metrics(cases, augmented, spec["confidence"])
     comparison = paired(cases, rules, augmented)
+    # One task is one statistical unit. A partially detected task is a miss;
+    # repeating several claims from it cannot inflate the sample size.
+    negative_groups = {}
+    for case in cases:
+        if case["label"] == "unsupported":
+            negative_groups.setdefault(case["group_id"], []).append(augmented[case["id"]] in REJECT)
+    detected = sum(all(values) for values in negative_groups.values())
+    negative_n = len(negative_groups)
+    detection_lower = (1 - upper_bound(negative_n - detected, negative_n, spec["confidence"])) if negative_n else None
     supported_n = c_metrics["false_block"]["independent_groups"]
     unsupported_n = len({c["group_id"] for c in cases if c["label"] == "unsupported"})
     bound = c_metrics["false_block"]["confidence_upper_bound"]
@@ -296,6 +308,8 @@ def score(cases, rows, threshold, spec):
         reasons.append("too_few_unsupported_groups")
     if bound is None or bound > spec["max_false_block_rate"]:
         reasons.append("false_block_confidence_bound_exceeds_limit")
+    if "min_detection_rate" in spec and (detection_lower is None or detection_lower < spec["min_detection_rate"]):
+        reasons.append("detection_confidence_bound_below_limit")
     if comparison["improved_unsupported_rejection_groups"] < spec["min_paired_improvements"]:
         reasons.append("insufficient_paired_improvement")
     if comparison["one_sided_sign_test_p"] > 1 - spec["confidence"]:
@@ -315,6 +329,10 @@ def score(cases, rows, threshold, spec):
     return {"threshold": threshold, "A": metrics(cases, original, spec["confidence"]) if original else None,
             "A_status": "paired_provided" if original else "unavailable_no_original_framework_evidence",
             "B": metrics(cases, rules, spec["confidence"]), "C": c_metrics,
+            "detection": {"independent_groups": negative_n, "detected_groups": detected,
+                          "confidence_lower_bound": detection_lower,
+                          "minimum_required": spec.get("min_detection_rate"),
+                          "partial_group_detection_counts_as_miss": True},
             "paired_C_vs_B": comparison, "gate_met": not reasons, "gate_reasons": reasons}
 
 

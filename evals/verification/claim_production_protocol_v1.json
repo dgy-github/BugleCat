@@ -1,0 +1,39 @@
+{
+  "model": "jev-1.13.0",
+  "policy_version": "host-rules-v3.3",
+  "template_version": "jev-single-claim-v2",
+  "categories": ["semantic"],
+  "threshold_grid": [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.975, 0.99, 1.0],
+  "max_false_block_rate": 0.02,
+  "min_detection_rate": 0.5,
+  "confidence": 0.95,
+  "min_supported": 150,
+  "min_unsupported": 50,
+  "min_paired_improvements": 5,
+  "purpose": "Prospective claim-level production evaluation; not a dataset registration or spending authorization",
+  "status": "awaiting_independent_sources_and_bound_registration",
+  "unit": "independent task group; partial detection is a miss",
+  "phases": ["source_admission", "independent_labels", "frozen_registration", "calibration", "one_time_holdout"],
+  "quotas_apply_to_each_phase": ["calibration", "holdout"],
+  "source_admission": {
+    "natural_unedited_assistant_candidates": true,
+    "original_host_events_and_file_snapshots_required": true,
+    "split_by_task_family_before_scores": true,
+    "labels_hidden_from_jev": true,
+    "labels_from_executable_assertions_with_model_review_of_ambiguity": true,
+    "human_review_claimed": false,
+    "exclude_author_exposed_development_and_synthetic_fixtures": true,
+    "unresolved_labels_retained_and_reported": true
+  },
+  "runtime_chain": ["extraction", "assembly", "host_B", "jev_C", "correction", "post_correction_assertions"],
+  "runtime_chain_note": "Fixed-candidate scoring is insufficient for correction efficacy; report delivered outcomes separately from initial intervention.",
+  "budget": {
+    "paid_execution_authorized_by_this_file": false,
+    "automatic_retries": 0,
+    "require_durable_reservation_before_transport": true,
+    "failure_timeout_cancellation_consume_attempt": true,
+    "historical_unreserved_attempts_must_be_accounted_for": true
+  },
+  "production_authorized": false,
+  "certified_threshold": null
+}
