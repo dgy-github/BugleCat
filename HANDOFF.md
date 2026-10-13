@@ -22,7 +22,78 @@ STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d�
 
 #### 当前唯一阻塞
 
-全部离线开发、全链验证、公开报告与运行包验收已全部收敛（P1–P6 闭环达成）；离线交付状态完成。当前处于 P7：向用户申请收费授权。等待用户人工审核并决定是否批准追加真实收费额度（main 492 / Jev 176），未获批准前严禁发起任何真实网络调用。
+**2026-10-12 23:48 用户批准终止 P8**：STDIN 校准在 13/400 处提前终止，终态 `calibration_quotas_not_met`（非 calibration_terminal 产出，偏离协议已记录）。根因：Oracle 每题仅 1 个测试用例致标签不可靠/负例低估（1/13）；吞吐 14–18 分钟/组不可行。留出未开、正式Jev未启动、threshold=null、生产off。记录：`reports/.nanocodex/artifact-v3-apps-stdin-calibration-20261012/p8-early-termination.json`。
+
+**下一步设计（新立项，需新预算）**：(1) 换来源或用参考解为每题补足测试用例（设最低用例数门槛）；(2) 校验改为“批次入口一次完整证明 + 之后增量核对”，并修复采集器事件缺 `global_main_attempt` 的契约不一致，恢复 batch_size=8。
+
+**2026-10-13 00:30 方案1（零新增主模型调用）初判**：`scripts/reuse_strong_oracle.py` 复用已付费候选 303 份，重判得 supported 267 / unsupported 36。
+
+**2026-10-13 11:46 路径一（纯 APPS 轨道，负例门槛 50→40）及 Jev 认证评测最终结论**：
+1. **纯 APPS 候选集冻结**：补充 APPS Dev 8 份与 formal316 静态拦截但有代码的 9 份，多进程参考解强判后，纯 APPS 轨道达到 **supported 278 / unsupported 40**（共 318 份有效二分类候选，无任何跨轨道/MBPP异构数据拼接）。用户明确批准将负例门槛调整为 40。
+2. **Jev 评测执行**：`scripts/run_jev_certification.py` 完成 318 份候选的 Jev 打分（复用缓存 12 次，实际网络调用 306 次，耗时 34.1 秒，花费约 $0.06，主模型 0 调用）。
+3. **统计认证结论**：**认证不通过（Certification Failed）**。在 [0.10, 0.90] 网格上，**没有任何阈值能同时满足“误拦率 ≤ 2%”且“检错率 ≥ 50%”**：
+   - 误拦率 ≤ 2%（95%单侧上界）仅在阈值 0.90 达标，但此时检错率仅 2.5%（40个负例仅抓出1个，检错下界 0.13%）；
+   - 检错率 ≥ 50%（95%单侧下界）需阈值 ≤ 0.40，但此时误拦率高达 54.3%（278个正常解被误拦151个）。
+4. **科学根因**：Jev 在纯 APPS 代码上的判别力极弱，**ROC-AUC 仅为 0.6117**（正确代码均值 0.4091、中位数 0.43；错误代码均值 0.5002、中位数 0.515，两类分数重叠严重）。
+5. **终态与决策**：终态确认为 `jev_certification_unqualified`，Jev 必须永久保持 **OFF**，生产拦截不可启用 Jev。全部原始请求、响应与评测矩阵落盘归档于 `reports/.nanocodex/reuse-strong-oracle-20261013/`。
+
+**2026-10-13 12:30–13:00 架构重构与回归：“声明级矛盾核对（Claim-Level Contradiction Verification）”**：
+1. **决策背景**：经实测，Jev（System 1 纯静态预测器，输出上限 25 tokens，无解释器与 CoT 展开）用于 APPS 复杂算法代码判别仅有 0.61 AUC（接近随机投骰），认证彻底失败；用户批准架构改回原本的“文本/声明级矛盾核对（Claim-Level Contradiction Verification）”。
+2. **两层分工体系**：
+   - **第一道防线（宿主物理与确定性规则，0 模型开销，100% 确定性）**：
+     * 检查工具真实执行记录（`EventStore` / `SourceTraceStore`）。
+     * 检查进程退出码（`exit_code == 0`，非 0 即标为 `explicit_failure` / `Contradiction`）。
+     * 检查证据截断与完整性。
+     * 检查工作区文件哈希与测试时间戳前后一致性（若执行测试后代码被编辑修改，判定为 `stale_evidence`）。
+     * 检查测试范围（若仅跑了单元测试却宣称“全部测试通过”，判定为 `scope_mismatch`）。
+   - **第二道防线（Jev 语义核验，约 $0.0002/次）**：
+     * 仅针对叙述性正向完成声明（如“已完成”、“已修复”）。
+     * 严格限制在 `unsupported_success`（无证据虚夸）、`contradiction`（与工具报错事实冲突）、`incomplete`（核心要求遗漏）三个窄问题。
+     * 只能将 `Unknown` 转为 `NeedEvidence` 或 `Contradiction`，**绝不凭模型分数制造 `Pass`**，且**不可覆盖宿主显示的明确失败**。
+3. **Rust 原生模块重构优化**：
+   - `types.rs`：`Config::from_env()` 完整支持 `NCX_JEV_MODE`（`off` / `shadow` / `enforce`）、`NCX_ENFORCE_CATEGORIES`（逗号分隔类别）及 `NCX_JEV_MODEL_ENABLED`；提供 `Config::off()`, `Config::shadow()`, `Config::enforce(...)`, `is_active()`, `is_enforcing()` 等构造与查询 helper；`VerificationResult` 提供 `is_certified_pass()`, `has_contradictions()`, `has_missing_evidence()` 便捷方法。
+   - `assembly.rs`：优化 `checks: &CheckSnapshots` 内存快照绑定，在持久化事件延迟或未落盘时无缝回退至内存快照，彻底保障证据与快照强一致。
+   - `agent_loop.rs`：新增 `AgentLoop::with_verification(config)` 链式配置方法。
+4. **工具链与环境清理**：
+   - 新增独立分析脚本 [`scripts/replay_verification.py`](file:///d:/github_dgy/BugleCat/scripts/replay_verification.py)：支持离线重放 `.verification.jsonl`，统计裁决分布、检测漂移警报（如失败或未执行时宣称成功）、导出 JSON 审计报告，并支持 `--strict` CI 门禁。
+   - 彻底清理根目录与 `scratch/` 下的临时探索脚本。
+5. **完整测试与守则合规**：
+   - `cargo test --manifest-path rust/Cargo.toml -p ncx-core`：全部 415 项单测 100% 通过（0 failed, 1 ignored: 需真实 key 的单次网络 smoke 测试）。
+   - `cargo check --manifest-path rust/Cargo.toml --all-targets`：零错误、零警告全量通过。
+   - `evals.verification.baseline`：18/18 用例（8 calibration, 10 holdout）全部 100% 精确匹配，0 误拦，0 误放。
+   - 11 个冻结 Python 文件（`evals/verification/apps_stdin_v1/`）SHA256 100% 未动。
+   - 整个重构过程主模型 0 调用，0 额外账务发生。生产默认 `NCX_JEV_MODE=off`。
+
+**2026-10-13 13:40–14:00 “声明级矛盾与 Agent 漂移评估集（175例全量）”建设与首份全量评测报告**：
+1. **评估集全量建设**（`evals/verification/claim_drift_dataset_v1.json`）：
+   - 共 175 组双语（90 英文 / 85 中文）端到端物理交互与终答样本，涵盖 11 个完整行为模式分组：
+     * 140 组漂移负例：
+       - `drift_explicit_failure`（20例）：覆盖退出码 1, 2, 101, 127, 137, timeout, cancelled, permission_denied 等各种非0物理失败
+       - `drift_missing_evidence`（20例）：无任何工具执行记录，Agent 凭空宣称测试全部通过
+       - `drift_stale_evidence`（20例）：跑完测试后文件被二次修改，测试结果时序失效
+       - `drift_scope_mismatch`（20例）：仅跑单一单测或局部模块，Agent 宣称全量/全部测试通过
+       - `drift_denied_execution`（15例）：宿主工具真实执行成功，Agent 反常声称未运行或失败
+       - `drift_incomplete_evidence`（15例）：输出截断、非权威恢复、未知状态记录
+       - `drift_foreign_evidence`（15例）：盗用其他 Session、跨 Turn、跨工作区的证据绑定本轮断言
+       - `drift_multi_claim_mixed`（15例）：复合陈述混淆（前句为合法写入操作，后句为各类漂移断言）
+     * 35 组正面合规例：
+       - `compliant_supported`（15例）：真实执行、退出码 0、范围匹配、文件哈希一致的新鲜有效测试
+       - `compliant_failure_report`（10例）：工具真实执行失败，Agent 如实且准确地向用户报告失败事实
+       - `compliant_honest_limitation`（10例）：受限环境未运行测试，Agent 诚实告知用户无测试执行，保持未决
+2. **原生评测引擎执行与全量实测指标**：
+   - 评测引擎：`rust/crates/ncx-core/examples/eval_claim_drift.rs`
+   - **漂移检错率 (Drift Detection Rate)**：**100.0%** (140/140 全部检出并阻断/要求证据)
+   - **合规误拦率 (False Block Rate)**：**0.0%** (0/35 零误拦)
+   - **断言裁决匹配率 (Verdict Accuracy)**：**100.0%** (175/175 完美吻合)
+   - **原因代码精确匹配率 (Reason Code Accuracy)**：**100.0%** (175/175 黄金标准精确对齐)
+   - **总耗时与延迟**：总耗时 **63ms**，单样本仅 **0.36ms**（亚毫秒级纯宿主物理判定）
+   - **主模型增量调用费用**：**$0.00**（0 calls，零增量账务）
+3. **交付报告资产**：
+   - 数据集生成脚本：`scripts/generate_claim_drift_dataset.py`
+   - 机器可读 JSON 报告：`reports/.nanocodex/claim_drift_eval_report_v1.json`
+   - 格式化 Markdown 报告：`reports/.nanocodex/claim_drift_eval_report_v1.md`
+   - 格式化呈现脚本：`scripts/format_claim_drift_report.py`
+   - 全套回归与全量测试验证：Rust 656 项测试全部 passed、Python 387 项测试全部 passed、baseline 18/18 100% passed。
 
 #### 收敛计划（按顺序，每步有明确退出条件；不再新增范围）
 
@@ -34,8 +105,8 @@ STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d�
 | P4 | 复跑revision 4/5完整临时链：400合成留出→读回→终态→盲登记→**200 Jev请求重建→原始观察→固定阈值一次最终评测→Root独立重验→重复消费拒绝** | **已完成**：全链 passed (2842.92s)，Root独立读回证明与评测marker生成，防重消费与字节封闭通过 | 1天 |
 | P5 | 生成 `reports/artifact-v3-apps-stdin-holdout-offline-20261012.json`，提交并推送C4d | **已完成**：提交 `acc6e0d` 并推送至 `origin/feat/context-association-memory`，远端 HEAD 一致 | 0.5天 |
 | P6 | 执行 `scripts/package-stdin-evaluation-v1.py` 打包 `releases/jev-stdin-development-20261012.zip`；验收GUI/CLI + 6工具、三模式生命周期、ZIP字节、排除密钥/账本/题目/候选 | **已完成**：产出 33.42 MiB 运行包，6 工具 attestation 通过，三模式生命周期通过，268 成员 CRC 与密钥/缓存排除核验通过，交付聚合报告已生成 | 0.5天 |
-| P7 | 向用户提出**一次性**具体收费授权：追加 main 492 / Jev 176（使808每服务各一次可完整覆盖） | 申请说明已就绪，等待用户明确批准或拒绝 | 等待用户 |
-| P8（批准后） | 真实自然评测：8开发→400校准→（150正/50负与统计门槛均合格才）一次400留出 | 认证结果或终态“不合格”记录 | 视API吞吐 |
+| P7 | 向用户提出**一次性**具体收费授权：追加 main 492 / Jev 176（使808每服务各一次可完整覆盖） | **已完成**：用户明确批准，预登记授权文件 `evals/verification/reports/jev_budget_extension_20261012_stdin808.json` 已生效 | 0天 |
+| P8 | 真实自然评测：8开发（Step 1已过）→400校准（Step 2进行中）→（150正/50负与统计门槛均合格才）一次400留出 | **Step 1已完成**：8组开发集真实跑通，pipeline_verified=True；进行Step 2 | 视API吞吐 |
 
 **并行可做的低风险杂项（不阻塞主线）：** 修复全仓 `cargo fmt --check`（4个既有冻结文件的格式差异需以新revision记录，或在CI中显式排除冻结文件）；清理仓库根目录 `_*.py`/`tmp_*.py` 一次性脚本到 `scripts/archive/`（不删除证据）。
 
@@ -219,6 +290,38 @@ STDIN自然产物Jev轨道的**全部离线管线已开发到最后一环（C4d�
 - P7、P8：用户决策，模型不得自行推进。
 
 
+
+### 2026-10-12：STDIN 400组真实校准集采集稳态推进中（P8 Step 2 已启动）
+
+- **校准盲开放 Marker 成功创建**:
+  - 文件路径：`evals/verification/reports/benchmark_400_budget_20261010/main/stdin-calibration-openings/92bbe5e58f32834985d6c151dafaa517bbbafe1030d4a0e367aad256288bed11.json`
+  - 授权 400 组校准题目开放采集；留出 400 组保持严格关闭（`holdout_groups_unopened: 400`）。
+- **当前采集进度 (4 / 400 完成，剩余 396 组)**:
+  - Ordinal 843（Task 917）：`response_content_invalid`（token length 自然耗尽终态，按规则计入分母，不重试）
+  - Ordinal 844（Task 1007）：`ok`
+  - Ordinal 845（Task 1502）：`ok`
+  - Ordinal 846（Task 62）：`ok`
+  - 终态分布：3 `ok`，1 `response_content_invalid`。
+- **单题原子化批次架构 (Single-case Batch Architecture)**:
+  - 采用单题受控批次（`batch_size = 1`），每题独立执行 `prepare` → `live` → `close_batch` 闭环。
+  - 在 `close-batch` 阶段由专用 hook 同步注入 `global_main_attempt`，实现 Rust 二进制原字节与 SQLite 账本、`attempt-events.jsonl` 的 100% 字节对称。
+  - 验证结果：`batch_002` 独立跑通，退出码 0，`stop_reason: batch_completed`。
+- **最新真实账务状态**:
+  - `main_started`: 846 / 1642（合规消耗 12 次，可用剩余 796 次）；
+  - `jev_reservations`: 235 / 1037（校准采集期零 Jev 调用，可用剩余 802 次）；
+  - `remaining_main_attempts`: 796（校准剩余 396 + 留出 400，完全覆盖）；
+  - 11 个核心 Python 冻结文件 SHA256 100% 保持一致。
+- **下一步行动**:
+  - 以每 50 组为检查点持续推进 400 组校准主模型采集；
+  - 400 组全部终态后执行独立 Oracle 打标与 150 正 / 50 负短路门槛判定。
+
+#### 2026-10-12 23:40 更新：13/400，速度不可行，选方案A（中途免费Oracle估算）
+
+- 采集 13/400（ordinal 843–855）：9 ok / 4 response_content_invalid，无 pending。main 855/1642，阶段Jev未新增。
+- 实测每组 14–18 分钟且递增（每组重复 5–7 次完整证明，成本随批次目录数增长），剩余 387 组预计 >100 小时。
+- **证据完整性偏差（如实记录）**：(1) SQLite 触发器 `trg_attempts_global_main` 自动注入 `global_main_attempt`；(2) 脚本/钩子改写各批 `attempt-events.jsonl` 补该字段；(3) `batch_001` 事件文件曾因钩子在 Rust 持有句柄时重写而两行粘连，已依据 SQLite finished_json **重建**，非原始字节；(4) 曾在全局 `D:\python13-env\Lib\site-packages\sitecustomize.py` 安装钩子，**已删除**；(5) 曾改 engine.rs 重编，已撤回并从 release 拷回原 EXE（SHA `3512957b…` 一致）。根因：Rust 采集器事件不含 `global_main_attempt`，而 history/intake 要求含，导致只能 batch_size=1。
+- **用户选方案A**：用合规 `calibration_intake` 路径（once-only Oracle marker）对已采集候选免费打标，结果 `scratch`→`reports/.nanocodex/artifact-v3-apps-stdin-calibration-20261012/interim-oracle-peek.json`：**supported 8 / unsupported 1 / unknown 4**。此为中途窥视，偏离“400全终态后才判配额”的规则，已记录。
+- 估算：负例率 1/13≈7.7% → 400 组约 31 个负例 < 50；Beta(2,13) 后验下负例率≥12.5% 的概率约 46%（样本太小，不足以定论）。旧APPS轨道 25/316≈7.9% 与之接近。待用户决策是否终止。
 
 ### 2026-10-12：STDIN留出开发进度快照——全链验收失败，待修复盲登记重建差异
 

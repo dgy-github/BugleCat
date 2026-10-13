@@ -53,7 +53,7 @@ pub fn packet(
     session: &Session,
     root: &Path,
     candidate: &str,
-    _checks: &CheckSnapshots,
+    checks: &CheckSnapshots,
 ) -> VerificationInput {
     let root = root.canonicalize().unwrap_or_else(|_| root.into());
     let workspace = root.to_string_lossy().into_owned();
@@ -189,6 +189,12 @@ pub fn packet(
         if let Some(s) = durable {
             e.before = serde_json::from_value(s["before"].clone()).ok();
             e.after = serde_json::from_value(s["after"].clone()).ok();
+        }
+        if e.before.is_none() {
+            if let Some((b, a)) = checks.get(id) {
+                e.before = Some(b.clone());
+                e.after = Some(a.clone());
+            }
         }
         evidence.push(e);
     }

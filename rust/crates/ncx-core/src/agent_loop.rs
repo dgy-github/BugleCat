@@ -398,6 +398,12 @@ impl AgentLoop {
         self
     }
 
+    /// Configure pre-commit host verification mode and policies.
+    pub fn with_verification(mut self, config: crate::verification::Config) -> Self {
+        self.verification = config;
+        self
+    }
+
     /// Install a sink that receives [`LoopEvent`]s during every turn (the GUI
     /// bridge forwards them to the frontend). Replaces any previous sink.
     pub fn set_event_sink(&mut self, sink: EventSink) {

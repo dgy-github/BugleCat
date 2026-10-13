@@ -31,19 +31,74 @@ pub struct ExperimentalJevPolicy {
 }
 impl Config {
     pub fn from_env() -> Self {
-        let mode = match std::env::var("NCX_JEV_MODE").as_deref() {
-            Ok("shadow") => Mode::Shadow,
-            Ok("enforce") => Mode::Enforce,
+        let mode = match std::env::var("NCX_JEV_MODE")
+            .ok()
+            .as_deref()
+            .map(|s| s.trim().to_lowercase())
+            .as_deref()
+        {
+            Some("shadow") => Mode::Shadow,
+            Some("enforce") => Mode::Enforce,
             _ => Mode::Off,
         };
-        // No production category is enabled: current data is not an independent
-        // effect evaluation. The host API can supply reviewed categories.
+        let model_enabled = std::env::var("NCX_JEV_MODEL_ENABLED")
+            .map(|v| !matches!(v.trim().to_lowercase().as_str(), "0" | "false" | "off"))
+            .unwrap_or(true);
+        let enforce_categories = std::env::var("NCX_ENFORCE_CATEGORIES")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .filter_map(|part| match part.trim().to_lowercase().as_str() {
+                        "execution_success" => Some(ClaimKind::ExecutionSuccess),
+                        "tests_passed" => Some(ClaimKind::TestsPassed),
+                        "semantic" => Some(ClaimKind::Semantic),
+                        "limitation" => Some(ClaimKind::Limitation),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Self {
             mode,
+            model_enabled,
+            enforce_categories,
+            experimental_jev: None,
+        }
+    }
+
+    pub fn off() -> Self {
+        Self {
+            mode: Mode::Off,
+            model_enabled: false,
+            enforce_categories: vec![],
+            experimental_jev: None,
+        }
+    }
+
+    pub fn shadow() -> Self {
+        Self {
+            mode: Mode::Shadow,
             model_enabled: true,
             enforce_categories: vec![],
             experimental_jev: None,
         }
+    }
+
+    pub fn enforce(categories: Vec<ClaimKind>) -> Self {
+        Self {
+            mode: Mode::Enforce,
+            model_enabled: true,
+            enforce_categories: categories,
+            experimental_jev: None,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.mode != Mode::Off
+    }
+
+    pub fn is_enforcing(&self) -> bool {
+        self.mode == Mode::Enforce
     }
 }
 
@@ -209,6 +264,22 @@ pub struct VerificationResult {
 }
 
 impl VerificationResult {
+    pub fn is_certified_pass(&self) -> bool {
+        self.verdict == Verdict::Pass
+    }
+
+    pub fn has_contradictions(&self) -> bool {
+        self.decisions
+            .iter()
+            .any(|d| d.verdict == Verdict::Contradiction)
+    }
+
+    pub fn has_missing_evidence(&self) -> bool {
+        self.decisions
+            .iter()
+            .any(|d| d.verdict == Verdict::NeedEvidence)
+    }
+
     pub fn should_correct(&self, config: &Config, input: &VerificationInput) -> bool {
         config.mode == Mode::Enforce
             && self.decisions.iter().any(|d| {
