@@ -2,6 +2,8 @@
 
 ### 2026-10-13：试采缺陷修复与完整本地回归（host-rules-v3.4）
 
+**最终交付已完成：** 源码修复提交`50ad535`已推送GitHub main。新运行包 `releases/jev-claim-fixes-20261013-final.zip`，14,514,624 bytes（13.84 MiB），SHA256 `d949b57a95bf2f65a306dd520137726b2602a4810de020204d18c0fe876fe4af`。GUI、CLI和NSIS均重新编译；实际打包副本通过启动/会话恢复/未验证标识，以及off、shadow、enforce三模式取消与恢复验收；付费调用0，安装程序未执行。17个ZIP成员逐项hash及CRC验收通过，未打包用户配置、Keys或WebView缓存。交付收据 `reports/jev-claim-fixes-delivery-20261013.json`。此包替代上一运行包用于本次代码修复，不代表生产效果已认证。
+
 - 用户要求做完测试和剩余修复并提交GitHub。本轮修复声明分句：内联代码和配对括号中的逗号/连接词不再截断声明，保留原文byte span；参数`area_polygon(4, 20)`、嵌套参数、中文分句及后续否定声明均有回归。
 - 预算终态归因核对：已有`python_check::failure`优先保留compile_failed/verification_failed是正确的，原提示却只写预算耗尽。现在模型预算和工具预算两条终止路径同时写明尚未解决的实际校验原因，不伪造正常终答，也不改原始试采记录。
 - 文件新鲜度核对完成：当前契约对整个工作区做before/after/current相等校验。新增临时文件会使当前状态不可认证，属于保守边界；回归验证旧快照仍保留且当前freshness=false。未通过忽略未跟踪文件来掩盖潜在依赖变更。

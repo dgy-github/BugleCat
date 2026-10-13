@@ -1,0 +1,23 @@
+{
+  "schema": "buglecat.verification.review-runtime-package.v1",
+  "package": "releases\\jev-claim-fixes-20261013-final.zip",
+  "sha256": "d949b57a95bf2f65a306dd520137726b2602a4810de020204d18c0fe876fe4af",
+  "bytes": 14514624,
+  "member_count": 17,
+  "runtime_acceptance": {
+    "actual_copied_runtime_smoke": true,
+    "policy_version": "host-rules-v3.4",
+    "modes": [
+      "enforce",
+      "off",
+      "shadow"
+    ],
+    "paid_calls": 0,
+    "installer_executed": false
+  },
+  "installer_executed": false,
+  "formal_certification": false,
+  "historical_accounting_reconciled": false,
+  "source_manifest_sha256": "b80760c953baa72f5cac1f1d6be17e1bd4606b6cf6ebd8b04a7308e78f991eec",
+  "paid_calls": 0
+}
