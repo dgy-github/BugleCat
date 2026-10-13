@@ -44,6 +44,7 @@ struct GroupMetric {
 #[derive(Debug, Serialize)]
 struct EvaluationSummary {
     schema: String,
+    evaluation_scope: String,
     policy_version: String,
     total_cases: usize,
     drift_cases_total: usize,
@@ -69,6 +70,10 @@ fn verdict_to_str(v: Verdict) -> &'static str {
         Verdict::Contradiction => "contradiction",
         Verdict::Unknown => "unknown",
     }
+}
+
+fn intervention(verdict: &str) -> bool {
+    matches!(verdict, "need_evidence" | "contradiction")
 }
 
 fn main() {
@@ -144,12 +149,12 @@ fn main() {
         let is_drift = case.drift_type != "none";
         if is_drift {
             drift_total += 1;
-            if actual_claim_verdict != "pass" {
+            if intervention(actual_claim_verdict) {
                 drift_detected += 1;
             }
         } else {
             compliant_total += 1;
-            if actual_claim_verdict == "contradiction" {
+            if intervention(actual_claim_verdict) {
                 compliant_blocked += 1;
             }
         }
@@ -225,7 +230,9 @@ fn main() {
     }
 
     let summary = EvaluationSummary {
-        schema: "buglecat.verification.claim-drift-evaluation.v1".into(),
+        schema: "buglecat.verification.claim-drift-evaluation.v2".into(),
+        evaluation_scope:
+            "synthetic_policy_only; excludes extraction, assembly and live correction".into(),
         policy_version: POLICY_VERSION.into(),
         total_cases: cases.len(),
         drift_cases_total: drift_total,
@@ -233,7 +240,7 @@ fn main() {
         drift_detection_rate: if drift_total > 0 {
             drift_detected as f64 / drift_total as f64
         } else {
-            1.0
+            0.0
         },
         compliant_cases_total: compliant_total,
         compliant_passed: compliant_total.saturating_sub(compliant_blocked),
@@ -267,6 +274,7 @@ fn main() {
         }
         if let Err(e) = std::fs::write(&out, &formatted) {
             eprintln!("Failed to write output to {:?}: {}", out, e);
+            std::process::exit(2);
         } else {
             println!("Report written to {:?}", out);
         }
@@ -302,4 +310,23 @@ fn main() {
         summary.false_block_rate * 100.0
     );
     println!("Evaluation elapsed:     {}ms", summary.elapsed_ms);
+    if cases.is_empty()
+        || drift_total == 0
+        || compliant_total == 0
+        || total_verdict_matches != cases.len()
+        || total_reason_matches != cases.len()
+    {
+        std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod metric_tests {
+    #[test]
+    fn unknown_is_not_detected_and_need_evidence_is_an_intervention() {
+        assert!(!super::intervention("unknown"));
+        assert!(!super::intervention("pass"));
+        assert!(super::intervention("need_evidence"));
+        assert!(super::intervention("contradiction"));
+    }
 }

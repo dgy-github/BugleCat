@@ -122,6 +122,7 @@ fn assistant_toolcall(calls: Vec<ToolCall>) -> ModelResponse {
 mod basic_tests;
 mod compaction_tests;
 mod runtime_tests;
+mod verification_chain_tests;
 
 struct CapturingProvider {
     seen: Rc<RefCell<Vec<Value>>>,

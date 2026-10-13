@@ -106,7 +106,9 @@ pub fn claims(candidate: &str) -> Vec<Claim> {
                     .any(|s| low.starts_with(s));
                 let kind = if conditional || context != "narrative" || limitation {
                     ClaimKind::Limitation
-                } else if tests && (positive || negative) {
+                } else if (tests || !super::evidence::test_scope(&low).is_empty())
+                    && (positive || negative)
+                {
                     ClaimKind::TestsPassed
                 } else if positive
                     && [

@@ -1,5 +1,24 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-13：历史账务清点与真实工具闭环回归
+
+- 已独立扫描历史评分原件：318 份保存结果，312 份无缓存标记的直接请求结果、6 份 stdin_dev_cached；原 certification_report.json 的 calls_made 也是 312。旧文中“306 请求＋12 缓存”与磁盘原件不一致，以 `reports/jev-history-audit-20261013.json` 的逐文件 SHA256 清单为核对入口。共享 Jev 预约文件 235 份；不能把预约数或成功响应数当作收费数。失败重试及收费金额仍未知，没有补造账目。
+- 用户要求自行查找：已检查仓库及 Downloads/Desktop/Documents 顶层相关账单导出文件，未发现账单；已进入用户提供的登录助手并验证 Key 有效，TypeSafe 控制台可达。登录页要求点击 Continue 即接受条款，已单独请求该步骤确认；确认前没有继续登录或索取验证码。
+- 新增 6 条完整 AgentLoop 回归：真实 shell 执行、真实 Session/EventStore/快照、实际声明抽取与证据组装、裁决以及终答纠正。覆盖失败纠正、成功保留、shadow、夸大全量、执行后修改导致证据失效、中英文声明。模型使用固定回答，Jev model_enabled=false，费用为零。
+- 回归发现并修复漏检：`python check.py passed` 被误分为 Semantic，执行失败仍可直接提交。抽取器复用已有 test_scope 识别明确检查命令；现在失败证据触发 explicit_failure 并纠正后提交。
+- 验证：6 条新闭环通过；ncx-core 全量 421 passed、1 ignored（真实 Key smoke）；前序 Python 15 项通过。CLI release 与 Tauri GUI/NSIS 安装包均重新构建成功。运行包复制后验收与 GitHub 提交结果随后追加。
+
+### 2026-10-13：预算旁路关闭、评测统计与严格审计修复
+
+本节覆盖下方旧进度摘要。此前 C4d 与运行包已经提交；P8 已提前终止。当前修复针对最新评测/审计工具，不启动收费、生产启用或新阈值认证。
+
+- `run_jev_certification.py` 删除直接 HTTP 与最多三次重试入口，改为只读历史评分复核。新增收费必须走现有授权采集器；本脚本没有开关可绕过账本。旧的未登记调用次数不能由成功缓存数反推，明确输出 historical_network_attempts=null、historical_accounting_reconciled=false，不伪造补账或恢复剩余额度。
+- 失败、缺失、无效分数及 raw 分数不一致保留在 unresolved，原正负组数保留；有未决项或配额不足时不计算阈值网格。完整数据也仅输出探索结果，独立留出未验证，认证阈值恒为空。默认不写文件，显式新报告也不覆盖已有文件。
+- 声明评测 v2：NeedEvidence/Contradiction 统一计为干预，Unknown 不再计检出；空集、缺少任一类别、裁决/原因不匹配及写报告失败返回非零。结果限定为合成规则层回归，不宣称端到端认证。
+- replay --strict：缺失路径、空输入、坏行、未知 schema 返回 2；坏行之后继续扫描；所有 NeedEvidence/Contradiction 返回 1，干净记录返回 0。
+- 验证：新增 Python 回归 15 passed；Rust 指标回归 1 passed；重新执行 175 例规则层回归，175/175 裁决及原因匹配，140/140 干预检出、0/35 合规干预。README 与报告生成器同步限定验证范围。
+- 本轮真实模型请求 0。历史旁路的失败/重试总次数仍需原始传输记录或服务端账单才能对账；本次没有修改历史账本。
+
 ### 2026-10-12 10:11：现状总结与收敛开发计划（以本节为执行顺序依据）
 
 #### 一句话现状

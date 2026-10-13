@@ -1,0 +1,2252 @@
+{
+  "schema": "buglecat.verification.historical-accounting-audit.v1",
+  "status": "unreconciled_requires_provider_attempt_or_billing_export",
+  "saved_response_files": 318,
+  "sources": {
+    "legacy_direct_http": 312,
+    "stdin_dev_cached": 6
+  },
+  "shared_ledger_reservations": 235,
+  "legacy_report_sha256": "fa1b6eb76efd6650bbfa23f6b6e83116f163eab8cca072bd74f1e13fbf18ab71",
+  "legacy_report_tasks_to_call": 312,
+  "actual_network_attempts": null,
+  "failed_network_attempts": null,
+  "automatic_retry_attempts": null,
+  "charged_amount": null,
+  "new_paid_calls": 0,
+  "ledger_modified": false,
+  "limitations": [
+    "Legacy direct HTTP wrote only successful final responses; intermediate attempts were not retained.",
+    "A saved response proves a retained result, not the number of HTTP attempts or billable requests.",
+    "Candidate group name matching alone does not authenticate a reservation/request binding.",
+    "Provider request/billing export is needed to resolve retries, failed charges and total spend."
+  ],
+  "responses": [
+    {
+      "candidate_id": "apps-v3-dev-main-206",
+      "sha256": "918e032ab5cd53c66519fc101725a67f7a0e589eb2527b4904da59488b0f8bd6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-267",
+      "sha256": "01bd69c459dd791323525e2eb3b4e076901cb0635664232564aa623f9b33b361",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-286",
+      "sha256": "9b7d1cad0f24dc21489812636c44b124eec683291c8fddd454ba7e48eacd4efd",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-2948",
+      "sha256": "135918fa791ad04889995f26c770f1d9b2faf0ad7bb1b399603495835e5e0d59",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-3491",
+      "sha256": "69546cc9d0e42129dfadd2b18ac2f37788f13d8aa9a3203809e964777fb34918",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-4598",
+      "sha256": "7b61bf74ec78f118b006145c5f402bea05133994b047ef2bb797af61da2c7c06",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-463",
+      "sha256": "9fc78dc88cab8f2a32d700daed6f1b30554db0a23f9a0638b0c2291e6a45d0a0",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-dev-main-4728",
+      "sha256": "22bd021006eea14ac3922a59cd20f1fb6786fc39d86a7df3d3c6ab375f05a64b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-125",
+      "sha256": "796bfa7358f67e252ae0f2a72f450ccc1a08eb4ecb051610a2025401b4cb99ff",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-127",
+      "sha256": "e2c8087435e616d974cb28aded4fd493fa61f06991f979b126144190ae0cd23a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-128",
+      "sha256": "9ac40f6ab558ab5c1f132de332bbc6464d0e12a4e78a3e8549ac587016ed4d09",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-132",
+      "sha256": "f29a32dbfd211e261ad012ff57f3cec4d70ccaa19cdd6053fae31f3ec3c34c3f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-134",
+      "sha256": "4622205ec37382ce24809a45f0577f451317ebfcd5a6ea18197ec3d8fe01ae10",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-136",
+      "sha256": "85597223ff28b58d8da6c785f36203ff66406b890e27bebbc949a52c9435e244",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-139",
+      "sha256": "ba8183253171bf4f4f16dd80b77b4b0dcc7a608de9e8d7a8b5c604563a51204a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-141",
+      "sha256": "f008c94ec678ced4f7364d4190d332b88dc948f5c2040fb5e8ab81a88ea7d376",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-147",
+      "sha256": "8c13b952d773ae519984e47ff78501eb0d1c5b9078cc75e8941a4ee323016794",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-148",
+      "sha256": "211d265b4a68b7f746409ac159da5d59fae0d89a8c756016a1dbd9bd2a83a51d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-149",
+      "sha256": "66f93ef0cb20caac4bf481795c55738a21ea5875440af0c32e4d3a4fe9989c94",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-150",
+      "sha256": "e5bd8a2df07c950280610c30a1f51345267040d7322f929a1b2ff945aff9015f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-154",
+      "sha256": "4b888ee6e0d3484d751dc55b3a9f1be25e1008c7786cb933713210946d8c7fbf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-158",
+      "sha256": "24c44ecdf84df8d7f1310ae0e33947e9216b40f434e072448b1aa9aeee8c33b9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-159",
+      "sha256": "979a5d0d40c58f356d6aa684b4f254a28f2c3ee51195f7410fe072a8c6bc3774",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-160",
+      "sha256": "75d555e836395d99902f774d38f9ca7065d90c8f06e03754470a39eb6eaaebd8",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1608",
+      "sha256": "3427376ab9c2e08870539551373ec84ccd480ad016087e6eb583de2a84d1a50f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1609",
+      "sha256": "a2bd5e078cb7b9717801753a3d05ebde4b13daef1abc9bea252174686d495ead",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1610",
+      "sha256": "77982ab83471fc595c8770e1534f1186e2a7f2c6ed5d88f4aced8627fc22f0d9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1614",
+      "sha256": "ffaeb8687e279a771ace54e99cedb3c0c5e8923e8993896e55e9e323b31c91e1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1618",
+      "sha256": "4603af71ecd5526f47f6f189867a8f3d32b1ff2249e9dfc11c48a9522e7f81a7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1626",
+      "sha256": "95e82933f0ef3238cc16eeeb20758d6572189c6c460d5c64a1addeb587c1e08d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1629",
+      "sha256": "b4549833edbe7c3513f43012dd18dd2e662b6e4e61bfd308eb1cda2decc2d0b3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-163",
+      "sha256": "0251b4376636dcae70ad2663ed2e1d3976c44139637cb4e1c40b436ed937efcb",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1631",
+      "sha256": "a99be5dcf27bd202176ef67d89f6073966e2843a837aa8fe7a542bb3b68f605e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1632",
+      "sha256": "7a631f9428b0ceaa11c3a6ce832e78171c76bb119cd934e6eb598867ce43f8e9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1634",
+      "sha256": "8bdcb8aadc6a8e0760a95179ed902bf3a75d629775a33a32fefef78adc734d9f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1635",
+      "sha256": "c5bf28c823b181bab6e37f6ef0a53b7b1dc9f13f8e5df06eb53d91909d6f6177",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1636",
+      "sha256": "531c95e4b9c90c5847002a3d8f287e5d7ff9e9bbc978ad28ad6fe94686d18354",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1637",
+      "sha256": "02f48f5327444b243c40b11d2e1886e24455cf65da6badbdd8cdc743b729afe8",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1638",
+      "sha256": "4ee6cab4b36dc383fa997dd27b35f30bf6e4d83a94bf03fe23ba93183788ad1c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1639",
+      "sha256": "5ec6a246745bde580078a13f454a4fd55ebdfee8ca715e44e57d8577cdf7817d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-164",
+      "sha256": "504d993de828c3431cbb8708f6edfdabac6e93850648a6bb8d6f7ccbce1573f0",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1646",
+      "sha256": "21ce9c73ac728ce58c152b554d2671b9c5b7e2063269ef324d03c88a760aeccf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1647",
+      "sha256": "162271839bf1923e1114dca18065b0cfbcb9dc89644ed72b1a1ae52ce9b889cf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1649",
+      "sha256": "544a492220b73824fb60a8b6947a68c534bb50153f6893027429ff614e154292",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-165",
+      "sha256": "1423a127dfa77b48e2aa859b64943bb2b124033b0f182175e215438e9e01391d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1653",
+      "sha256": "1662f615892c1091400251e70f1559285a326f2254727b180f24d1aafc2981ec",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1655",
+      "sha256": "a4189cd155912d69df86282e3d98ec8488e816ae27690d85cd3a23d65ecd2505",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1656",
+      "sha256": "93ae054a8e31010c40817bb2aeaad096186d739b14befac3d419d99dd7d1ef51",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1658",
+      "sha256": "376fcdab2befd9ead1270e4e4f68630beccdb31f5be28eacdcb6d58a239a65e7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1660",
+      "sha256": "96b6a927c27c88c85552b6ac0ae375d416fbcf1a6362e64611903b47c4f386df",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1662",
+      "sha256": "2757f6ffa281ddf1381fb6cb3670179d04f858d8e73eef09d913bb728aa0fd7e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1663",
+      "sha256": "2d3d7d8ac50f63f93fcc4004cfeb8af042edfa91b078c976111c3b7447399301",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-1668",
+      "sha256": "a3a780cac9f4fbfe2451ae3f7f28c6829603fbab4254712548373368ccf4ebf1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-169",
+      "sha256": "48d59cf807d6f05a85506834ea597138077cb3947b460d77a6552e44976ef0d4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-177",
+      "sha256": "9392b67006dff2ebe1dab99396ed5310f874104c4a7d036983ff2bc2f49345cd",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-178",
+      "sha256": "21865e9e341eb5524063518fd5c79631dcc78dd45f015a0b10577ee7f9a18894",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-179",
+      "sha256": "9b076ed069c8a8317b8e2fc6ff53ee921fd432c77c59f4b8c0f6a2c884348e94",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-185",
+      "sha256": "8e9bb5dea8472696e1ef181ad7a7351389bb8e41eb01ed9e349ec204e93f078b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-187",
+      "sha256": "b49090fa40134d88f6e477c3b69e8d8693546406068af64a9a2e02a8e7f723c5",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-190",
+      "sha256": "dd7aad1f6c61c96010447a9bf1b5b77df826b7003fa3f35103927c7df8d72746",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-195",
+      "sha256": "aa565c981ae09799dac22acd278f29c76346876467c8419423a3517525491d97",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-196",
+      "sha256": "063b6d2dcb073d12725f001a4c0e5eb6ab4bdd411b86be89f20043ee08fe8aec",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-199",
+      "sha256": "3e7c6961e2d5f76e7227e4afa71ebe8ce76f119002af26f4c29704057ad52f17",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-200",
+      "sha256": "16d0800f3825b0a334d138fcf24907a0f78ddb0f163fe1201c969299580de980",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-204",
+      "sha256": "707c6431bdeb8e730669453f5c8b9d88876352afc07859ce865526cc10d7f6df",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-208",
+      "sha256": "841d575dcd56e94022bac19791b7ac0565b6f025025cdd8bd53b2a28e1cbfd00",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-210",
+      "sha256": "72112db8e8d2360bc9ba455d15d86214c8b6dba653ab69ff6c334b706b0360c1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-215",
+      "sha256": "ce36fa015fee5fd7a56a6621eb19b5ad9121a879d6db5b903d3f77cf42d24f5f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-217",
+      "sha256": "b0f4ec56dfce8fbf043161b2e9c76a5a15174f0acdeaeee2de76a83b67b79fbf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-218",
+      "sha256": "fdef9895059095f0301c4ecdd621f77f312715f13f9cf24bd881b250e724780b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-221",
+      "sha256": "40428f987a178cce6e7348147e0573851e20c14579759b06c290b9f7ff275744",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-224",
+      "sha256": "fac2e84102264cfcc9fb3900de0a3ea524c557affa5fa68b360f29fab157fed2",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-228",
+      "sha256": "5083136ff78e1e69b90863df5fd2b99361875b04a7bea61f80c797b108a6f7ea",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-230",
+      "sha256": "37eab6bcb2c12fafa2c9003cd9595623a8e7ebb289f594b113a2f3859ebc34e7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-232",
+      "sha256": "df15b2da5966328395f3f86c3b9a8927a6069ab5e1c9e63c28e17e0a6335d667",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-235",
+      "sha256": "152f3bcaf2be439f72b755f41ef1dbbd8a6534c80fc192fc877761ec0889b512",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-236",
+      "sha256": "884ba37fe3a9b27a082751ea5512b845ed58b844ba15f7d1da2a541843be3286",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-237",
+      "sha256": "02d8bdf534150dae89ad323990c0f5da21913ced69d9e452b843083882c831db",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-238",
+      "sha256": "991e3b769d32f3de9c58ec8b0e44cfb1b4f1ae409a2b886ee62c1e975f45efca",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-241",
+      "sha256": "162172f46b9f53da83c6c4e1531910b9c2915d45f529556670ee2f6383a5fea1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2435",
+      "sha256": "7d93bded453daa51e853c3cff62f4ad5dad18825f709cb34869676a1941aaae8",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2438",
+      "sha256": "33bc60e4aa5b906ca4c36ddfa65c8a1e92d8d13173101c61ef87fd7d8a139b38",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2443",
+      "sha256": "efd01ae07f5b151747d326368e3d184b11bc9581ccac48bf3c77ec48ddba5dd1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-245",
+      "sha256": "67160c1fb08447c6bbefeda910a5ff2178ba15a258654c8e654fb5bfa24b00e4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2468",
+      "sha256": "0e7806f7106159150c671ebd30f770bf5dc147494292b1aff43f4a5bfaba5c54",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-247",
+      "sha256": "5dd07ebb204a1c72595a0f0b63d018d5f6ede9870983ab106323adb97f120660",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2523",
+      "sha256": "182169455d949b4cd488ea458fdd9aea44953bf956331309c271047d8dc791f6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-254",
+      "sha256": "57a9e7015af4a3a66e61fddffe5678a9511bbb641a2b0cf98769ad994f09a880",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-257",
+      "sha256": "71439a18bbc1fb21ec42a4dc1e425374634f716edf52ee882fa66aeec4605816",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-258",
+      "sha256": "b1e948295cfef8265ac3a6f75e485790fdfb350ddf477ba45510ca0175ae7410",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-264",
+      "sha256": "f5c17fa556bacf7088e63349e55d4e6bea2302392d94b6bd8a8f816080f05e2a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-268",
+      "sha256": "6a628238d26ba640d47d3af915c322a8cdfa204771334fdaf933537a7d8c6bfe",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2709",
+      "sha256": "bf4e031c617db74ab4c19c48f3f3991ae38e1cba786dd953e989024489079c85",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-271",
+      "sha256": "94e22063fc3000022cbaae3748e81f36d13a3970afd9cab4698e76e6f72ef96b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-272",
+      "sha256": "3661dbccafe59a6ec2250e5ec56f5b845accbe497f4b9681e00ec0df3253b801",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2742",
+      "sha256": "3d1f61331e07f4eae9e8bd8a7e55fc8f2e31844a04d36a75d505f60cc298ee4e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-275",
+      "sha256": "9806fcef47daaa81ffce031be192d6e2644f763838bb2879a482cecc46cf8a4f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2764",
+      "sha256": "f6d4e35ff15ba66f6221a8103b01b9bbdbfc7af1fe4a3b74e460ad166b346cde",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-277",
+      "sha256": "c60665705ea11e60392f96f2ca940b9f559dae74d846cf2caf3970003fbad61d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2775",
+      "sha256": "ed57e633fe84d678639328874fcdf27600ea886fcbac399fbc4138de41e1012e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-278",
+      "sha256": "92c27b5d0accdb4e3879adf32d6499f252c0ac9a3b3a5aa877f17b807dcd0755",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2787",
+      "sha256": "3a8a8003385c64435c2a215cdb37f511bedc437315e03bfdd7b21b1baf1d73f4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-279",
+      "sha256": "d0c987d71604ac927ca43d6e8420c1917325209df1e0fd71904a0b441bfe6965",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-280",
+      "sha256": "ff87f77b15de4dc8b4f0146a3f36d4e613d2ccfc37ce20a4cdf312ef7ed590aa",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2812",
+      "sha256": "d360c694a61e6c9ba6aecd3b5ee4db9bdfce36b53bb49ebce91c03127f40bdc2",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2817",
+      "sha256": "41d3f239afba8c71f707969bbe817b1c81becb5e411e6a9c1a700f080acb9f9b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2819",
+      "sha256": "d1b2ed10eacfa5761f3895c8fb482290ad951f8e4aae1be1b6b3bcf0366d4bb1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2828",
+      "sha256": "58ff79cedec8fe554e93ff45249d59a5023b1acbfe3ea6f2ac33ea64f881d9c6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-283",
+      "sha256": "0f21765c9e874cfb26b2d61472482ea4ba27119b6dccd26496c3a7e6e6d17413",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-284",
+      "sha256": "287b6654eb6f30dd6d9277e6c4ecf9b96c11342a0ef8d455b4a55d13ecae2b5a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-285",
+      "sha256": "7df8f7c46d57022fbdd9d5b1190de20edfe320aeafed74aa0f2bed4d066bf3b6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2863",
+      "sha256": "b378a814ebf590b9f3590e4c13d28e1b08d9acd000c55c2ca590636c1690b2d1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2877",
+      "sha256": "bbf26b9164869b459580fb55a3987c06ac79c474ff9c1120deefe2cbb0e99ada",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-289",
+      "sha256": "52d5a167793aa06c80ada21693639c11337f9f90221639a64b0fa797ef348fb9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2898",
+      "sha256": "a9853ab22cfdf9fff85b2d5d54392266df9e38e46dfddc826955ebd383a69e8e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2910",
+      "sha256": "641c9852000bb138e0ae25d05046d62dd7b55a1b523ab5ddc62a6748f7bb47d6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2912",
+      "sha256": "ca4fd7db9c2100f6f88c0c51661640b2c69ff28e9b569765cc4cf219243da473",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-293",
+      "sha256": "4be78e0809d97e1dee057ec6332c974c9094c9dda8daaba4dc59d7507d1c6edd",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-294",
+      "sha256": "a2a3d1fdae9e1908a342822b9fd76f2a9e60becffdf4e5424c43aef684eca6cc",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2984",
+      "sha256": "7165a7a89522295520036f15c3c3782c874844c4f277a49e670079939b19d9a5",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-299",
+      "sha256": "df68b8a68627b9027b77665bafb9c69d5bbbb3043dd93e0967e51095e73b18af",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-2991",
+      "sha256": "9f4cb6113bfbdd8b517358e29d3f680f314b604fabee1b42fd94055453bfabbe",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3023",
+      "sha256": "b3e4a0c84ab4d8ff0998b745f5c0c436886ef8d6873efdf78b8566e54b734680",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-303",
+      "sha256": "e4a31eb7a7adf633afa5d6f7cb5e669053a29d9404251e73dea08ba2d10e4630",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-304",
+      "sha256": "3dc3a694edb69fd2923098686c259e7197940c743da4c7802ecc4c03bc531819",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3049",
+      "sha256": "320a171d26aaf1722b4b3196fb9f7fd6e0c35f4ae175cb3d1845e0b578ee7423",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-305",
+      "sha256": "df663084f35b338809e114cd7510877024244858341fdb652c48e7c5445f3d5b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-306",
+      "sha256": "f07e8e4742e51bfe7d25cc3b8a5ccb7f7ae3523f10b24ee7d8931c1a1d6f815d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3076",
+      "sha256": "c9dea22f91cc14e9d4a5f33f0f7e905698fff9071ca5bc1f9d865cf9ec05483b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-309",
+      "sha256": "fa0aadf86dd6f731f3b6e68dc4ae942cdfad818af9e03566bef4e86e540adc47",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-311",
+      "sha256": "e51aa79a4e8d639db002840586f4ae249225cdb49e6bd491d2bfa3ad7b2c63c3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3113",
+      "sha256": "04addd4eb39f68c518f0b157c2cb7196d3a538e9523514cf2d02d439bf106c19",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3118",
+      "sha256": "2222d35f1a6862422a581f81b7df452bdedf5740f3857e0fd611d90712c8d1ef",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3134",
+      "sha256": "4af26f72e80e459ee2cb6be6fe86066ee2a5218c30f32267bc5ab17dd47c803a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3142",
+      "sha256": "2f69cb784a344f36a0622c3a1f31838287a7a247d14186066b25e3a4326f993b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-315",
+      "sha256": "151fd189c89e8d73785f33990cc5bd2001d77c9ef793efa84958490410e67b58",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3153",
+      "sha256": "d5bb0a8c7381545d4d733272533746dd0eb12d359427f23b3453c44cd1741e00",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-316",
+      "sha256": "b091fc6b313811a9f85834a0c0cf4c7acf30e8fff4a00c118063dfd06fb5551b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3167",
+      "sha256": "0cedebd3c3802896198ce87457b9224f957d59def07bd59ad6f6693e16e5a3d4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3179",
+      "sha256": "97d6383e68a3e2893857f0c18a6587f1ed316ca7c1fc462bd95bfbfc15e09588",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-319",
+      "sha256": "d8c44142e6ca20a10bf967c15c66b02db7351c9498558a9459cb9a862e20f1d5",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3190",
+      "sha256": "ad89a5ac6c2c9c173ab624801e8e185dea01126326c9b62e15c2f4d6f384953c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3192",
+      "sha256": "1d89f172f9926ba01369f3ee2658569e1cfc070ecc2557d5eb4b1a04f45dd5e5",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-320",
+      "sha256": "1682b6f6ba4cca90704e0635ca0263114ce6ec281658f392b257d92e348dd3a6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-322",
+      "sha256": "7b17421529a0e00355196a9c270036f6efdec0133f0443adee7bff2d5d426849",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-323",
+      "sha256": "22223f431b56de1daf98276310acdea8c712af2e0906dc0ec09957de59526df2",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3233",
+      "sha256": "0d95ceb347f6ddfb2e4a53b173685f026a8fffd96f52b94913f17f01b1e652ee",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3239",
+      "sha256": "f634a95794bb6eb1f7f8ab33f308c2cf90d647984739a5a20f80a96f1e8ee8cf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-324",
+      "sha256": "47483c5a6f8638992da70be538a428b9b19617d22ca92ceeb2b58f484c39ca6c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3244",
+      "sha256": "a8fe7e41fd0a57f44047d3c423385ee4a92d18235d3ecf1f3c25ff6e32cfabab",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-325",
+      "sha256": "d7d9c80b41808cc80ea0f8a7d5bac41860fa24c92fdcd215d78b856579bd2e2b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3252",
+      "sha256": "43078d048d48c399c1c52605fd549959f5faeccf5acbd3ab1049e85537f831de",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3253",
+      "sha256": "87122d693b5768cb81cc63df97fecf9bb88d2a13971adc45ce3d15ccd065c188",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3254",
+      "sha256": "1443ec357b1707eb0ef74556a16dd1586b664b393b08e3a2002f98315a83686b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-328",
+      "sha256": "9cfefa8181f315e8cb651e6ffcaab5c041d397293da7761a74890ba7deaaf60c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3288",
+      "sha256": "ce971dd8e2f1337327421c84e2d68f47adc406f572cae095f0992ae8ee5aa96e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3304",
+      "sha256": "06173809fad15a6831e934be80c491a1e2393bb763adb77294a2b05e32e82b3c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-331",
+      "sha256": "823315bb04d65c5698e174c115abc92fa84ce4489a420f17653136e7fdc5b7be",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3312",
+      "sha256": "85b6327e928eb4ec60dac454615888f6b7128b30f5b9c712d1e20bac0189156c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3316",
+      "sha256": "244d39005a66b78240dec0b65f94197ec65b020c79d42c5b0c7818fef5d2f7a1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3317",
+      "sha256": "b81b2587dc54daf3240144928dbd93ab5a191156fa5bf6909979b66944d552b8",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3322",
+      "sha256": "0cfc835eaa4f739260857084ddcb7de31ccdff44cee1c7c99303e7aa778f2a97",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3323",
+      "sha256": "bee91298a36657e9720e307fff73f09ae79ac6e5c7d1653d618ff8853e7c5e85",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3328",
+      "sha256": "2e95423af4f35cd50f1f4f69716fe0ad98cc3dfbba04f62f137cbe0c12e8ffe9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3345",
+      "sha256": "0802d08d2f6e230eb13d4522cd44cf18d97c0fbff86171a24bcb156181f46822",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3352",
+      "sha256": "0711a79f111bdc1686d39b153093f05f02664844b3d35253156853af2c1037b2",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-336",
+      "sha256": "22961448f18e67f77afd6f2aac02e93e1b08df627d927f141e2eeebd472c8c37",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-340",
+      "sha256": "249b8cf9f3dbc4222cc4333387474710898e9e95e412208b65d25454723989ba",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3417",
+      "sha256": "8a52d7f5f0fe0fcba4e7a17fdd59e9369cf256e6e487bada3a060f1c2a364af3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3419",
+      "sha256": "78895cdda577a254133f176c99228c4f7fbfa7735fe361eede6de69b9d2f12da",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-342",
+      "sha256": "4fa42b02c4fcc540ea76f2fecc40bf4503cf7f1333d0910b5a2341eaeeb10829",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3440",
+      "sha256": "062279e0f7d7959c0dae18ba2bbb177937148ebf1e5ca3dcd964d63bd24ecf0c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3448",
+      "sha256": "c7d07b2d59e7c0a5765e1a7d9cf55469c66d8837106df1d72f142bf435f240b7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-345",
+      "sha256": "0b2779e9d3bb2cb2a5d541dcd9a1bdd3d9e16b07ab85060c15ff55518487cf90",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3459",
+      "sha256": "c733542e8698ab34c241c11cdde0a4ce7da6c67be08895ad9d1102b4e26adb3e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3460",
+      "sha256": "4d74f6722c6b605d393813940217d3a3fab39862691123cb0c3cf062d54c8c4e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3470",
+      "sha256": "fc17dfa3d2abc6160db8a0588fee45ac263aeba747670c2638504877608f636b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-349",
+      "sha256": "17956b6961b19c78306890dbd6cba523978963ae5ee67a2ba498b3a300b4e5ed",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3493",
+      "sha256": "df06867df2cc5749e1a817423e56cd962385f464cf07f9c9a7b38ccfc7543991",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3506",
+      "sha256": "2c6a3c2d0dee46cdd6df74f408aa3cd47b1534bb3f254304956e126a6d0c772c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3508",
+      "sha256": "fa8e1196ae8c3fe74dd4cd0975bae4b5819509ebd228e911392fe67a2246071a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-352",
+      "sha256": "941adfdede582dd463016de95aea540c85bc599d24a99f2019b769e567b30afc",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-356",
+      "sha256": "21182bf8ab0c521726f3ba416e5bdc92c147d0fa13ffe424251d8eb68d300b20",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3563",
+      "sha256": "3a310f12d4912d7ad71062a87b414f5307ba47be8de419cc06e5295d03ce7a97",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-357",
+      "sha256": "39665c74bfd581edc14d9e540224f9c03411a27abe29ed4e4a3cf30d54adbdde",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3575",
+      "sha256": "f6a3461951228320a8000fa59e0667f38fddbbefe3b60db3f920952946864a42",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3577",
+      "sha256": "b7a823f3c03c4fe0c2cdd1caf9285cc5611533896013fd0af3262fa88c910de2",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3580",
+      "sha256": "4fea76b77f27d4609a9be2207b466716581b36cb4430bdbc3bb7c1012f54c96e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3594",
+      "sha256": "4a8cce063d93be8433f4a842c2164039f122cecda6cafa3d9d363400d5eb16fb",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-362",
+      "sha256": "96caf30ff25d3d7145045735dcd1f7d6ac888eb81f455f8e33b23937fb92e9cc",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3633",
+      "sha256": "23da019ca3bc249deba030ed9501e9006a95854953c7e61ce7525be3e2613d37",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3672",
+      "sha256": "8438d5520d141cc0576999bfaabb2097c71fd8b1589f085550bd0a8cf73e375d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3677",
+      "sha256": "00bec5c24f37a74718e809761b484e55d0d61ed470f5adc114cfa5b6d7d01369",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3702",
+      "sha256": "456d67128a6f1851f86796909dbd4c6ed788189627decf1afa3507232993c2f6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-373",
+      "sha256": "6b6df8b2ac2cda7e20216a95f13015369171bd3e7a45c58f979495f55cf1889c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3739",
+      "sha256": "db0fe035d8fc74a2fc286638f82f5575aa3edc1bd8b96a894b91a05b993cfed3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-374",
+      "sha256": "c0731fd9d80876703744f327cc400e8527b35b5b0b5a744521463d6bf5a08f53",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3750",
+      "sha256": "fa5ce4dec7a98263bba0f4ea49ea0f19b90116f1bfb1238fad4cd8255ef55c6e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3754",
+      "sha256": "71437113ded87735eb27e57bd0f9d6bc1c3b961dc9aee3ac4431637a4beaf90e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3760",
+      "sha256": "c8f1a6f8e8890c7be798d4021eec5f7cf1c4b2a62750469391392d8f98699814",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3795",
+      "sha256": "537ed14d46a4f871c819fe06084b525feb2431df78eb4fcc45bb5e39c99c5e9e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3798",
+      "sha256": "1e28605d9103e815ac565c8ad1e2ff55a8e1789ac583951c60e4f7c2ca150779",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-380",
+      "sha256": "ed7ddad68638885e0cf193e24bd4acadcb689593f5bdac8b36248dabaa025af9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3803",
+      "sha256": "d0251222237dbc581c2431a4e3a955ef15232385665324ec82e3c9a31eb474b8",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3814",
+      "sha256": "7897c916b155e60f7d1de235e9c22c756692f1c7de4062267946d2b1a7f59df9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3823",
+      "sha256": "0d2b79facabbd0984aada3ae9b29d1c55966f90d42474fe5d3761fa2686c88f9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3824",
+      "sha256": "fbf3ee6313ec8f280bc96d93882bd4c6f6f10e813db41ba281655ab8e8ddb98e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3839",
+      "sha256": "26c331d16a72b7e02a3e841006fb66ecd135b70ecf764a975037450fa97097fd",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3855",
+      "sha256": "29d5e445d43d24d3ad0f35dd27fc0245b8ab5ad0f8cf77b4f8605bfd7d208e1f",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-386",
+      "sha256": "81f064d15ba14d851a535085ef24042a7253c649f203bba69578c30b741f0009",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3878",
+      "sha256": "dbdd888df36c79c0596bda2849b4a2e3559acfed4a2b9d800562a8e54d028d15",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3882",
+      "sha256": "22c4b0b7a351e421a723d84e12d0699fa447b6a25ff6388083c2ea3c20983855",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-389",
+      "sha256": "5027482daf92aa8e202200c35d93f7613160d082c86a01ea6a1a1cfe690cd44a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3890",
+      "sha256": "c7620ec7343d860ba32d92be3d138f9c3880587cc58e3a30b93d0241825d181c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-391",
+      "sha256": "3d611efff9e15cb98c7cdba699302ffb35d1c02e1131a029a95c49a0456eefc4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-392",
+      "sha256": "4b567e6e77fc0c3ae5d3a9489b448650e3dae10412501e53d5c404a3233a75a4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3922",
+      "sha256": "069f6b37d801095202074239278074b27d6e91629d222b1001b4569354fd9cee",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3925",
+      "sha256": "f74939ef8ef69595584f06ffb1e5610c9bf12a4d301cce489d945143ae2d831e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-394",
+      "sha256": "cc5b5f5c6debf16e1c54d7ede60905ed793c60de6f1fd724d957b442b70e893e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3955",
+      "sha256": "ef53c65fab609a483c3a06c0edaf6f82bb707028f027df8078016a3d7ed10f95",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3959",
+      "sha256": "409500b50c675ec925662def0a6963d73ba7baa80c3655eabeacb8cea805c14b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-3987",
+      "sha256": "39397a9cbf1b474589c8ca7172d2739e02c1b7b2ededad93595a853977410db6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-399",
+      "sha256": "ba8a6aefe676d6cec871ff9ab91decd7a2c3126199782759d414d3914d97bef7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-401",
+      "sha256": "e0de0d4aa5992e0346d5faec9e4fecf92e4df728858849a972a119a9358d81ea",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4014",
+      "sha256": "1fb0c0057365b6280685ad92532c15d76fe28a32c15dbe251138df406fc7ab41",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4026",
+      "sha256": "098618c89501986300d16bdd86ee4d6691344a997de0294509b705d9506a77f5",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-403",
+      "sha256": "0d7537c0f7b26de5bc340e4843087536865037e92545e75c08debc12c62e26b1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4047",
+      "sha256": "48a584afe8cf54c135f50fe619551b22062ceaedec71dd69dec7bc960cebb423",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-405",
+      "sha256": "d9795ac62487de236f414596d351a516a25c829a8edb4f32a82f676ad029ac2a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-407",
+      "sha256": "fdc282f87c1d9d925f097628bbe744e343bcbb6e6f76b15f519fd25f7c7b8db4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4074",
+      "sha256": "4be1c8df583349d4b282bf6232b4aa3e5ebd78dd730f5924893f46f7d1320229",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-408",
+      "sha256": "f1abc4ecd58d8075f7af35ef03e77c5272ceeabdc85c226c2fc2ae1afd25e489",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4100",
+      "sha256": "48e1ebf9bce7b83afac875a26ee7960850bd1686fea66276e945b04361c1f237",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-413",
+      "sha256": "513816a6f852ffd6903e784988d0864491734ad40e507d0ab9276b954333d8f8",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4151",
+      "sha256": "c257c809d00f1519693f17b5fb81b03ce7d33a362b14ddac642b39395bfa2fb1",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4158",
+      "sha256": "e43ea95d2f4d9b7ad52cc1eab0133642e784f8d49e964d7a8fc441405b140001",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4178",
+      "sha256": "ab0ae0f85c0adab78ed17a825c0a43dc56c05094c59da27d24bb2887e29ae39c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4179",
+      "sha256": "be27e09137669bb3dd1a10d962801a235dbe358889d37d81296b230c33b1447c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-421",
+      "sha256": "f0e9cbddb1efd884d76a8e3be2e75f7dd91a424f481d8f3f711ce9e0dfed771a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4216",
+      "sha256": "e805e5193aaf9f141602145cbf986fa8603913db22c0c6bf1cf7e10b25234445",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4222",
+      "sha256": "091d976770b11c1d4b24ae1c2bc21def5c7bad977be45f23be4f86b4b386260a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4229",
+      "sha256": "bacb88a7d941ebed7ae0e5c5116e797dd34fb9f1ae0d4b85d8583b910f107ccd",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4230",
+      "sha256": "a7606f2648e10317b7e53519926876e476f4c70b5e9f09419d5f634dbb49800e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4234",
+      "sha256": "49da797e82c9f50dcc8543bb7ee402fb76bc43dfcdf6855adb142e04183f0eb6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-424",
+      "sha256": "4dbd12ee1ebc18545b329764d6fd5894b59da35e245833f5462fc39ff93309b7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-425",
+      "sha256": "0bb4a217a560143a988b8943c0f1bfd6b19685415a3017fb006f365d7ddcda12",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-426",
+      "sha256": "be6416f64f626f2570336ef92627a1c76a21b56f15226bef0a81f8d16f86029d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4278",
+      "sha256": "3b172cdeef9e825601d8f557fdef9c177ce4baba3336f48c4ecc3344119c4896",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4288",
+      "sha256": "b9a08376537ac1c7dfcf3e2991f7f4837eaa7fae6ed3ee62ff418cc43563a498",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-429",
+      "sha256": "a230e75f76030fc1077d011ef2bf4226ff6be58cc56b2d9dee4a6383aecdd9c5",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-430",
+      "sha256": "7c4d7c928c6ba5b05eedc375ec6d9a9c729ac5bd57b46d2e4ba92ab23963a3eb",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-431",
+      "sha256": "4cc9f5ce08e47c3fe6ea9f00f5a852e291e2ca4e911bf0e784a0050963c1b112",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4310",
+      "sha256": "109abdad528b51c2bee27d77a0196c569b6417b1b058664de63e135f1427b06d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-435",
+      "sha256": "3015759fba4202570140b23232059c4fac50dee138e3ecc06644102cead4d999",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4356",
+      "sha256": "0ab7bcf39a88e6bdd27a89feeb8ab5f5d481d83d099ccbe8367ddb6acc9678fe",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4409",
+      "sha256": "d24222a75339283e4285eac8bb4d5b69adfcebabd3064b590ef7f0d1aa2deafa",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4437",
+      "sha256": "7115f24682659e58883d93c1142e7643130b3151440da8bc00cbedaa59b6689a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4447",
+      "sha256": "2693df3e4bd2eaab0bdcae98e4d1441163bc681b9ea7480bf0ed43f89ad863d0",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-445",
+      "sha256": "9e4ca2bfad9618b1bb7a3aa19bdd4982c1023e476c93bb2effd8bd6a367e9e3c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4470",
+      "sha256": "4d986900a8fe9ad09a521f6154a0065fa060394c1f7cc8a9e7b159dd1bc64c2c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4472",
+      "sha256": "8718640509446015096b2ed3d8664395a168324789b4d738eb55a51cad4fe358",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4490",
+      "sha256": "854e4476774292f8d0dd238ec3f441acf1e3bf31922ca15decaf938e47de8dfd",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4492",
+      "sha256": "62340dcd55d1347180dd0f0754c478cf7eacf1ee6543cff91a062b694751e5ea",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-450",
+      "sha256": "e70bf036e3353a2b735fd846b18b7b3e57f816b4243b02a288e504830acac8af",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-451",
+      "sha256": "ebd192b73ef7b6fef23f9db911283c53b69e62115e195930dd3433d66abadcc3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4516",
+      "sha256": "55d1bdba653080890b0392862ace9b15a384713c5313a456cd40e3dc0fcf5d76",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-452",
+      "sha256": "8ad5a4e8999e91a375e208271e04ed0a9e5b11265c18f51e24a876edb7090333",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4524",
+      "sha256": "ad42265e1ab5438bf006293aa8e2ee4e8a10aa981ae3e85b119db5311e2504e6",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-453",
+      "sha256": "1281ac95f19c2e9603be24e439039f8090916039cbe0e31f34d60269fd64c214",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4545",
+      "sha256": "abc68a90e2433dd28e5573f1b209fc85a41b6f31833d23cd31dcffeef8b0337d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-456",
+      "sha256": "4a0553b2855f0e62442f6381e2577685198956a2a37c840403bf80861a474d5e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4585",
+      "sha256": "9943204f7f2b8a5b7d256fa68a1e9738814571eabf296fa19889ac68ba055871",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4589",
+      "sha256": "dd922d57f671062b570ece6ec19a9f78422eb92e5f27a6d396e26bcc056781fa",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4601",
+      "sha256": "4b5b00d520e252a828e9dc042148874f78965f1e0f89453e2beb995df2f05a65",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4607",
+      "sha256": "8b9f6f20fc41191653c4413da52d60a3b8930e5703a23880972f34200a01eca7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-462",
+      "sha256": "2be4b18ea4e15270aef0949526c995f2cb9bc2a285f9c68ec7692f4caf9e3256",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4630",
+      "sha256": "2a50a1a43a3e1b6812533ece977ff15840899c7996a97e93a6b3ea5d3bf217ea",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4634",
+      "sha256": "d5c79e6da3f920c75f6f01a64a049130bc3ea9c6ae5ee797a396554c8f0c223a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4635",
+      "sha256": "eceba3788e9df796d2539c9d7dabc86b174226733d3f4d671e2040e4e9a17300",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4638",
+      "sha256": "bc00b3e2dd8c68bdf88a9a0395bde948dafc56993c279af9101f2886dd41d4be",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-465",
+      "sha256": "46c9d97d1e64a789110e51860e237023e28f61e54d7e6f2b97b20b2c890b057b",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4650",
+      "sha256": "bcc9f11fd9d222cc313848e983d4c90a05ad2721fe18e639ba1cfe1e4300c33a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-466",
+      "sha256": "7145c98b1798bfa04082143c5fcac6550da21926715c20eda1354812994aef64",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4673",
+      "sha256": "86fed8f2e9ea8ad15fb33ac4acd120a36d7c96a5e42ef73266fddb0325c45a46",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4689",
+      "sha256": "73b756001c0ef2abb3915fc3034a5d488a193b8ec9e137b5cf2dafccd33d9c1d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-471",
+      "sha256": "7a4319adade812866ad72ab2d225b69bf040ff4047796d78da653a620fec089d",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4717",
+      "sha256": "153ceb5fd63d37f5bad113adbf6becbe2778662d036de420ed8a5a98eb090c4e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-4723",
+      "sha256": "3d50803db467fb3d8674a2ec0d7aa112fe5fd55d5e360541f7eb1d0872df0a99",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-473",
+      "sha256": "2d4c804be0370f091dda885e0a2a5d406fef0698f6806ca3ee12a966d40769d4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-474",
+      "sha256": "7181a5531908e7acdb6ebf20e3e1a592bc6f0215d4a22f8c79e9f957cc102954",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-476",
+      "sha256": "e0c0b634f8e6133334e9d16244cbddd6fd75ff8ed0ea9e6844ef48c4ecb48ddf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-483",
+      "sha256": "670694213c237bcbf5369914fa1ef11edf1b45f4596ac7cd8563d3d5dbe7fa3c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-485",
+      "sha256": "fa426fc800ac455bb6d6ae4162d187315b49c67eebc4b80b1e8af14a9ba5c1be",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-491",
+      "sha256": "1f7998d20b3220e671d5f06873be8923b5e69afbeebccdca069c7461aeb93ca3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-492",
+      "sha256": "8076c40a6f1e9dd8c0844615db844015ec426ab095f456f644a4987b936d5f96",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-495",
+      "sha256": "7fc6306715671dc754081e551af6cccc747c3fa07eb4786ae6100d784be155b7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-496",
+      "sha256": "d69f6e7b99dcadc519790e8cb84d1885052153d9d4ca7f365da03d2e01baf589",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-497",
+      "sha256": "66c5302392dc05a32bfca9aedc721e05025fb15184dd8c51729baae4a0f802a7",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-499",
+      "sha256": "7b2e109d37252f915cfa34b4209adca8d60eaba5c7c041e6a4fdcd0a320d6bcc",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-500",
+      "sha256": "ca4fb4d7eb7fd0eb7e68f7c6c271b90de8f77c2b5a27113db976af13da853466",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-501",
+      "sha256": "63fefb06f0376a2a22e8457e97a4a4147ec8c676078fcb3a1fcc6d92f2a9d3dc",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-505",
+      "sha256": "f94a15116bb52bd80f4bfc5d80ddc8ccd683c5a8d2032930811f7df18adfd861",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "apps-v3-proposed-calibration-main-507",
+      "sha256": "27a09d8ab8a3b9adcbc308e964b9fc93076f888abcdce589ec24e906dc86ed3e",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-1007",
+      "sha256": "4195f776044dfdc92ef75031ffa202c6ccca3180a153ff09c973211f086e40f3",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-1281",
+      "sha256": "ff91eaa45a168de4019c7c1260d08cd03cde0ff04079f7e7ee7e58dd81890518",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-1324",
+      "sha256": "a2245b9afc41183db1c4db0a8ecfe8c338d0a12dd7b9909528f4c7de3e23efc4",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-1398",
+      "sha256": "26bc9f51762e8d30297e0ab30c859cb5d572212db546e920c8aa3d306bc729f9",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-1502",
+      "sha256": "bbe0241113447d7366854fb5f1cc492fde735689728af12f60ba067c561fd459",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-598",
+      "sha256": "53c6bbe44ef3161603c494e1aa1d2ad0d5c38f3dda24b876f0d9df7c362c510a",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-62",
+      "sha256": "aba8bf63aef84b15ca60b0bb8396f9da21023bda1e4e7f01ccec7fbfcaa7045c",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-761",
+      "sha256": "574bde2f6954afff26a77ec79beb235b0f233520f93263c00cd6d397dfd73faf",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-calibration-main-909",
+      "sha256": "8cde8ec141573b69abbed258029f9639858b3f2fcec9cb4aa47b6473a661ad31",
+      "source": "legacy_direct_http",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-development-main-2013",
+      "sha256": "a31260f22d84bf0b21d3beac404ee17c100f9a840d6a2a7d94d4c31c9325b001",
+      "source": "stdin_dev_cached",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-development-main-2192",
+      "sha256": "aa7c860f89316002a95c8b3892bd8eaecdc96d41737004348b4f7cb3970a0f4e",
+      "source": "stdin_dev_cached",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-development-main-2195",
+      "sha256": "31fb43e369826dcff6a61e84ed8a020d0e1b7875952dd325cb062140de672fb0",
+      "source": "stdin_dev_cached",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-development-main-534",
+      "sha256": "8b102aada3f4ae1bf6c9d93351b6d417b1aa89036e150b57efb74044cca4739f",
+      "source": "stdin_dev_cached",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-development-main-635",
+      "sha256": "5504f3aae4eb2bbd854014f8efea07695e6a460894bc8956695f8b3137796d53",
+      "source": "stdin_dev_cached",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    },
+    {
+      "candidate_id": "stdin-v1-development-main-805",
+      "sha256": "c7cbe997e1fe7175e3586b7090640d262f899c37ebef40003daa052552f5d61f",
+      "source": "stdin_dev_cached",
+      "saved_ok": true,
+      "exact_candidate_group_in_ledger": false
+    }
+  ]
+}

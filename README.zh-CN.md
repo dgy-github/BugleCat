@@ -6,9 +6,9 @@
 
 > [!IMPORTANT]
 > **声明级矛盾核对与 Agent 物理防漂移体系全量上线（v1 评测基准通过）**
-> - **核心突破**：彻底根治 Coding Agent 在长上下文工具交互中的“虚构测试通过、以偏概全、改后未测、否认观测”等言行不一漂移现象。
-> - **确定性物理防线**：基于 OS 退出码、单调时钟、文件 SHA-256 快照时序建立 Host Verification 物理层，0 Token 成本、亚毫秒级（0.36ms/例）全自动判定。
-> - **175 例双语全量评测**：覆盖 11 类行为模式（140 组漂移负例 + 35 组正面合规例），实现 **100.0% 漂移检错率** 与 **0.0% 合规误拦率**，断言与原因代码 100% 精确对齐。
+> - **规则范围**：核对给定声明与证据中的执行失败、证据新鲜度和范围冲突。
+> - **175 例规则层合成回归**：140/140 漂移例产生 NeedEvidence 或 Contradiction，35 个合规例均未产生这两种干预；Unknown 不算检出。175 例裁决及原因均匹配。
+> - **验证边界**：样本预先构造声明和证据，未覆盖声明抽取、真实证据组装及 Agent 纠正链路；不构成生产准确率认证。规则耗时不含证据采集与模型调用。
 > - **交付资产与运行方式**：
 >   * 完整基准报告：[reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)
 >   * 评测数据集：[evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
@@ -738,7 +738,7 @@ python scripts/format_claim_drift_report.py
 python scripts/replay_verification.py path/to/.verification.jsonl --strict
 ```
 
-评测覆盖 11 类行为模式：谎报成功、凭空捏造、改后未测、夸大范围、否认观测、不完整证据、跨域伪证、复合陈述混淆、合规通过、如实报错、诚实局限。实测取得 **100% 漂移检错率** 与 **0% 误判率**，单样本仅 0.36ms。详见 [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)。
+评测覆盖 11 类规则分支，使用 175 例预先构造声明与证据的合成输入。v2 指标对检出和误拦统一统计 NeedEvidence、Contradiction，Unknown 不算检出。结果属于规则回归，不属于端到端或独立生产认证。详见 [报告](reports/claim_drift_eval_report_v1.md)。
 
 ### 可靠性回归与本地开发
 

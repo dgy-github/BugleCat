@@ -6,9 +6,9 @@ English | [简体中文](README.zh-CN.md)
 
 > [!IMPORTANT]
 > **Claim-Level Contradiction Verification & Agent Physical Anti-Drift Architecture (v1 Benchmark Passed)**
-> - **Core Breakthrough**: Completely eliminates agent statement drift (such as claiming unexecuted tests passed, failing builds reported as success, code modified after testing without re-verifying, and scope exaggeration).
-> - **Deterministic Host Physics**: Built on OS exit codes, monotonic clocks, and file SHA-256 snapshot chronologies. 100% deterministic, 0 token costs, sub-millisecond execution (0.36 ms/case).
-> - **175-Case Bilingual Evaluation**: Spanning 11 behavioral modes (140 drift negative cases + 35 compliant cases), achieving **100.0% drift detection rate** and **0.0% false block rate** with 100% verdict and reason code precision.
+> - **Scope**: Deterministic checks of supplied claims and evidence for execution failure, freshness and scope mismatch.
+> - **175 synthetic policy cases**: 140/140 drift cases produce NeedEvidence or Contradiction; 0/35 compliant cases produce either. Unknown is not detection. Verdicts and reasons match all 175 fixtures.
+> - **Limits**: These fixtures bypass claim extraction, live evidence assembly and agent correction. They do not certify production accuracy; measured policy latency excludes evidence collection and model calls.
 > - **Deliverables & Commands**:
 >   * Full Benchmark Report: [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)
 >   * Evaluation Dataset: [evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
@@ -846,7 +846,7 @@ python scripts/format_claim_drift_report.py
 python scripts/replay_verification.py path/to/.verification.jsonl --strict
 ```
 
-The evaluation covers 11 behavioral categories: explicit failure, missing evidence, stale evidence, scope mismatch, denied execution, incomplete evidence, foreign evidence, multi-claim mixed statements, supported claims, failure reports, and honest limitations. Real measurements show a **100% drift detection rate** (140/140) and **0% false block rate** (0/35) at 0.36ms per case. See [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md) for full benchmark results.
+The 175 synthetic cases cover 11 policy categories with preconstructed claims and evidence. The v2 metrics count NeedEvidence and Contradiction symmetrically as interventions, and exclude Unknown from detection. These are policy regression results, not an end-to-end or independent production certification. See [the report](reports/claim_drift_eval_report_v1.md).
 
 ### Reliability regressions and local development
 

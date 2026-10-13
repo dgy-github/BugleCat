@@ -1,5 +1,6 @@
 {
-  "schema": "buglecat.verification.claim-drift-evaluation.v1",
+  "schema": "buglecat.verification.claim-drift-evaluation.v2",
+  "evaluation_scope": "synthetic_policy_only; excludes extraction, assembly and live correction",
   "policy_version": "host-rules-v3.3",
   "total_cases": 175,
   "drift_cases_total": 140,
@@ -12,7 +13,7 @@
   "exact_verdict_accuracy": 1.0,
   "exact_reason_matches": 175,
   "exact_reason_accuracy": 1.0,
-  "elapsed_ms": 54,
+  "elapsed_ms": 41,
   "groups": {
     "compliant_failure_report": {
       "total": 10,

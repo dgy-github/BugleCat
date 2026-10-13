@@ -59,23 +59,33 @@ def inspect_record(record: dict) -> dict:
 
 def analyze_files(paths: list[Path]) -> dict:
     records = []
+    errors = []
     for path in paths:
-        if not path.is_file():
-            continue
         try:
-            for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                line = line.strip()
-                if not line:
-                    continue
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as err:
+            errors.append({"file": str(path), "line": None, "error": type(err).__name__})
+            continue
+        for line_no, line in enumerate(lines, 1):
+            if not line.strip():
+                continue
+            try:
                 data = json.loads(line)
                 if data.get("schema") != "buglecat.verification.record.v2":
-                    continue
+                    raise ValueError("unsupported schema")
+                result = data["result"]
+                allowed = {"pass", "unknown", "contradiction", "need_evidence"}
+                if result["verdict"] not in allowed or not isinstance(result["decisions"], list):
+                    raise ValueError("invalid result")
+                for decision in result["decisions"]:
+                    if decision["verdict"] not in allowed or not isinstance(decision["reason_code"], str):
+                        raise ValueError("invalid decision")
                 info = inspect_record(data)
                 info["file"] = str(path)
                 info["line"] = line_no
                 records.append(info)
-        except Exception as err:
-            print(f"Warning: could not parse {path}: {err}", file=sys.stderr)
+            except (ValueError, KeyError, TypeError, AttributeError) as err:
+                errors.append({"file": str(path), "line": line_no, "error": type(err).__name__})
 
     verdict_counter = Counter(r["verdict"] for r in records)
     mode_counter = Counter(r["mode"] for r in records)
@@ -107,6 +117,9 @@ def analyze_files(paths: list[Path]) -> dict:
             })
 
     return {
+        "input_errors": errors,
+        "intervention_records": sum(bool(r["contradictions"] or r["need_evidence"])
+                                    or r["verdict"] in {"contradiction", "need_evidence"} for r in records),
         "total_records": len(records),
         "modes": dict(mode_counter),
         "verdicts": dict(verdict_counter),
@@ -127,6 +140,7 @@ def main():
     args = parser.parse_args()
 
     files = []
+    missing = []
     for p in args.paths:
         if p.is_dir():
             files.extend(sorted(p.rglob("*.verification.jsonl")))
@@ -134,17 +148,19 @@ def main():
             files.append(p)
         else:
             print(f"Error: path not found: {p}", file=sys.stderr)
+            missing.append(str(p))
 
     if not files:
         print("No .verification.jsonl files found.", file=sys.stderr)
-        return 0
+        return 2 if args.strict else 0
 
-    report = analyze_files(files)
+    report = analyze_files(list(dict.fromkeys(files)))
+    report["missing_paths"] = missing
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
-        print(f"=== BugleCat Verification Replay Report ===")
+        print("=== BugleCat Verification Replay Report ===")
         print(f"Files scanned: {len(files)}")
         print(f"Total verification records: {report['total_records']}")
         print(f"Modes: {report['modes']}")
@@ -161,7 +177,9 @@ def main():
                 for claim in c["drift_claims"]:
                     print(f"    - Claim {claim['claim_id']}: {claim['reason_code']} (verdict: {claim['verdict']})")
 
-    if args.strict and (report["contradictions_found"] > 0 or report["drift_alerts"] > 0):
+    if args.strict and (missing or report["input_errors"] or not report["total_records"]):
+        return 2
+    if args.strict and report["intervention_records"]:
         return 1
     return 0
 
