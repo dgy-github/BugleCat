@@ -1,0 +1,23 @@
+{
+  "schema": "buglecat.verification.review-runtime-package.v1",
+  "package": "releases\\jev-review-20261013-final.zip",
+  "sha256": "44c14c4d45e79c9772472a70db15f7ebfbb0c853a8debffbf7580c0b51066b60",
+  "bytes": 14509591,
+  "member_count": 16,
+  "runtime_acceptance": {
+    "actual_copied_runtime_smoke": true,
+    "policy_version": "host-rules-v3.3",
+    "modes": [
+      "enforce",
+      "off",
+      "shadow"
+    ],
+    "paid_calls": 0,
+    "installer_executed": false
+  },
+  "installer_executed": false,
+  "formal_certification": false,
+  "historical_accounting_reconciled": false,
+  "source_manifest_sha256": "e1c0239557657430a312456a6aabddc242d7e7ba6231db0e73332635af553484",
+  "paid_calls": 0
+}

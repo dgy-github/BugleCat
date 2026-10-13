@@ -1,5 +1,15 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-13：最终运行包验收与源码推送
+
+源码提交 `ba393a305bd3a5c042d0f2a72b9ac77e4f2f5887` 已推送 GitHub `origin/main`，远端 SHA 已核实。工作时实际当前分支为 main；旧 feat/context-association-memory 保留在 640305d。
+
+最终包 `releases/jev-review-20261013-final.zip`：14,509,591 bytes（约 13.84 MiB），SHA256 `44c14c4d45e79c9772472a70db15f7ebfbb0c853a8debffbf7580c0b51066b60`。包含新编译 GUI、CLI、NSIS 安装程序与离线复核工具；安装程序未执行安装。16 个 ZIP 成员逐项字节/hash/CRC 核验通过，WebView2 缓存、用户设置、账本、Key、原始评分响应未打包。
+
+`reports/jev-review-delivery-20261013-final.json` 记录复制后 GUI/CLI 启动、恢复、取消、off/shadow/enforce 三模式实测全部通过，零模型收费。源清单在包内 manifest.json；该包不包含历史冻结 STDIN 评测 EXE，它们仍在旧开发包中，不对旧冻结工具重新认证。
+
+最终本地验证为 Python 16 passed、Rust ncx-core 421 passed / 1 ignored、6 条新增真实工具闭环通过；忽略项为需真实 Key 的网络 smoke。历史账務仍以未对账状态交付。用户已授权 TypeSafe 登录条款确认，已获取登录邮件并进入控制台查看流程；服务端结论待实际页面核实后补充。
+
 ### 2026-10-13：历史账务清点与真实工具闭环回归
 
 - 已独立扫描历史评分原件：318 份保存结果，312 份无缓存标记的直接请求结果、6 份 stdin_dev_cached；原 certification_report.json 的 calls_made 也是 312。旧文中“306 请求＋12 缓存”与磁盘原件不一致，以 `reports/jev-history-audit-20261013.json` 的逐文件 SHA256 清单为核对入口。共享 Jev 预约文件 235 份；不能把预约数或成功响应数当作收费数。失败重试及收费金额仍未知，没有补造账目。
