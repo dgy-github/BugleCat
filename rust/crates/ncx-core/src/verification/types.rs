@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const POLICY_VERSION: &str = "host-rules-v3.3";
+pub const POLICY_VERSION: &str = "host-rules-v3.4";
 pub const TEMPLATE_VERSION: &str = "jev-single-claim-v2";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

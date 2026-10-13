@@ -849,13 +849,14 @@ fn tool_budget_result(agent: &mut AgentLoop, iteration: usize, state: TurnState)
     agent.session.backfill_unanswered_tool_calls(
         "[interrupted: task budget exhausted before this tool ran]",
     );
-    let text = format!(
+    let mut text = format!(
         "Stopped because the task budget was exhausted (model calls: {}/{}, tool calls: {}/{}). The task may be incomplete.",
         iteration + 1,
         agent.task_budget.max_model_calls,
         state.tools_used.len(),
         agent.task_budget.max_tool_calls,
     );
+    append_pending_check_failure(python_check::failure(&agent.tools.ctx), &mut text);
     agent.session.add_assistant(&text, None, "");
     state.finish(
         text,
@@ -869,16 +870,42 @@ fn model_budget_result(
     max_model_calls: usize,
     state: TurnState,
 ) -> TurnResult {
-    let text = format!(
+    let mut text = format!(
         "Reached the task budget of {} model calls without finishing. The task may be incomplete.",
         max_model_calls
     );
+    append_pending_check_failure(python_check::failure(&agent.tools.ctx), &mut text);
     agent.session.add_assistant(&text, None, "");
     state.finish(
         text,
         max_model_calls,
         python_check::failure(&agent.tools.ctx).unwrap_or("task_budget"),
     )
+}
+
+fn append_pending_check_failure(reason: Option<&str>, text: &mut String) {
+    if let Some(reason) = reason {
+        text.push_str(&format!(" Python verification also remains unresolved ({reason}); budget exhaustion prevented further correction."));
+    }
+}
+
+#[cfg(test)]
+mod budget_message_tests {
+    use super::*;
+
+    #[test]
+    fn budget_message_reports_actual_pending_check_reason() {
+        for reason in ["compile_failed", "verification_failed"] {
+            let mut text = "budget exhausted".to_string();
+            append_pending_check_failure(Some(reason), &mut text);
+            assert!(text.contains(reason));
+            assert!(text.contains("budget exhausted"));
+        }
+
+        let mut text = "budget exhausted".to_string();
+        append_pending_check_failure(None, &mut text);
+        assert_eq!(text, "budget exhausted");
+    }
 }
 
 fn budget_note(agent: &AgentLoop, model_call: usize, tool_calls_used: usize) -> String {

@@ -2,6 +2,35 @@ use super::types::*;
 use regex::Regex;
 use std::sync::OnceLock;
 
+// Delimit prose only outside inline code and balanced argument lists. Byte
+// positions are retained so downstream provenance spans remain exact.
+fn protected_delimiters(line: &str) -> Vec<bool> {
+    let mut protected = vec![false; line.len()];
+    let mut brackets = Vec::new();
+    let mut ticks = false;
+    for (offset, ch) in line.char_indices() {
+        if ch == '`' {
+            ticks = !ticks;
+        } else if !ticks {
+            match ch {
+                '(' | '[' | '{' => brackets.push(ch),
+                ')' if brackets.last() == Some(&'(') => {
+                    brackets.pop();
+                }
+                ']' if brackets.last() == Some(&'[') => {
+                    brackets.pop();
+                }
+                '}' if brackets.last() == Some(&'{') => {
+                    brackets.pop();
+                }
+                _ => {}
+            }
+        }
+        protected[offset] = ticks || !brackets.is_empty();
+    }
+    protected
+}
+
 /// Explicit absence of execution, shared with policy so a truthful denial is
 /// not mistaken for a success claim or for evidence that a failed run happened.
 pub(super) fn denies_execution(text: &str) -> bool {
@@ -36,8 +65,10 @@ pub fn claims(candidate: &str) -> Vec<Claim> {
             "narrative"
         };
         let mut begin = 0;
+        let protected = protected_delimiters(line);
         let ends: Vec<_> = delimiters
             .find_iter(line)
+            .filter(|m| !protected[m.start()])
             .map(|m| (m.start(), m.end()))
             .chain(std::iter::once((line.len(), line.len())))
             .collect();

@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import zipfile
@@ -14,6 +15,7 @@ PUBLIC = (
     "scripts/audit_jev_history.py", "scripts/format_claim_drift_report.py",
     "reports/claim_drift_eval_report_v1.json", "reports/claim_drift_eval_report_v1.md",
     "reports/jev-history-audit-20261013.json", "tests/test_verification_review_tools.py",
+    "evals/verification/reports/claim_pilot_20261013.json",
 )
 
 
@@ -46,8 +48,12 @@ def stage(output):
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, target)
+    policy_source = (ROOT / "rust/crates/ncx-core/src/verification/types.rs").read_text(encoding="utf-8")
+    policy_match = re.search(r'pub const POLICY_VERSION: &str = "(host-rules-v[0-9.]+)";', policy_source)
+    if not policy_match:
+        raise ValueError("missing runtime policy version")
     manifest = {"schema": "buglecat.verification.review-runtime-package.v1",
-                "policy_version": "host-rules-v3.3", "production_jev_threshold": None,
+                "policy_version": policy_match[1], "production_jev_threshold": None,
                 "production_default_mode": "off", "paid_calls": 0, "installer_executed": False,
                 "historical_accounting_reconciled": False, "formal_certification": False,
                 "files": {name: {"sha256": sha(output / name), "bytes": (output / name).stat().st_size}

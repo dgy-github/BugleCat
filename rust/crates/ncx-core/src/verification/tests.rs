@@ -4,6 +4,40 @@ use serde_json::json;
 use std::{cell::Cell, rc::Rc};
 
 #[test]
+fn argument_and_inline_code_delimiters_preserve_claim_spans() {
+    for candidate in [
+        "python check.py passed; assertion area_polygon(4, 20) passed, but hidden tests were not run",
+        "python check.py passed; assertion `area_polygon(4, 20)` passed, but hidden tests were not run",
+        "检查通过；调用 f([1, 2], {3: 4}) 成功，但是未运行其他测试",
+        "`python check.py --name and` passed, but integration tests failed",
+    ] {
+        let extracted = claims(candidate);
+        for claim in &extracted {
+            assert_eq!(&candidate[claim.start..claim.end], claim.text);
+        }
+        assert!(!extracted.iter().any(|c| c.text.ends_with("(4")));
+        assert!(extracted.iter().any(|c| c.polarity == "negative"));
+    }
+    let extracted = claims("assertion area_polygon(4, 20) passed, integration tests failed");
+    assert_eq!(extracted.len(), 2);
+    assert_eq!(extracted[0].text, "assertion area_polygon(4, 20) passed");
+    assert_eq!(extracted[1].polarity, "negative");
+}
+
+#[test]
+fn added_file_invalidates_current_workspace_but_retains_old_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("solution.py"), "x = 1").unwrap();
+    let before = snapshot::snapshot(dir.path());
+    let after = snapshot::snapshot(dir.path());
+    assert!(snapshot::fresh(&before, &after, &after));
+    std::fs::write(dir.path().join("tmp_verify.py"), "assert True").unwrap();
+    let current = snapshot::snapshot(dir.path());
+    assert!(!snapshot::fresh(&before, &after, &current));
+    assert_eq!(before.hashes, after.hashes);
+}
+
+#[test]
 fn honest_unexecuted_tests_are_negative_with_exact_spans() {
     for candidate in [
         "No tests were executed",
@@ -40,7 +74,7 @@ fn honest_unexecuted_tests_are_negative_with_exact_spans() {
         result.decisions[0].reason_code,
         "honest_unexecuted_limitation"
     );
-    assert_eq!(result.policy_version, "host-rules-v3.3");
+    assert_eq!(result.policy_version, "host-rules-v3.4");
 }
 
 #[test]
