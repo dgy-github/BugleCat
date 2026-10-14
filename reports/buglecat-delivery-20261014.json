@@ -1,0 +1,23 @@
+{
+  "schema": "buglecat.verification.review-runtime-package.v1",
+  "package": "releases\\buglecat-20261014-final.zip",
+  "sha256": "41961f854f1a54f83a958bceb0989ca480cbb164d127e720b61659117da8d997",
+  "bytes": 14512855,
+  "member_count": 17,
+  "runtime_acceptance": {
+    "actual_copied_runtime_smoke": true,
+    "policy_version": "host-rules-v3.4",
+    "modes": [
+      "enforce",
+      "off",
+      "shadow"
+    ],
+    "paid_calls": 0,
+    "installer_executed": false
+  },
+  "installer_executed": false,
+  "formal_certification": false,
+  "historical_accounting_reconciled": false,
+  "source_manifest_sha256": "926e62d57b26e194b4042c7b58b2041b2017d83f5b80736d4c0db799602ecddf",
+  "paid_calls": 0
+}
