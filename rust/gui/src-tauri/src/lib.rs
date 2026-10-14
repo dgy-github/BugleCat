@@ -1,4 +1,4 @@
-//! nanocodex GUI (Tauri v2) — Rust backend.
+//! BugleCat GUI (Tauri v2) — Rust backend.
 //!
 //! The agent loop runs on a dedicated `!Send` thread (see [`bridge`]); the
 //! frontend talks to it through the `send_prompt` command and listens for
@@ -4066,7 +4066,7 @@ fn install_dsh_marketplace_plugin(
         return Err(preview
             .get("reason")
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("该 DSH 插件不能转换为 nanocodex 资源插件")
+            .unwrap_or("该 DSH 插件不能转换为 BugleCat 资源插件")
             .to_string());
     }
     let package = item
@@ -4744,7 +4744,7 @@ pub fn run() {
     let session_index = Arc::new(Mutex::new(SessionIndex::default()));
     let thread_store = Arc::new(
         JsonThreadStore::open(default_thread_store_path())
-            .expect("open the versioned nanocodex thread store"),
+            .expect("open the versioned BugleCat thread store"),
     );
     let app_server = Arc::new(AppServer::new(thread_store, now_epoch_millis));
     let provider_directory = ProviderDirectoryService::default();
@@ -4852,7 +4852,7 @@ pub fn run() {
             get_workspace,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building the nanocodex GUI");
+        .expect("error while building the BugleCat GUI");
     app.run(|handle, event| {
         if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
             let state = handle.state::<AppState>();

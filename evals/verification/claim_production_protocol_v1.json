@@ -1,6 +1,6 @@
 {
   "model": "jev-1.13.0",
-  "policy_version": "host-rules-v3.3",
+  "policy_version": "host-rules-v3.4",
   "template_version": "jev-single-claim-v2",
   "categories": ["semantic"],
   "threshold_grid": [0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.975, 0.99, 1.0],
@@ -23,6 +23,10 @@
     "labels_from_executable_assertions_with_model_review_of_ambiguity": true,
     "human_review_claimed": false,
     "exclude_author_exposed_development_and_synthetic_fixtures": true,
+    "excluded_pilot_reports": ["evals/verification/reports/claim_pilot_20261013.json"],
+    "excluded_pilot_task_ids": [25, 28, 44, 76, 163, 207, 213, 221],
+    "excluded_attempt_ledgers": ["evals/verification/reports/benchmark_400_budget_20261010/main/main-attempts.sqlite3"],
+    "holdout_split_cannibalization_prohibited": true,
     "unresolved_labels_retained_and_reported": true
   },
   "runtime_chain": ["extraction", "assembly", "host_B", "jev_C", "correction", "post_correction_assertions"],

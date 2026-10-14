@@ -54,7 +54,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 
 $outRoot = Join-Path $repoRoot $OutputDir
 $stageRoot = Join-Path $outRoot "_stage"
-$releaseName = "nanocodex-$Version-$Target"
+$releaseName = "BugleCat-$Version-$Target"
 $stageDir = Join-Path $stageRoot $releaseName
 $zipPath = Join-Path $outRoot "$releaseName.zip"
 $manifestPath = Join-Path $outRoot "release-manifest.json"
@@ -147,7 +147,7 @@ $hashLines = foreach ($artifact in $artifacts) {
 Set-Content -Path $sumsPath -Value $hashLines -Encoding utf8
 
 $manifest = [ordered]@{
-    package = "nanocodex"
+    package = "BugleCat"
     version = $Version
     target = $Target
     commit = $commit

@@ -392,7 +392,7 @@ REPL 中可以这样调用：
 
 ## 本地模型 / OpenAI 兼容接口
 
-nanocodex 走标准的 `/v1/chat/completions`，所以任何 OpenAI 兼容服务都能用——
+BugleCat 走标准的 `/v1/chat/completions`，所以任何 OpenAI 兼容服务都能用——
 vLLM、llama-server、LM Studio、Ollama 的 OpenAI 兼容层等等。把 `base_url`
 指向该服务的 `/v1` 根路径即可。多数本地服务会忽略 API key，但仍需一个非空占位
 值，因为 OpenAI SDK 需要它。
@@ -651,7 +651,7 @@ nanocodex schedule run        # 让它一直跑，任务才会触发
 隔离的 **git worktree** 里跑，所以真实的 `shell`/`apply_patch` 改动永不冲突：
 
 1. 选两套配置（model / 推理强度 / 沙箱 / 审批）。
-2. nanocodex 从干净的 `HEAD` 建两个 worktree，串行地在每个里跑这个 prompt，
+2. BugleCat 从干净的 `HEAD` 建两个 worktree，串行地在每个里跑这个 prompt，
    审批 auto 放行但范围锁在 worktree 内。
 3. 你拿到并排对比：diff、token 成本、延迟、迭代步数、停止原因。
 4. **采纳**其中一侧（它的 diff 被应用到真实工作区），或两侧都丢弃；worktree 总会
@@ -830,7 +830,7 @@ npm.cmd --prefix rust\gui run protocol:check
 ```
 
 脚本会先跑 Rust workspace 测试，再构建 Windows MSVC release 二进制，生成
-`releases\nanocodex-<version>-x86_64-pc-windows-msvc.zip`，构建 Tauri NSIS
+`releases\BugleCat-<version>-x86_64-pc-windows-msvc.zip`，构建 Tauri NSIS
 installer，并写出 `releases\SHA256SUMS.txt` 和 `releases\release-manifest.json`。
 只需要 CLI 包时可加 `-SkipTauri`；只有同 target 已在 CI 或本地 release 验证通过时，
 才建议加 `-SkipTests`。

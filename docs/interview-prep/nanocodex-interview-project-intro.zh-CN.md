@@ -1,27 +1,27 @@
-# nanocodex 面试项目介绍（内容生成前置）
+# BugleCat（原 nanocodex）面试项目介绍（内容生成前置）
 
 > 用途：这份文档不是给面试官直接读的，而是作为后续生成口播、自我介绍、项目介绍、PPT、宣传文案、短视频脚本时的统一上游输入。  
 > 原则：后续生成内容时，优先基于这份文档改写，不要每次从 README、设计稿、流程图里重新拼素材，避免口径漂移。
 
 ## 1. GitHub / 在线链接
 
-- GitHub 仓库：<https://github.com/dgy-github/nanocodex>
-- 在线能力页：<https://dgy-github.github.io/nanocodex/nanocodex.html>
-- 中文 README：<https://github.com/dgy-github/nanocodex/blob/main/README.zh-CN.md>
-- 面试总入口：<https://github.com/dgy-github/nanocodex/blob/main/docs/interview-prep/INTERVIEW-MASTER-MAP.zh-CN.html>
-- nanocodex 主看物图谱：<https://github.com/dgy-github/nanocodex/blob/main/docs/interview-prep/nanocodex-interview-final-map.zh-CN.html>
+- GitHub 仓库：<https://github.com/dgy-github/BugleCat>
+- 在线能力页：<https://dgy-github.github.io/BugleCat/nanocodex.html>
+- 中文 README：<https://github.com/dgy-github/BugleCat/blob/main/README.zh-CN.md>
+- 面试总入口：<https://github.com/dgy-github/BugleCat/blob/main/docs/interview-prep/INTERVIEW-MASTER-MAP.zh-CN.html>
+- BugleCat 主看物图谱：<https://github.com/dgy-github/BugleCat/blob/main/docs/interview-prep/nanocodex-interview-final-map.zh-CN.html>
 
 ## 2. 一句话定位
 
-`nanocodex` 是一个从零自研的、可本地部署的 Codex 风格 coding agent 项目，重点不只是“把模型接起来”，而是把工具调用、权限控制、上下文压缩、项目记忆、MCP、成本控制、桌面端交互和可分发交付做成一个完整工程系统。
+`BugleCat`（原型期名 `nanocodex`）是一个从零自研的、可本地部署的 Codex 风格 coding agent 项目，重点不只是“把模型接起来”，而是把工具调用、权限控制、上下文压缩、项目记忆、MCP、成本控制、桌面端交互和可分发交付做成一个完整工程系统。
 
 ## 3. 面试版 30 秒介绍
 
-我做过一个从零自研的 coding agent，项目叫 `nanocodex`。它本质上是一个 Codex 风格的本地开发代理，不只是调用大模型回答代码问题，而是让模型能够在受控边界里调用文件、shell、补丁、搜索、MCP 等工具，完成真实的软件开发任务。我在这个项目里重点解决的是权限双层控制、工具工程、上下文压缩、项目记忆和本地可交付这几件事，后来又把它从 Python 原型线重构到 Rust + Tauri，变成更适合长期维护和分发的版本。
+我做过一个从零自研的 coding agent，项目叫 `BugleCat`（早期原型叫 `nanocodex`）。它本质上是一个 Codex 风格的本地开发代理，不只是调用大模型回答代码问题，而是让模型能够在受控边界里调用文件、shell、补丁、搜索、MCP 等工具，完成真实的软件开发任务。我在这个项目里重点解决的是权限双层控制、工具工程、上下文压缩、项目记忆和本地可交付这几件事，后来又把它从 Python 原型线重构到 Rust + Tauri，变成更适合长期维护和分发的版本。
 
 ## 4. 面试版 90 秒介绍
 
-`nanocodex` 可以看成我对“AI coding agent 怎么从 demo 走到工程系统”这件事的一次完整实现。项目早期先用 Python 验证 agent loop、工具调用、审批模型和桌面交互，证明产品面是成立的；后面再用 Rust 把核心运行时重写成更清晰的 crate 边界，加上 Tauri 桌面壳，解决启动性能、类型契约、可维护性和原生分发的问题。
+`BugleCat` 可以看成我对“AI coding agent 怎么从 demo 走到工程系统”这件事的一次完整实现。项目早期先用 Python 验证 agent loop、工具调用、审批模型和桌面交互，证明产品面是成立的；后面再用 Rust 把核心运行时重写成更清晰的 crate 边界，加上 Tauri 桌面壳，解决启动性能、类型契约、可维护性和原生分发的问题。
 
 它的核心不是让模型“自己决定一切”，而是把高风险部分尽量放回代码侧处理。比如工具暴露不是一次把所有 schema 都塞给模型，而是有动态 schema 选择和 `tool_search`；写操作不是直接放行，而是经过 sandbox 和 approval 两层正交门控；上下文不是满了就暴力摘要，而是先做非破坏式上下文编辑，再做更高成本的压缩；项目记忆也不是简单向量库堆砌，而是围绕本地工作流做按需召回和整理。整个项目体现的是一种很明确的工程观：LLM 负责推理和表达，确定性边界、安全约束、执行控制和可追责性必须落在系统代码里。
 
@@ -59,13 +59,13 @@
 - 本地部署 AI 工具链
 - 企业级 AI 应用平台
 
-如果岗位更偏“基建 / 框架 / 平台”，`nanocodex` 很适合作为主讲项目。  
+如果岗位更偏“基建 / 框架 / 平台”，`BugleCat` 很适合作为主讲项目。  
 如果岗位更偏“业务落地 / 治理 / 企业流程”，排产项目通常更容易对口。
 
 ## 7. 生成内容时必须保留的事实锚点
 
-- 项目名：`nanocodex`
-- 仓库：<https://github.com/dgy-github/nanocodex>
+- 项目名：`BugleCat`（原名 `nanocodex`）
+- 仓库：<https://github.com/dgy-github/BugleCat>
 - 项目类型：本地可运行的 Codex 风格 coding agent
 - 技术路线：先 Python 原型，再 Rust 重构，桌面端使用 Tauri
 - 核心能力：
@@ -89,8 +89,9 @@
 ## 9. 可直接喂给生成器的结构化前置
 
 ```yaml
-project_name: nanocodex
-repo_url: https://github.com/dgy-github/nanocodex
+project_name: BugleCat
+legacy_name: nanocodex
+repo_url: https://github.com/dgy-github/BugleCat
 project_type: 本地可部署的 Codex 风格 coding agent
 stage:
   - Python 原型验证

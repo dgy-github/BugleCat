@@ -1,5 +1,5 @@
 # Copy this file to ~/.nanocodex/mcp.toml and edit for your machine.
-# MCP servers run outside the nanocodex sandbox. Only enable servers you trust.
+# MCP servers run outside the BugleCat sandbox. Only enable servers you trust.
 
 [mcp_servers.fetch]
 command = "uvx"

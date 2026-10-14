@@ -1,5 +1,5 @@
 /* ============================================================================
-   nanocodex — Apple-inspired system interface
+   BugleCat — Apple-inspired system interface
    A single cohesive system driven by :root custom properties.
    Neutral system materials, restrained blue accent, soft depth, and compact
    controls inspired by macOS without copying platform chrome.
@@ -2351,7 +2351,7 @@ textarea:focus { background: var(--surface-soft); border-color: var(--accent); b
 
 /* ============================================================================
    DSH Desktop inspired conversation shell
-   Keeps nanocodex ownership and controls while aligning the visual hierarchy.
+   Keeps BugleCat ownership and controls while aligning the visual hierarchy.
    ========================================================================== */
 .sidebar {
   padding: 0.9rem 0.72rem 0.7rem;

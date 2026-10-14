@@ -31,6 +31,7 @@ credentials*
 _probe_*.py
 _*.py
 _*.ps1
+scripts/archive/
 *.log
 HANDOFF.md
 .claude/

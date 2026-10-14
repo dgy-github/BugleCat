@@ -55,7 +55,7 @@ jobs:
           workspaces: rust
 
       - name: rustfmt
-        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+        run: python scripts/check_rustfmt.py
 
       - name: Workspace lib tests
         run: cargo test --manifest-path rust/Cargo.toml --workspace --lib

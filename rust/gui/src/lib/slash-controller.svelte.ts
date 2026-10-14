@@ -107,7 +107,7 @@ export class SlashController {
       { id: "branches", label: "分支", desc: "Git 分支", run: action.openBranches },
       { id: "memory", label: "记忆", desc: "项目记忆", run: action.openMemory },
       { id: "mcp", label: "MCP", desc: "列出已配置的 MCP 服务器", run: this.showMcp },
-      { id: "feedback", label: "反馈", desc: "打开 GitHub Issues", run: () => invoke("open_url", { url: "https://github.com/dgy-github/nanocodex/issues" }).catch((error) => this.notify(`打开反馈页失败：${error}`)) },
+      { id: "feedback", label: "反馈", desc: "打开 GitHub Issues", run: () => invoke("open_url", { url: "https://github.com/dgy-github/BugleCat/issues" }).catch((error) => this.notify(`打开反馈页失败：${error}`)) },
       { id: "review", label: "代码审查", desc: "填入基于真实 diff 的缺陷审查任务", run: () => this.prompt("审查当前代码改动的正确性和质量。先检查实际 git diff；逐项给出文件与行号、严重程度、问题和具体修复。重点关注真实 bug、边界、错误处理和非预期行为，最后明确是否可交付。") },
       { id: "security-review", label: "安全审查", desc: "填入基于真实 diff 的安全审查任务", run: () => this.prompt("对当前改动进行安全审查。先检查实际 git diff；重点检查命令、路径或注入风险，不安全反序列化，输入校验，密钥泄漏，权限缺口及危险文件或网络操作。每项给出文件与行号、严重程度、利用方式和修复；没有可利用问题也要说明残余风险。") },
       { id: "verify", label: "验证改动", desc: "填入要求构建、测试和证据的验证任务", run: () => this.prompt("验证最近的改动是否真的可用，不要只根据代码推断。先确认实际 diff 和预期行为，再运行能覆盖改动的最窄构建、测试及必要的运行态检查，报告真实命令与结果，最后给出“已验证”或“未验证”的明确结论。") },

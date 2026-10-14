@@ -475,7 +475,7 @@ run local shell code by themselves.
 
 ## Local Model / OpenAI-Compatible Endpoint
 
-nanocodex talks plain `/v1/chat/completions`, so any OpenAI-compatible server
+BugleCat talks plain `/v1/chat/completions`, so any OpenAI-compatible server
 works — vLLM, llama-server, LM Studio, Ollama's OpenAI shim, etc. Point
 `base_url` at the server's `/v1` root. Most local servers ignore the API key,
 but a non-empty placeholder is still required because the OpenAI SDK expects
@@ -778,7 +778,7 @@ risking your working tree. Each side runs in its own isolated **git worktree**,
 so real `shell`/`apply_patch` edits never collide:
 
 1. Pick two configs (model / reasoning effort / sandbox / approval).
-2. nanocodex creates two worktrees from clean `HEAD` and runs the prompt in each,
+2. BugleCat creates two worktrees from clean `HEAD` and runs the prompt in each,
    serially, with auto-approve scoped to the worktree.
 3. You get a side-by-side comparison: diff, token cost, latency, iterations,
    stop reason.
@@ -983,7 +983,7 @@ Recommended Windows release entry point:
 ```
 
 The script runs the Rust workspace tests, builds the Windows MSVC release binary,
-creates `releases\nanocodex-<version>-x86_64-pc-windows-msvc.zip`, builds the
+creates `releases\BugleCat-<version>-x86_64-pc-windows-msvc.zip`, builds the
 Tauri NSIS installer, then writes `releases\SHA256SUMS.txt` and
 `releases\release-manifest.json`. Use `-SkipTauri` for a CLI-only package or
 `-SkipTests` only after the same target has already passed in CI/local release

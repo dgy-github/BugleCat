@@ -126,7 +126,7 @@ export class PluginController {
     try {
       await appServerRequest({ method: "dshMarketplaceInstall", params: { item: this.dshSelected, upgrade } });
       await this.refreshCodex();
-      this.notify(`DSH 插件已${upgrade ? "升级" : "安装"}为 nanocodex 资源插件：${this.dshSelected.name}`);
+      this.notify(`DSH 插件已${upgrade ? "升级" : "安装"}为 BugleCat 资源插件：${this.dshSelected.name}`);
     } catch (error) { this.dshError = String(error).replace(/^Error:\s*/, ""); }
     finally { this.dshLoading = false; }
   };
