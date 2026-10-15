@@ -6,7 +6,7 @@
 >
 > **每张卡的结构**：一句话主线 · 深度阶梯(30秒/2分钟/深挖) · 核心机制支柱 · 关键数字必背 · 取舍与坑 · 高频追问与应答 · 自测(L1-L4) · 别发散到这。
 >
-> 代码标识符保留英文，叙述用中文。行号引用对应主 checkout `D:/agent_prac/nanocodex` 在生成时的源码。
+> 代码标识符保留英文，叙述用中文。行号引用对应主 checkout `BugleCat` 在生成时的源码。
 
 ## 目录
 
@@ -181,7 +181,7 @@
 
 ---
 
-**关键文件**（绝对路径）:`D:/agent_prac/nanocodex/rust/crates/ncx-cli/src/main.rs`（阶段 A 装配 + 阶段 B `run_one_turn` + `run_orchestrated`）、`D:/agent_prac/nanocodex/rust/crates/ncx-core/src/lib.rs`（核心 crate 的 re-export 接线面）、`D:/agent_prac/nanocodex/docs/design_data.zh.json`（8 子系统 flow_steps + key_mechanisms 出处）。
+**关键文件**（绝对路径）:`rust/crates/ncx-cli/src/main.rs`（阶段 A 装配 + 阶段 B `run_one_turn` + `run_orchestrated`）、`rust/crates/ncx-core/src/lib.rs`（核心 crate 的 re-export 接线面）、`docs/design_data.zh.json`（8 子系统 flow_steps + key_mechanisms 出处）。
 
 
 ---

@@ -50,7 +50,7 @@ use cli_app::run;
 use runner::memory_summarizer;
 
 const SYSTEM_PROMPT: &str =
-    "You are nanocodex, a precise coding agent. Use native workspace tools \
+    "You are BugleCat (ncx), a precise coding agent. Use native workspace tools \
     (find_files, grep, glob, list_directory, path_info, read_file) for recursive discovery and \
     inspection, and prefer them over shell commands. Use apply_patch for edits and update_plan for \
     multi-step work. If a path is incomplete, search recursively instead of guessing. After every \
@@ -162,7 +162,7 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
 /// strings with `\n`/`\"` escapes so it round-trips through any TOML parser.
 fn dump_genome_toml(system_prompt: &str, catalog: &[ncx_core::tools::ToolCatalogEntry]) -> String {
     let mut out = String::new();
-    out.push_str("# Default nanocodex harness genome (ncx --dump-genome).\n");
+    out.push_str("# Default BugleCat harness genome (ncx --dump-genome).\n");
     out.push_str("# Edit system_prompt and tool_desc.* to evolve the agent.\n\n");
     out.push_str(&format!(
         "system_prompt = \"{}\"\n\n",
@@ -205,7 +205,7 @@ async fn repl(
     mcp_tool_names: &mut Vec<String>,
 ) {
     println!(
-        "nanocodex (ncx) — model {}, sandbox {}. /help for commands, /exit to quit. \
+        "BugleCat (ncx) — model {}, sandbox {}. /help for commands, /exit to quit. \
          (attach images inline: `--image <path> your question`)",
         cfg.model, cfg.sandbox_mode
     );

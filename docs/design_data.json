@@ -76,27 +76,27 @@
    "Schema selection lexical scoring (`catalog_score`) is a simple substring/word match (name exact=100, name-contains=50, hay-contains=20); a capability described in synonyms the query doesn't share won't surface unless `tool_search` is called explicitly."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:22 (trait Provider, #[async_trait(?Send)])",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:71 (TaskBudget, defaults 60/120)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:173 (active_provider — vision routing)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:185 (call_model — context-edited view + provider dispatch)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:203 (execute_cancellable — 100ms select! cancel poll)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:225 (run_turn — sink take/restore + stop hook)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:284 (max_model_calls cap composition)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:300 (schemas_for_query per turn)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:379 (tool-call walk: budget check, parallel_run gather, serial else)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:573 (has_image_block)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:1093 (read_only_calls_run_concurrently test), 1149 (write_between_reads_stays_serial test), 1179 (stop_interrupts_a_hanging_tool test)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:25 (DEFAULT_VISIBLE_TOOL_LIMIT=9 + ALWAYS_VISIBLE_TOOLS)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:279 (schemas_for_query / schemas_limited_for_query selection)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:327 (ToolRegistry::execute — dispatch by name + pre/post hooks, unknown→error)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:396 (ToolSearchTool::execute — writes ctx.tool_hints)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:167 (for_model_edited non-destructive view), 263 (backfill_unanswered_tool_calls)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-provider/src/types.rs:9 (ToolCall, arguments→{} on invalid), 39 (has_tool_calls)"
+   "rust/crates/ncx-core/src/agent_loop.rs:22 (trait Provider, #[async_trait(?Send)])",
+   "rust/crates/ncx-core/src/agent_loop.rs:71 (TaskBudget, defaults 60/120)",
+   "rust/crates/ncx-core/src/agent_loop.rs:173 (active_provider — vision routing)",
+   "rust/crates/ncx-core/src/agent_loop.rs:185 (call_model — context-edited view + provider dispatch)",
+   "rust/crates/ncx-core/src/agent_loop.rs:203 (execute_cancellable — 100ms select! cancel poll)",
+   "rust/crates/ncx-core/src/agent_loop.rs:225 (run_turn — sink take/restore + stop hook)",
+   "rust/crates/ncx-core/src/agent_loop.rs:284 (max_model_calls cap composition)",
+   "rust/crates/ncx-core/src/agent_loop.rs:300 (schemas_for_query per turn)",
+   "rust/crates/ncx-core/src/agent_loop.rs:379 (tool-call walk: budget check, parallel_run gather, serial else)",
+   "rust/crates/ncx-core/src/agent_loop.rs:573 (has_image_block)",
+   "rust/crates/ncx-core/src/agent_loop.rs:1093 (read_only_calls_run_concurrently test), 1149 (write_between_reads_stays_serial test), 1179 (stop_interrupts_a_hanging_tool test)",
+   "rust/crates/ncx-core/src/tools.rs:25 (DEFAULT_VISIBLE_TOOL_LIMIT=9 + ALWAYS_VISIBLE_TOOLS)",
+   "rust/crates/ncx-core/src/tools.rs:279 (schemas_for_query / schemas_limited_for_query selection)",
+   "rust/crates/ncx-core/src/tools.rs:327 (ToolRegistry::execute — dispatch by name + pre/post hooks, unknown→error)",
+   "rust/crates/ncx-core/src/tools.rs:396 (ToolSearchTool::execute — writes ctx.tool_hints)",
+   "rust/crates/ncx-core/src/session.rs:167 (for_model_edited non-destructive view), 263 (backfill_unanswered_tool_calls)",
+   "rust/crates/ncx-provider/src/types.rs:9 (ToolCall, arguments→{} on invalid), 39 (has_tool_calls)"
   ]
  },
  {
-  "subsystem": "context-compression (context editing / session history shaping) in ncx-core's Session — D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs",
+  "subsystem": "context-compression (context editing / session history shaping) in ncx-core's Session — rust/crates/ncx-core/src/session.rs",
   "one_liner": "A two-mode context editor: every model call gets a non-destructive, budget-shaped \"provider view\" (truncate old tool results, then drop the oldest message prefix past a char budget), while an opt-in /compact bakes that same transform into the live history and rewrites the JSONL log.",
   "how_it_works": "Session stores the full conversation as Vec<serde_json::Value> in OpenAI chat shape (`messages`), with the system prompt held separately in `system`. ContextEditPolicy carries four knobs: `enabled`, `max_chars` (default 120_000), `keep_recent_messages` (default 30), `max_tool_result_chars` (default 4_000). The core algorithm lives in `edited_body(system_notes, policy)`: it clones `self.messages` into `body`, records `original_chars` via `total_chars` (chars of system + notes + every message serialized to JSON), then if `policy.enabled` runs two passes. Pass 1 (tool-result shrink): compute `recent_cutoff = body.len() - keep_recent_messages` (saturating), and for every message at index `i < recent_cutoff` whose role is \"tool\", call `compress_tool_result`, which truncates the `content` string to the first `max_tool_result_chars` chars and appends a marker `\\n[context edited: omitted the rest of prior {name} result; original_chars=N]`, returning true so `stats.compressed_tool_results` increments. Pass 2 (prefix drop): only if `total_chars(...) > max_chars` AND `body.len() > keep_recent_messages`, set `start = body.len() - keep_recent_messages`, then advance `start` to the first \"user\" message at/after that cutoff (`position(role==user)`), then skip any leading \"tool\" messages, and if `0 < start < body.len()` set `dropped_messages = start` and keep only `body[start..]`. `for_model_edited` then prepends the system message and any non-empty `system_notes` as extra system messages, appends the edited body, and reports `edited_chars`. `for_model` is just `for_model_edited(&[], policy{enabled:false})`. `compact` reuses `edited_body` with `enabled` forced true and, only if something actually changed (compressed or dropped > 0), overwrites `self.messages` and calls `rewrite_log` to truncate-and-rewrite the JSONL file. The send-time view is wired in agent_loop.rs `call_model`, which calls `for_model_edited(system_notes, &self.context_edit)` before every provider `chat`; the destructive `/compact` path is the CLI's `compact_session_text` calling `agent.session.compact`.",
   "design_rationale": "The central design choice is non-destructive send-time editing: `for_model_edited` builds a temporary trimmed view and leaves `self.messages` (the canonical log) untouched, so the full transcript is always preserved for `--resume` and the JSONL log even though the model only ever sees a budget-bounded slice. The test `context_edit_compresses_old_tool_results_without_mutating_session` asserts exactly this (session keeps the 200-char original). The two passes are deliberately ordered cheap-then-expensive: tool-result truncation runs first because verbose tool outputs (shell dumps, file reads) are the dominant, lowest-value bulk in a coding agent's history, so shrinking them often gets back under budget without losing any conversational turns; only if that is insufficient does it resort to dropping whole messages. The prefix-drop is conservative: it always keeps `keep_recent_messages`, and rather than cutting at an arbitrary index it advances the cut to a \"user\" boundary and skips leading orphan \"tool\" messages — this preserves the OpenAI invariant that the history starts cleanly and that no \"tool\" message is left without its preceding assistant tool_call (a malformed prefix would be rejected by the API). `compact` is opt-in and only mutates/rewrites when work was actually done (the `compress > 0 || dropped > 0` guard), so a no-op compact under budget leaves the log byte-identical (test `compact_noops_when_under_budget`). Char-counting (`json_chars` on serialized JSON, counting Unicode scalars via `.chars().count()`) is a deliberately cheap proxy for token budget — it avoids a tokenizer dependency, trading exactness for a fast, provider-agnostic heuristic. Truncation uses `.chars().take(n)` rather than byte slicing to avoid panicking on a multi-byte UTF-8 boundary.",
@@ -165,17 +165,17 @@
    "Counting edited_chars by re-serializing every message on each turn is O(total history size) work per model call — fine at these scales but it is not incremental."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:16 (ContextEditPolicy struct + Default at :24)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:167 (for_model_edited — non-destructive provider view)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:192 (compact — destructive materialization + rewrite_log)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:203 (edited_body — the two-pass algorithm)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:455 (compress_tool_result — tool-result truncation + edit marker)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:443 (json_chars) and :449 (total_chars — char-budget proxy)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:375 (sanitize_restored_messages) and :263 (backfill_unanswered_tool_calls — resume integrity)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/session.rs:299 (append_log) / :321 (rewrite_log) / :414 (redact_image_data)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:185 (call_model wires for_model_edited into every turn)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:969 (compact_session_text — /compact handler) and :1176 (context_edit_from_config)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-config/src/config.rs:72 (config knobs + defaults at :107)"
+   "rust/crates/ncx-core/src/session.rs:16 (ContextEditPolicy struct + Default at :24)",
+   "rust/crates/ncx-core/src/session.rs:167 (for_model_edited — non-destructive provider view)",
+   "rust/crates/ncx-core/src/session.rs:192 (compact — destructive materialization + rewrite_log)",
+   "rust/crates/ncx-core/src/session.rs:203 (edited_body — the two-pass algorithm)",
+   "rust/crates/ncx-core/src/session.rs:455 (compress_tool_result — tool-result truncation + edit marker)",
+   "rust/crates/ncx-core/src/session.rs:443 (json_chars) and :449 (total_chars — char-budget proxy)",
+   "rust/crates/ncx-core/src/session.rs:375 (sanitize_restored_messages) and :263 (backfill_unanswered_tool_calls — resume integrity)",
+   "rust/crates/ncx-core/src/session.rs:299 (append_log) / :321 (rewrite_log) / :414 (redact_image_data)",
+   "rust/crates/ncx-core/src/agent_loop.rs:185 (call_model wires for_model_edited into every turn)",
+   "rust/crates/ncx-cli/src/main.rs:969 (compact_session_text — /compact handler) and :1176 (context_edit_from_config)",
+   "rust/crates/ncx-config/src/config.rs:72 (config knobs + defaults at :107)"
   ]
  },
  {
@@ -253,22 +253,22 @@
    "ALWAYS_VISIBLE_TOOLS is a hardcoded &[&str] of names; a renamed/forgotten core tool would silently drop from the guaranteed set (contains_key guard means a missing name is just skipped, no error)."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:25 (DEFAULT_VISIBLE_TOOL_LIMIT / ALWAYS_VISIBLE_TOOLS)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:48 (ApprovalHandler ?Send trait)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:55 (ToolContext + builders)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:159 (Tool trait, read_only default, to_schema)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:194 (ToolRegistry::new conditional registration)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:229 (register: genome-baked catalog entry)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:251 (schema_for genome override)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:283 (schemas_limited_for_query selection)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:327 (execute: pre/post hook wrapping)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:396 (ToolSearchTool.execute writes tool_hints)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:432 (tool_words) / :446 (catalog_score)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:537 (apply_patch load-bearing description) / :572 (escape escalation)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/genome.rs:94 (Genome::describe)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:300 (schemas_for_query per-iter) / :392 (read-only batching)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:161 (Approver::classify) — shell decision used by ShellTool",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-tools/src/detect.rs:53 (looks_read_only) — shell escalation heuristic"
+   "rust/crates/ncx-core/src/tools.rs:25 (DEFAULT_VISIBLE_TOOL_LIMIT / ALWAYS_VISIBLE_TOOLS)",
+   "rust/crates/ncx-core/src/tools.rs:48 (ApprovalHandler ?Send trait)",
+   "rust/crates/ncx-core/src/tools.rs:55 (ToolContext + builders)",
+   "rust/crates/ncx-core/src/tools.rs:159 (Tool trait, read_only default, to_schema)",
+   "rust/crates/ncx-core/src/tools.rs:194 (ToolRegistry::new conditional registration)",
+   "rust/crates/ncx-core/src/tools.rs:229 (register: genome-baked catalog entry)",
+   "rust/crates/ncx-core/src/tools.rs:251 (schema_for genome override)",
+   "rust/crates/ncx-core/src/tools.rs:283 (schemas_limited_for_query selection)",
+   "rust/crates/ncx-core/src/tools.rs:327 (execute: pre/post hook wrapping)",
+   "rust/crates/ncx-core/src/tools.rs:396 (ToolSearchTool.execute writes tool_hints)",
+   "rust/crates/ncx-core/src/tools.rs:432 (tool_words) / :446 (catalog_score)",
+   "rust/crates/ncx-core/src/tools.rs:537 (apply_patch load-bearing description) / :572 (escape escalation)",
+   "rust/crates/ncx-core/src/genome.rs:94 (Genome::describe)",
+   "rust/crates/ncx-core/src/agent_loop.rs:300 (schemas_for_query per-iter) / :392 (read-only batching)",
+   "rust/crates/ncx-sandbox/src/approval.rs:161 (Approver::classify) — shell decision used by ShellTool",
+   "rust/crates/ncx-tools/src/detect.rs:53 (looks_read_only) — shell escalation heuristic"
   ]
  },
  {
@@ -346,19 +346,19 @@
    "network_access is a plain field the policy never enforces; even danger-full-access leaves network_access=false unless a caller (load_config) flips it (tested by danger_full_access_allows_everything)."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/lib.rs",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs:86-100 (can_write short-circuit + lexical starts_with)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs:70-77 (writable_dirs incl. opt-in temp)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/policy.rs:132-146 (normalize, lexical)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:161-188 (classify per-policy)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:91-142 (dangerous_patterns + is_trusted + GIT_WRITE_SUBCMDS)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-sandbox/src/approval.rs:54-62 (step_decision)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:988-998 (ShellTool::needs_escalation, consumer)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:577-630 (apply_patch escalation + ApprovalRequest with full-diff details)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-tools/src/detect.rs (looks_read_only, separate read-only classifier)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-tools/src/patch.rs:347-404 (apply_patch gates every path through can_write, staged in memory)"
+   "rust/crates/ncx-sandbox/src/lib.rs",
+   "rust/crates/ncx-sandbox/src/policy.rs",
+   "rust/crates/ncx-sandbox/src/approval.rs",
+   "rust/crates/ncx-sandbox/src/policy.rs:86-100 (can_write short-circuit + lexical starts_with)",
+   "rust/crates/ncx-sandbox/src/policy.rs:70-77 (writable_dirs incl. opt-in temp)",
+   "rust/crates/ncx-sandbox/src/policy.rs:132-146 (normalize, lexical)",
+   "rust/crates/ncx-sandbox/src/approval.rs:161-188 (classify per-policy)",
+   "rust/crates/ncx-sandbox/src/approval.rs:91-142 (dangerous_patterns + is_trusted + GIT_WRITE_SUBCMDS)",
+   "rust/crates/ncx-sandbox/src/approval.rs:54-62 (step_decision)",
+   "rust/crates/ncx-core/src/tools.rs:988-998 (ShellTool::needs_escalation, consumer)",
+   "rust/crates/ncx-core/src/tools.rs:577-630 (apply_patch escalation + ApprovalRequest with full-diff details)",
+   "rust/crates/ncx-tools/src/detect.rs (looks_read_only, separate read-only classifier)",
+   "rust/crates/ncx-tools/src/patch.rs:347-404 (apply_patch gates every path through can_write, staged in memory)"
   ]
  },
  {
@@ -434,16 +434,16 @@
    "Default max_depth=1 means subtasks that themselves classify as High do not decompose again (they run best-of-N) — intentional per the depth-cap test, but limits true deep recursion."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:53-78 (AgentRunner trait: run/reason/run_worker/promote_worker + defaults)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:81-99 (node system prompts: CLASSIFY/PLAN/DECOMPOSE/WORKER/VERIFY_SYS)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:101-129 (OrchestratorConfig + Default: workers=2, high_workers=3, max_verify_retries=1, max_depth=1, max_subtasks=6)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:165-198 (handle_at recursive core, LocalBoxFuture/boxed_local, Simple/Medium/High routing)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:207-275 (pipeline + run_attempts closed best-of-N/verify/retry loop, promote_worker, synthesize)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:282-352 (decompose_and_recurse: atomic fallback, max_subtasks truncate, sequential handle_at per subtask, final join verify)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:364-502 (parsers: parse_complexity, verdict_passed, parse_subtasks/strip_list_marker, parse_best_worker, build_* + synthesize helpers)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/orchestrator.rs:506-822 (MockRunner + tests asserting (tier,stage) call counts for every path)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/runner.rs:48-152 (LiveRunner: model_for tier mapping, run_in with_tools flag → ToolRegistry::empty for reason, run_worker copy_tree isolation, promote_worker sync-back+cleanup)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:239-248 (run_orchestrated wiring: LiveRunner + Orchestrator::new + OrchestratorConfig::default + handle)"
+   "rust/crates/ncx-core/src/orchestrator.rs:53-78 (AgentRunner trait: run/reason/run_worker/promote_worker + defaults)",
+   "rust/crates/ncx-core/src/orchestrator.rs:81-99 (node system prompts: CLASSIFY/PLAN/DECOMPOSE/WORKER/VERIFY_SYS)",
+   "rust/crates/ncx-core/src/orchestrator.rs:101-129 (OrchestratorConfig + Default: workers=2, high_workers=3, max_verify_retries=1, max_depth=1, max_subtasks=6)",
+   "rust/crates/ncx-core/src/orchestrator.rs:165-198 (handle_at recursive core, LocalBoxFuture/boxed_local, Simple/Medium/High routing)",
+   "rust/crates/ncx-core/src/orchestrator.rs:207-275 (pipeline + run_attempts closed best-of-N/verify/retry loop, promote_worker, synthesize)",
+   "rust/crates/ncx-core/src/orchestrator.rs:282-352 (decompose_and_recurse: atomic fallback, max_subtasks truncate, sequential handle_at per subtask, final join verify)",
+   "rust/crates/ncx-core/src/orchestrator.rs:364-502 (parsers: parse_complexity, verdict_passed, parse_subtasks/strip_list_marker, parse_best_worker, build_* + synthesize helpers)",
+   "rust/crates/ncx-core/src/orchestrator.rs:506-822 (MockRunner + tests asserting (tier,stage) call counts for every path)",
+   "rust/crates/ncx-cli/src/runner.rs:48-152 (LiveRunner: model_for tier mapping, run_in with_tools flag → ToolRegistry::empty for reason, run_worker copy_tree isolation, promote_worker sync-back+cleanup)",
+   "rust/crates/ncx-cli/src/main.rs:239-248 (run_orchestrated wiring: LiveRunner + Orchestrator::new + OrchestratorConfig::default + handle)"
   ]
  },
  {
@@ -519,23 +519,23 @@
    "`consolidate` returning removed-count and only writing when removed>0 makes it cheap/idempotent, but it silently keeps the NEWEST of a near-dup cluster, which may discard a better-worded older note in favor of a sloppier recent one (LLM merge exists precisely to mitigate this)."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:25 (Summarizer trait, ?Send)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:31 (MAX_ENTRIES=200)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:32 (RECALL_HEADER 'treat as leads')",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:60 (remember: dedup + cap)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:96 (recall: score + bit-pack + char/entry cap)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:109 (overlap*1_000_000 + ts recency packing)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:141 (consolidate: heuristic Jaccard near-dup, idempotent)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:179 (summarize_consolidate: LLM merge + newest-ts/union-tags + fallback)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:295 (semantic_aliases synonym map)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:311 (semantic_score: tag+8/text+4/phrase+6/jaccard*20)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:372 (jaccard)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/memory.rs:385 (parse_entries comment-header parser)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:1128 (RememberTool — CONFIRMED-only writes, SystemTime now)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/runner.rs:100 (recall(task,6,3000) injected into prompt)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/runner.rs:206 (LiveSummarizer — fast model, merge prompt)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:114 (summarize_consolidate at 0.85 subcommand; consolidate(0.85) at startup)",
-   "D:/agent_prac/ncx-train/rust/gui/src-tauri/src/bridge.rs:176 (GUI recall(\"\",8,4000) — recency-only at session start)"
+   "rust/crates/ncx-core/src/memory.rs:25 (Summarizer trait, ?Send)",
+   "rust/crates/ncx-core/src/memory.rs:31 (MAX_ENTRIES=200)",
+   "rust/crates/ncx-core/src/memory.rs:32 (RECALL_HEADER 'treat as leads')",
+   "rust/crates/ncx-core/src/memory.rs:60 (remember: dedup + cap)",
+   "rust/crates/ncx-core/src/memory.rs:96 (recall: score + bit-pack + char/entry cap)",
+   "rust/crates/ncx-core/src/memory.rs:109 (overlap*1_000_000 + ts recency packing)",
+   "rust/crates/ncx-core/src/memory.rs:141 (consolidate: heuristic Jaccard near-dup, idempotent)",
+   "rust/crates/ncx-core/src/memory.rs:179 (summarize_consolidate: LLM merge + newest-ts/union-tags + fallback)",
+   "rust/crates/ncx-core/src/memory.rs:295 (semantic_aliases synonym map)",
+   "rust/crates/ncx-core/src/memory.rs:311 (semantic_score: tag+8/text+4/phrase+6/jaccard*20)",
+   "rust/crates/ncx-core/src/memory.rs:372 (jaccard)",
+   "rust/crates/ncx-core/src/memory.rs:385 (parse_entries comment-header parser)",
+   "rust/crates/ncx-core/src/tools.rs:1128 (RememberTool — CONFIRMED-only writes, SystemTime now)",
+   "rust/crates/ncx-cli/src/runner.rs:100 (recall(task,6,3000) injected into prompt)",
+   "rust/crates/ncx-cli/src/runner.rs:206 (LiveSummarizer — fast model, merge prompt)",
+   "rust/crates/ncx-cli/src/main.rs:114 (summarize_consolidate at 0.85 subcommand; consolidate(0.85) at startup)",
+   "rust/gui/src-tauri/src/bridge.rs:176 (GUI recall(\"\",8,4000) — recency-only at session start)"
   ]
  },
  {
@@ -595,22 +595,22 @@
    "All MCP tools of a server serialise through one Mutex, so a slow MCP call blocks sibling tools from the same server (acceptable on a single-thread runtime, but no per-tool concurrency)."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:52 (Skill::load_body)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:69 (builtin_skills via include_str!)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:101 (discover_skills_with_home + BTreeMap shadowing)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:160 (skills_index_block, level-1)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/skills.rs:177 (parse_frontmatter)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:213 (SkillTool registered only when skills present)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/tools.rs:1184 (SkillTool, level-2 body load)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:24 (McpTool struct, Rc<Mutex<McpClient>>)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:38 (is_read_only_name heuristic)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:66 (execute: approval + client.lock().await)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/mcp_tool.rs:118 (register_mcp_server)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:173 (active_provider vision swap)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:247 (use_vision_this_turn computed per turn)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/agent_loop.rs:573 (has_image_block)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:148 (discover + index into system prompt)",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-cli/src/main.rs:1094 (build_vision_provider)"
+   "rust/crates/ncx-core/src/skills.rs:52 (Skill::load_body)",
+   "rust/crates/ncx-core/src/skills.rs:69 (builtin_skills via include_str!)",
+   "rust/crates/ncx-core/src/skills.rs:101 (discover_skills_with_home + BTreeMap shadowing)",
+   "rust/crates/ncx-core/src/skills.rs:160 (skills_index_block, level-1)",
+   "rust/crates/ncx-core/src/skills.rs:177 (parse_frontmatter)",
+   "rust/crates/ncx-core/src/tools.rs:213 (SkillTool registered only when skills present)",
+   "rust/crates/ncx-core/src/tools.rs:1184 (SkillTool, level-2 body load)",
+   "rust/crates/ncx-core/src/mcp_tool.rs:24 (McpTool struct, Rc<Mutex<McpClient>>)",
+   "rust/crates/ncx-core/src/mcp_tool.rs:38 (is_read_only_name heuristic)",
+   "rust/crates/ncx-core/src/mcp_tool.rs:66 (execute: approval + client.lock().await)",
+   "rust/crates/ncx-core/src/mcp_tool.rs:118 (register_mcp_server)",
+   "rust/crates/ncx-core/src/agent_loop.rs:173 (active_provider vision swap)",
+   "rust/crates/ncx-core/src/agent_loop.rs:247 (use_vision_this_turn computed per turn)",
+   "rust/crates/ncx-core/src/agent_loop.rs:573 (has_image_block)",
+   "rust/crates/ncx-cli/src/main.rs:148 (discover + index into system prompt)",
+   "rust/crates/ncx-cli/src/main.rs:1094 (build_vision_provider)"
   ]
  },
  {
@@ -696,18 +696,18 @@
    "Acceptance is by integer pass-count thresholds (accept_margin defaults to 1, repeats defaults to 1), so with few tasks/repeats the 'noise band' is coarse; DESIGN itself flags small task counts (originally 8) as the largest risk that TaskGen + splits only partially mitigate."
   ],
   "code_refs": [
-   "D:/agent_prac/ncx-train/train/DESIGN.md",
-   "D:/agent_prac/ncx-train/train/forge.py",
-   "D:/agent_prac/ncx-train/rust/crates/ncx-core/src/genome.rs",
-   "D:/agent_prac/ncx-train/train/teacher.py",
-   "D:/agent_prac/ncx-train/train/evaluator.py",
-   "D:/agent_prac/ncx-train/train/genome.py",
-   "D:/agent_prac/ncx-train/train/taskgen.py",
-   "D:/agent_prac/ncx-train/train/pareto.py",
-   "D:/agent_prac/ncx-train/train/splits.py",
-   "D:/agent_prac/ncx-train/train/export.py",
-   "D:/agent_prac/ncx-train/train/rollout.py",
-   "D:/agent_prac/ncx-train/train/finetune.py"
+   "train/DESIGN.md",
+   "train/forge.py",
+   "rust/crates/ncx-core/src/genome.rs",
+   "train/teacher.py",
+   "train/evaluator.py",
+   "train/genome.py",
+   "train/taskgen.py",
+   "train/pareto.py",
+   "train/splits.py",
+   "train/export.py",
+   "train/rollout.py",
+   "train/finetune.py"
   ]
  }
 ]

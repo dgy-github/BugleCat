@@ -154,4 +154,4 @@
 
 ---
 
-**关键文件**（绝对路径）:`D:/agent_prac/nanocodex/rust/crates/ncx-cli/src/main.rs`（阶段 A 装配 + 阶段 B `run_one_turn` + `run_orchestrated`）、`D:/agent_prac/nanocodex/rust/crates/ncx-core/src/lib.rs`（核心 crate 的 re-export 接线面）、`D:/agent_prac/nanocodex/docs/design_data.zh.json`（8 子系统 flow_steps + key_mechanisms 出处）。
+**关键文件**（绝对路径）:`rust/crates/ncx-cli/src/main.rs`（阶段 A 装配 + 阶段 B `run_one_turn` + `run_orchestrated`）、`rust/crates/ncx-core/src/lib.rs`（核心 crate 的 re-export 接线面）、`docs/design_data.zh.json`（8 子系统 flow_steps + key_mechanisms 出处）。

@@ -7,7 +7,7 @@
 //! entire raw payload inline would rapidly exhaust the LLM context window.
 //!
 //! This module automatically persists the complete, untruncated tool output to an
-//! external artifact file under `<temp_dir>/nanocodex-tool-outputs/` (outside the git
+//! external artifact file under `<temp_dir>/buglecat-tool-outputs/` (outside the git
 //! workspace so it never pollutes `git status` or workspace freshness verification)
 //! and returns a compact **Head + Handle + Tail** preview. The model can then inspect
 //! any omitted middle lines on demand via `read_file(path, offset, limit)`.
@@ -24,7 +24,7 @@ pub const OFFLOAD_MARKER_PREFIX: &str = "[tool_output_offloaded:";
 
 /// Directory under the system temporary folder where full tool outputs are stored.
 fn offload_dir() -> PathBuf {
-    std::env::temp_dir().join("nanocodex-tool-outputs")
+    std::env::temp_dir().join("buglecat-tool-outputs")
 }
 
 /// If `output` exceeds [`TOOL_OUTPUT_OFFLOAD_THRESHOLD`], persist the complete

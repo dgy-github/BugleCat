@@ -7,9 +7,9 @@ args = ["mcp-server-fetch"]
 
 [mcp_servers.filesystem]
 command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "D:\\agent_prac"]
+args = ["-y", "@modelcontextprotocol/server-filesystem", "<workspace-dir>"]
 
 # Project-local Windows computer-use server example:
 # [mcp_servers.windows_computer_use]
 # command = "python"
-# args = ["D:\\agent_prac\\windows-computer-use-mcp\\server.py"]
+# args = ["<path-to-windows-computer-use-mcp>\\server.py"]

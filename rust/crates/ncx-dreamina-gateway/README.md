@@ -16,7 +16,7 @@ manually for pool-management testing and are only shown redacted in the UI.
 ## Run
 
 ```powershell
-cd D:\agent_prac\ncx-dreamina-gateway\rust
+cd rust
 cargo run -p ncx-dreamina-gateway
 ```
 

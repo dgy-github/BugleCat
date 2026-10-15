@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 pub const USAGE: &str = "\
-ncx — nanocodex coding agent
+ncx — BugleCat coding agent CLI
 
 USAGE:
     ncx [OPTIONS] [PROMPT]

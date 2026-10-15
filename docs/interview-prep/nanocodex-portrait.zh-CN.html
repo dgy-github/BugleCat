@@ -43,7 +43,7 @@
 <p>用途：系统性重建 nanocodex 全栈细节的面试应答材料。全部内容 <strong>grounded 在真实源码</strong> 并经过"敌意 fact-checker"逐条对抗校验（数字、函数名、控制流、解析回退都核对过源码行号）。</p>
 <p><strong>怎么用</strong>：先读"第 0 章·连接图"建立整体心智 → 逐个子系统过"一句话主线 + 30秒/2分钟/深挖三档" → 用每章末"自测·主动回忆"先盖答案自答 → 考前只过"速记页"(见 nanocodex-portrait-cram.zh.md)。</p>
 <p><strong>每张卡的结构</strong>：一句话主线 · 深度阶梯(30秒/2分钟/深挖) · 核心机制支柱 · 关键数字必背 · 取舍与坑 · 高频追问与应答 · 自测(L1-L4) · 别发散到这。</p>
-<p>代码标识符保留英文，叙述用中文。行号引用对应主 checkout <code>D:/agent_prac/nanocodex</code> 在生成时的源码。</p>
+<p>代码标识符保留英文，叙述用中文。行号引用对应主 checkout <code>BugleCat</code> 在生成时的源码。</p>
 </blockquote>
 
 <div class="toc"><b>目录：</b><br><a href="#系统画像-跨子系统连接图">🗺 系统画像 · 跨子系统连接图</a>
@@ -265,7 +265,7 @@
 </li>
 </ol>
 <hr />
-<p><strong>关键文件</strong>（绝对路径）:<code>D:/agent_prac/nanocodex/rust/crates/ncx-cli/src/main.rs</code>（阶段 A 装配 + 阶段 B <code>run_one_turn</code> + <code>run_orchestrated</code>）、<code>D:/agent_prac/nanocodex/rust/crates/ncx-core/src/lib.rs</code>（核心 crate 的 re-export 接线面）、<code>D:/agent_prac/nanocodex/docs/design_data.zh.json</code>（8 子系统 flow_steps + key_mechanisms 出处）。</p>
+<p><strong>关键文件</strong>（绝对路径）:<code>rust/crates/ncx-cli/src/main.rs</code>（阶段 A 装配 + 阶段 B <code>run_one_turn</code> + <code>run_orchestrated</code>）、<code>rust/crates/ncx-core/src/lib.rs</code>（核心 crate 的 re-export 接线面）、<code>docs/design_data.zh.json</code>（8 子系统 flow_steps + key_mechanisms 出处）。</p>
 <hr />
 </section>
 

@@ -547,8 +547,8 @@ mod tests {
     #[test]
     fn strips_windows_extended_path_prefix_for_cmd() {
         assert_eq!(
-            shell_compatible_path(PathBuf::from(r"\\?\D:\agent_prac\nanocodex")),
-            PathBuf::from(r"D:\agent_prac\nanocodex")
+            shell_compatible_path(PathBuf::from(r"\\?\D:\workspace\BugleCat")),
+            PathBuf::from(r"D:\workspace\BugleCat")
         );
     }
 

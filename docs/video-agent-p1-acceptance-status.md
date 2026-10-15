@@ -6,7 +6,7 @@ This document tracks the P1 `S01`-`S12` acceptance evidence for the AI video-age
 
 ## Commands
 
-Run script commands from `D:\agent_prac\nanocodex` unless noted. Run the direct `cargo ...` commands from `D:\agent_prac\nanocodex\rust`.
+Run script commands from `<repo-root>` unless noted. Run the direct `cargo ...` commands from `<repo-root>\rust`.
 
 One-command local acceptance gates, without live TOS/Seedance spending:
 
@@ -22,14 +22,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\rust\crates\ncx-video-agen
 
 `-LocalOnly` is intentionally not a completion claim: it skips live TOS readiness and paid Seedance/TOS proof. `-RunPaidLive` first runs all local/Temporal gates and live readiness, then runs both paid Seedance/TOS proofs.
 
-Manual local gates from `D:\agent_prac\nanocodex\rust`:
+Manual local gates from `<repo-root>\rust`:
 
 ```powershell
 cargo test -p ncx-video-agent --quiet
 $env:PROTOC='C:\Users\jingc\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\protoc-bin-vendored-win32-3.2.0\bin\protoc.exe'
 cargo check -p ncx-video-agent --features temporal --bin p1_temporal_probe
-cargo run -p ncx-video-agent --bin p1_dry_run --quiet -- D:\agent_prac\nanocodex\rust\target\p1_dry_run_out_current
-powershell -NoProfile -ExecutionPolicy Bypass -File .\crates\ncx-video-agent\scripts\p1_verify_rough_cut_trace.ps1 -OutDir D:\agent_prac\nanocodex\rust\target\p1_dry_run_out_current -AllowLocalDryRun
+cargo run -p ncx-video-agent --bin p1_dry_run --quiet -- .\target\p1_dry_run_out_current
+powershell -NoProfile -ExecutionPolicy Bypass -File .\crates\ncx-video-agent\scripts\p1_verify_rough_cut_trace.ps1 -OutDir .\target\p1_dry_run_out_current -AllowLocalDryRun
 powershell -NoProfile -ExecutionPolicy Bypass -File .\crates\ncx-video-agent\scripts\p1_paid_preflight_selftest.ps1
 ```
 
@@ -66,8 +66,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\rust\crates\ncx-video-agen
 Real paid Seedance/TOS smoke:
 
 ```powershell
-cargo run -p ncx-video-agent --bin p1_seedance_tos_smoke -- --submit-real-ark-job D:\agent_prac\nanocodex\rust\target\p1_seedance_tos_smoke_out
-powershell -NoProfile -ExecutionPolicy Bypass -File .\rust\crates\ncx-video-agent\scripts\p1_verify_rough_cut_trace.ps1 -OutDir D:\agent_prac\nanocodex\rust\target\p1_seedance_tos_smoke_out
+cargo run -p ncx-video-agent --bin p1_seedance_tos_smoke -- --submit-real-ark-job .\rust\target\p1_seedance_tos_smoke_out
+powershell -NoProfile -ExecutionPolicy Bypass -File .\rust\crates\ncx-video-agent\scripts\p1_verify_rough_cut_trace.ps1 -OutDir .\rust\target\p1_seedance_tos_smoke_out
 ```
 
 This live smoke is intentionally opt-in because it spends ARK/Seedance budget. On success it must produce:
