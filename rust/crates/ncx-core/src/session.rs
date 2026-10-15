@@ -681,7 +681,10 @@ impl Session {
         });
         if let Some(ms) = duration_ms {
             if let Some(obj) = msg.as_object_mut() {
-                obj.insert("_trace".into(), json!({"id": "", "timestamp": 0, "duration_ms": ms}));
+                obj.insert(
+                    "_trace".into(),
+                    json!({"id": "", "timestamp": 0, "duration_ms": ms}),
+                );
             }
         }
         self.append(msg);
@@ -736,10 +739,7 @@ impl Session {
         let (mut body, stats) = self.edited_body(&[], &policy);
         if stats.compressed_tool_results > 0 || stats.dropped_messages > 0 {
             if stats.dropped_messages > 0 {
-                let first_kept_entry_id = body
-                    .iter()
-                    .find_map(Self::message_trace)
-                    .map(|t| t.id);
+                let first_kept_entry_id = body.iter().find_map(Self::message_trace).map(|t| t.id);
                 if let Some(first) = body.first_mut() {
                     if Self::message_trace(first).is_none() {
                         self.attach_compaction_trace(
@@ -2203,7 +2203,10 @@ mod tests {
         let expected_parent = s.leaf_entry_id().unwrap();
         s.add_user_text("post-compaction message");
         let new_leaf = Session::message_trace(s.messages.last().unwrap()).unwrap();
-        assert_eq!(new_leaf.parent_id.as_deref(), Some(expected_parent.as_str()));
+        assert_eq!(
+            new_leaf.parent_id.as_deref(),
+            Some(expected_parent.as_str())
+        );
 
         let _ = std::fs::remove_dir_all(dir);
     }
