@@ -1,8 +1,8 @@
 {
   "schema": "buglecat.verification.review-runtime-package.v1",
   "package": "releases\\buglecat-20261014-final.zip",
-  "sha256": "41961f854f1a54f83a958bceb0989ca480cbb164d127e720b61659117da8d997",
-  "bytes": 14512855,
+  "sha256": "25658fb2d49eb5da17b769b6211e9c0feaa9b8316bd0648bac6ecd2b0041c479",
+  "bytes": 14572966,
   "member_count": 17,
   "runtime_acceptance": {
     "actual_copied_runtime_smoke": true,
@@ -18,6 +18,6 @@
   "installer_executed": false,
   "formal_certification": false,
   "historical_accounting_reconciled": false,
-  "source_manifest_sha256": "926e62d57b26e194b4042c7b58b2041b2017d83f5b80736d4c0db799602ecddf",
+  "source_manifest_sha256": "596fa73d09b803dd756197f2b19397197eb312bde47f51f535e50ded0b6da503",
   "paid_calls": 0
 }
