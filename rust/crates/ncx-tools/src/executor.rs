@@ -37,8 +37,9 @@ impl ExecResult {
         self.exit_code == 0 && !self.timed_out && !self.sandbox_denied
     }
 
-    /// Render for the model — mirrors the Python `ExecResult.render`.
-    pub fn render(&self) -> String {
+    /// Render the complete, untruncated command output (`stdout`, `stderr`,
+    /// timeout notice, and `Exit code: N`).
+    pub fn render_untruncated(&self) -> String {
         if self.sandbox_denied {
             return format!("Sandbox denied: {}", self.denial_reason);
         }
@@ -53,7 +54,12 @@ impl ExecResult {
             parts.push("(command timed out)".to_string());
         }
         parts.push(format!("\nExit code: {}", self.exit_code));
-        let out = parts.join("\n");
+        parts.join("\n")
+    }
+
+    /// Render for the model — mirrors the Python `ExecResult.render`.
+    pub fn render(&self) -> String {
+        let out = self.render_untruncated();
         if out.chars().count() > MAX_OUTPUT {
             let chars: Vec<char> = out.chars().collect();
             let half = MAX_OUTPUT / 2;

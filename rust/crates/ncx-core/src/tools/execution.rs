@@ -78,18 +78,19 @@ impl ToolRegistry {
         if !self.substitute_allowed(&fallback_name, &fallback_args) {
             // A mutating substitute could double-apply a partially successful
             // write. Report the original failure instead of guessing.
-            self.record_recovery(chain.refused_substitute(
-                &fallback_name,
-                "substitute is mutating and not idempotent",
-            ));
+            self.record_recovery(
+                chain.refused_substitute(
+                    &fallback_name,
+                    "substitute is mutating and not idempotent",
+                ),
+            );
             return latest;
         }
         // Before substituting for a failed write, check what that write already
         // did. Substituting after a partial effect would apply it twice, and an
         // unverifiable effect is treated the same way as a known partial one.
         if let Some(before) = &before {
-            let after =
-                crate::tool_recovery::fingerprint_paths(&self.ctx.workspace, &probe_paths);
+            let after = crate::tool_recovery::fingerprint_paths(&self.ctx.workspace, &probe_paths);
             let effect = crate::tool_recovery::classify_write_effect(before, &after);
             self.record_write_probe(name, &effect);
             if effect != crate::tool_recovery::WriteEffect::None {
@@ -145,7 +146,11 @@ impl ToolRegistry {
         };
         let text = chain.render();
         let _ = store.append(&crate::context_trace::SourceRecord {
-            source_id: format!("recovery-{}-{}", chain.tool, crate::context_trace::content_hash(&text)),
+            source_id: format!(
+                "recovery-{}-{}",
+                chain.tool,
+                crate::context_trace::content_hash(&text)
+            ),
             kind: crate::context_trace::SourceKind::ToolRecovery,
             tool_name: Some(chain.tool.clone()),
             status: Some(chain.outcome.clone()),
@@ -214,7 +219,10 @@ impl RecoveryChain {
     }
 
     fn substituted_failed(&mut self, candidate: &str, failure: ToolFailureClass) -> &Self {
-        self.finish(format!("substitute {candidate} failed: {failure}"), "failed")
+        self.finish(
+            format!("substitute {candidate} failed: {failure}"),
+            "failed",
+        )
     }
 
     fn render(&self) -> String {
@@ -223,7 +231,6 @@ impl RecoveryChain {
 }
 
 impl ToolRegistry {
-
     async fn execute_attempt(&self, name: &str, args: &Value) -> String {
         if let Some(blocked) = self.check_runtime_policy(name, args) {
             return blocked;
@@ -239,8 +246,10 @@ impl ToolRegistry {
                     Some(result) => result,
                     None => self.execute_with_hooks(&context, tool, name, args).await,
                 };
-                self.leave_middleware(&context, entered, name, args, result)
-                    .await
+                let out = self
+                    .leave_middleware(&context, entered, name, args, result)
+                    .await;
+                output_offload::maybe_offload(name, out)
             }
             None => format!("Error: unknown tool '{name}'."),
         }
@@ -396,14 +405,24 @@ fn canonical_json(value: &Value) -> String {
             entries.sort_by(|a, b| a.0.cmp(b.0));
             let body = entries
                 .into_iter()
-                .map(|(key, value)| format!("{}:{}", serde_json::to_string(key).unwrap(), canonical_json(value)))
+                .map(|(key, value)| {
+                    format!(
+                        "{}:{}",
+                        serde_json::to_string(key).unwrap(),
+                        canonical_json(value)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(",");
             format!("{{{body}}}")
         }
         Value::Array(items) => format!(
             "[{}]",
-            items.iter().map(canonical_json).collect::<Vec<_>>().join(",")
+            items
+                .iter()
+                .map(canonical_json)
+                .collect::<Vec<_>>()
+                .join(",")
         ),
         _ => serde_json::to_string(value).unwrap_or_default(),
     }
@@ -425,10 +444,18 @@ mod runtime_tests {
 
     #[async_trait(?Send)]
     impl Tool for CountingTool {
-        fn name(&self) -> &str { "counting" }
-        fn description(&self) -> &str { "runtime policy test tool" }
-        fn parameters(&self) -> Value { json!({"type":"object"}) }
-        fn read_only(&self) -> bool { true }
+        fn name(&self) -> &str {
+            "counting"
+        }
+        fn description(&self) -> &str {
+            "runtime policy test tool"
+        }
+        fn parameters(&self) -> Value {
+            json!({"type":"object"})
+        }
+        fn read_only(&self) -> bool {
+            true
+        }
         fn runtime_policy(&self) -> ToolRuntimePolicy {
             ToolRuntimePolicy {
                 max_calls_per_turn: Some(2),
@@ -450,10 +477,15 @@ mod runtime_tests {
         let policy = SandboxPolicy::new(WORKSPACE_WRITE, &workspace);
         let calls = Rc::new(Cell::new(0));
         let mut registry = ToolRegistry::empty(ToolContext::new(workspace, policy));
-        registry.register(Box::new(CountingTool { calls: calls.clone() }));
+        registry.register(Box::new(CountingTool {
+            calls: calls.clone(),
+        }));
         registry.begin_task(1);
 
-        assert_eq!(registry.execute("counting", &json!({"a":1,"b":2})).await, "ok");
+        assert_eq!(
+            registry.execute("counting", &json!({"a":1,"b":2})).await,
+            "ok"
+        );
         let duplicate = registry.execute("counting", &json!({"b":2,"a":1})).await;
         assert!(duplicate.contains("duplicate invocation rejected"));
         assert_eq!(registry.execute("counting", &json!({"a":3})).await, "ok");

@@ -149,7 +149,9 @@ impl Tool for ShellTool {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let needs_escalation = ShellTool::needs_escalation(ctx, command, &workdir);
-        if let Err(error) = authorize_shell(ctx, command, &workdir, justification, needs_escalation).await {
+        if let Err(error) =
+            authorize_shell(ctx, command, &workdir, justification, needs_escalation).await
+        {
             return error;
         }
         run_shell(ctx, command, &workdir, timeout, justification).await
@@ -157,11 +159,19 @@ impl Tool for ShellTool {
 }
 
 pub(crate) fn resolve_shell_workdir(ctx: &ToolContext, args: &Value) -> PathBuf {
-    let Some(path) = args.get("workdir").and_then(Value::as_str).filter(|p| !p.is_empty()) else {
+    let Some(path) = args
+        .get("workdir")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+    else {
         return ctx.workspace.clone();
     };
     let path = PathBuf::from(path);
-    let joined = if path.is_absolute() { path } else { ctx.workspace.join(path) };
+    let joined = if path.is_absolute() {
+        path
+    } else {
+        ctx.workspace.join(path)
+    };
     joined.canonicalize().unwrap_or(joined)
 }
 
@@ -180,16 +190,15 @@ pub(crate) async fn authorize_shell(
     };
     match decision {
         Decision::AutoApprove => Ok(()),
-        Decision::AutoDeny => Err("Error: command denied by approval policy 'never' (it requires \
+        Decision::AutoDeny => Err(
+            "Error: command denied by approval policy 'never' (it requires \
             escalated permissions). Adjust the approach to stay within the sandbox, or ask the \
-            user to change the policy.".into()),
-        Decision::Ask => request_shell_approval(
-            ctx,
-            command,
-            workdir,
-            justification,
-            needs_escalation,
-        ).await,
+            user to change the policy."
+                .into(),
+        ),
+        Decision::Ask => {
+            request_shell_approval(ctx, command, workdir, justification, needs_escalation).await
+        }
     }
 }
 
@@ -203,19 +212,28 @@ async fn request_shell_approval(
     let Some(handler) = &ctx.approver else {
         return Err("Error: command requires approval but no approver is configured.".into());
     };
-    let reason = if justification.is_empty() { "Command requires approval." } else { justification };
-    let answer = handler.request(ApprovalRequest {
-        command: command.to_string(),
-        reason: reason.to_string(),
-        cwd: workdir.display().to_string(),
-        escalated,
-        details: String::new(),
-    }).await;
+    let reason = if justification.is_empty() {
+        "Command requires approval."
+    } else {
+        justification
+    };
+    let answer = handler
+        .request(ApprovalRequest {
+            command: command.to_string(),
+            reason: reason.to_string(),
+            cwd: workdir.display().to_string(),
+            escalated,
+            details: String::new(),
+        })
+        .await;
     if !answer.approved() {
         return Err("Error: command not approved by the user.".into());
     }
     if answer == ApprovalDecision::Always {
-        ctx.session_grants.borrow_mut().commands.insert(command.to_string());
+        ctx.session_grants
+            .borrow_mut()
+            .commands
+            .insert(command.to_string());
     }
     Ok(())
 }
@@ -236,7 +254,9 @@ pub(crate) async fn run_shell(
     {
         result = executor.run(command, workdir, timeout).await;
     }
-    result.render()
+    // Offload oversized command outputs (>16k chars) to disk before inline head/tail
+    // truncation so the model can inspect omitted middle lines via `read_file`.
+    output_offload::maybe_offload("shell", result.render_untruncated())
 }
 
 async fn approve_failed_retry(
@@ -246,14 +266,21 @@ async fn approve_failed_retry(
     justification: &str,
     exit_code: i32,
 ) -> bool {
-    let Some(handler) = &ctx.approver else { return false };
-    handler.request(ApprovalRequest {
-        command: command.to_string(),
-        reason: format!("Sandboxed run failed (exit {exit_code}). {justification}").trim().to_string(),
-        cwd: workdir.display().to_string(),
-        escalated: true,
-        details: String::new(),
-    }).await.approved()
+    let Some(handler) = &ctx.approver else {
+        return false;
+    };
+    handler
+        .request(ApprovalRequest {
+            command: command.to_string(),
+            reason: format!("Sandboxed run failed (exit {exit_code}). {justification}")
+                .trim()
+                .to_string(),
+            cwd: workdir.display().to_string(),
+            escalated: true,
+            details: String::new(),
+        })
+        .await
+        .approved()
 }
 
 /// `remember` â€” record a verified, reusable note into project memory. Only the

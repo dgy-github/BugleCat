@@ -653,4 +653,70 @@ mod tests {
             "{out_clean}"
         );
     }
+
+    struct VerboseLogTool;
+    #[async_trait(?Send)]
+    impl Tool for VerboseLogTool {
+        fn name(&self) -> &str {
+            "verbose_log"
+        }
+        fn description(&self) -> &str {
+            "Emits >16k chars with a middle marker."
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object"})
+        }
+        fn read_only(&self) -> bool {
+            true
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            let mut lines = Vec::new();
+            for i in 1..=250 {
+                lines.push(format!("HEAD_LINE_{i:04}: {}", "a".repeat(40)));
+            }
+            lines.push("MIDDLE_CRITICAL_TRACEBACK_MARKER_LINE_251".to_string());
+            for i in 252..=500 {
+                lines.push(format!("TAIL_LINE_{i:04}: {}", "b".repeat(40)));
+            }
+            lines.push("Exit code: 0".to_string());
+            lines.join("\n")
+        }
+    }
+
+    #[tokio::test]
+    async fn large_tool_output_offloads_to_disk_and_is_readable_via_read_file() {
+        let ws = tmp_ws("output_offload");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let mut reg = ToolRegistry::empty(ctx.clone());
+        reg.register(Box::new(VerboseLogTool));
+
+        let out = reg.execute("verbose_log", &json!({})).await;
+        assert!(out.contains("HEAD_LINE_0001"), "{out}");
+        assert!(out.contains("Exit code: 0"), "{out}");
+        assert!(out.contains("chars truncated"), "{out}");
+        assert!(out.contains("[tool_output_offloaded: path=\""), "{out}");
+        // Middle line was omitted from the inline preview to save context window tokens.
+        assert!(
+            !out.contains("MIDDLE_CRITICAL_TRACEBACK_MARKER_LINE_251"),
+            "middle marker should be offloaded, not inline"
+        );
+
+        // Extract the offloaded path from `[tool_output_offloaded: path="<PATH>" ...]`
+        let path_start = out.find("[tool_output_offloaded: path=\"").unwrap()
+            + "[tool_output_offloaded: path=\"".len();
+        let path_end = out[path_start..].find('"').unwrap() + path_start;
+        let offload_path = &out[path_start..path_end];
+
+        // Read the omitted middle section via ReadFileTool using offset & limit!
+        let middle = ReadFileTool
+            .execute(
+                &ctx,
+                &json!({"path": offload_path, "offset": 245, "limit": 15}),
+            )
+            .await;
+        assert!(
+            middle.contains("251| MIDDLE_CRITICAL_TRACEBACK_MARKER_LINE_251"),
+            "{middle}"
+        );
+    }
 }
