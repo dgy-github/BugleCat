@@ -573,4 +573,84 @@ mod tests {
             .await;
         assert!(read.contains("workspace fact"), "{read}");
     }
+
+    struct StubDiagnosticLspProvider;
+    #[async_trait(?Send)]
+    impl crate::lsp_tool::LspProvider for StubDiagnosticLspProvider {
+        async fn request(&self, request: crate::lsp_tool::LspRequest) -> Result<Value, String> {
+            assert_eq!(request.operation, "diagnostics");
+            Ok(json!({
+                "kind": "full",
+                "items": [
+                    {
+                        "range": {"start": {"line": 2, "character": 8}},
+                        "severity": 1,
+                        "message": "mismatched types: expected `u32`, found `&str`"
+                    },
+                    {
+                        "range": {"start": {"line": 0, "character": 0}},
+                        "severity": 3,
+                        "message": "informational note that should be filtered out"
+                    }
+                ]
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn post_edit_auto_diagnostics_surfaces_lsp_errors_on_patch() {
+        let ws = tmp_ws("post_edit_lsp");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_lsp_provider(Rc::new(StubDiagnosticLspProvider));
+        let patch = "*** Begin Patch\n*** Add File: src/lib.rs\n+pub fn demo() -> u32 {\n+    let x = \"bad\";\n+    x\n+}\n*** End Patch";
+        let out = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": patch }))
+            .await;
+        assert!(out.contains("Patch applied successfully"), "{out}");
+        assert!(out.contains("[post_edit_diagnostics:"), "{out}");
+        assert!(
+            out.contains("src/lib.rs:3:9 [error] mismatched types: expected `u32`, found `&str`"),
+            "{out}"
+        );
+        assert!(!out.contains("informational note"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn post_edit_auto_diagnostics_catches_invalid_json_toml_and_conflict_markers() {
+        let ws = tmp_ws("post_edit_syntax");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+
+        let bad_json = "*** Begin Patch\n*** Add File: config.json\n+{\"key\": }\n*** End Patch";
+        let out_json = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": bad_json }))
+            .await;
+        assert!(out_json.contains("[post_edit_diagnostics:"), "{out_json}");
+        assert!(out_json.contains("JSON syntax error"), "{out_json}");
+
+        let bad_toml =
+            "*** Begin Patch\n*** Add File: Cargo.toml\n+[package\n+name = \"demo\"\n*** End Patch";
+        let out_toml = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": bad_toml }))
+            .await;
+        assert!(out_toml.contains("[post_edit_diagnostics:"), "{out_toml}");
+        assert!(out_toml.contains("TOML syntax error"), "{out_toml}");
+
+        let conflict_rs = "*** Begin Patch\n*** Add File: main.rs\n+<<<<<<< HEAD\n+fn a() {}\n+=======\n+fn b() {}\n+>>>>>>> branch\n*** End Patch";
+        let out_conflict = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": conflict_rs }))
+            .await;
+        assert!(
+            out_conflict.contains("unresolved git merge conflict marker"),
+            "{out_conflict}"
+        );
+
+        let clean_json = "*** Begin Patch\n*** Update File: config.json\n-{\"key\": }\n+{\"key\": 42}\n*** End Patch";
+        let out_clean = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": clean_json }))
+            .await;
+        assert!(
+            !out_clean.contains("[post_edit_diagnostics:"),
+            "{out_clean}"
+        );
+    }
 }

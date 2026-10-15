@@ -734,6 +734,7 @@ impl ToolRegistry {
 include!("tools/catalog.rs");
 include!("tools/execution.rs");
 include!("tools/file.rs");
+pub(crate) mod post_edit_diagnostics;
 pub(crate) mod python_check;
 include!("tools/builtins.rs");
 include!("tools/tests.rs");

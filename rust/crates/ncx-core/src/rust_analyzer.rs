@@ -1,6 +1,6 @@
 //! Persistent rust-analyzer client implementing the pluggable LSP boundary.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -59,7 +59,8 @@ struct LspSession {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
-    open_documents: HashSet<String>,
+    /// Maps document URI -> latest synchronized LSP document version.
+    open_documents: HashMap<String, i64>,
 }
 
 impl LspSession {
@@ -85,7 +86,7 @@ impl LspSession {
             stdin,
             stdout: BufReader::new(stdout),
             next_id: 1,
-            open_documents: HashSet::new(),
+            open_documents: HashMap::new(),
         };
         let root_uri = Url::from_directory_path(workspace).map_err(|_| {
             format!(
@@ -116,12 +117,12 @@ impl LspSession {
         self.call(method, params).await
     }
 
+    /// Open a document in `rust-analyzer` on first access (`textDocument/didOpen`),
+    /// or synchronize its latest disk contents via `textDocument/didChange` so
+    /// post-edit diagnostics always inspect the freshly modified buffer.
     async fn open_document(&mut self, workspace: &Path, path: &str) -> Result<(), String> {
         let uri = file_uri(workspace, Some(path))?;
         let uri_text = uri.to_string();
-        if self.open_documents.contains(&uri_text) {
-            return Ok(());
-        }
         let source_path = uri
             .to_file_path()
             .map_err(|_| format!("cannot convert source URI back to a path: {uri}"))?;
@@ -131,6 +132,22 @@ impl LspSession {
                 source_path.display()
             )
         })?;
+        if let Some(prev_version) = self.open_documents.get(&uri_text).copied() {
+            let next_version = prev_version + 1;
+            self.notify(
+                "textDocument/didChange",
+                json!({
+                    "textDocument": {
+                        "uri": uri_text,
+                        "version": next_version
+                    },
+                    "contentChanges": [{"text": text}]
+                }),
+            )
+            .await?;
+            self.open_documents.insert(uri.to_string(), next_version);
+            return Ok(());
+        }
         self.notify(
             "textDocument/didOpen",
             json!({
@@ -143,7 +160,7 @@ impl LspSession {
             }),
         )
         .await?;
-        self.open_documents.insert(uri.to_string());
+        self.open_documents.insert(uri.to_string(), 1);
         Ok(())
     }
 

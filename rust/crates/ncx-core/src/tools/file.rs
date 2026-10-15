@@ -151,12 +151,14 @@ impl Tool for ApplyPatchTool {
                 }
                 let mut checks = Vec::new();
                 let mut paths = Vec::new();
+                let mut touched_rel_paths = Vec::new();
                 for target in outcome
                     .added
                     .iter()
                     .chain(&outcome.updated)
                     .chain(outcome.moved.iter().map(|(_, dst)| dst))
                 {
+                    touched_rel_paths.push(target.clone());
                     let path = ctx.workspace.join(target);
                     if path
                         .extension()
@@ -173,18 +175,21 @@ impl Tool for ApplyPatchTool {
                 for path in paths {
                     checks.push(python_check::check(ctx, &path).await);
                 }
+                // Run OpenCode-style post-edit static & LSP diagnostics on all touched files.
+                let diag_findings = post_edit_diagnostics::collect(ctx, &touched_rel_paths).await;
+                let diag_suffix = post_edit_diagnostics::format_block(&diag_findings);
                 if !checks.is_empty() {
                     let prefix = if python_check::failure(ctx).is_some() {
                         "Error: patch saved but verification failed; repair before finishing"
                     } else {
                         "Patch applied successfully"
                     };
-                    return format!("{prefix}:\n{summary}\n{}", checks.join("\n"));
+                    return format!("{prefix}:\n{summary}\n{}{diag_suffix}", checks.join("\n"));
                 }
                 if summary.is_empty() {
                     "Patch applied (no changes).".into()
                 } else {
-                    format!("Patch applied successfully:\n{summary}")
+                    format!("Patch applied successfully:\n{summary}{diag_suffix}")
                 }
             }
             Err(e) => format!("Error applying patch: {e}"),
