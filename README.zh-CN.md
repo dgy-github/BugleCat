@@ -2,18 +2,20 @@
 
 [English](README.md) | 简体中文
 
-## 最新更新（2026-10-13）
+## 最新更新（2026-10-14）
 
 > [!IMPORTANT]
-> **声明级矛盾核对与 Agent 物理防漂移体系全量上线（v1 评测基准通过）**
-> - **规则范围**：核对给定声明与证据中的执行失败、证据新鲜度和范围冲突。
-> - **175 例规则层合成回归**：140/140 漂移例产生 NeedEvidence 或 Contradiction，35 个合规例均未产生这两种干预；Unknown 不算检出。175 例裁决及原因均匹配。
-> - **验证边界**：样本预先构造声明和证据，未覆盖声明抽取、真实证据组装及 Agent 纠正链路；不构成生产准确率认证。规则耗时不含证据采集与模型调用。
-> - **交付资产与运行方式**：
->   * 完整基准报告：[reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)
->   * 评测数据集：[evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
->   * 原生 Rust 运行器：`cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
->   * 离线会话审计工具：`python scripts/replay_verification.py path/to/.verification.jsonl --strict`
+> **BugleCat `v0.1.2` 发布与声明级矛盾核验体系（`host-rules-v3.4`）**
+> - **预编译安装包下载**：[GitHub Release `v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2)（提供 Windows x64 NSIS 安装程序 `BugleCat_0.1.0_x64-setup.exe`、完整便携运行包 `buglecat-20261014-final.zip` 以及 macOS `arm64` / `x64` DMG）。
+> - **宿主规则核验范围（默认 `off`）**：基于宿主确定性规则核对给定声明与工具执行证据中的执行失败、文件快照新鲜度与测试范围冲突（当前策略版本 `host-rules-v3.4`；生产默认 `off`）。
+> - **175 例规则层合成回归**：140/140 漂移例产生 `NeedEvidence` 或 `Contradiction`，35/35 合规例无误拦；`Unknown` 不计入检出，175 例裁决与原因码全部匹配。
+> - **验证边界**：175 例为预先构造声明与证据的规则层合成回归，不替代真实独立样本校准/留出，亦不构成生产准确率认证。
+> - **交付资产与常用核验命令**：
+>   * 运行包交付与三模式实机验收收据：[reports/buglecat-delivery-20261014.json](reports/buglecat-delivery-20261014.json)
+>   * 完整规则基准报告：[reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md) · 数据集：[evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
+>   * 原生 Rust 规则基准运行器：`cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
+>   * 离线会话核验日志审计：`python scripts/replay_verification.py path/to/.verification.jsonl --strict`
+>   * 声明核验独立样本池离线审计：`python scripts/audit_claim_source_pool.py`
 
 ## 合作与自测证据
 
@@ -39,14 +41,13 @@
 
 [![BugleCat 桌面端真实截图：Tauri + Svelte 桌面客户端](assets/buglecat-desktop-real.png)](nanocodex.html)
 
-**BugleCat** 是一个面向 Windows、本地运行且可扩展的 Codex 风格编码 Agent。一个 chat-completions 模型
-提出工具调用，agent 在沙箱内执行文件/shell 工具，记录会话，并循环直到任务完成。
+**BugleCat** 是一个本地运行且可扩展的 Codex 风格编码 Agent。chat-completions 模型
+提出结构化工具调用，Agent 在受控沙箱与审批策略下执行文件/shell/LSP/终端工具，记录会话与事件快照，并循环直到任务完成。
 它可以对接 DeepSeek 托管 API，也可以对接任意 OpenAI 兼容的本地模型，并自带
-MCP 集成、skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Windows
-GUI、定时器，以及 git worktree 的 A/B 对比。
+MCP 集成、插件生态、Skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Tauri 2 + Svelte 5 桌面客户端、定时器，以及 git worktree 的 A/B 对比。
 
-项目由最初的 `nanocodex` 原型演进而来。为了兼容已有安装，配置目录、环境变量和
-Python 命令中仍保留旧名称；对外产品和新仓库统一使用 BugleCat。项目分为两个清晰
+项目由最初的 `nanocodex` 原型演进而来。为了兼容已有安装，配置目录（`~/.nanocodex/`）、环境变量（`NANOCODEX_*`）和
+Python 兼容命令中仍保留旧名称；对外产品和新仓库统一使用 **BugleCat**。项目分为两个清晰
 阶段，重点不是“把同一套功能换一种语言写”，而是架构边界和发布性能的升级。
 
 ## 项目阶段
@@ -64,36 +65,36 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   可独立扩展的 Python 模块，适合在产品形态还不稳定时快速迭代。
 - 运行时契约偏动态，因此新增 MCP marketplace、prompt 增强、图片输入、session
   resume/fork、A/B worktree 对比等功能成本很低。
-- Windows GUI 使用 Tkinter，第一版桌面体验依赖少、调试直接。
+- 早期原型 GUI 使用 Tkinter，第一版桌面体验依赖少、调试直接。
 
 **性能与交付层面**
 
 - 优势是迭代速度：没有编译步骤，实验快，mock provider 的离线测试也容易铺开。
-- 420 个离线测试覆盖 Python 功能线，不需要真实 API key，也不依赖网络。
-- 交付仍依赖 Python 解释器、包环境和导入启动成本；对普通 Windows 用户来说，分发
+- 离线单元测试覆盖 Python 功能线，不需要真实 API key，也不依赖网络。
+- 交付仍依赖 Python 解释器、包环境和导入启动成本；对普通桌面用户来说，分发
   体验不如原生二进制直接。
 - 动态边界适合探索期，但当沙箱、工具执行、记忆、MCP、并行 agent flow 变多时，跨模块
   状态和行为边界会越来越难推理。
 
 ### 第二阶段：Rust 重构版
 
-`rust/` 下的 Rust 实现是当前 release 线。它不删除 Python 树，而是把已经验证过的
-能力重建成更清晰的 crate 边界，并配套 Tauri 桌面壳，让项目进入可分发工具阶段。
+`rust/` 下的 Rust 实现是当前的主线发布版。它保留 Python 树用于兼容与评测参考，同时把核心运行时重建为职责清晰的 Rust crates，并配套 Tauri v2 + Svelte 5 桌面端。
 
 **架构层面**
 
-- 工作区按责任拆分为 `ncx-sandbox`、`ncx-config`、`ncx-provider`、`ncx-tools`、
-  `ncx-core`、`ncx-cli`。
-- provider 响应、工具调用、沙箱决策、session 消息、记忆条目、编排结果都有显式类型，
+- 工作区按职责拆分为 `ncx-config`、`ncx-provider`、`ncx-sandbox`、`ncx-tools`、
+  `ncx-mcp`、`ncx-context`、`ncx-thread-store`、`ncx-protocol`、`ncx-app-server`、
+  `ncx-core` 与 `ncx-cli`。
+- provider 响应、工具调用、沙箱决策、session 消息、记忆条目、编排结果与前后端协议均有显式类型，
   跨 crate 边界时不再靠松散 dict/object 传递。
 - 工具执行集中到 `ToolContext` 和 `ToolRegistry` 后面，沙箱策略、审批策略、超时、
   搜索和记忆都挂在真正执行动作的边界上。
+- `AgentLoop` 由可替换的模型 Provider、命名 turn-context provider、工具注册表、工具中间件与可注入调度器组装而成；CLI、GUI 与编排 worker 通过同一套 `AgentRuntimeProfile` 解析预算、上下文编辑、并发与模型端点，避免前端配置漂移。
 - 编排层加入任务分类、main/fast 模型路由、隔离 worker 工作区、verifier 选择，以及
   把胜出 worker promote 回真实工作区。
 - 项目记忆保存在 `.ncx/memory/LEARNINGS.md`；启动时只做便宜的启发式去重，显式运行
   `ncx --memory-merge` 才会做成本更高的 LLM 记忆合并。
-- 桌面线切到 Tauri v2 + Svelte 5，把原生后端和 UI 表层分离，为比 Python GUI 更小的
-  release bundle 做准备。
+- 桌面线采用 Tauri v2 + Svelte 5，把原生 Rust 后端和 Web UI 表层分离，支持构建轻量级 Windows NSIS 安装包与 macOS DMG。
 
 **性能与交付层面**
 
@@ -103,20 +104,26 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - 启动路径避开 Python 解释器和 import 开销，适合短的一次性命令，也适合交互 REPL。
 - 显式所有权让并行 worker 隔离、结果选择和 promote 更容易推理，不容易出现共享可变状态
   泄漏。
-- Rust 离线测试覆盖当前 crate 边界，包括记忆合并、provider 请求/响应解析、
-  沙箱策略、工具和编排器。
+- Rust 工作区与 GUI 测试套件覆盖 provider 与运行时契约、沙箱与审批策略、工具调度与恢复、MCP 热重载、持久后台进程、LSP、原生 PTY 会话、GUI 装配、声明核验以及编排器。
 
 **平台控制面补齐**
 
-- **Task budget：** 每次模型调用都会收到当前运行预算，包括模型调用次数、工具调用次数
-  和上下文限制；模型调用或工具调用超预算时，loop 会干净停止，并补齐未执行工具调用的
-  tool result，保证消息历史仍然有效。
-- **Context editing：** 本地完整 session 不会被删；发给 provider 的是发送时编辑视图，
+- **Task budget（任务预算）：** 每次模型调用都会收到当前运行预算，包括模型调用次数、工具调用次数
+  和上下文限制；模型调用或工具调用超预算时，loop 会干净停止，补齐未执行工具调用的
+  tool result，并如实报告未完成的校验状态。
+- **Context editing（上下文编辑）：** 本地完整 session 不会被删；发给 provider 的是发送时编辑视图，
   会压缩旧 tool result，并在超过上下文预算时丢弃更早的前缀。
-- **Tool search：** 工具注册时会进入 catalog。小工具集仍全量暴露；工具变多时只暴露核心
-  工具和 `tool_search`，搜索命中的工具会在下一轮 schema 里出现。
-- **Semantic memory：** 项目记忆检索从纯关键词升级为混合语义排序：关键词、标签、短语、
+- **Tool search（按需工具暴露）：** 工具注册时会进入 catalog。小工具集仍全量暴露；工具变多时只暴露核心
+  工具和 `tool_search`，搜索命中的工具会在下一轮 schema 里出现（默认单轮最多暴露 16 个 schema）。
+- **Harness 工具族：** Rust 运行时内置真实的 `rust-analyzer` LSP provider、带增量输出的有界后台进程，以及支持原始 stdin、光标读取、尺寸调整和关闭的持久 ConPTY/PTY 终端；Windows 子进程纳入 Job Object 容器管控。
+- **Tool recovery（工具恢复）：** 只读工具失败会自动分类，瞬态故障可重试一次，并在不绕过中间件、审批与沙箱强制的前提下自动选择参数兼容的回退工具。
+- **结构化工作区巡检：** `list_directory` 和 `path_info` 使用原生文件系统 API，`git_status` 和 `git_diff` 暴露固定的只读 Git 操作，无需模型手写平台相关的 `ls`/`dir`/`find` 命令。
+- **Semantic memory（混合语义记忆）：** 项目记忆检索采用混合词法语义排序：关键词、标签、短语、
   Jaccard 相似度、时间新近度，以及一小组 agent/runtime 领域同义词。
+- **确定性 Hooks：** `[[hooks]]` 可在匹配工具执行前后及轮次生命周期节点运行项目命令。`pre_tool` 或 `user_prompt` 失败会阻断动作；`post_tool` 和 `stop` 输出会追加到上下文，用于审计、格式化与质量门禁。
+- **Checkpoint / restore：** Rust CLI 和 Tauri GUI 都会在模型轮次前创建文件
+  checkpoint。CLI 提供 `/checkpoint`、`/checkpoints`、`/restore <id>`；GUI 提供
+  checkpoint 面板用于手动保存、列表查看和恢复。
 
 ### 第二阶段为什么改用 Rust
 
@@ -130,9 +137,6 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   流程，在显式所有权和类型系统下更容易证明不会互相踩写。
 - **运行时控制面：** task budget、context editing、tool search、semantic memory 放在
   Rust runtime 边界里，而不是只靠模型提示词约定。
-- **Checkpoint / restore：** Rust CLI 和 Tauri GUI 都会在模型轮次前创建文件
-  checkpoint。CLI 提供 `/checkpoint`、`/checkpoints`、`/restore <id>`；GUI 提供
-  checkpoint 面板用于手动保存、列表查看和恢复。
 - **原生发布性能：** 小体积 `ncx.exe` 不需要解释器启动和环境配置，一次性 CLI 任务响应
   更直接，Windows 用户拿到包即可运行。
 - **桌面打包路径：** Tauri 提供原生 shell + web UI 前端，比继续扩大 Tkinter 原型更适合
@@ -159,8 +163,9 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - [Token 用量与成本](#token-用量与成本)
 - [定时器](#定时器)
 - [A/B worktree 对比](#ab-worktree-对比)
-- [GUI](#gui)
+- [BugleCat 桌面端](#buglecat-桌面端)
 - [测试](#测试)
+- [Release 打包](#release-打包)
 - [安全说明](#安全说明)
 
 ## 亮点
@@ -172,9 +177,11 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - **沙箱与审批状态机** —— 三种沙箱模式、四种审批策略，拦截每一次文件/shell/网络
   动作。
 - **MCP 集成 + 市场** —— 从 `mcp.toml` 加载服务，或从内置 / 远程目录一键安装；
-  工具保留服务端提供的名称，重名会被拒绝。
+  工具保留服务端提供的名称，重名会被拒绝；`/mcp reload` 支持进程内原子热重载外部工具集。
 - **插件生态** —— 可从本地、Git、NPM 或社区市场安装兼容 Codex 的资源插件，把
   Skills、MCP、Apps、Hooks 和 UI 插槽组合发布，并在安装前检查兼容性和能力冲突。
+- **可插拔 Agent 运行时** —— 模型 Provider、轮次上下文、工具注册表、调度器、中间件与权限配置均为显式运行时接缝，CLI 与 GUI 共享同一套装配契约。
+- **Harness 工具族** —— 真实 LSP 查询、有界后台进程、持久原生 PTY 终端会话、结构化工作区巡检、Web 工具与会话检索。
 - **Skills 系统** —— 用户 skill 加三个内置编码 skill；只注入名称 + 描述，正文
   按需加载。
 - **自定义 slash commands** —— 项目/用户级 Markdown prompt 模板放在
@@ -191,61 +198,65 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - **定时器** —— 一次性/周期性保存的 prompt，连续失败自动禁用。
 - **A/B worktree 对比** —— 同一 prompt 在两个隔离的 git worktree 里各跑一套配置，
   对比 diff/成本/延迟，采纳其中一侧。
-- **prompt 增强、图片输入、中文优先回复**，以及一个面向 Windows 的 Tkinter GUI。
+- **prompt 增强、图片输入、中文优先回复**，以及基于 **Tauri 2 + Svelte 5** 的跨平台桌面客户端。
 
 ## 架构
 
 ```text
-nanocodex/
-├── agent/
-│   ├── loop.py            # 轮次循环：调模型 → 跑工具 → 重复
-│   ├── prompt.py          # 基础系统提示（中文优先沟通）
-│   ├── session.py         # 运行中的消息列表 + JSONL 持久化
-│   ├── session_index.py   # 可浏览的历史索引 + 单会话快照
-│   ├── compaction.py      # 把 prompt 压在 token 预算内
-│   ├── pricing.py         # 从真实用量算缓存感知的美元成本
-│   ├── auto_reasoning.py  # 为 `auto` 档选推理强度
-│   ├── enhance_prompt.py  # ✨ 把原始输入改写成更清晰的 prompt
-│   ├── memory_store.py    # ~/.nanocodex/memory.md 持久笔记
-│   ├── agents_md.py       # 分层的 AGENTS.md 项目指令
-│   ├── images.py          # OpenAI 多模态图片块
-│   ├── skills_store.py    # 用户 + 内置 skills 发现
-│   ├── schedule.py        # 定时任务存储（一次性 / 周期）
-│   ├── schedule_runner.py # 触发到期任务，跟踪失败
-│   └── ab_compare.py      # A/B worktree 对比（纯逻辑核心）
-├── provider/
-│   ├── base.py            # Provider / ToolCall / ModelResponse 契约
-│   └── deepseek.py        # OpenAI 兼容的 chat-completions + 流式
-├── tools/                 # shell、apply_patch、update_plan、read_file、
-│                          # web_search、schedule、skills、remember、
-│                          # mcp、mcp_store、marketplace、patch
-├── sandbox/
-│   ├── policy.py          # 什么可写 / 是否允许网络
-│   ├── approval.py        # ASK / AUTO_APPROVE / AUTO_DENY 状态机
-│   └── executor.py        # 工具边界上的策略级强制
-├── builtin_skills/        # code-review、debug、write-tests
-├── cli.py                 # CLI 入口（typer）
-├── gui.py                 # Tkinter GUI
-└── config.py              # 分层配置解析
+rust/
+├── crates/
+│   ├── ncx-config/        # 分层配置解析与运行时限额
+│   ├── ncx-provider/      # 可替换的 OpenAI 兼容 / Anthropic 模型边界与诊断脱敏
+│   ├── ncx-sandbox/       # 沙箱策略与四档审批状态机
+│   ├── ncx-tools/         # 进程执行器（Windows Job Object）、后台任务、PTY、文件与补丁工具
+│   ├── ncx-mcp/           # MCP 传输层、协议版本校验与外部工具热重载
+│   ├── ncx-context/       # 关联记忆与上下文检索
+│   ├── ncx-thread-store/  # 持久化会话与事件存储
+│   ├── ncx-protocol/      # GUI / App Server 强类型协议契约（唯一事实源）
+│   ├── ncx-app-server/    # 桌面端与宿主服务桥接层
+│   ├── ncx-core/          # AgentLoop、ToolRegistry、中间件、声明核验（verification）与编排器
+│   └── ncx-cli/           # 一次性与交互式命令行前端（ncx.exe）
+└── gui/
+    ├── src/               # Svelte 5 桌面 UI
+    └── src-tauri/         # Tauri v2 原生宿主命令与共享运行时装配
+
+nanocodex/                 # 第一阶段 Python 参考与兼容原型实现
 ```
 
 ## 工具
 
-模型每轮看到这些工具（顺序有意义）：
+Rust `ToolRegistry` 每轮向模型暴露与当前任务相关的工具子集：核心工具常驻可见，命名匹配与 `tool_search` 按需挂载专用工具，避免每轮发送完整工具目录。
 
 | 工具 | 用途 |
 | --- | --- |
 | `shell` | 执行 shell 命令，受沙箱/审批策略约束。 |
 | `apply_patch` | 应用 Codex 风格补丁，创建/编辑/删除文件。 |
 | `update_plan` | 为多步任务维护一个可见的步骤计划。 |
-| `read_file` | 读取工作区里的文件（或某个行区间）。 |
-| `web_search` | DuckDuckGo 搜索，受网络策略约束。 |
-| `manage_schedule` | 在对话里创建 / 列出 / 取消定时任务。 |
-| `manage_skills` | 在对话里创建 / 列出 / 读取 / 删除用户 skill。 |
+| `read_file` | 读取工作区里的文件（或指定行区间）。 |
+| `str_replace_editor` | 执行精确的、受审批门禁保护的文本替换编辑。 |
+| `grep`、`grep_literal`、`glob` | 无需 shell 解析即可搜索源码内容与文件路径。 |
+| `list_directory`、`path_info`、`git_status`、`git_diff` | 结构化工作区文件与只读 Git 状态巡检。 |
+| `web_search`、`web_fetch` | 在配置的网络策略下执行网页搜索与抓取。 |
+| `lsp` | 查询符号、定义、引用、悬停文档（hover）与编译诊断。 |
+| `background_start/poll/stop/list` | 管理带增量输出的有界后台长进程。 |
+| `terminal_open/write/read/exec/resize/close/list` | 管理持久化的原生 ConPTY/PTY 终端会话。 |
+| `ask_user_question` | 当前端提供处理器时，暂停并弹出 GUI/CLI 多选或自由输入交互问答。 |
+| `session_search`、`session_trace`、`session_event_read/search/trace` | 检索历史会话快照与脱敏事件轨迹。 |
+| `skill` | 按需加载已发现的 Skill 正文。 |
 | `remember` | 往用户记忆里追加一条持久笔记。 |
 | `<tool>`（MCP） | 已连接 MCP 服务暴露的工具，使用服务端提供的名称。 |
 
 ## 安装
+
+### 方式一：直接下载预编译包（推荐）
+
+前往 [GitHub Releases (`v0.1.2`)](https://github.com/dgy-github/BugleCat/releases/latest) 直接下载：
+
+- **Windows 安装包（NSIS）**：`BugleCat_0.1.0_x64-setup.exe`
+- **Windows 完整便携运行包（含 `BugleCat.exe`、`ncx.exe` 与离线核验工具）**：`buglecat-20261014-final.zip`
+- **macOS 安装包**：`BugleCat-arm64.dmg`（Apple Silicon） / `BugleCat-x64.dmg`（Intel）
+
+### 方式二：从源码构建
 
 当前 Rust release 线：
 
@@ -341,6 +352,7 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # context_window = 1048576
 # max_iterations = 60
 # max_tool_calls = 120
+# max_parallel_tool_calls = 8  # 有效范围：1..=128；仅对只读工具生效
 # context_edit_enabled = true
 # context_edit_max_chars = 120000
 # context_edit_keep_recent_messages = 30
@@ -353,6 +365,8 @@ reasoning_effort = "auto"          # auto | low | high | max | off
 # command = "echo checking %NCX_HOOK_TOOL%"
 # timeout_s = 10
 ```
+
+运行时控制面参数也可通过环境变量设置：`NANOCODEX_MAX_ITERATIONS`、`NANOCODEX_MAX_TOOL_CALLS`、`NANOCODEX_CONTEXT_EDIT_ENABLED`、`NANOCODEX_CONTEXT_EDIT_MAX_CHARS`、`NANOCODEX_CONTEXT_EDIT_KEEP_RECENT` 与 `NANOCODEX_CONTEXT_EDIT_TOOL_RESULT_CHARS`。Rust CLI 同时支持 `--max-iterations`、`--max-tool-calls`、`--context-edit-max-chars`、`--context-edit-keep-recent`、`--context-edit-tool-result-chars` 和 `--disable-context-edit`。
 
 完整示例见 `config.example.toml`。
 
@@ -568,8 +582,7 @@ Look for behavior regressions first, then missing tests, then maintainability.
 
 [`local-plugins/llmwiki-memory`](local-plugins/llmwiki-memory) 是一个可选的本地插件，
 用于提供更结构化的记忆生命周期。它把 `always_apply` Skill 与单一本地 MCP 工具组合
-起来，以 `D:\LLMWIKI` 作为实际记忆库。`D:\llm-wiki-template` 只保存协议和初始化
-模板，不是运行中的数据目录。
+起来，通过可配置的本地知识库目录（见插件内 `.mcp.json`）作为实际记忆存储。
 
 安装并启用插件及其 MCP 服务后：
 
@@ -725,7 +738,7 @@ python -m pytest -q
 
 ### 声明级矛盾与 Agent 工具漂移核验（Host Verification）
 
-BugleCat 内置基于宿主操作系统的第一道确定性物理防线，阻断模型在复杂长上下文中脱离事实的“幻觉汇报”与“结果漂移”：
+BugleCat 内置基于宿主操作系统的确定性规则核验层（当前策略版本 `host-rules-v3.4`，生产默认 `off`），用于检测模型在长上下文中脱离实际工具结果的夸大汇报或范围漂移：
 
 ```powershell
 # 执行 175 例全量中英双语声明级矛盾与漂移评测
@@ -736,69 +749,36 @@ python scripts/format_claim_drift_report.py
 
 # 独立离线审计实际会话中的 .verification.jsonl 日志（支持 CI --strict 门禁）
 python scripts/replay_verification.py path/to/.verification.jsonl --strict
+
+# 离线审计声明核验协议与独立样本池配额（零网络调用）
+python scripts/audit_claim_source_pool.py
 ```
 
-评测覆盖 11 类规则分支，使用 175 例预先构造声明与证据的合成输入。v2 指标对检出和误拦统一统计 NeedEvidence、Contradiction，Unknown 不算检出。结果属于规则回归，不属于端到端或独立生产认证。详见 [报告](reports/claim_drift_eval_report_v1.md)。
+评测覆盖 11 类规则分支，使用 175 例预先构造声明与证据的合成输入。v2 指标对检出和误拦统一统计 `NeedEvidence`、`Contradiction`，`Unknown` 不算检出。结果属于规则层回归，不属于端到端或独立生产认证。详见 [报告](reports/claim_drift_eval_report_v1.md)。
 
-### 可靠性回归与本地开发
+### 可靠性回归门禁与本地开发
 
-当前测试门禁同时覆盖安全边界、插件容错和并发稳定性：
+回归套件（含 Golden `unit` 层 24 项与 `cargo` 层 11 项门禁）重点守护以下工程边界：
 
-- MCP 的只读记忆查询可以在 `approval_policy=never` 下执行；有副作用的调用必须明确返回审批拒绝，不能被 compaction 守卫测试遮蔽。
-- Codex 兼容插件中单个损坏的 MCP 资源、command、arg 或无法启动的 server 只会跳过当前插件/server，其他合法 server 仍会被发现并装配；显式 `./` 路径会按插件根解析，越界的 `../` 路径会被拒绝，裸参数继续交给进程 CWD/PATH 处理。
-- Codex 兼容插件的可选 Hooks/Apps 资源也按同一隔离边界处理：损坏文档、不可读目录条目或格式错误的单个 App 会记录并跳过，其他合法插件和资源仍可用；显式插件目录检查命令保留严格错误。
-- MCP 服务在暴露工具前拒绝明确的协议版本不匹配；省略版本字段的旧服务仍保持兼容。
-- Windows Hook 测试使用 20 秒测试超时，避免冷启动和并行调度造成误报；只读并发测试使用 in-flight 峰值断言，不依赖固定墙钟阈值。
-- 测试临时目录使用唯一 session ID（时间、进程 ID 和单调序号），避免 IDE 与 CLI 并行执行时互相清理目录。
-- “工作区改动”面板只有一个滚动容器，文件行禁止被 flex 压缩；大量 diff 不会再重叠或裁切文件名。切换工作区会清空仍在返回的面板/侧栏投影（包括 Forge 状态观察器；后台 Forge 任务本身继续运行并会在启动和切换后自动刷新投影）；仅在进程 CWD 真正改变前才取消模型记忆整理，旧工作区草稿不能在切换后提交。
-- 单个“工作区改动”预览最多返回 1,000 行或 192 KiB，并明确提示已截断；同一时刻只展开一个预览，生成文件或压缩文件不会创建无上限的 WebView DOM 节点。
-- 会话 Ready、标题和完成等突发事件会共用一个正在进行的侧栏刷新，并合并为尾随刷新，而不是反复读取全部持久会话。
-- 新建或分叉会话若未被宿主运行时接受，会基于精确的持久快照做补偿：只有目标 Thread、模型上下文和 Goal 都未被后续修改时才删除，因此可安全重试同一 ID，也不会误删已进入运行态的会话。
-- 空会话快速连续选择 Harness Profile 会被串行化：首轮前只会持久化并激活最后一次选择；Profile 写入与首轮 Claim 原子互斥，已在校验中的旧选择也不能越过首轮锁定。
-- Resume、Fork、新建会话和权限模式重建都会显式使用持久 Thread 的工作区；权限模式请求携带精确 `threadId`，过期 worker 会被拒绝且不写配置；宿主完成工作区切换后才返回就绪，延迟 worker 不会复用前一个进程目录。
-- Memory 列表/新增/整理/合并以及 Forge 启动/状态/取消请求都会携带工作区快照；宿主在工作区互斥围栏内校验快照，过期请求直接拒绝，不会写入新选中的项目。状态投影只属于启动它的工作区，取消还必须携带用户实际观察到的精确任务 generation。
+- **MCP 权限与传输隔离**：只读分类仅在完整声明 `readOnlyHint=true` 且 `destructiveHint=false` 时生效（缺失或冲突一律 fail-closed 进入审批）；同一服务最多允许 4 个只读调用并发，副作用调用独占闸门；协议版本不匹配或单个插件/server 损坏只跳过当前项，不影响其他合法服务。
+- **Provider 诊断脱敏**：OpenAI 兼容与 Anthropic Provider 的非 2xx 响应仅暴露 `HTTP <status>`，绝不把远端错误正文或 API 凭据写入模型上下文、会话日志或诊断文件。
+- **前后端强类型协议契约**：`ncx-protocol::ClientRequest` 是 GUI App Server 方法契约的唯一事实源，`scripts/check-protocol-version.mjs` 自动同步协议版本与全部 70 个方法名，构建前强制执行漂移检查与 TypeScript 类型检查。
+- **工作区与会话状态一致性**：会话 Resume/Fork/新建、权限模式切换、Memory 整理与 Forge 任务均绑定工作区快照与精确 `threadId` / generation，防止跨工作区串写或残留状态泄漏；持久 Goal 状态转换与自动续轮共享同一互斥边界。
 
-#### 当前可靠性收口（2026-09-02）
-
-- 持久 Goal 阶段、进程内 activation 和自动续轮 admission 现在共用一把
-  transition lock。Goal 读取返回一致的持久/armed 快照；pause/resume/
-  block/complete/clear 不会和旧的 arm/disarm 交错。`GoalRoundStart` 也在同一
-  边界内 claim Turn；宿主失败时只撤销 activation，不改写可恢复的持久 Goal。
-- MCP 只读分类只信任完整 annotations：`readOnlyHint=true` 且
-  `destructiveHint=false`。缺失、部分、畸形或冲突 annotations 一律保持审批门禁
-  （fail closed）；多 action 的 `llmwiki` 还要通过仓库维护的只读 action 白名单，
-  因而写 action 不会继承服务级只读提示。
-- OpenAI 兼容和 Anthropic Provider 的非 2xx 响应（流式与非流式）只暴露
-  `HTTP <status>`；远端 HTML/JSON 正文和凭据不会被读取、缓存或写入模型上下文、
-  会话日志和界面错误。
-- “工作区改动”面板约束外层 flex workarea，并让 `rp-body` 成为唯一纵向滚动容器；
-  文件行禁止压缩，长列表保持稳定行高，不再出现条目互相覆盖。
-- `ncx-protocol::ClientRequest` 是 GUI App Server 方法契约的唯一事实源。
-  `scripts/check-protocol-version.mjs` 会从 Rust 枚举生成
-  `rust/gui/src/lib/protocol-version.ts`，同时同步协议版本和 70 个 camelCase
-  方法名；GUI 构建会先执行漂移检查和 TypeScript 类型检查，避免方法改名后才在
-  运行时暴露 IPC 错误。
-- MCP 传输层按服务维护一个后台 reader 和 request-ID pending map；每个服务的
-  调用闸门最多允许 4 个只读调用同时在途，副作用/未知调用独占全部 permit。
-  EOF、写入错误和超时都会释放 pending 请求，不会让 Agent 永久卡住。
-
-本轮已用 Rust workspace `--all-features` 全量测试与严格 clippy、GUI Rust
-测试/clippy、Vite 生产构建、Python pytest 和 Ruff 验证；不需要真实 Provider
-凭据，也不会产生付费模型调用。
-
-推荐在提交前运行：
+推荐在提交前运行完整本地门禁（无需真实 API Key，零付费调用）：
 
 ```powershell
-cargo fmt --manifest-path rust\Cargo.toml --all -- --check
-cargo fmt --manifest-path rust\gui\src-tauri\Cargo.toml --all -- --check
+python scripts/check_rustfmt.py
 cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
 cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+cargo test --manifest-path rust\Cargo.toml --workspace --lib
 cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
 npm.cmd --prefix rust\gui run test:protocol
 npm.cmd --prefix rust\gui run protocol:check
 npm.cmd --prefix rust\gui run typecheck
 npm.cmd --prefix rust\gui run build
+python -m evals.golden.runner --tier unit --scope-to-tiers
+python -m evals.golden.runner --tier cargo --scope-to-tiers
 python -m pytest -q
 python -m ruff check .
 ```

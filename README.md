@@ -2,18 +2,20 @@
 
 English | [简体中文](README.zh-CN.md)
 
-## Latest Update (2026-10-13)
+## Latest Update (2026-10-14)
 
 > [!IMPORTANT]
-> **Claim-Level Contradiction Verification & Agent Physical Anti-Drift Architecture (v1 Benchmark Passed)**
-> - **Scope**: Deterministic checks of supplied claims and evidence for execution failure, freshness and scope mismatch.
-> - **175 synthetic policy cases**: 140/140 drift cases produce NeedEvidence or Contradiction; 0/35 compliant cases produce either. Unknown is not detection. Verdicts and reasons match all 175 fixtures.
-> - **Limits**: These fixtures bypass claim extraction, live evidence assembly and agent correction. They do not certify production accuracy; measured policy latency excludes evidence collection and model calls.
+> **BugleCat `v0.1.2` Release & Claim-Level Contradiction Verification (`host-rules-v3.4`)**
+> - **Prebuilt Releases**: [GitHub Release `v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2) (Windows x64 NSIS installer `BugleCat_0.1.0_x64-setup.exe`, full portable bundle `buglecat-20261014-final.zip`, and macOS `arm64` / `x64` DMGs).
+> - **Host Rule Verification Scope (Default `off`)**: Deterministic host-level checks of supplied claims and tool execution evidence for execution failure, file-snapshot freshness, and scope mismatch (`policy_version: "host-rules-v3.4"`, production default `off`).
+> - **175 synthetic policy cases**: 140/140 drift cases produce `NeedEvidence` or `Contradiction`; 0/35 compliant cases produce either. `Unknown` is not counted as detection. Verdicts and reason codes match all 175 fixtures.
+> - **Limits**: These fixtures use preconstructed claims and evidence; they do not certify end-to-end production accuracy or replace independent calibration/holdout cohorts.
 > - **Deliverables & Commands**:
->   * Full Benchmark Report: [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md)
->   * Evaluation Dataset: [evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
+>   * Runtime Package & 3-Mode Acceptance Receipt: [reports/buglecat-delivery-20261014.json](reports/buglecat-delivery-20261014.json)
+>   * Full Benchmark Report: [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md) · Dataset: [evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
 >   * Native Rust Eval Runner: `cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
 >   * Standalone Session Audit & Replay: `python scripts/replay_verification.py path/to/.verification.jsonl --strict`
+>   * Offline Independent Source Pool Audit: `python scripts/audit_claim_source_pool.py`
 
 ## Collaboration & self-test evidence
 
@@ -39,16 +41,16 @@ In the **September 8, 2026** six-category source self-repair test using `deepsee
 
 [![BugleCat desktop screenshot: Tauri + Svelte desktop client](assets/buglecat-desktop-real.png)](nanocodex.html)
 
-**BugleCat** is a local, extensible Codex-style coding agent for Windows. A
-chat-completions model proposes tool calls, the agent runs sandboxed
-file/shell tools, records the session, and loops until the task is done. It
+**BugleCat** is a local, extensible Codex-style coding agent. A
+chat-completions model proposes structured tool calls, the agent runs sandboxed
+file/shell/LSP/terminal tools, records the session and event snapshots, and loops until the task is done. It
 runs against DeepSeek's hosted API or any OpenAI-compatible local model, and
-ships with MCP integration, a skills system, a sandbox/approval state machine,
-context compaction, token-cost accounting, a Windows GUI, a scheduler, and
+ships with MCP integration, a plugin ecosystem, a skills system, a sandbox/approval state machine,
+context compaction, token-cost accounting, a Tauri 2 + Svelte 5 desktop client, a scheduler, and
 git-worktree A/B comparison.
 
 The project evolved from the original `nanocodex` prototype. That legacy name
-still appears in compatibility paths, environment variables, and Python
+still appears in compatibility paths (`~/.nanocodex/`), environment variables (`NANOCODEX_*`), and Python
 commands so existing installations keep working. The project has two clear
 stages. The important shift is not just "same
 features in another language"; it is an architectural split and a release
@@ -73,14 +75,14 @@ into a stricter runtime.
 - Runtime contracts are intentionally dynamic, which made it cheap to add
   features such as MCP marketplace entries, prompt enhancement, image input,
   session resume/fork, and A/B worktree comparison.
-- The Windows GUI uses Tkinter, keeping the first desktop version dependency
+- The legacy prototype GUI uses Tkinter, keeping the first desktop version dependency
   light and simple to debug.
 
 **Performance and delivery profile**
 
 - Best for iteration speed: no compile step, quick experiments, and a large
   offline test suite around mocked providers.
-- 420 offline tests validate behavior without API keys or network calls.
+- Offline unit tests validate behavior without API keys or network calls.
 - Runtime delivery still depends on a Python install, package environment, and
   import-time startup cost; desktop distribution is therefore less clean than a
   native binary.
@@ -98,10 +100,11 @@ tool.
 
 **Architecture**
 
-- The workspace is split by responsibility: `ncx-sandbox`, `ncx-config`,
-  `ncx-provider`, `ncx-tools`, `ncx-core`, and `ncx-cli`.
+- The workspace is split by responsibility: `ncx-config`, `ncx-provider`,
+  `ncx-sandbox`, `ncx-tools`, `ncx-mcp`, `ncx-context`, `ncx-thread-store`,
+  `ncx-protocol`, `ncx-app-server`, `ncx-core`, and `ncx-cli`.
 - Core contracts are typed: provider responses, tool calls, sandbox decisions,
-  session messages, memory entries, and orchestrator results cross crate
+  session messages, memory entries, protocol requests, and orchestrator results cross crate
   boundaries explicitly.
 - Tool execution is centralized behind `ToolContext` and `ToolRegistry`, so
   sandbox policy, approval policy, timeouts, search, and memory are attached at
@@ -120,8 +123,7 @@ tool.
   heuristic deduplication, while `ncx --memory-merge` runs the more expensive
   LLM-backed consolidation only as an explicit maintenance command.
 - The desktop line moves to Tauri v2 + Svelte 5, separating the native backend
-  from the UI surface and preparing a smaller release bundle than the Python GUI
-  path.
+  from the UI surface and building native Windows NSIS installers and macOS DMGs.
 
 **Performance and delivery profile**
 
@@ -136,14 +138,14 @@ tool.
   to reason about without shared mutable state leaks.
 - The workspace test suite covers provider and runtime contracts, sandbox and
   approval policy, tool scheduling and recovery, MCP replacement, persistent
-  processes, LSP, raw PTY sessions, GUI assembly, and orchestration.
+  processes, LSP, raw PTY sessions, GUI assembly, claim verification, and orchestration.
 
 **Platform control-plane upgrades**
 
 - **Task budget:** every model call receives a runtime budget note with current
   model-call, tool-call, and context limits; the loop stops cleanly when model
-  or tool budgets are exhausted and backfills unanswered tool calls so the
-  message history stays valid.
+  or tool budgets are exhausted, backfills unanswered tool calls, and reports
+  unresolved verification status accurately.
 - **Context editing:** the full local session remains intact, but the provider
   sees a send-time edited view that compresses old tool results and drops older
   prefixes once the context budget is exceeded.
@@ -219,8 +221,9 @@ only adding more features:
 - [Token Usage & Cost](#token-usage--cost)
 - [Scheduler](#scheduler)
 - [A/B Worktree Comparison](#ab-worktree-comparison)
-- [GUI](#gui)
+- [BugleCat Desktop GUI](#buglecat-desktop-gui)
 - [Tests](#tests)
+- [Release Packaging](#release-packaging)
 - [Security Notes](#security-notes)
 
 ## Highlights
@@ -265,8 +268,8 @@ only adding more features:
   auto-disable.
 - **A/B worktree comparison** — run one prompt under two configs in isolated git
   worktrees, compare diff/cost/latency, adopt one side.
-- **Prompt enhancement, image input, Chinese-first responses**, and a Tauri 2 +
-  Svelte 5 desktop GUI for Windows.
+- **Prompt enhancement, image input, Chinese-first responses**, and a **Tauri 2 +
+  Svelte 5** desktop client.
 
 ## Architecture
 
@@ -274,17 +277,21 @@ only adding more features:
 rust/
 ├── crates/
 │   ├── ncx-config/        # layered config and runtime limits
-│   ├── ncx-provider/      # replaceable OpenAI-compatible model boundary
-│   ├── ncx-sandbox/       # policy and approval decisions
-│   ├── ncx-tools/         # process executor, managed jobs, PTY, file tools
-│   ├── ncx-mcp/           # MCP transport and external tool discovery
-│   ├── ncx-core/          # AgentLoop, registry, context, middleware, scheduler
-│   └── ncx-cli/           # one-shot and interactive front end
+│   ├── ncx-provider/      # replaceable OpenAI-compatible / Anthropic model boundary
+│   ├── ncx-sandbox/       # policy and 4-state approval decisions
+│   ├── ncx-tools/         # process executor (Windows Job Object), managed jobs, PTY, file & patch tools
+│   ├── ncx-mcp/           # MCP transport, protocol validation, and atomic tool reload
+│   ├── ncx-context/       # associative memory and context retrieval
+│   ├── ncx-thread-store/  # durable session and event storage
+│   ├── ncx-protocol/      # strongly-typed GUI / App Server protocol contract
+│   ├── ncx-app-server/    # desktop and host service bridge
+│   ├── ncx-core/          # AgentLoop, ToolRegistry, middleware, claim verification, orchestrator
+│   └── ncx-cli/           # one-shot and interactive CLI front end (ncx.exe)
 └── gui/
     ├── src/               # Svelte 5 desktop UI
-    └── src-tauri/         # Tauri commands and shared runtime assembly
+    └── src-tauri/         # Tauri v2 native commands and shared runtime assembly
 
-nanocodex/                 # Python reference/prototyping implementation
+nanocodex/                 # Stage 1 Python reference and compatibility implementation
 ```
 
 ## Tools
@@ -313,6 +320,16 @@ sending the entire catalog on every model call.
 | `<tool>` (MCP) | A tool exposed by a connected MCP server, using its server-supplied name. |
 
 ## Install
+
+### Option 1: Prebuilt Releases (Recommended)
+
+Download directly from [GitHub Releases (`v0.1.2`)](https://github.com/dgy-github/BugleCat/releases/latest):
+
+- **Windows NSIS Installer**: `BugleCat_0.1.0_x64-setup.exe`
+- **Windows Full Portable Bundle (includes `BugleCat.exe`, `ncx.exe`, and offline verification tools)**: `buglecat-20261014-final.zip`
+- **macOS Disk Images**: `BugleCat-arm64.dmg` (Apple Silicon) / `BugleCat-x64.dmg` (Intel)
+
+### Option 2: Build from Source
 
 Current Rust release line:
 
@@ -675,9 +692,9 @@ AGENTS.md / CLAUDE.md are project-scoped guidance.
 
 [`local-plugins/llmwiki-memory`](local-plugins/llmwiki-memory) is an optional
 local plugin that adds a more structured memory lifecycle. It combines an
-`always_apply` Skill with one local MCP tool, using `D:\LLMWIKI` as the actual
-memory store. `D:\llm-wiki-template` contains the protocol and initialization
-template; it is not the live data directory.
+`always_apply` Skill with one local MCP tool, using a configured local LLM Wiki
+directory (for example `<llmwiki-root>`) as the actual memory store, while its
+protocol/template repository remains separate from live data.
 
 After the plugin and its MCP server are enabled:
 
@@ -807,24 +824,34 @@ and LSP attachment from the same `AgentRuntimeProfile` assembly path.
 
 ## Tests
 
-Rust release line:
+Rust + Tauri release line (zero real API key / offline deterministic):
 
 ```powershell
-cargo fmt --manifest-path rust\Cargo.toml --all -- --check
-cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
-cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+# Rust formatting check (respects SHA-256 frozen verification example files)
+python scripts/check_rustfmt.py
 
-cd rust\gui
-npm ci
-npm audit
-npm run build
-npm run test:e2e:question
+# Rust workspace & Tauri host static checks and unit tests
+cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
+cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
+
+# Golden evaluation gates (24 unit + 11 cargo suites)
+cargo run --manifest-path rust\Cargo.toml -p ncx-cli -- eval golden evals\golden --tier unit
+cargo run --manifest-path rust\Cargo.toml -p ncx-cli -- eval golden evals\golden --tier cargo
+
+# Frontend protocol drift, TypeScript typecheck, and Vite production build
+npm.cmd --prefix rust\gui run test:protocol
+npm.cmd --prefix rust\gui run protocol:check
+npm.cmd --prefix rust\gui run typecheck
+npm.cmd --prefix rust\gui run build
 ```
 
-Python line:
+Python compatibility & engineering scripts:
 
 ```powershell
 python -m pytest -q
+python -m ruff check .
 ```
 
 The normal Rust and Python suites are deterministic and offline. Explicit live
@@ -833,7 +860,7 @@ reload, and real model-driven combinations of LSP, background, and PTY tools.
 
 ### Claim-Level Contradiction & Agent Drift Verification (Host Physics)
 
-BugleCat includes a deterministic, host-level physical defense line that blocks model statement drift and tool-execution hallucinations:
+BugleCat includes a deterministic, host-level physical defense line (`ncx-core::verification`, rule version `host-rules-v3.4`) that blocks model statement drift and tool-execution hallucinations:
 
 ```powershell
 # Run the 175-case bilingual claim-level contradiction and drift benchmark
@@ -842,117 +869,21 @@ cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/ve
 # Regenerate formatted Markdown benchmark report
 python scripts/format_claim_drift_report.py
 
+# Audit frozen dataset SHA-256 integrity, protocol version alignment, and independent evaluation readiness
+python scripts/audit_claim_source_pool.py
+
 # Independently audit session verification logs (.verification.jsonl) with CI strict gating
 python scripts/replay_verification.py path/to/.verification.jsonl --strict
 ```
 
-The 175 synthetic cases cover 11 policy categories with preconstructed claims and evidence. The v2 metrics count NeedEvidence and Contradiction symmetrically as interventions, and exclude Unknown from detection. These are policy regression results, not an end-to-end or independent production certification. See [the report](reports/claim_drift_eval_report_v1.md).
+The 175 synthetic cases cover 11 policy categories with preconstructed claims and evidence. The v2 metrics count `NeedEvidence` and `Contradiction` symmetrically as interventions, and exclude `Unknown` from detection. These are policy regression results, not an end-to-end or independent production certification. See [the report](reports/claim_drift_eval_report_v1.md).
 
-### Reliability regressions and local development
+### Key Reliability Boundaries Covered by Regression Suites
 
-The regression suite also protects the following boundaries:
-
-- Read-only LLM Wiki memory actions remain available under
-  `approval_policy=never`, while side-effecting MCP calls must return the
-  explicit approval denial instead of being masked by compaction recovery.
-- A malformed MCP resource, command, argument, or unavailable server only skips
-  that plugin/server. Other valid servers still load. Explicit `./` paths resolve
-  from the plugin root; escaping `../` paths are rejected, while bare arguments
-  retain normal process CWD/PATH semantics.
-- Optional Codex plugin resources follow the same isolation boundary: a broken
-  Hooks/Apps document, unreadable catalog entry, or malformed individual App is
-  logged and skipped while valid plugins and resources remain available. The
-  explicit plugin catalog inspection path stays strict for maintenance.
-- MCP startup rejects an explicit protocol-version mismatch before exposing any
-  tools; legacy servers that omit the response field remain compatible.
-- Windows hook tests use a 20-second test timeout to avoid cold-start flakes,
-  and read-only concurrency is asserted with an in-flight peak rather than a
-  fixed wall-clock threshold.
-- Test temporary directories use a unique session ID (time, process ID, and a
-  monotonic sequence), so concurrent IDE and CLI runs cannot clean up each
-  other's fixtures.
-- The Workspace Changes panel has one scroll owner and non-shrinking file rows,
-  so large diffs do not overlap or clip their filenames. Switching workspaces
-  clears pending panel/sidebar projections, including the Forge observer (the
-  process-owned Forge job itself keeps running and its new projection refreshes
-  automatically, including after initial startup); an in-flight memory merge is
-  cancelled only before a real
-  process-directory change and cannot commit its old draft afterward.
-- A per-file Workspace Changes preview is capped at 1,000 lines or 192 KiB and
-  says when it is truncated. Only one preview stays open at a time, preventing
-  a generated or minified file from creating an unbounded WebView DOM tree.
-- Bursty session events share one in-flight sidebar refresh and coalesce into a
-  trailing refresh, rather than repeatedly reading every persisted thread.
-- A create or fork that the host runtime rejects is compensated with an exact
-  durable snapshot check. The rollback removes the new Thread and any copied
-  model context/Goal only if nothing changed it, so retries can reuse the ID
-  without deleting a Thread that has since become active.
-- Rapid Harness Profile choices on an empty thread are serialized. The last
-  choice is the one persisted and activated before its first turn; profiles
-  remain locked once a turn exists. The durable write and first-turn claim are
-  atomic, so a profile request already validating loses safely to that turn.
-- Resume, fork, new-session, and permission-mode rebuilds use the persisted
-  Thread workspace explicitly. Permission-mode requests carry the exact
-  `threadId`; a stale worker request is rejected without writing configuration,
-  and the host finishes workspace transition before reporting readiness, so a
-  delayed worker cannot reuse a previous process directory.
-- Memory list/add/consolidate/merge and Forge start/status/cancel requests
-  carry a workspace snapshot. The host compares it while holding the workspace
-  gate and rejects stale requests instead of applying them to the newly
-  selected project; status projections stay with their owning workspace and
-  cancellation also requires the exact observed job generation.
-
-#### Current reliability pass (2026-09-02)
-
-- Durable Goal phase, process-local activation, and automatic-round admission
-  now share one transition lock. Goal reads return a coherent durable/armed
-  snapshot, and pause/resume/block/complete/clear cannot interleave a stale
-  arm or disarm. `GoalRoundStart` takes the same boundary before claiming a
-  Turn; host-side failure still revokes activation without rewriting the
-  durable Goal.
-- MCP read-only classification trusts only an explicit pair of annotations:
-  `readOnlyHint=true` and `destructiveHint=false`. Missing, partial, malformed,
-  or conflicting annotations remain approval-gated (fail closed); the
-  `llmwiki` multiplexed tool additionally uses its repository-owned read-action
-  allowlist, so a write action cannot inherit a server-level read hint.
-- Provider non-2xx responses (OpenAI-compatible and Anthropic, streaming and
-  non-streaming) expose only `HTTP <status>`. Remote HTML/JSON bodies and
-  credentials are neither buffered nor copied into model context, session
-  logs, or UI errors.
-- The Workspace Changes panel constrains the outer flex workarea and leaves
-  `rp-body` as its single vertical scroll owner. File rows cannot shrink, so
-  long change lists preserve readable line height instead of overlapping rows.
-- The Rust `ncx-protocol::ClientRequest` enum is the source of truth for the
-  GUI method contract. `scripts/check-protocol-version.mjs` generates
-  `rust/gui/src/lib/protocol-version.ts` (the protocol version and all 70
-  camel-case methods); the GUI build runs the drift check and TypeScript
-  type-check before Vite. This prevents a renamed Rust request from silently
-  becoming a runtime IPC failure.
-- The MCP transport keeps one background reader and request-ID pending map per
-  server. Its per-server call gate permits up to four read-only calls and makes
-  side-effecting/unknown calls exclusive; EOF, write failures, and timeouts
-  release pending calls instead of leaving the agent stuck.
-
-The current pass was verified with Rust workspace `--all-features` tests and
-strict clippy, GUI Rust tests/clippy, Vite production build, Python pytest, and
-Ruff; no real provider credential or paid model call is required.
-
-Before submitting, run:
-
-```powershell
-cargo fmt --manifest-path rust\Cargo.toml --all -- --check
-cargo fmt --manifest-path rust\gui\src-tauri\Cargo.toml --all -- --check
-cargo clippy --manifest-path rust\Cargo.toml --workspace --all-targets --all-features -- -D warnings
-cargo clippy --manifest-path rust\gui\src-tauri\Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path rust\Cargo.toml --workspace --all-features
-cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
-npm.cmd --prefix rust\gui run test:protocol
-npm.cmd --prefix rust\gui run protocol:check
-npm.cmd --prefix rust\gui run typecheck
-npm.cmd --prefix rust\gui run build
-python -m pytest -q
-python -m ruff check .
-```
+- **Permission & MCP fail-closed isolation**: MCP read-only classification trusts only explicit `readOnlyHint=true` + `destructiveHint=false` annotations (plus a repo-owned read-action allowlist for multiplexed tools like `llmwiki`). Missing or conflicting annotations remain approval-gated; broken MCP servers or plugin catalogs only skip the offending entry without blocking valid servers.
+- **Protocol & state-machine consistency**: `ncx-protocol::ClientRequest` is the single source of truth for all 70 GUI IPC methods (`scripts/check-protocol-version.mjs` enforces zero drift before Vite builds). Durable Goal state transitions, Harness Profile locking, and Thread workspace snapshots are serialized under atomic host gates so stale background workers cannot cross-contaminate projects.
+- **Provider & UI defensive bounds**: Non-2xx HTTP responses from OpenAI-compatible and Anthropic endpoints expose only `HTTP <status>` without leaking raw remote bodies or credentials into logs/context. Workspace Changes file previews are capped at 1,000 lines / 192 KiB with single-scroll-owner layout protection.
+- **Isolated test fixtures**: Rust and Python test temporary directories use a monotonic per-session ID (timestamp + PID + atomic sequence) so parallel CLI and IDE test runs never collide.
 
 Run the local Tauri development app with:
 

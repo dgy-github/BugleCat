@@ -254,14 +254,14 @@
 
 <header class="hero">
   <h1>BugleCat</h1>
-  <p class="tag">一个面向 DeepSeek 的 Codex-style 本地 coding agent。它不是官方 Codex 的复制品，而是把编码 Agent 最关键的工程机制重建成可读、可测、可替换模型后端的 harness：工具调用、文件修改、命令执行、沙箱审批、会话恢复、MCP、Skills、上下文压缩和成本统计。</p>
+  <p class="tag">一个采用 Rust + Tauri 2 构建、支持多模型商与可插拔 Harness 的本地 coding agent。它不是官方 Codex 的复制品，而是把编码 Agent 最关键的工程机制重建成可读、可测、可替换模型后端的控制面：17 个内置工具、文件检查点、后台 PTY、沙箱审批、宿主声明核验、MCP 热重载、Skills、上下文编辑与离线回归门禁。</p>
   <div class="badges">
-    <span class="badge">Codex-style tool loop</span>
-    <span class="badge">DeepSeek reasoner fixes</span>
-    <span class="badge">MCP</span>
-    <span class="badge">Skills</span>
-    <span class="badge">sandbox approval</span>
-    <span class="badge">JSONL resume</span>
+    <span class="badge">Rust + Tauri 2</span>
+    <span class="badge">17 Built-in Tools</span>
+    <span class="badge">OpenAI &amp; Anthropic Providers</span>
+    <span class="badge">MCP &amp; Skills</span>
+    <span class="badge">Host Claim Verification</span>
+    <span class="badge">Checkpoints &amp; JSONL Resume</span>
     <span class="badge">六类源码自修复 · 报告公开</span>
   </div>
   <div class="hero-actions">
@@ -309,29 +309,29 @@
   <h2><span class="num">01</span>这个项目到底是什么</h2>
   <div class="intro">
     <p class="lead">BugleCat 是一个本地运行、可切换模型商并采用可插拔 Harness 的 coding agent，用来验证“一个模型怎样在受控环境里持续读代码、改文件、跑命令、看结果、再修正”。</p>
-    <p>它对齐的是 Codex 类工具的工程能力，而不是外观：交互式编码循环、工具协议、仓库读写、命令执行、审批/沙箱、会话恢复、AGENTS.md、Skills、MCP、上下文压缩、成本统计和 worktree 隔离实验。</p>
-    <p>后端只要求 OpenAI 兼容 <code>/v1/chat/completions</code>，所以可以接 DeepSeek 托管 API，也可以把 <code>base_url</code> 指到本地 vLLM、llama-server、LM Studio 或企业内网模型服务。</p>
+    <p>它对齐的是 Codex / Claude Code 类工具的工程能力，而不是外观：交互式编码循环、17 个内置工具协议、仓库读写与结构化搜索、命令执行与后台 PTY、审批/沙箱、宿主级声明核验、会话恢复与文件检查点、AGENTS.md、Skills、MCP、上下文编辑和成本统计。</p>
+    <p>后端原生支持 OpenAI 兼容 <code>/v1/chat/completions</code> 与 Anthropic Messages <code>/v1/messages</code>，既可以接 DeepSeek、Claude、OpenAI、智谱、百炼、MiniMax 等托管 API，也可以把 <code>base_url</code> 指到本地 Ollama、vLLM、llama-server、LM Studio 或企业内网模型服务。</p>
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="value">10+</div><div class="label">Codex-style 能力被拆成可测试模块</div></div>
-    <div class="stat"><div class="value">8+</div><div class="label">内置工具，MCP 可继续扩展</div></div>
-    <div class="stat"><div class="value">6+</div><div class="label">DeepSeek-specific 适配与稳定性修复</div></div>
-    <div class="stat"><div class="value">可复查</div><div class="label">测试记录与候选补丁随报告公开</div></div>
+    <div class="stat"><div class="value">11 Crates</div><div class="label">Rust + Tauri 2 模块化工程主线</div></div>
+    <div class="stat"><div class="value">17+</div><div class="label">内置工具（含 Harness / LSP / 后台 PTY），MCP 可继续扩展</div></div>
+    <div class="stat"><div class="value">887</div><div class="label">Rust 工作区与 GUI 宿主确定性回归测试通过</div></div>
+    <div class="stat"><div class="value">可复查</div><div class="label">175 用例声明漂移基准与自我测试报告公开</div></div>
   </div>
 
   <div class="cards">
     <div class="card">
       <h3>不是聊天壳</h3>
-      <p>模型不能直接碰文件系统。它必须输出结构化 tool call，由工具层执行，再把结果喂回模型形成闭环。</p>
+      <p>模型不能直接碰文件系统。它必须输出结构化 tool call，由工具层在沙箱/审批与宿主核验边界内执行，再把真实结果喂回模型形成闭环。</p>
     </div>
     <div class="card">
       <h3>不是官方克隆</h3>
-      <p>不宣称复刻 Codex 云端、PR review 或官方系统沙箱；它聚焦本地 coding agent 的核心可运行链路。</p>
+      <p>不宣称复刻官方云端容器、PR 自动 review 或内核级强隔离；它聚焦本地 coding agent 的核心可运行链路与可审计控制面。</p>
     </div>
     <div class="card">
       <h3>适合放 GitHub 的点</h3>
-      <p>它展示的是 agent 工程化：协议、权限、上下文、成本、状态恢复、DeepSeek 兼容性和离线可回归测试。</p>
+      <p>它展示的是 agent 工程化：协议、权限、工具恢复、上下文编辑、宿主物理事实核验、多厂商兼容性和零 API 离线回归门禁。</p>
     </div>
   </div>
 
@@ -341,18 +341,18 @@
   <table>
     <thead><tr><th>Codex 类能力</th><th>BugleCat 做到了什么</th><th>实现程度</th></tr></thead>
     <tbody>
-      <tr><td>交互式编码循环</td><td><code>AgentLoop.run_turn()</code> 执行“模型 → 工具 → 结果 → 再模型”的多轮循环，CLI 和 GUI 都只是渲染层。</td><td>已实现</td></tr>
-      <tr><td>读仓库 / 改文件 / 跑命令</td><td><code>read_file</code>、<code>apply_patch</code>、<code>shell</code> 统一经 ToolRegistry 派发，模型只提交结构化工具调用。</td><td>已实现</td></tr>
-      <tr><td>计划与过程可见</td><td><code>update_plan</code> 记录多步骤任务状态；GUI/CLI hook 展示流式输出、reasoning、tool call 和结果。</td><td>已实现</td></tr>
-      <tr><td>沙箱与审批</td><td><code>read-only</code> / <code>workspace-write</code> / <code>danger-full-access</code> 三档沙箱，加 <code>untrusted</code> / <code>on-failure</code> / <code>on-request</code> / <code>never</code> 四档审批。</td><td>已实现，Windows 为策略级边界</td></tr>
-      <tr><td>会话恢复与历史</td><td>全量对话写入 JSONL；按 session_id 保存快照，支持 <code>--resume</code>、GUI 会话列表和 fork。</td><td>已实现</td></tr>
-      <tr><td>AGENTS.md 项目指令</td><td><code>agents_md.py</code> 分层读取项目指令并注入 system prompt，让仓库约定持续生效。</td><td>已实现</td></tr>
-      <tr><td>Skills 渐进加载</td><td>用户 skill + 内置 <code>code-review</code> / <code>debug</code> / <code>write-tests</code>；默认只注入名称和描述，需要时再读正文。</td><td>已实现</td></tr>
-      <tr><td>MCP 扩展工具</td><td>从 <code>~/.nanocodex/mcp.toml</code> 连接服务，工具暴露为 <code>mcp__server__tool</code>；附带本地/远程 catalog。</td><td>已实现</td></tr>
-      <tr><td>上下文压缩</td><td>默认 deterministic 零成本摘要，也支持 opt-in 模型 summarizer；保留 system 与最近用户上下文。</td><td>已实现</td></tr>
-      <tr><td>记忆</td><td><code>remember</code> 工具写入 <code>~/.nanocodex/memory.md</code>，用于跨会话保存稳定偏好和项目事实。</td><td>已实现</td></tr>
-      <tr><td>Git worktree 实验</td><td><code>ab_compare.py</code> 用两个隔离 worktree 跑同一 prompt，比较 diff、成本和延迟，再采纳一侧。</td><td>实验性实现</td></tr>
-      <tr><td>GUI / 调度 / 图片输入</td><td>Tkinter GUI、一次性/周期任务、图片 block 支持、prompt 增强和成本显示。</td><td>已实现或局部实现</td></tr>
+      <tr><td>交互式编码循环</td><td><code>ncx-core::AgentLoop</code>（及 Python <code>AgentLoop.run_turn()</code>）执行“模型 → 工具 → 结果 → 再模型”的多轮循环，CLI 和 Tauri GUI 共享同一 <code>AgentRuntimeProfile</code> 装配路径。</td><td>已实现</td></tr>
+      <tr><td>读仓库 / 改文件 / 跑命令</td><td><code>read_file</code>、<code>apply_patch</code>、<code>shell</code>、<code>grep_files</code>、<code>find_files</code>、<code>lsp</code>、<code>pty_*</code> 等 17 个内置工具统一经 <code>ToolRegistry</code> 派发，只读工具可并发执行。</td><td>已实现</td></tr>
+      <tr><td>Harness 结构化探索与恢复</td><td><code>inspect_workspace</code>、<code>plan_change</code>、<code>verify_change</code>、<code>summarize_blockers</code> 配合 <code>ToolRecoveryPolicy</code> 对半截补丁或未知工具做有界重试。</td><td>已实现</td></tr>
+      <tr><td>沙箱、审批与宿主核验</td><td>三档沙箱 + 四档审批 + 权限模式（<code>default</code> / <code>acceptEdits</code> / <code>plan</code> / <code>bypassPermissions</code>），附带宿主级声明漂移物理核验（<code>host-rules-v3.4</code>）。</td><td>已实现，Windows 为策略级边界 + 路径重解析点拦截</td></tr>
+      <tr><td>会话恢复、历史与检查点</td><td>全量对话写入 JSONL；按会话保存快照，支持 <code>--resume</code>、GUI 会话回放，以及每轮自动/手动文件检查点（<code>/checkpoints</code>、<code>/restore</code>）。</td><td>已实现</td></tr>
+      <tr><td>AGENTS.md 项目指令与确定性 Hooks</td><td><code>ncx-core::agents_md</code> 分层读取项目指令注入 system prompt；<code>hooks.json</code> 支持 <code>PreToolUse</code> / <code>PostToolUse</code> / <code>Stop</code> 确定性钩子。</td><td>已实现</td></tr>
+      <tr><td>Skills 渐进加载与 Codex 插件兼容</td><td>用户 skill + 内置 <code>code-review</code> / <code>debug</code> / <code>write-tests</code>；支持直接挂载本地 Codex 插件的 Skills、MCP、Hooks 与 Apps 元数据。</td><td>已实现</td></tr>
+      <tr><td>MCP 扩展工具与热重载</td><td>从 <code>~/.nanocodex/mcp.toml</code> 连接服务，工具暴露为 <code>mcp__server__tool</code>；支持 CLI/GUI 会话内 <code>/mcp reload</code> 热重载与严格只读注解门禁。</td><td>已实现</td></tr>
+      <tr><td>上下文压缩与裁剪</td><td>支持 deterministic 零成本压缩、opt-in 模型摘要，以及按保留条数清理旧工具结果（<code>clear_tool_uses_v1</code>）与旧思考块（<code>clear_thinking_v1</code>）。</td><td>已实现</td></tr>
+      <tr><td>长期记忆</td><td><code>remember</code> 工具写入 <code>~/.nanocodex/memory.md</code>；可选挂载 <code>local-plugins/llmwiki-memory</code> 分层跨会话记忆插件。</td><td>已实现</td></tr>
+      <tr><td>Git worktree A/B 对比</td><td>用两个隔离 git worktree 跑同一 prompt，对比 diff、token 成本和耗时后决定采纳哪一侧（Python <code>ab_compare.py</code>）。</td><td>已实现</td></tr>
+      <tr><td>Tauri 2 桌面端 / 调度 / 图片输入</td><td><code>rust/gui</code> Tauri 2 + Svelte 5 桌面端、<code>ask_user_question</code> 弹窗、工作区变更面板、一次性/周期调度任务与多模态图片输入。</td><td>已实现</td></tr>
     </tbody>
   </table>
 
@@ -361,7 +361,7 @@
   </div>
 
   <h2><span class="num">03</span>核心循环怎么跑</h2>
-  <p><code>AgentLoop.run_turn()</code> 驱动单个用户回合直到完成。一个回合内可能发生多轮模型调用；每轮可产生工具调用，工具结果再进入下一轮上下文，token 用量逐轮累计。</p>
+  <p><code>ncx-core::AgentLoop</code>（以及 Python <code>AgentLoop.run_turn()</code>）驱动单个用户回合直到完成。一个回合内可能发生多轮模型调用；每轮可产生工具调用，经沙箱/审批/Hooks 与工具恢复策略处理后，工具结果再进入下一轮上下文，token 用量逐轮累计。</p>
 
   <div class="loop">
     <span class="step">用户输入</span>
@@ -370,99 +370,98 @@
     <span class="arrow">→</span>
     <span class="step">解析工具调用</span>
     <span class="arrow">→</span>
-    <span class="step">沙箱/审批闸门</span>
+    <span class="step">沙箱/审批/Hooks</span>
     <span class="arrow">→</span>
-    <span class="step">执行工具</span>
+    <span class="step">执行工具与恢复</span>
     <span class="arrow">↺</span>
-    <span class="step done">回合完成</span>
+    <span class="step done">核验与回合完成</span>
   </div>
 
-  <pre><span class="c"># agent/loop.py — 回合产物</span>
-<span class="k">class</span> TurnResult:
-    final_text: str
-    iterations: int          <span class="c"># 本回合循环了几轮</span>
-    stop_reason: str
-    tools_used: list[str]
-    usage: dict[str, int]    <span class="c"># 真实 token 累计 → 折算成本</span></pre>
+  <pre><span class="c">// rust/crates/ncx-core — 回合产物与统计快照</span>
+<span class="k">pub struct</span> TurnOutcome {
+    <span class="k">pub</span> final_text: String,
+    <span class="k">pub</span> iterations: usize,          <span class="c">// 本回合循环了几轮</span>
+    <span class="k">pub</span> stop_reason: StopReason,    <span class="c">// 完成 / 预算触顶 / 用户取消</span>
+    <span class="k">pub</span> tools_used: Vec&lt;String&gt;,
+    <span class="k">pub</span> usage: TokenUsage,          <span class="c">// 含 prompt_cache_hit / miss 拆分</span>
+}</pre>
 
   <div class="flow-detail">
-    <div class="flow-item"><b>1. 组装上下文</b><span>system prompt、AGENTS.md、memory、skills 描述、MCP schema 和历史消息一起进入模型。</span></div>
-    <div class="flow-item"><b>2. 调用模型</b><span>DeepSeek provider 发起 chat/completions；支持非流式和流式 tool_calls。</span></div>
-    <div class="flow-item"><b>3. 工具派发</b><span>ToolRegistry 按名称路由到 shell、apply_patch、read_file、remember 或 MCP 工具。</span></div>
-    <div class="flow-item"><b>4. 权限判断</b><span>沙箱策略判断可读、可写、可联网；审批策略决定 ASK / AUTO_DENY / AUTO_APPROVE。</span></div>
-    <div class="flow-item"><b>5. 结果回填</b><span>工具结果以 tool message 回到模型上下文，模型根据真实输出继续修正。</span></div>
-    <div class="flow-item"><b>6. 持久化</b><span>最终答案、工具轨迹、reasoning、token usage 和会话快照写入本地。</span></div>
+    <div class="flow-item"><b>1. 组装上下文</b><span>system prompt、AGENTS.md、memory、skills 描述、MCP schema、上下文裁剪策略和历史消息一起进入模型。</span></div>
+    <div class="flow-item"><b>2. 调用模型</b><span>OpenAI 兼容或 Anthropic Messages provider 发起请求；支持流式思考、正文和分片 tool_calls 聚合。</span></div>
+    <div class="flow-item"><b>3. 工具派发</b><span>ToolRegistry 按名称路由到 17 个内置工具或 MCP 工具；连续只读工具批次可并发执行。</span></div>
+    <div class="flow-item"><b>4. 权限与 Hooks</b><span>沙箱策略校验工作区与路径重解析点；审批策略与 PreToolUse / PostToolUse hooks 决定放行、拦截或请求用户确认。</span></div>
+    <div class="flow-item"><b>5. 结果回填与恢复</b><span>工具输出回到模型上下文；若遇到半截补丁或参数格式错误，ToolRecoveryPolicy 注入结构化修复提示。</span></div>
+    <div class="flow-item"><b>6. 核验与持久化</b><span>可选宿主级声明核验拦截“未测宣称已测”；最终答案、工具轨迹、检查点、token usage 和会话快照写入本地。</span></div>
   </div>
 
-  <h2><span class="num">04</span>针对 DeepSeek 做了哪些优化</h2>
-  <p class="lead">DeepSeek/OpenAI 兼容接口能跑起来只是第一步。真正做 coding agent 时，reasoner、tool call 历史、流式超时、usage 字段和成本统计都会踩坑。BugleCat 在 Provider 与 Harness 边界统一处理这些兼容问题。</p>
+  <h2><span class="num">04</span>针对 DeepSeek 与多模型网关做了哪些适配</h2>
+  <p class="lead">OpenAI 兼容或 Anthropic 接口能跑起来只是第一步。真正做 coding agent 时，reasoner 思考回放、流式 tool call 分片、首包超时、HTTP 异常脱敏和 cache 计费都会踩坑。BugleCat 在 Provider 与 Harness 边界统一处理这些兼容问题。</p>
 
   <table>
     <thead><tr><th>优化点</th><th>为什么需要</th><th>实现位置</th></tr></thead>
     <tbody>
-      <tr><td><code>reasoning_content</code> 回放</td><td>DeepSeek V4/reasoner 在 assistant 历史里有 <code>tool_calls</code> 但缺 reasoning 时可能拒绝后续请求；BugleCat 会为旧会话补 <code>(reasoning omitted)</code> 占位。</td><td><code>_sanitize_reasoning_replay()</code></td></tr>
-      <tr><td>reasoning 字段兼容</td><td>不同兼容网关可能返回 <code>reasoning_content</code> 或 <code>reasoning</code>；统一抽取后 CLI/GUI 可把思考流和正文流分开显示。</td><td><code>_extract_reasoning()</code></td></tr>
-      <tr><td>DeepSeek thinking 参数映射</td><td><code>off</code> 映射到 <code>thinking: disabled</code>，<code>max/high</code> 映射到 DeepSeek thinking-mode 的 <code>extra_body</code>，避免配置写了但请求没带。</td><td><code>_apply_reasoning_effort()</code></td></tr>
-      <tr><td>自适应推理档</td><td><code>auto</code> 不再只是 no-op；遇到“报错/调试/debug/エラー”走 <code>max</code>，搜索类任务走 <code>low</code>，普通开发默认 <code>high</code>。</td><td><code>agent/auto_reasoning.py</code></td></tr>
-      <tr><td>流式首包超时</td><td>Windows / 代理网络下，流式请求可能在首个 chunk 前卡住。默认 45 秒未拿到 response headers 就明确报错，可用环境变量调到 5-300 秒。</td><td><code>NANOCODEX_STREAM_OPEN_TIMEOUT_S</code></td></tr>
-      <tr><td>流式 tool call 聚合</td><td>tool call 在 stream 里按 index 分片到达；BugleCat 聚合 id、name、arguments 后再交给 ToolRegistry，避免半截 JSON 直接执行。</td><td><code>chat_stream()</code></td></tr>
-      <tr><td>DeepSeek cache-aware usage</td><td>DeepSeek 的 <code>prompt_cache_hit_tokens</code> / <code>prompt_cache_miss_tokens</code> 可能在 SDK 的 <code>model_extra</code> 里；BugleCat 会读出来做命中/未命中分开计价。</td><td><code>_extract_usage()</code> + <code>pricing.py</code></td></tr>
-      <tr><td>托管 / 本地双模式</td><td>同一套工具协议可以接 DeepSeek 官方 API，也可以接本地 vLLM / llama-server / LM Studio / Qwen endpoint，用于比较模型 coding agent 能力。</td><td><code>base_url</code> + <code>model</code> 配置</td></tr>
+      <tr><td><code>reasoning_content</code> 回放</td><td>DeepSeek reasoner 在 assistant 历史里有 <code>tool_calls</code> 但缺 reasoning 时可能拒绝后续请求；BugleCat 会为历史回合保留或补齐占位。</td><td><code>ncx-provider</code> / <code>_sanitize_reasoning_replay()</code></td></tr>
+      <tr><td>reasoning 字段兼容</td><td>不同兼容网关可能返回 <code>reasoning_content</code>、<code>reasoning</code> 或 Anthropic thinking block；统一抽取后 CLI/GUI 可把思考流和正文流分开显示。</td><td><code>ncx-provider</code> / <code>_extract_reasoning()</code></td></tr>
+      <tr><td>DeepSeek thinking 参数映射</td><td><code>off</code> 映射到 <code>thinking: disabled</code>，<code>max/high</code> 映射到 DeepSeek thinking-mode 的扩展字段，避免配置写了但请求没带。</td><td><code>ncx-provider</code> / <code>_apply_reasoning_effort()</code></td></tr>
+      <tr><td>自适应推理档</td><td><code>auto</code> 不再只是 no-op；遇到“报错/调试/debug/エラー”走 <code>max</code>，搜索类任务走 <code>low</code>，普通开发默认 <code>high</code>。</td><td><code>ncx-core::auto_reasoning</code> / <code>agent/auto_reasoning.py</code></td></tr>
+      <tr><td>流式首包超时与错误脱敏</td><td>代理网络下流式请求可能卡住；非 2xx 响应统一只暴露 <code>HTTP &lt;status&gt;</code>，不把远端 HTML/JSON 原文或凭据拼进上下文或日志。</td><td><code>ncx-provider</code> / <code>NANOCODEX_STREAM_OPEN_TIMEOUT_S</code></td></tr>
+      <tr><td>流式 tool call 聚合</td><td>tool call 在 SSE 流里按 index 分片到达；BugleCat 聚合完整 id、name、arguments 后再交给 ToolRegistry，避免半截 JSON 直接执行。</td><td><code>ncx-provider::sse</code> / <code>chat_stream()</code></td></tr>
+      <tr><td>DeepSeek cache-aware usage</td><td>自动提取 <code>prompt_cache_hit_tokens</code> / <code>prompt_cache_miss_tokens</code>，在 CLI <code>/usage</code> 中展示命中拆分，并在 Python 线按命中/未命中分别折算美元成本。</td><td><code>ncx-provider</code> + <code>pricing.py</code></td></tr>
+      <tr><td>多协议托管 / 本地双模式</td><td>同一套工具与权限控制面既可接 OpenAI-compatible 端点，也可接原生 Anthropic Messages 端点或本地 Ollama / vLLM / LM Studio。</td><td><code>protocol</code> + <code>base_url</code> + <code>model</code> 配置</td></tr>
     </tbody>
   </table>
 
   <h2><span class="num">05</span>工程取舍与边界</h2>
   <ul class="detail-list">
-    <li><b>核心循环小：</b>AgentLoop 只关心“模型、工具、结果、继续”，GUI、CLI、调度器都通过 hook 或边界层装配。</li>
-    <li><b>工具协议显式：</b>每个工具有 schema、参数校验和统一返回格式；模型不能绕过工具层直接写文件或跑命令。</li>
-    <li><b>DeepSeek 优先：</b>provider 命名为 DeepSeekProvider，但保持 OpenAI-compatible 形状，方便接本地模型和企业网关。</li>
-    <li><b>安全不吹大：</b>Windows 侧是策略级沙箱，不宣称内核隔离；MCP 子进程运行在沙箱外，只应启用可信服务。</li>
-    <li><b>上下文压缩可控：</b>默认 deterministic compaction，不额外花 token；需要自然摘要时才 opt-in 模型 summarizer。</li>
-    <li><b>成本统计保守：</b>能拿到 cache hit / miss 就分别计费，拿不到就按未命中估算，避免给出虚假的低成本。</li>
-    <li><b>测试优先：</b>provider、时间、文件、网络都可注入 mock；本次发布验证的数量和范围见上方自我测试报告。</li>
-    <li><b>没有覆盖的能力：</b>尚未实现官方 Codex 的云端容器、GitHub PR review、完整 Computer Use、子代理编排和 OS 级强沙箱。</li>
+    <li><b>核心循环清晰：</b><code>ncx-core</code> 统一管理会话、上下文编辑、预算、检查点与声明核验，CLI 与 Tauri GUI 共享同一套 <code>AgentRuntimeProfile</code> 与 70 个强类型协议方法。</li>
+    <li><b>工具协议显式：</b>17 个内置工具均有严格 JSON schema、参数校验和统一返回格式；模型不能绕过工具层直接写文件或跑命令。</li>
+    <li><b>多模型商中立：</b>内置 DeepSeek、Anthropic、OpenAI、智谱、百炼、MiniMax、Kimi、硅基流动与本地网关预设，一键切换无需重写工具层。</li>
+    <li><b>安全不吹大：</b>Windows 侧是策略级沙箱 + 工作区路径重解析点拦截，不宣称内核隔离；MCP 子进程运行在沙箱外且默认遵循 fail-closed 审批门禁。</li>
+    <li><b>上下文可治理：</b>结合 deterministic 压缩、opt-in 模型摘要以及旧工具输出/思考块定向裁剪，控制长会话成本与延迟。</li>
+    <li><b>宿主级诚实核验：</b>提供 <code>ncx-core::verification</code> 确定性声明核验器（<code>host-rules-v3.4</code>），可物理拦截“未运行测试却宣称通过”的幻觉声明。</li>
+    <li><b>离线确定性回归：</b>Rust 工作区、Tauri 宿主、Golden 评测门禁与 Python 测试全套可在无真实 API Key、无外网条件下 100% 确定性通过。</li>
+    <li><b>没有覆盖的能力：</b>尚未实现官方 Codex 的云端托管容器、GitHub PR 自动 review、完整 Computer Use 和 OS 内核级强沙箱。</li>
   </ul>
 
   <div class="callout blue">
-    <b>一句话价值：</b>BugleCat 证明的是“多个模型商可以接进同一套 Codex-style coding agent 工具链”，而且这套链路有权限边界、会话恢复、上下文管理、成本统计和离线测试。
+    <b>一句话价值：</b>BugleCat 证明的是“多个模型商可以接进同一套可审计的 Codex-style coding agent 工具链”，而且这套链路有权限边界、文件检查点、上下文治理、宿主事实核验和全套离线回归测试。
   </div>
 
   <h2><span class="num">06</span>模块地图</h2>
   <div class="modules">
-    <div class="mod"><span class="path">agent/loop.py</span><div class="desc">回合循环，模型↔工具的推进引擎。</div></div>
-    <div class="mod"><span class="path">provider/deepseek.py</span><div class="desc">OpenAI 兼容后端 + 流式 + 用量提取。</div></div>
-    <div class="mod"><span class="path">tools/</span><div class="desc">8 个内置工具 + 注册派发。</div></div>
-    <div class="mod"><span class="path">sandbox/</span><div class="desc">策略 + 审批 + 执行三分离。</div></div>
-    <div class="mod"><span class="path">agent/compaction.py</span><div class="desc">上下文压缩，零成本/摘要双策略。</div></div>
-    <div class="mod"><span class="path">agent/auto_reasoning.py</span><div class="desc">自适应推理档（中日英关键词）。</div></div>
-    <div class="mod"><span class="path">agent/pricing.py</span><div class="desc">cache-aware 成本折算。</div></div>
-    <div class="mod"><span class="path">agent/session_index.py</span><div class="desc">会话索引 + 快照回放。</div></div>
-    <div class="mod"><span class="path">agent/memory_store.py</span><div class="desc">跨会话用户记忆。</div></div>
-    <div class="mod"><span class="path">agent/skills_store.py</span><div class="desc">用户 + 内置双根 skill 发现。</div></div>
-    <div class="mod"><span class="path">tools/mcp.py</span><div class="desc">MCP 桥接，沙箱外子进程。</div></div>
-    <div class="mod"><span class="path">agent/ab_compare.py</span><div class="desc">A/B worktree 隔离对比。</div></div>
-    <div class="mod"><span class="path">gui.py</span><div class="desc">Windows Tkinter GUI（~3972 行）。</div></div>
-    <div class="mod"><span class="path">cli.py</span><div class="desc">命令行入口与 loop 装配。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-core</span><div class="desc">Agent 主循环、Harness Profile、上下文编辑、检查点、Hooks 与宿主声明核验。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-tools</span><div class="desc">17 个内置工具实现、ToolRegistry 派发与只读并发调度。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-sandbox</span><div class="desc">沙箱策略、四档审批、权限模式与路径重解析点防护。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-provider</span><div class="desc">OpenAI 兼容与 Anthropic Messages 流式客户端、SSE 聚合与用量提取。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-mcp</span><div class="desc">MCP JSON-RPC 2.0 传输、严格只读注解判定、目录安装与会话热重载。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-lsp</span><div class="desc">异步 JSON-RPC LSP 客户端（定义跳转、引用查找、悬停类型与实时诊断）。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-protocol</span><div class="desc">CLI / App-Server / Tauri GUI 共享的 70 个强类型请求与事件协议定义。</div></div>
+    <div class="mod"><span class="path">rust/crates/ncx-cli</span><div class="desc"><code>nanocodex-rs</code> 交互式 REPL、斜杠命令、调度器与 Golden 评测入口。</div></div>
+    <div class="mod"><span class="path">rust/gui</span><div class="desc">BugleCat 桌面端（Tauri 2 Rust 宿主 + Svelte 5 前端界面）。</div></div>
+    <div class="mod"><span class="path">nanocodex/</span><div class="desc">Python 原始兼容实现（含 <code>ab_compare.py</code> worktree 对比与美元成本折算）。</div></div>
   </div>
 
   <h2><span class="num">07</span>快速开始</h2>
-  <pre><span class="c"># 安装（含开发依赖）</span>
-python -m pip install -e <span class="s">".[dev]"</span>
+  <pre><span class="c"># 方式一：直接下载 GitHub Release v0.1.2 预编译包</span>
+<span class="c"># https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2</span>
+<span class="c"># 解压 buglecat-20261014-final.zip 或安装 BugleCat_0.1.0_x64-setup.exe</span>
 
-<span class="c"># DeepSeek 托管 API 配置示例：~/.nanocodex/config.toml</span>
+<span class="c"># 配置文件示例：~/.nanocodex/config.toml</span>
 api_key = <span class="s">"sk-..."</span>
 base_url = <span class="s">"https://api.deepseek.com/v1"</span>
 model = <span class="s">"deepseek-chat"</span>
 reasoning_effort = <span class="s">"auto"</span>
 
-<span class="c"># CLI</span>
-nanocodex --cd .
-nanocodex <span class="s">"add a --json flag to the CLI"</span>
+<span class="c"># 方式二：源码构建与运行 Rust CLI / Tauri 桌面端</span>
+cargo run --manifest-path rust\Cargo.toml -p ncx-cli -- --cd .
+cargo run --manifest-path rust\Cargo.toml -p ncx-cli -- <span class="s">"summarize this repository"</span>
+npm.cmd --prefix rust\gui run tauri dev
 
-<span class="c"># GUI</span>
-nanocodex-gui --cd .
-
-<span class="c"># 全套离线测试（无需真实 key / 网络）</span>
+<span class="c"># 全套离线回归测试（无需真实 API Key / 外网）</span>
+python scripts/check_rustfmt.py
+cargo test --manifest-path rust\Cargo.toml --workspace --all-features
+cargo test --manifest-path rust\gui\src-tauri\Cargo.toml --lib
 python -m pytest -q</pre>
 
   <div class="callout">
