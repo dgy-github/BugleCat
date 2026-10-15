@@ -156,10 +156,12 @@ async fn execute_read_batch(
     for call in &batch {
         record_tool_start(output.tools_used, output.sink, call);
     }
+    let started = std::time::Instant::now();
     let results = agent
         .tool_scheduler
         .execute_read_only_batch(&agent.tools, &batch, agent.max_parallel_tool_calls, cancel)
         .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
     for (position, call) in batch.into_iter().enumerate() {
         let result = results.get(position).cloned().unwrap_or_else(|| {
             "Error: tool scheduler returned no result for this call.".to_string()
@@ -167,7 +169,7 @@ async fn execute_read_batch(
         if classify_tool_result(&result).is_some() {
             *output.tool_failures += 1;
         }
-        record_tool_result(agent, output.sink, call, result);
+        record_tool_result(agent, output.sink, call, result, Some(duration_ms));
     }
     index
 }
@@ -179,15 +181,17 @@ async fn execute_serial(
     output: &mut DispatchOutput<'_>,
 ) {
     record_tool_start(output.tools_used, output.sink, call);
+    let started = std::time::Instant::now();
     let result = agent
         .tool_scheduler
         .execute_one(&agent.tools, call, cancel)
         .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
     trace::tool_result(&call.name, &result);
     if classify_tool_result(&result).is_some() {
         *output.tool_failures += 1;
     }
-    record_tool_result(agent, output.sink, call, result);
+    record_tool_result(agent, output.sink, call, result, Some(duration_ms));
 }
 
 fn record_tool_start(tools_used: &mut Vec<String>, sink: &mut Option<EventSink>, call: &ToolCall) {
@@ -201,11 +205,14 @@ fn record_tool_start(tools_used: &mut Vec<String>, sink: &mut Option<EventSink>,
     );
 }
 
+/// Emit `LoopEvent::ToolResult` and persist the tool result with wall-clock execution
+/// duration (`duration_ms`) into the session's in-conversation `_trace`.
 fn record_tool_result(
     agent: &mut AgentLoop,
     sink: &mut Option<EventSink>,
     call: &ToolCall,
     result: String,
+    duration_ms: Option<u64>,
 ) {
     emit(
         sink,
@@ -214,7 +221,9 @@ fn record_tool_result(
             result: result.clone(),
         },
     );
-    agent.session.add_tool_result(&call.id, &call.name, &result);
+    agent
+        .session
+        .add_tool_result_timed(&call.id, &call.name, &result, duration_ms);
 }
 
 fn is_cancelled(cancel: Option<&dyn Fn() -> bool>) -> bool {

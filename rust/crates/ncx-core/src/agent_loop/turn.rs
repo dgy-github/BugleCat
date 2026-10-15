@@ -729,9 +729,20 @@ fn finish_response(
     if has_unfinished_plan(agent) {
         return None;
     }
-    agent
-        .session
-        .add_assistant(&text, None, &response.reasoning);
+    // Persist the assistant message along with Pi-style in-conversation trace metadata
+    // (`model`, `finish_reason`, and per-step token `usage`).
+    let active_model = agent
+        .provider
+        .confirmed_model()
+        .unwrap_or_else(|| agent.provider.model().to_string());
+    agent.session.add_assistant_with_meta(
+        &text,
+        None,
+        &response.reasoning,
+        Some(&active_model),
+        Some(&response.finish_reason),
+        &response.usage,
+    );
     emit(
         sink,
         LoopEvent::AssistantText {
@@ -817,9 +828,19 @@ fn persist_tool_calls(agent: &mut AgentLoop, response: &ModelResponse) {
             })
         })
         .collect();
-    agent
-        .session
-        .add_assistant(&response.content, Some(calls), &response.reasoning);
+    // Record model, finish_reason, and token usage on tool-calling assistant turns as well.
+    let active_model = agent
+        .provider
+        .confirmed_model()
+        .unwrap_or_else(|| agent.provider.model().to_string());
+    agent.session.add_assistant_with_meta(
+        &response.content,
+        Some(calls),
+        &response.reasoning,
+        Some(&active_model),
+        Some(&response.finish_reason),
+        &response.usage,
+    );
 }
 
 fn stop_turn(

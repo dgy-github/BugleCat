@@ -193,9 +193,7 @@ impl Session {
             .enumerate()
             .map(|(index, message)| {
                 let mut message = redact_image_data(message, "[image omitted from summary]");
-                if let Some(object) = message.as_object_mut() {
-                    object.remove("_compaction_safety");
-                }
+                strip_internal_fields(&mut message);
                 format!("[S{index}] {message}")
             })
             .collect();
@@ -260,6 +258,13 @@ impl Session {
             response.content.trim(),
             safety_marker(&plan.snapshot)
         );
+        // Record the entry ID of the first retained tail message so the checkpoint's
+        // `_trace.compaction` points directly at the kept boundary (Pi-style compaction entry).
+        let first_kept_entry_id = plan
+            .tail
+            .first()
+            .and_then(Session::message_trace)
+            .map(|trace| trace.id);
         let mut body = vec![json!({"role":"user", "content": content,
             "_compaction_safety": plan.snapshot})];
         body.extend(plan.tail);
@@ -283,6 +288,18 @@ impl Session {
             dropped_messages: self.messages.len() - (body.len() - 1),
             compressed_tool_results: 0,
         };
+        if let Some(first) = body.first_mut() {
+            self.attach_compaction_trace(
+                first,
+                CompactionTrace {
+                    first_kept_entry_id,
+                    dropped_messages: stats.dropped_messages,
+                    compressed_tool_results: stats.compressed_tool_results,
+                    chars_before: stats.original_chars,
+                    chars_after: stats.edited_chars,
+                },
+            );
+        }
         self.persist_checkpoint(&body)?;
         // The checkpoint rewrites the session log, so the summarized prefix is
         // only recoverable from the append-only provenance store after this.
@@ -292,6 +309,7 @@ impl Session {
             Some("ok"),
         );
         self.messages = body;
+        self.sync_trace_cursor();
         Ok(stats)
     }
 

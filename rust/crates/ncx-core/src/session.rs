@@ -49,6 +49,69 @@ pub struct SafeCompactionResult {
     pub conflicts: Vec<String>,
 }
 
+/// Compaction boundary metadata embedded inside a compacted milestone entry's `_trace`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct CompactionTrace {
+    /// Entry ID of the first kept message after the compacted prefix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_kept_entry_id: Option<String>,
+    /// Number of historical messages folded into this compaction entry.
+    pub dropped_messages: usize,
+    /// Number of tool results compressed in-place.
+    pub compressed_tool_results: usize,
+    /// Context character count before compaction.
+    pub chars_before: usize,
+    /// Context character count after compaction.
+    pub chars_after: usize,
+}
+
+/// Pi-style in-conversation trace metadata embedded under `"_trace"` on each
+/// session message in `self.messages` and persisted in `session.jsonl`.
+/// Automatically stripped by `for_model_edited` before sending to the LLM.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct MessageTrace {
+    /// Stable unique entry ID within the session (e.g. `"e1"`, `"e2"`).
+    pub id: String,
+    /// Parent entry ID in the conversation tree (`None` for the root entry).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Turn number assigned by the agent loop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<u64>,
+    /// Millisecond epoch timestamp when the entry was recorded.
+    pub timestamp: u64,
+    /// Short SHA-256 digest of the untruncated message content / tool payload.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub content_hash: String,
+    /// Workspace git revision at the time of recording, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_revision: Option<String>,
+    /// Model identifier that produced an assistant message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Provider finish reason for an assistant message (`"stop"`, `"tool_calls"`, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+    /// Per-step token usage for an assistant message.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub usage: std::collections::BTreeMap<String, i64>,
+    /// Normalized execution outcome for a tool result (`"completed"`, `"failed"`, `"cancelled"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    /// Normalized failure class for a failed tool result (e.g. `"notfound"`, `"timeout"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_class: Option<String>,
+    /// Process exit code parsed from a shell/tool result, if present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Execution wall-clock duration in milliseconds for a tool call, if measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Compaction metadata when this entry is a compaction milestone/summary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction: Option<CompactionTrace>,
+}
+
 /// Longest excerpt stored per provenance record. The full text stays in the
 /// JSONL log; `content_hash` covers the untruncated original.
 const MAX_TRACE_EXCERPT_CHARS: usize = 4_000;
@@ -69,6 +132,8 @@ pub struct Session {
     turn_id: Option<u64>,
     workspace_revision: Option<String>,
     workspace: Option<String>,
+    next_entry_seq: u64,
+    last_entry_id: Option<String>,
 }
 
 impl Session {
@@ -101,7 +166,32 @@ impl Session {
             turn_id: None,
             workspace_revision: None,
             workspace: None,
+            next_entry_seq: 1,
+            last_entry_id: None,
         }
+    }
+
+    /// Extract the embedded Pi-style `MessageTrace` from a session message value.
+    pub fn message_trace(msg: &Value) -> Option<MessageTrace> {
+        serde_json::from_value(msg.get("_trace")?.clone()).ok()
+    }
+
+    /// Return all in-conversation `MessageTrace` nodes currently in the session.
+    pub fn trace_entries(&self) -> Vec<MessageTrace> {
+        self.messages
+            .iter()
+            .filter_map(Self::message_trace)
+            .collect()
+    }
+
+    /// Return the entry ID of the current conversation leaf node.
+    pub fn leaf_entry_id(&self) -> Option<String> {
+        self.last_entry_id.clone().or_else(|| {
+            self.messages
+                .last()
+                .and_then(Self::message_trace)
+                .map(|t| t.id)
+        })
     }
 
     /// Attach the shared fact-event store. Without it the session still works;
@@ -126,11 +216,12 @@ impl Session {
             .collect()
     }
 
-    fn append_event(&self, msg: &Value) {
+    fn append_event(&self, msg: &Value, entry_id: &str) {
         let Some(store) = &self.events else {
             return;
         };
         let workspace = self.workspace.clone();
+        let source_ref = self.source_ref_for(entry_id);
         match role(msg) {
             Some("user") => {
                 let text = message_content_text(msg);
@@ -149,8 +240,9 @@ impl Session {
                     )
                     .with_turn(self.turn_id)
                     .with_workspace(workspace)
-                    .with_source_ref(self.source_ref())
+                    .with_source_ref(source_ref)
                     .with_payload(&json!({
+                        "entry_id": entry_id,
                         "text_hash": crate::context_trace::content_hash(&text),
                         "text": crate::verification::evidence::redact(&text).chars().take(64_000).collect::<String>(),
                         "text_truncated": text.chars().count() > 64_000,
@@ -183,8 +275,9 @@ impl Session {
                         .with_turn(self.turn_id)
                         .with_tool_call(Some(call_id.to_string()))
                         .with_workspace(workspace.clone())
-                        .with_source_ref(self.source_ref())
+                        .with_source_ref(source_ref.clone())
                         .with_payload(&json!({
+                            "entry_id": entry_id,
                             "tool": name,
                             "workspace_revision": self.workspace_revision,
                             "call_hash": crate::context_trace::content_hash(&format!("{name} {}", call["function"]["arguments"].as_str().unwrap_or_default())),
@@ -221,8 +314,9 @@ impl Session {
                     .with_turn(self.turn_id)
                     .with_tool_call(Some(call_id.to_string()))
                     .with_workspace(workspace.clone())
-                    .with_source_ref(self.source_ref())
+                    .with_source_ref(source_ref)
                     .with_payload(&json!({
+                        "entry_id": entry_id,
                         "tool": msg.get("name").and_then(Value::as_str),
                         "result_hash": crate::context_trace::content_hash(&text),
                         "exit_code": parse_exit_code(&text),
@@ -234,11 +328,18 @@ impl Session {
         }
     }
 
-    /// Points an event back at the verbatim JSONL line it came from.
+    /// Points an event back at the immutable `_trace.id` of the JSONL entry it came from.
     fn source_ref(&self) -> Option<String> {
+        let anchor = self
+            .leaf_entry_id()
+            .unwrap_or_else(|| format!("e{}", self.messages.len()));
+        self.source_ref_for(&anchor)
+    }
+
+    fn source_ref_for(&self, entry_id: &str) -> Option<String> {
         self.log_path
             .as_ref()
-            .map(|path| format!("{}#{}", path.display(), self.messages.len()))
+            .map(|path| format!("{}#{entry_id}", path.display()))
     }
 
     /// Provenance store for this session, when it has a durable log.
@@ -432,6 +533,7 @@ impl Session {
         let mut session = Self::with_log(system, log_path);
         session.restored_count = body.len();
         session.messages = body;
+        session.sync_trace_cursor();
         session
     }
 
@@ -448,7 +550,35 @@ impl Session {
         let mut session = Self::with_log(system, log_path);
         session.restored_count = body.len();
         session.messages = body;
+        session.sync_trace_cursor();
         session
+    }
+
+    /// Synchronize the in-conversation trace sequence counter (`next_entry_seq`)
+    /// and leaf cursor (`last_entry_id`) after restoring from JSONL, forking, or
+    /// rewriting the message list during compaction.
+    ///
+    /// Guarantees that newly appended entries never collide with existing `eN`
+    /// entry IDs and always link `parent_id` to the current leaf entry.
+    pub(crate) fn sync_trace_cursor(&mut self) {
+        let mut max_seq = 0u64;
+        let mut last_id = None;
+        for msg in &self.messages {
+            if let Some(trace) = Self::message_trace(msg) {
+                if let Some(seq) = trace
+                    .id
+                    .strip_prefix('e')
+                    .and_then(|s| s.parse::<u64>().ok())
+                {
+                    max_seq = max_seq.max(seq);
+                }
+                last_id = Some(trace.id);
+            }
+        }
+        if max_seq >= self.next_entry_seq {
+            self.next_entry_seq = max_seq + 1;
+        }
+        self.last_entry_id = last_id;
     }
 
     pub fn full_messages(&self) -> Vec<Value> {
@@ -475,6 +605,26 @@ impl Session {
         tool_calls: Option<Vec<Value>>,
         reasoning: &str,
     ) {
+        self.add_assistant_with_meta(
+            content,
+            tool_calls,
+            reasoning,
+            None,
+            None,
+            &std::collections::BTreeMap::new(),
+        );
+    }
+
+    /// Append an assistant message with per-step model, finish_reason, and token usage trace metadata.
+    pub fn add_assistant_with_meta(
+        &mut self,
+        content: &str,
+        tool_calls: Option<Vec<Value>>,
+        reasoning: &str,
+        model: Option<&str>,
+        finish_reason: Option<&str>,
+        usage: &std::collections::BTreeMap<String, i64>,
+    ) {
         let mut msg = serde_json::Map::new();
         msg.insert("role".into(), json!("assistant"));
         msg.insert("content".into(), json!(content));
@@ -486,17 +636,55 @@ impl Session {
         if !reasoning.trim().is_empty() {
             msg.insert("reasoning_content".into(), json!(reasoning));
         }
+        let mut seed_trace = MessageTrace {
+            model: model
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            finish_reason: finish_reason
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+            usage: usage.clone(),
+            ..Default::default()
+        };
+        if seed_trace.model.is_some()
+            || seed_trace.finish_reason.is_some()
+            || !seed_trace.usage.is_empty()
+        {
+            seed_trace.id = String::new();
+            if let Ok(trace_val) = serde_json::to_value(&seed_trace) {
+                msg.insert("_trace".into(), trace_val);
+            }
+        }
         self.append(Value::Object(msg));
     }
 
     /// Append a tool result message answering a specific tool_call id.
     pub fn add_tool_result(&mut self, call_id: &str, name: &str, result: &str) {
-        self.append(json!({
+        self.add_tool_result_timed(call_id, name, result, None);
+    }
+
+    /// Append a tool result message with measured execution duration in milliseconds.
+    pub fn add_tool_result_timed(
+        &mut self,
+        call_id: &str,
+        name: &str,
+        result: &str,
+        duration_ms: Option<u64>,
+    ) {
+        let mut msg = json!({
             "role": "tool",
             "tool_call_id": call_id,
             "name": name,
             "content": result,
-        }));
+        });
+        if let Some(ms) = duration_ms {
+            if let Some(obj) = msg.as_object_mut() {
+                obj.insert("_trace".into(), json!({"id": "", "timestamp": 0, "duration_ms": ms}));
+            }
+        }
+        self.append(msg);
     }
 
     /// System message + history, ready for the provider.
@@ -529,9 +717,7 @@ impl Session {
             }
         }
         out.extend(body.into_iter().map(|mut message| {
-            if let Some(object) = message.as_object_mut() {
-                object.remove("_compaction_safety");
-            }
+            strip_internal_fields(&mut message);
             message
         }));
         stats.edited_chars = out.iter().map(json_chars).sum();
@@ -547,9 +733,30 @@ impl Session {
     pub fn compact(&mut self, policy: &ContextEditPolicy) -> ContextEditStats {
         let mut policy = policy.clone();
         policy.enabled = true;
-        let (body, stats) = self.edited_body(&[], &policy);
+        let (mut body, stats) = self.edited_body(&[], &policy);
         if stats.compressed_tool_results > 0 || stats.dropped_messages > 0 {
+            if stats.dropped_messages > 0 {
+                let first_kept_entry_id = body
+                    .iter()
+                    .find_map(Self::message_trace)
+                    .map(|t| t.id);
+                if let Some(first) = body.first_mut() {
+                    if Self::message_trace(first).is_none() {
+                        self.attach_compaction_trace(
+                            first,
+                            CompactionTrace {
+                                first_kept_entry_id,
+                                dropped_messages: stats.dropped_messages,
+                                compressed_tool_results: stats.compressed_tool_results,
+                                chars_before: stats.original_chars,
+                                chars_after: stats.edited_chars,
+                            },
+                        );
+                    }
+                }
+            }
             self.messages = body;
+            self.sync_trace_cursor();
             self.rewrite_log();
         }
         stats
@@ -582,8 +789,24 @@ impl Session {
             return None;
         }
         if !marker.is_empty() {
-            self.messages
-                .insert(0, json!({"role": "user", "content": marker}));
+            let first_kept_entry_id = self
+                .messages
+                .iter()
+                .find_map(Self::message_trace)
+                .map(|t| t.id);
+            let mut marker_msg = json!({"role": "user", "content": marker});
+            self.attach_compaction_trace(
+                &mut marker_msg,
+                CompactionTrace {
+                    first_kept_entry_id,
+                    dropped_messages: stats.dropped_messages,
+                    compressed_tool_results: stats.compressed_tool_results,
+                    chars_before: stats.original_chars,
+                    chars_after: stats.edited_chars,
+                },
+            );
+            self.messages.insert(0, marker_msg);
+            self.sync_trace_cursor();
             self.rewrite_log();
         }
         let after = safety_snapshot(&self.messages, workspace);
@@ -594,6 +817,27 @@ impl Session {
             after,
             conflicts,
         })
+    }
+
+    /// Attach a Pi-style `CompactionTrace` (`first_kept_entry_id`, dropped/compressed
+    /// counts, character budget delta) to a synthetic compaction checkpoint entry.
+    pub(crate) fn attach_compaction_trace(&mut self, msg: &mut Value, compaction: CompactionTrace) {
+        let entry_id = format!("e{}", self.next_entry_seq);
+        self.next_entry_seq += 1;
+        let text = message_content_text(msg);
+        let trace = MessageTrace {
+            id: entry_id,
+            parent_id: self.last_entry_id.clone(),
+            turn_id: self.turn_id,
+            timestamp: now_millis(),
+            content_hash: crate::context_trace::content_hash(&text),
+            workspace_revision: self.workspace_revision.clone(),
+            compaction: Some(compaction),
+            ..Default::default()
+        };
+        if let (Some(obj), Ok(val)) = (msg.as_object_mut(), serde_json::to_value(trace)) {
+            obj.insert("_trace".into(), val);
+        }
     }
 
     pub fn needs_compaction(&self, policy: &ContextEditPolicy) -> bool {
@@ -698,9 +942,56 @@ impl Session {
         }
     }
 
-    fn append(&mut self, msg: Value) {
+    /// Populate or enrich the in-conversation `_trace` (`MessageTrace`) object on a
+    /// message before appending it to `self.messages` and `session.jsonl`.
+    ///
+    /// Assigns the next monotonic `id` (`e1`, `e2`, ...), links `parent_id` to the
+    /// previous leaf entry, stamps `turn_id`, `timestamp`, `workspace_revision`, and
+    /// `content_hash`, and extracts normalized tool telemetry (`status`, `failure_class`,
+    /// `exit_code`) for `"tool"` role entries.
+    fn populate_message_trace(&mut self, msg: &mut Value) -> String {
+        let entry_id = format!("e{}", self.next_entry_seq);
+        self.next_entry_seq += 1;
+        let parent_id = self.last_entry_id.clone();
+        self.last_entry_id = Some(entry_id.clone());
+
+        let mut trace = Self::message_trace(msg).unwrap_or_default();
+        trace.id = entry_id.clone();
+        trace.parent_id = parent_id;
+        trace.turn_id = self.turn_id;
+        trace.timestamp = now_millis();
+        trace.workspace_revision = self.workspace_revision.clone();
+
+        let text = message_content_text(msg);
+        if !text.is_empty() {
+            trace.content_hash = crate::context_trace::content_hash(&text);
+        } else if let Some(calls) = msg.get("tool_calls").and_then(Value::as_array) {
+            if let Ok(serialized) = serde_json::to_string(calls) {
+                trace.content_hash = crate::context_trace::content_hash(&serialized);
+            }
+        }
+
+        if role(msg) == Some("tool") {
+            let failure = classify_tool_result(&text);
+            trace.status = Some(match failure {
+                None => "completed".to_string(),
+                Some(crate::tool_recovery::ToolFailureClass::Cancelled) => "cancelled".to_string(),
+                Some(_) => "failed".to_string(),
+            });
+            trace.failure_class = failure.map(|class| class.to_string());
+            trace.exit_code = parse_exit_code(&text);
+        }
+
+        if let (Some(obj), Ok(val)) = (msg.as_object_mut(), serde_json::to_value(&trace)) {
+            obj.insert("_trace".into(), val);
+        }
+        entry_id
+    }
+
+    fn append(&mut self, mut msg: Value) {
+        let entry_id = self.populate_message_trace(&mut msg);
         self.append_trace(&msg);
-        self.append_event(&msg);
+        self.append_event(&msg, &entry_id);
         self.messages.push(msg.clone());
         self.append_log(&msg);
     }
@@ -1044,11 +1335,17 @@ fn now_stamp() -> String {
         .unwrap_or_else(|_| "0000000000000".into())
 }
 
+pub(crate) fn strip_internal_fields(v: &mut Value) {
+    if let Some(object) = v.as_object_mut() {
+        object.remove("_compaction_safety");
+        object.remove("_trace");
+        object.remove("_ts");
+    }
+}
+
 fn json_chars(v: &Value) -> usize {
     let mut wire = v.clone();
-    if let Some(object) = wire.as_object_mut() {
-        object.remove("_compaction_safety");
-    }
+    strip_internal_fields(&mut wire);
     serde_json::to_string(&wire)
         .map(|s| s.chars().count())
         .unwrap_or(0)
@@ -1784,5 +2081,130 @@ mod tests {
         assert_eq!(std::fs::read_to_string(source).unwrap(), before);
         assert!(std::fs::read_to_string(fork_log).unwrap().contains("new"));
         assert_eq!(forked.restored_count, 1);
+    }
+
+    #[test]
+    fn pi_style_in_conversation_trace_links_parent_ids_and_strips_on_for_model() {
+        let dir = crate::test_support::unique_temp_dir("ncx_pi_trace_tree");
+        let path = dir.join("session.jsonl");
+        let mut s = Session::with_log("sys", Some(path.clone()));
+        s.set_turn_id(7);
+        s.set_workspace_revision(Some("abc1234".to_string()));
+
+        s.add_user_text("inspect Cargo.toml");
+        let mut usage = std::collections::BTreeMap::new();
+        usage.insert("prompt_tokens".to_string(), 120i64);
+        usage.insert("completion_tokens".to_string(), 35i64);
+        s.add_assistant_with_meta(
+            "",
+            Some(vec![json!({
+                "id": "call_read_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{\"path\":\"Cargo.toml\"}"}
+            })]),
+            "need to read Cargo.toml",
+            Some("deepseek-reasoner"),
+            Some("tool_calls"),
+            &usage,
+        );
+        s.add_tool_result_timed(
+            "call_read_1",
+            "read_file",
+            "[package]\nname = \"ncx\"\nExit code: 0",
+            Some(18),
+        );
+
+        let traces = s.trace_entries();
+        assert_eq!(traces.len(), 3);
+        assert_eq!(traces[0].id, "e1");
+        assert_eq!(traces[0].parent_id, None);
+        assert_eq!(traces[0].turn_id, Some(7));
+        assert_eq!(traces[0].workspace_revision.as_deref(), Some("abc1234"));
+
+        assert_eq!(traces[1].id, "e2");
+        assert_eq!(traces[1].parent_id.as_deref(), Some("e1"));
+        assert_eq!(traces[1].model.as_deref(), Some("deepseek-reasoner"));
+        assert_eq!(traces[1].finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(traces[1].usage.get("prompt_tokens"), Some(&120));
+
+        assert_eq!(traces[2].id, "e3");
+        assert_eq!(traces[2].parent_id.as_deref(), Some("e2"));
+        assert_eq!(traces[2].status.as_deref(), Some("completed"));
+        assert_eq!(traces[2].exit_code, Some(0));
+        assert_eq!(traces[2].duration_ms, Some(18));
+        assert_eq!(s.leaf_entry_id().as_deref(), Some("e3"));
+
+        // Wire messages sent to the LLM must strip internal `_trace` metadata.
+        for msg in s.for_model() {
+            assert!(
+                msg.get("_trace").is_none(),
+                "wire format leaked _trace: {msg}"
+            );
+        }
+
+        // Resuming from JSONL preserves the trace tree and continues sequence numbering.
+        let mut resumed = Session::resume("sys", Some(path));
+        let resumed_traces = resumed.trace_entries();
+        assert_eq!(resumed_traces, traces);
+        resumed.add_user_text("follow-up");
+        let follow = Session::message_trace(&resumed.messages[3]).expect("follow-up trace");
+        assert_eq!(follow.id, "e4");
+        assert_eq!(follow.parent_id.as_deref(), Some("e3"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn compaction_checkpoint_embeds_first_kept_entry_id_and_links_tail() {
+        let dir = crate::test_support::unique_temp_dir("ncx_pi_compaction_trace");
+        let path = dir.join("session.jsonl");
+        let mut s = Session::with_log("sys", Some(path.clone()));
+
+        s.add_user_text("initial request");
+        for i in 0..8 {
+            let call_id = format!("call_{i}");
+            s.add_assistant(
+                "",
+                Some(vec![json!({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"}
+                })]),
+                "",
+            );
+            s.add_tool_result(&call_id, "read_file", &"x".repeat(600));
+        }
+        s.add_user_text("recent question that stays in tail");
+        s.add_assistant("recent answer", None, "");
+
+        let stats = s.compact(&ContextEditPolicy {
+            enabled: true,
+            max_chars: 1_200,
+            keep_recent_messages: 2,
+            max_tool_result_chars: 100,
+        });
+        assert!(stats.dropped_messages > 0);
+
+        let checkpoint_trace = Session::message_trace(&s.messages[0]).expect("checkpoint trace");
+        let compaction = checkpoint_trace
+            .compaction
+            .as_ref()
+            .expect("compaction trace on checkpoint message");
+        assert_eq!(compaction.dropped_messages, stats.dropped_messages);
+        assert!(compaction.first_kept_entry_id.is_some());
+
+        let first_tail_trace = Session::message_trace(&s.messages[1]).expect("first tail trace");
+        assert_eq!(
+            compaction.first_kept_entry_id.as_deref(),
+            Some(first_tail_trace.id.as_str())
+        );
+
+        // Next turn after compaction links cleanly to the leaf of the kept tail.
+        let expected_parent = s.leaf_entry_id().unwrap();
+        s.add_user_text("post-compaction message");
+        let new_leaf = Session::message_trace(s.messages.last().unwrap()).unwrap();
+        assert_eq!(new_leaf.parent_id.as_deref(), Some(expected_parent.as_str()));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

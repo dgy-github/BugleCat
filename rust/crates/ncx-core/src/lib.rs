@@ -133,7 +133,8 @@ pub use runtime_profile::{
 };
 pub use rust_analyzer::RustAnalyzerProvider;
 pub use session::{
-    estimate_tokens, ContextEditPolicy, ContextEditStats, Session, COMPACTED_HISTORY_PREFIX,
+    estimate_tokens, CompactionTrace, ContextEditPolicy, ContextEditStats, MessageTrace, Session,
+    COMPACTED_HISTORY_PREFIX,
 };
 pub use session_index::{new_session_id, SessionIndex, SessionSummary};
 pub use session_query_tools::session_query_tools;
