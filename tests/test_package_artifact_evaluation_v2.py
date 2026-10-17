@@ -236,6 +236,7 @@ def test_zip_path_escape_rejected(tmp_path, path):
         package.checked_zip(tmp_path, tmp_path / "bundle.zip", [{"path": path, "sha256": "", "bytes": 0}])
 
 
+@pytest.mark.historical_artifact
 def test_actual_parent_and_freeze_unchanged():
     assert package.verify_parent(ROOT / "releases/jev-v33-20261010-235623")["policy_version"] == "host-rules-v3.3"
     bindings, binaries = package.verify_freeze(ROOT / "reports/.nanocodex/artifact-v2-formal-20261011-r2/freeze.json")
@@ -244,6 +245,7 @@ def test_actual_parent_and_freeze_unchanged():
 
 
 @pytest.mark.parametrize("name", [package.MAIN, package.JEV])
+@pytest.mark.historical_artifact
 def test_actual_copied_offline_entrypoint(tmp_path, name):
     bindings, binaries = package.verify_freeze(ROOT / "reports/.nanocodex/artifact-v2-formal-20261011-r2/freeze.json")
     cohort = package.load(ROOT / "reports/.nanocodex/artifact-v2-formal-20261011-r2/cohort.json")
@@ -267,6 +269,7 @@ def test_offline_rejects_unfrozen_exe_before_execution(tmp_path, monkeypatch):
         package.offline_attest(fake, package.MAIN, tmp_path / "fixture", {})
 
 
+@pytest.mark.historical_artifact
 def test_public_allowlist_excludes_real_cohort_and_history():
     bindings, _ = package.verify_freeze(ROOT / "reports/.nanocodex/artifact-v2-formal-20261011-r2/freeze.json")
     cohort_path = ROOT / "reports/.nanocodex/artifact-v2-formal-20261011-r2/cohort.json"
@@ -354,6 +357,7 @@ def test_readonly_preflight_passes_freeze_to_original_result_proof(monkeypatch):
     assert proofs == [(Path('result'), Path('freeze'))]
 
 
+@pytest.mark.historical_artifact
 def test_actual_scope_binding_current_source_freeze_no_model_calls():
     cohort_file = ROOT / 'reports/.nanocodex/artifact-v2-formal-20261011-r2/cohort.json'
     cohort = package.load(cohort_file)

@@ -28,11 +28,11 @@ def built_binary():
 @pytest.fixture
 def private_profile():
     if not PROFILE.is_file():
-        pytest.skip("original local profile evidence is not distributed in Git")
+        pytest.fail("original local profile evidence is not distributed in Git")
     value = load(PROFILE)
     for field in ("previous_artifact_cohort_file", "diagnostic_file"):
         if not Path(value[field]).is_file():
-            pytest.skip("original local profile evidence is not distributed in Git")
+            pytest.fail("original local profile evidence is not distributed in Git")
     return PROFILE
 
 
@@ -52,6 +52,7 @@ def assert_build(build):
         assert build[field] == file_hash(path)
 
 
+@pytest.mark.historical_artifact
 def test_actual_profile_body_uses_high_without_key_or_config_mutation(private_profile):
     value, bindings = profile.validate_profile(PROFILE)
     assert len(bindings) == 10
@@ -72,6 +73,7 @@ def test_actual_profile_body_uses_high_without_key_or_config_mutation(private_pr
 
 @pytest.mark.parametrize("field", ["max_tokens", "reasoning_effort", "timeout_s", "max_retries",
                                     "previous_artifact_cohort_sha256", "diagnostic_sha256", "profile_id"])
+@pytest.mark.historical_artifact
 def test_resealed_profile_tamper_rejected_without_config_transport_or_output(tmp_path, field, private_profile):
     value = load(PROFILE)
     if field in profile.SETTINGS:
@@ -117,7 +119,7 @@ def test_actual_receipts_keep_profile_fields_and_old35_slots(tmp_path, scenario,
         prepared.update(schema="buglecat.verification.prepared-main.v1", body=load(directory / "request.json"))
         prepared["artifact_sha256"] = digest(prepared)
         assert verify(prepared, directory / "receipt.json", events, BINARY) == receipt
-        assert receipt["result"]["host_B"]["policy_version"] == "host-rules-v3.3"
+        assert receipt["result"]["host_B"]["policy_version"] == "host-rules-v3.4"
     before = file_hash(directory / "receipt.json")
     assert run("offline-test", directory, scenario).returncode != 0
     assert file_hash(directory / "receipt.json") == before
@@ -138,6 +140,7 @@ def test_live_needs_explicit_flag_without_side_effects(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.historical_artifact
 def test_profile_wrapper_reuses_owner_and_does_not_register_real_cohort(tmp_path, monkeypatch, private_profile):
     # Explicitly mock upstream source registration; this is not a formal sample.
     previous = load(load(PROFILE)["previous_artifact_cohort_file"])

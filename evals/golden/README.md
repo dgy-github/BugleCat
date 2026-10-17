@@ -56,6 +56,16 @@ agent 层跑分建议逐步引入 repeats>=3）。
 
 ## 与 eval-gate CI 的关系
 
-`.github/workflows/eval-gate.yml` 在 push/PR 时跑两个 job：`golden-gate`（`pytest tests -q` +
-unit 层）和 `rust-gate`（rustfmt + `cargo test --workspace --lib` + cargo 层）。agent 层需要
+`.github/workflows/eval-gate.yml` 在 push/PR 时跑三个 job：`golden-gate`（`pytest tests -q` +
+unit 层）、`rust-gate`（rustfmt + `cargo test --workspace --lib` + cargo 层）和
+`desktop-gate`（前端协议测试、类型检查及构建、独立 Tauri workspace 库测试）。agent 层需要
 模型密钥，仅人工触发；`benchmark` 低于 `--min-pass-rate` 时以非 0 退出。
+
+默认 pytest 通过 `historical_artifact` 标记排除依赖私有冻结档案及旧运行包的历史验收，
+这些用例显示为 deselected，不计为通过。可移植的打包校验仍默认执行。
+完整 Python 回归包含调用 Rust example 的离线集成测试；首次运行及源码变更后先执行
+`cargo build --manifest-path rust/Cargo.toml --examples --locked`，避免缺失可执行文件或
+使用带旧源码 hash 的缓存二进制。CI 同样先构建，再执行 Python 回归。
+在具备完整原始档案的机器上，显式运行
+`python -m pytest tests -m historical_artifact -q`；缺失文件或 hash 不匹配仍然失败，
+不会因选择该标记而跳过校验，也不能把日常 CI 结果当作历史运行包认证。

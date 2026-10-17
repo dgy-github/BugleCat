@@ -29,7 +29,12 @@ pub fn render(path: &str, text: &str, offset: usize, limit: usize) -> String {
     }
     let mut result = numbered.join("\n");
     if result.len() > MAX_CHARS {
-        result.truncate(MAX_CHARS);
+        // The byte budget can land inside a multibyte UTF-8 character.
+        let mut end = MAX_CHARS;
+        while !result.is_char_boundary(end) {
+            end -= 1;
+        }
+        result.truncate(end);
         result.push_str("\n... (truncated)");
     }
     if end < total {
@@ -46,6 +51,18 @@ pub fn render(path: &str, text: &str, offset: usize, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_unicode_output_truncates_at_a_character_boundary() {
+        for character in ["中", "😀"] {
+            let out = render("large.txt", &character.repeat(40_000), 1, 2000);
+            let (preview, _) = out.split_once("\n... (truncated)").unwrap();
+            assert!(preview.len() <= MAX_CHARS);
+            assert!(MAX_CHARS - preview.len() < character.len());
+            assert!(preview.starts_with("1| "));
+            assert!(preview.ends_with(character));
+        }
+    }
 
     #[test]
     fn empty_file() {

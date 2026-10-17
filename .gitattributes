@@ -2,6 +2,7 @@
 evals/self_repair/*.patch -text -whitespace
 evals/self_repair/results/**/*.patch -text -whitespace
 # New frozen verification inputs must keep their authenticated bytes on checkout.
+evals/verification/apps_stdin_v1/packet.py -text
 evals/verification/data/mbpp/mbpp-full-f82046ba5aabbbb427dbfd38a254d26bff08b533.jsonl -text
 evals/verification/data/mbpp/mbpp-expanded-20261011-v2.json -text
 evals/verification/reports/artifact_expanded_mbpp_catalog_20261011_v2.json -text

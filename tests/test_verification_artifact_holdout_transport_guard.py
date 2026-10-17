@@ -63,10 +63,11 @@ def test_main_closed_after_label_registration(main_fixture):
         guard.main_proof(manifest)
 
 
+@pytest.mark.historical_artifact
 def test_actual_unqualified_calibration_cannot_open_holdout(tmp_path):
     cohort = ROOT / "reports/artifact-profile-cohort-high-20261011-v1.json"
     if not cohort.exists():
-        pytest.skip("private registered calibration cohort unavailable")
+        pytest.fail("private registered calibration cohort unavailable")
     manifest = dump(tmp_path / "manifest.json", {"artifact_cohort_file": str(cohort)})
     with pytest.raises(ValueError):
         guard.main_proof(manifest)

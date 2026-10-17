@@ -65,7 +65,7 @@ def test_actual_binary_preserves_old12_plus_one_and_bound_cohort_receipt(tmp_pat
         assert receipt["result"]["candidate"] == raw["choices"][0]["message"]["content"]
         messages = read_lines(Path(receipt["result"]["session_log"]))
         assert [m["role"] for m in messages] == ["user", "assistant"]
-        assert receipt["result"]["host_B"]["policy_version"] == "host-rules-v3.3"
+        assert receipt["result"]["host_B"]["policy_version"] == "host-rules-v3.4"
         assert not receipt["result"]["assertions_executed"] and receipt["result"]["tools_executed"] == 0
         prepared = {k: receipt[k] for k in ("id", "group_id", "task_id", "split", "source_sha256",
                                            "protocol_sha256", "authorization_sha256", "request_hash", "settings", "build_info")}
@@ -103,9 +103,10 @@ def manifest(cohort_file, count=8):
     return value
 
 
+@pytest.mark.historical_artifact
 def test_real_formal_cohort_prepare_does_not_send_and_binds_all_raw_fields(tmp_path):
     if not COHORT.is_file():
-        pytest.skip("actual preregistered cohort unavailable")
+        pytest.fail("actual preregistered cohort unavailable")
     path = tmp_path / "manifest.json"
     frozen = manifest(COHORT)
     path.write_text(json.dumps(frozen), encoding="utf-8")
@@ -129,9 +130,10 @@ def test_real_formal_cohort_prepare_does_not_send_and_binds_all_raw_fields(tmp_p
 
 
 @pytest.mark.parametrize("mutation", ["too_many", "holdout", "missing", "fixture", "body"])
+@pytest.mark.historical_artifact
 def test_invalid_formal_cohort_is_refused_before_config_transport_or_output(tmp_path, mutation):
     if not COHORT.is_file():
-        pytest.skip("private preregistered cohort unavailable")
+        pytest.fail("private preregistered cohort unavailable")
     value = manifest(COHORT, 9 if mutation == "too_many" else 8)
     if mutation == "holdout":
         value["cases"][0]["split"] = "holdout"

@@ -133,22 +133,28 @@ impl PolicyExecutor {
 
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
-
+        // Keep buffers outside the timeout future so cancellation retains the
+        // output already read. Drain both pipes together: either pipe can fill
+        // before the child closes the other one.
+        let mut out = Vec::new();
+        let mut err = Vec::new();
         let collect = async {
-            let mut out = Vec::new();
-            let mut err = Vec::new();
-            if let Some(p) = stdout_pipe.as_mut() {
-                let _ = p.read_to_end(&mut out).await;
-            }
-            if let Some(p) = stderr_pipe.as_mut() {
-                let _ = p.read_to_end(&mut err).await;
-            }
-            let status = child.wait().await;
-            (status, out, err)
+            let stdout = async {
+                if let Some(p) = stdout_pipe.as_mut() {
+                    let _ = p.read_to_end(&mut out).await;
+                }
+            };
+            let stderr = async {
+                if let Some(p) = stderr_pipe.as_mut() {
+                    let _ = p.read_to_end(&mut err).await;
+                }
+            };
+            let (_, _, status) = tokio::join!(stdout, stderr, child.wait());
+            status
         };
 
         match timeout(Duration::from_secs(timeout_s), collect).await {
-            Ok((status, out, err)) => {
+            Ok(status) => {
                 let code = status.ok().and_then(|s| s.code()).unwrap_or(1);
                 ExecResult {
                     exit_code: code,
@@ -164,9 +170,12 @@ impl PolicyExecutor {
                     j.terminate();
                 }
                 let _ = child.start_kill();
+                let _ = child.wait().await;
                 ExecResult {
                     exit_code: 124,
                     timed_out: true,
+                    stdout: decode_text_lossy(&out),
+                    stderr: decode_text_lossy(&err),
                     ..Default::default()
                 }
             }
@@ -356,6 +365,68 @@ pub(crate) mod win_job {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Use the test binary itself to exercise real pipe backpressure, without
+    // depending on an installed interpreter or platform-specific shell loops.
+    #[test]
+    fn pipe_output_child() {
+        use std::io::Write;
+        let Ok(mode) = std::env::var("NCX_TEST_PIPE_MODE") else {
+            return;
+        };
+        std::io::stdout().write_all(b"stdout-start\n").unwrap();
+        std::io::stdout().flush().unwrap();
+        std::io::stderr().write_all(b"stderr-start\n").unwrap();
+        std::io::stderr().flush().unwrap();
+        if mode == "timeout" {
+            std::thread::sleep(Duration::from_secs(30));
+        } else {
+            std::io::stderr().write_all(&vec![b'e'; 1_000_000]).unwrap();
+            std::io::stdout().write_all(&vec![b'o'; 1_000_000]).unwrap();
+        }
+    }
+
+    async fn run_pipe_child(mode: &str, timeout_s: u64) -> ExecResult {
+        let exe = std::env::current_exe().unwrap();
+        let prefix = if cfg!(windows) { ".\\" } else { "./" };
+        let command = format!(
+            "{prefix}{} --exact executor::tests::pipe_output_child --nocapture",
+            exe.file_name().unwrap().to_str().unwrap()
+        );
+        PolicyExecutor::new()
+            .run_with_env(
+                &command,
+                exe.parent().unwrap(),
+                timeout_s,
+                &HashMap::from([("NCX_TEST_PIPE_MODE".into(), mode.into())]),
+            )
+            .await
+    }
+
+    #[tokio::test]
+    async fn drains_stdout_and_stderr_concurrently() {
+        let result = run_pipe_child("large", 10).await;
+        assert!(result.ok(), "{}", result.render());
+        assert!(result.stdout.contains(&"o".repeat(1_000_000)));
+        assert!(result.stderr.contains(&"e".repeat(1_000_000)));
+    }
+
+    #[tokio::test]
+    async fn timeout_preserves_already_collected_output() {
+        let result = run_pipe_child("timeout", 2).await;
+        assert!(result.timed_out);
+        assert_eq!(result.exit_code, 124);
+        assert!(
+            result.stdout.contains("stdout-start"),
+            "{:?}",
+            result.stdout
+        );
+        assert!(
+            result.stderr.contains("stderr-start"),
+            "{:?}",
+            result.stderr
+        );
+    }
 
     #[test]
     fn ok_requires_zero_exit() {

@@ -107,10 +107,11 @@ def test_actual_binary_refuses_unqualified_registration_before_dataset_or_key(ex
     assert not any(path.name.endswith(".started") for path in tmp_path.iterdir())
 
 
+@pytest.mark.historical_artifact
 def test_old_development_cannot_be_promoted_by_reseal_and_claimed_counts(executable, tmp_path):
     source = ROOT / "reports/artifact-prepared-smoke104-20261011.jsonl"
     if not source.is_file():
-        pytest.skip("private original development receipt unavailable")
+        pytest.fail("private original development receipt unavailable")
     row = json.loads(source.read_text(encoding="utf-8").splitlines()[0])
     row.update(split="calibration", source_kind="source_preregistered_original_model_code", author_exposed=False)
     row.pop("artifact_sha256")

@@ -46,3 +46,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not historical_artifact'"
+markers = [
+    "historical_artifact: requires private frozen archives and release binaries; run explicitly with -m historical_artifact",
+]

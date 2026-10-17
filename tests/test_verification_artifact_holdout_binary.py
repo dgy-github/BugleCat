@@ -71,10 +71,11 @@ def test_actual_main_prestart_cancel_without_key(tmp_path):
     assert not (tmp_path / "cancel/receipt.json").exists()
 
 
+@pytest.mark.historical_artifact
 def test_actual_main_high_body_without_key():
     profile = ROOT / "reports/artifact-main-resource-profile-high-20261011-v1.json"
     if not profile.is_file():
-        pytest.skip("original local profile evidence is not distributed in Git")
+        pytest.fail("original local profile evidence is not distributed in Git")
     result = run(MAIN, "offline-body-test", profile)
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
@@ -121,10 +122,11 @@ def test_actual_jev_single_question_raw_bytes_and_once_reservation(tmp_path, sce
     assert file_hash(out / "fixture.started") == marker_hash
 
 
+@pytest.mark.historical_artifact
 def test_actual_qualified_owner_subprocess_rejects_old_calibration_and_resealed_holdout(tmp_path):
     cohort_file = ROOT / "reports/artifact-profile-cohort-high-20261011-v1.json"
     if not cohort_file.is_file():
-        pytest.skip("original local cohort evidence is not distributed in Git")
+        pytest.fail("original local cohort evidence is not distributed in Git")
     body = load(cohort_file)
     probe = tmp_path / "manifest.json"
     probe.write_text(json.dumps({"artifact_cohort_file": str(cohort_file)}), encoding="utf-8")

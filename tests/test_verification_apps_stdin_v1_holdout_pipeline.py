@@ -25,10 +25,11 @@ from tests.stdin_holdout_fixtures import (
 )
 
 
+@pytest.mark.historical_artifact
 def test_complete_self_made_continuation_once_fixed_holdout(tmp_path, monkeypatch):
     selected = os.environ.get('STDIN_C4D_SYNTHETIC_ARCHIVE')
     if not selected:
-        pytest.skip('explicit previously archived self-made input is required; never rerun400 factory')
+        pytest.fail('explicit previously archived self-made input is required; never rerun400 factory')
     root = Path(selected).resolve(strict=True)
     private = Path(__file__).resolve().parents[1] / 'reports/.nanocodex/artifact-v3-apps-stdin-c4d-implementation-20261012'
     original_archive = budget.load(private / 'original-c4c-temp-archive/manifest.json')

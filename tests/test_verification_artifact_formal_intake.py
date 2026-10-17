@@ -43,10 +43,11 @@ def test_development_dataset_rejected_before_predictions_or_source_execution(tmp
     assert not (tmp_path / "output").exists()
 
 
+@pytest.mark.historical_artifact
 def test_real_old_start_cannot_be_upgraded_with_new_cohort_file(tmp_path):
     prepared = Path("reports/benchmark-collection-batch02-20261010-resource-r1/prepared.jsonl")
     if not prepared.exists():
-        pytest.skip("original private local collection not present")
+        pytest.fail("original private local collection not present")
     original = next(json.loads(line) for line in prepared.read_text().splitlines()
                     if json.loads(line)["id"] == "mbpp-main-104")
     original["authorization_file"] = "evals/verification/reports/jev_budget_extension_20261011_100.json"
@@ -57,10 +58,11 @@ def test_real_old_start_cannot_be_upgraded_with_new_cohort_file(tmp_path):
 def original_reviewed():
     path = Path("reports/artifact-ultra-first3-reviewed-dataset-20261011.json")
     if not path.is_file():
-        pytest.skip("private original reviewed receipt set unavailable")
+        pytest.fail("private original reviewed receipt set unavailable")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@pytest.mark.historical_artifact
 def test_original_started_group_cannot_be_dropped_from_formal_denominator():
     data = original_reviewed()
     data["cases"] = data["cases"][1:]
@@ -68,6 +70,7 @@ def test_original_started_group_cannot_be_dropped_from_formal_denominator():
         verify_dataset_cases(data)
 
 
+@pytest.mark.historical_artifact
 def test_original_valid_label_cannot_be_hidden_as_unknown():
     data = original_reviewed()
     case = next(case for case in data["cases"] if case["label"] == "supported")

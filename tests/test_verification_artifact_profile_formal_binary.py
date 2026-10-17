@@ -107,10 +107,11 @@ def test_actual_binary_refuses_unqualified_registration_before_dataset_or_key(ex
     assert not any(path.name.endswith(".started") for path in tmp_path.iterdir())
 
 
+@pytest.mark.historical_artifact
 def test_old_development_cannot_be_promoted_by_reseal_and_claimed_counts(executable, tmp_path):
     source = ROOT / "reports/artifact-prepared-smoke104-20261011.jsonl"
     if not source.is_file():
-        pytest.skip("private original development receipt unavailable")
+        pytest.fail("private original development receipt unavailable")
     row = json.loads(source.read_text(encoding="utf-8").splitlines()[0])
     row.update(split="calibration", source_kind="source_preregistered_original_model_code", author_exposed=False)
     row.pop("artifact_sha256")
@@ -130,10 +131,11 @@ def test_formal_live_requires_registration_and_explicit_flag(executable, tmp_pat
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.historical_artifact
 def test_real_high_original_source_bytes_profile_and_sql_join_without_registration_or_key(executable):
     path = ROOT / "reports/artifact-profile-high-main-batch01-20261011-artifacts.jsonl"
     if not path.exists():
-        pytest.skip("original private high-profile artifacts unavailable")
+        pytest.fail("original private high-profile artifacts unavailable")
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert rows
     for row in rows:
@@ -148,10 +150,11 @@ def test_real_high_original_source_bytes_profile_and_sql_join_without_registrati
 
 @pytest.mark.parametrize("field", ["main_resource_profile_file", "main_resource_profile_sha256",
                                     "main_resource_profile_hash", "native_policy_version"])
+@pytest.mark.historical_artifact
 def test_resealed_high_row_cannot_change_profile_or_original_native_policy(executable, tmp_path, field):
     original = ROOT / "reports/artifact-profile-high-main-batch01-20261011-artifacts.jsonl"
     if not original.exists():
-        pytest.skip("original private high-profile artifacts unavailable")
+        pytest.fail("original private high-profile artifacts unavailable")
     row = json.loads(original.read_text(encoding="utf-8").splitlines()[0])
     row[field] = "host-rules-v3.2" if field == "native_policy_version" else "wrong-profile"
     row["artifact_sha256"] = digest({key: value for key, value in row.items() if key != "artifact_sha256"})

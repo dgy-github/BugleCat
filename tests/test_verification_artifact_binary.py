@@ -82,9 +82,10 @@ def test_main_keeps_bytes_and_claimed_budget_without_retries(executable, tmp_pat
     assert file_hash(marker) == before
 
 
+@pytest.mark.historical_artifact
 def test_real_frozen_development_validates_without_key_or_reservation(executable, tmp_path):
     if not PREPARED.is_file():
-        pytest.skip("local frozen development source unavailable")
+        pytest.fail("local frozen development source unavailable")
     result = invoke(executable, "validate", PREPARED, "mbpp-main-3", tmp_path / "validated.json")
     assert result.returncode == 0, result.stderr
     summary = json.loads(result.stdout)
@@ -96,9 +97,10 @@ def test_real_frozen_development_validates_without_key_or_reservation(executable
     assert summary["prepared_artifact_sha256"] == digest({k: v for k, v in row.items() if k != "artifact_sha256"})
 
 
+@pytest.mark.historical_artifact
 def test_formal_and_label_contaminated_bodies_reject_before_transport(executable, tmp_path):
     if not PREPARED.is_file():
-        pytest.skip("local frozen development source unavailable")
+        pytest.fail("local frozen development source unavailable")
     row = json.loads(PREPARED.read_text(encoding="utf-8").splitlines()[0])
     for name in ("formal", "label"):
         changed = json.loads(json.dumps(row))

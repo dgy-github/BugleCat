@@ -84,11 +84,12 @@ def test_history_mutations_are_not_a_budget_reset_bridge(tmp_path, mutation):
         owner.history_gate(original, current)
 
 
+@pytest.mark.historical_artifact
 def test_readonly_real_pinned_sources_no_oracle_or_model_calls():
     root = owner.ROOT
     review = root / "reports/.nanocodex/artifact-calibration-review"
     if not review.exists():
-        pytest.skip("local official snapshot inventory unavailable")
+        pytest.fail("local official snapshot inventory unavailable")
     tasks, value = owner.source_value(
         root / "evals/verification/data/mbpp/mbpp-expanded-20261011-v2.json",
         root / "evals/verification/reports/artifact_expanded_mbpp_catalog_20261011_v2.json",
@@ -124,11 +125,12 @@ def test_runtime_wrapper_binds_actual_interpreter_and_separate_timeouts(monkeypa
         owner.wrapped_oracle_gate({**body, "artifact_hash": digest(body)}, task, "original code", "mbpp", runtime, reference=reference)
 
 
+@pytest.mark.historical_artifact
 def test_reference_pool_keeps_unknown_sources_out_without_split_borrowing():
     root = owner.ROOT
     pool = root / "reports/.nanocodex/artifact-v2-formal-source-review/reference-pool.json"
     if not pool.exists():
-        pytest.skip("local source-only CPU admission unavailable")
+        pytest.fail("local source-only CPU admission unavailable")
     review = root / "reports/.nanocodex/artifact-calibration-review"
     _, value = owner.source_value(
         root / "evals/verification/data/mbpp/mbpp-expanded-20261011-v2.json",
