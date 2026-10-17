@@ -44,6 +44,46 @@ pub struct MemoryEntry {
 #[derive(Debug, Clone)]
 pub struct MemoryStore {
     pub(crate) path: PathBuf,
+    pub(crate) feedback_mode: String,
+}
+
+/// Result of one prompt-scoped recall.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemoryRecall {
+    /// Recall block for the prompt; empty when nothing was selected.
+    pub text: String,
+    /// `note_id`s of the injected notes, for outcome attribution.
+    pub note_ids: Vec<String>,
+    /// Whether plain and feedback-weighted ranking select different notes
+    /// (`None` when feedback is off or nothing was selectable).
+    pub rank_changed: Option<bool>,
+}
+
+fn select_recall(
+    scored: Vec<(i64, String, &MemoryEntry)>,
+    max_entries: usize,
+    max_chars: usize,
+) -> (String, Vec<String>) {
+    let mut out = String::from(RECALL_HEADER);
+    let mut used = out.len();
+    let mut ids = Vec::new();
+    for (_, nid, e) in scored {
+        if ids.len() >= max_entries {
+            break;
+        }
+        let line = format!("\n- {}", e.text.replace('\n', " "));
+        if used + line.len() > max_chars {
+            break;
+        }
+        out.push_str(&line);
+        used += line.len();
+        ids.push(nid);
+    }
+    if ids.is_empty() {
+        (String::new(), Vec::new())
+    } else {
+        (out, ids)
+    }
 }
 
 impl MemoryStore {
@@ -51,7 +91,33 @@ impl MemoryStore {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         MemoryStore {
             path: dir.into().join("LEARNINGS.md"),
+            feedback_mode: "shadow".to_string(),
         }
+    }
+
+    /// Set online memory feedback mode (`"off" | "shadow" | "on"`).
+    pub fn set_feedback_mode(&mut self, mode: impl Into<String>) {
+        self.feedback_mode = mode.into();
+    }
+
+    pub fn feedback_mode(&self) -> &str {
+        &self.feedback_mode
+    }
+
+    /// Deterministic note identifier (`content_hash(&normalize(text))`).
+    pub fn note_id(text: &str) -> String {
+        crate::context_trace::content_hash(&normalize(text))
+    }
+
+    /// Workspace key associated with this memory store directory.
+    pub fn workspace_key(&self) -> String {
+        self.path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .unwrap_or_else(|| Path::new("."))
+            .display()
+            .to_string()
     }
 
     /// Record a verified note. Returns `Ok(false)` if it duplicates an existing
@@ -96,48 +162,89 @@ impl MemoryStore {
         parse_entries(&text)
     }
 
+    /// Build a recall block for the system prompt along with the recalled `note_id`s
+    /// for outcome attribution.
+    ///
+    /// - `off`: plain lexical + recency ranking, no feedback lookup.
+    /// - `shadow`: plain ranking is what gets injected; the feedback-weighted
+    ///   ranking is computed only to report whether it would have differed.
+    /// - `on`: notes flagged demoted are withheld and the rest get a bounded
+    ///   Beta-posterior multiplier (`[0.8, 1.2]`).
+    pub fn recall_with_feedback(
+        &self,
+        query: &str,
+        max_entries: usize,
+        max_chars: usize,
+    ) -> MemoryRecall {
+        let entries = self.entries();
+        if entries.is_empty() {
+            return MemoryRecall::default();
+        }
+        let feedback_map = if self.feedback_mode == "off" {
+            std::collections::HashMap::new()
+        } else {
+            crate::memory_index::MemoryIndex::for_store(self)
+                .ok()
+                .map(|idx| idx.feedback_stats_for_workspace(&self.workspace_key()))
+                .unwrap_or_default()
+        };
+
+        let qwords = expanded_keywords(query);
+        let qset = word_set(query);
+        let qphrases = phrases(query);
+        let mut plain: Vec<(i64, String, &MemoryEntry)> = Vec::new();
+        let mut weighted: Vec<(i64, String, &MemoryEntry)> = Vec::new();
+        for e in &entries {
+            let nid = Self::note_id(&e.text);
+            let overlap = semantic_score(e, &qwords, &qset, &qphrases);
+            // Pack recency into the low bits so higher ts wins ties.
+            let recency = e.ts.min(999_999) as i64;
+            plain.push((overlap * 1_000_000 + recency, nid.clone(), e));
+            if self.feedback_mode == "off" {
+                continue;
+            }
+            let stat = feedback_map.get(&nid);
+            if stat.is_some_and(|s| s.demoted) {
+                continue;
+            }
+            let multiplier = stat.map_or(1.0, |s| s.bounded_multiplier());
+            let score = (overlap as f64 * multiplier * 100.0).round() as i64;
+            weighted.push((score * 1_000_000 + recency, nid, e));
+        }
+        plain.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        weighted.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        let (plain_text, plain_ids) = select_recall(plain, max_entries, max_chars);
+        if self.feedback_mode == "off" {
+            return MemoryRecall {
+                text: plain_text,
+                note_ids: plain_ids,
+                rank_changed: None,
+            };
+        }
+        let (weighted_text, weighted_ids) = select_recall(weighted, max_entries, max_chars);
+        let rank_changed =
+            (!plain_ids.is_empty() || !weighted_ids.is_empty()).then(|| plain_ids != weighted_ids);
+        if self.feedback_mode == "on" {
+            MemoryRecall {
+                text: weighted_text,
+                note_ids: weighted_ids,
+                rank_changed,
+            }
+        } else {
+            MemoryRecall {
+                text: plain_text,
+                note_ids: plain_ids,
+                rank_changed,
+            }
+        }
+    }
+
     /// Build a recall block for the system prompt: entries scored by keyword
     /// overlap with `query` (tie-break recency), capped by count and chars.
     /// Empty string when nothing is stored.
     pub fn recall(&self, query: &str, max_entries: usize, max_chars: usize) -> String {
-        let entries = self.entries();
-        if entries.is_empty() {
-            return String::new();
-        }
-        let qwords = expanded_keywords(query);
-        let qset = word_set(query);
-        let qphrases = phrases(query);
-        let mut scored: Vec<(i64, &MemoryEntry)> = entries
-            .iter()
-            .map(|e| {
-                let overlap = semantic_score(e, &qwords, &qset, &qphrases);
-                // Pack recency into the low bits so higher ts wins ties.
-                let s = overlap * 1_000_000 + (e.ts.min(999_999) as i64);
-                (s, e)
-            })
-            .collect();
-        scored.sort_by_key(|entry| std::cmp::Reverse(entry.0));
-
-        let mut out = String::from(RECALL_HEADER);
-        let mut used = out.len();
-        let mut shown = 0;
-        for (_, e) in scored {
-            if shown >= max_entries {
-                break;
-            }
-            let line = format!("\n- {}", e.text.replace('\n', " "));
-            if used + line.len() > max_chars {
-                break;
-            }
-            out.push_str(&line);
-            used += line.len();
-            shown += 1;
-        }
-        if shown == 0 {
-            String::new()
-        } else {
-            out
-        }
+        self.recall_with_feedback(query, max_entries, max_chars)
+            .text
     }
 
     /// Periodic consolidation: drop NEAR-duplicates (not just exact), keeping

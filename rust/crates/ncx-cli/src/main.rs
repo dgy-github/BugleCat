@@ -31,12 +31,14 @@ use ncx_core::slash::{is_known, parse_slash, SLASH_HELP};
 use std::rc::Rc;
 
 use ncx_core::{
-    custom_command_prompt, discover_codex_hooks, discover_codex_mcp_servers, discover_skills,
-    expand_file_mentions, list_custom_commands, load_project_instructions, new_session_id,
-    prepare_mcp_server_tools, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
-    ConfiguredHarnessRuntime, ContextServiceDescriptor, Genome, HarnessAgentRunner,
-    McpServiceDescriptor, MemoryStore, Orchestrator, OrchestratorConfig, RuntimeContextSources,
-    RuntimeHostBindings, Session, Tool, TurnResult,
+    build_outcome_report, custom_command_prompt, discover_codex_hooks, discover_codex_mcp_servers,
+    discover_skills, expand_file_mentions, format_outcome_report, list_custom_commands,
+    load_outcomes_and_followups, load_project_instructions, new_session_id,
+    parse_since_duration_ms, prepare_mcp_server_tools, record_checkpoint_rollback,
+    workspace_events_db_path, AgentLoop, AgentRuntimeProfile, CheckpointMeta, CheckpointStore,
+    ConfiguredHarnessRuntime, ContextServiceDescriptor, ContextStore, Genome, HarnessAgentRunner,
+    McpServiceDescriptor, MemoryFeedback, MemoryStore, Orchestrator, OrchestratorConfig,
+    RuntimeContextSources, RuntimeHostBindings, Session, Tool, TurnResult,
 };
 use ncx_protocol::{
     ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, TurnId,
@@ -116,10 +118,26 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
                 return 1;
             }
         };
+    let feedback_routing = cfg.feedback_routing.clone();
     let orchestrator_config = OrchestratorConfig::from_runtime_config(&cfg);
-    let runner = HarnessAgentRunner::new(cfg);
-    let orch = Orchestrator::new(&runner, orchestrator_config);
+    let session_id = recorder.session_id().to_string();
+    let runner =
+        HarnessAgentRunner::new(cfg).with_parent_task_id(format!("{session_id}:orch-{turn_id}"));
+    let routing_stats = runner.load_routing_stats();
+    let orch = Orchestrator::new(&runner, orchestrator_config)
+        .with_routing_feedback(feedback_routing, routing_stats);
+    let started_ms = ncx_core::now_millis();
     let outcome = orch.handle(prompt).await;
+    let duration_ms = ncx_core::now_millis().saturating_sub(started_ms);
+    runner.record_orchestrated_outcome(
+        &session_id,
+        1,
+        prompt,
+        &outcome,
+        orch.initial_complexity(),
+        orch.shadow_recommended_route(),
+        duration_ms,
+    );
     eprintln!(
         "[orchestrator] complexity={:?}  verify={}  rounds={}  best_worker={}",
         outcome.complexity,
@@ -332,7 +350,11 @@ async fn dispatch_slash(
             &CheckpointStore::new(&cfg.workspace).list(),
             20,
         )),
-        "/restore" => SlashOutcome::Printed(restore_checkpoint_text(&cfg.workspace, arg)),
+        "/restore" => SlashOutcome::Printed(restore_checkpoint_text(cfg, agent, arg)),
+        "/memory-review" => SlashOutcome::Printed(
+            MemoryStore::new(cfg.workspace.join(".ncx").join("memory")).review_command(arg),
+        ),
+        "/outcome" => SlashOutcome::Printed(outcome_command_text(agent, cfg, arg)),
         "/export" => SlashOutcome::Printed(export_session_text(
             &agent.session,
             cfg,

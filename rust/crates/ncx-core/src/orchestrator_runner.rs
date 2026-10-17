@@ -44,6 +44,9 @@ pub struct HarnessAgentRunner {
     cancel: Option<CancelCheck>,
     observer: Option<LoopObserver>,
     harness_profile: Option<String>,
+    parent_task_id: Option<String>,
+    /// Numbers worker/node outcomes under the parent task id.
+    child_seq: std::cell::Cell<usize>,
     scratch: RefCell<HashMap<usize, WorkerWorkspace>>,
 }
 
@@ -54,7 +57,9 @@ struct WorkerWorkspace {
 
 impl HarnessAgentRunner {
     pub fn new(cfg: Config) -> Self {
-        let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
+        let mut mem = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+        mem.set_feedback_mode(&cfg.feedback_memory);
+        let memory = Rc::new(mem);
         let _ = memory.consolidate(0.85);
         Self {
             cfg,
@@ -63,8 +68,15 @@ impl HarnessAgentRunner {
             cancel: None,
             observer: None,
             harness_profile: None,
+            parent_task_id: None,
+            child_seq: std::cell::Cell::new(0),
             scratch: RefCell::new(HashMap::new()),
         }
+    }
+
+    pub fn with_parent_task_id(mut self, parent_task_id: impl Into<String>) -> Self {
+        self.parent_task_id = Some(parent_task_id.into());
+        self
     }
 
     pub fn with_bindings(mut self, bindings: RuntimeHostBindings) -> Self {
@@ -89,6 +101,144 @@ impl HarnessAgentRunner {
 
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    /// Load `RoutingStats` for the last 30 days from the workspace `events.sqlite3` store.
+    pub fn load_routing_stats(&self) -> crate::outcome::RoutingStats {
+        const ROUTING_WINDOW_MS: u64 = 30 * 86_400 * 1_000;
+        let db = crate::outcome::workspace_events_db_path(&self.cfg.workspace, None);
+        let Ok(store) = crate::context_store::ContextStore::open(db) else {
+            return crate::outcome::RoutingStats::default();
+        };
+        let since = crate::outcome::now_millis().saturating_sub(ROUTING_WINDOW_MS);
+        let Ok((outcomes, followups)) =
+            crate::outcome::load_outcomes_and_followups(&store, Some(since))
+        else {
+            return crate::outcome::RoutingStats::default();
+        };
+        crate::outcome::RoutingStats::from_outcomes(&outcomes, &followups)
+    }
+
+    /// Record the parent `Primary` `TaskOutcome` for an orchestrated turn.
+    /// `initial_complexity` is the classifier's choice before any routing
+    /// feedback upgrade; statistics bucket on it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_orchestrated_outcome(
+        &self,
+        session_id: &str,
+        turn_id: u64,
+        task: &str,
+        outcome: &crate::OrchestratorOutcome,
+        initial_complexity: Option<crate::Complexity>,
+        shadow_recommended_route: Option<String>,
+        duration_ms: u64,
+    ) {
+        let db = crate::outcome::workspace_events_db_path(&self.cfg.workspace, None);
+        let Ok(store) = crate::context_store::ContextStore::open(db) else {
+            return;
+        };
+        let complexity_key = |c: crate::Complexity| match c {
+            crate::Complexity::Simple => "Simple",
+            crate::Complexity::Medium => "Medium",
+            crate::Complexity::High => "Complex",
+        };
+        let complexity_str = complexity_key(outcome.complexity);
+        let tier_config = match outcome.complexity {
+            crate::Complexity::Simple => "single",
+            crate::Complexity::Medium => "flash+pro",
+            crate::Complexity::High => "dag",
+        };
+        let task_id = self
+            .parent_task_id
+            .clone()
+            .unwrap_or_else(|| format!("{session_id}:orch-{turn_id}"));
+        let usage = crate::outcome::Usage {
+            prompt_tokens: outcome
+                .telemetry
+                .usage
+                .get("prompt_tokens")
+                .copied()
+                .unwrap_or(0)
+                .max(0) as u64,
+            completion_tokens: outcome
+                .telemetry
+                .usage
+                .get("completion_tokens")
+                .copied()
+                .unwrap_or(0)
+                .max(0) as u64,
+            total_tokens: outcome
+                .telemetry
+                .usage
+                .get("total_tokens")
+                .copied()
+                .unwrap_or(0)
+                .max(0) as u64,
+        };
+        let stop_reason = if outcome.cancelled {
+            "cancelled".to_string()
+        } else if outcome.promotion_error.is_some() {
+            "error".to_string()
+        } else {
+            "completed".to_string()
+        };
+        let terminal_state = if outcome.cancelled {
+            "Cancelled".to_string()
+        } else if outcome.promotion_error.is_some() {
+            "Failed".to_string()
+        } else {
+            "Completed".to_string()
+        };
+        // The Simple route runs no verifier (0 rounds, verify_passed=true):
+        // that is "skipped", not a verified pass.
+        let verification = Some(
+            match (outcome.verify_rounds, outcome.verify_passed) {
+                (0, true) => "skipped",
+                (_, true) => "passed",
+                (_, false) => "failed",
+            }
+            .to_string(),
+        );
+        let task_outcome = crate::outcome::TaskOutcome {
+            task_id,
+            parent_task_id: None,
+            session_id: session_id.to_string(),
+            turn_id,
+            role: crate::outcome::TaskRole::Primary,
+            authority: crate::agent_state::AuthoritySource::DirectHuman,
+            category: crate::outcome::TaskCategory::classify(task, &[], true),
+            query_hash: crate::outcome::hash_text(task),
+            model: self.cfg.model.clone(),
+            fast_model: (!self.cfg.fast_model.trim().is_empty())
+                .then(|| self.cfg.fast_model.clone()),
+            permission_mode: self.cfg.permission_mode.clone(),
+            route: Some(crate::outcome::RouteKey {
+                complexity: complexity_str.to_string(),
+                tier_config: tier_config.to_string(),
+                verify_passed: outcome.verify_passed,
+                verify_rounds: outcome.verify_rounds as u32,
+                shadow_recommended_route,
+                initial_complexity: initial_complexity.map(|c| complexity_key(c).to_string()),
+            }),
+            terminal_state,
+            stop_reason,
+            verification,
+            iterations: outcome.telemetry.calls,
+            tool_calls: 0,
+            tools_used: Vec::new(),
+            approvals_requested: 0,
+            approvals_denied: 0,
+            user_questions: 0,
+            recalled_note_ids: Vec::new(),
+            files_touched: Vec::new(),
+            file_hashes: std::collections::BTreeMap::new(),
+            workspace_revision: None,
+            usage,
+            duration_ms,
+            timestamp_ms: crate::outcome::now_millis(),
+            memory_rank_changed: None,
+        };
+        let _ = crate::outcome::append_task_outcome(&store, &task_outcome);
     }
 
     fn model_for(&self, tier: Tier) -> String {
@@ -142,10 +292,36 @@ impl HarnessAgentRunner {
             .service::<ContextServiceDescriptor>("context")
             .expect("configured context service")
             .assemble(system);
-        let mut agent = runtime.profile().clone().apply(
-            AgentLoop::from_runtime_services(tools, Session::new(assembled))
-                .expect("LLM factory service"),
-        );
+        let role = if with_tools {
+            crate::outcome::TaskRole::OrchestratorWorker
+        } else {
+            crate::outcome::TaskRole::OrchestratorNode
+        };
+        let mut agent = runtime
+            .profile()
+            .clone()
+            .apply(
+                AgentLoop::from_runtime_services(tools, Session::new(assembled))
+                    .expect("LLM factory service"),
+            )
+            .with_task_role(role, self.parent_task_id.clone());
+        // Worker sessions have no durable log; give their outcomes the
+        // workspace store and an id under the parent task so they are kept
+        // out of the ACR denominator but stay linked for routing analysis.
+        if let Some(parent) = &self.parent_task_id {
+            let db = crate::outcome::workspace_events_db_path(&self.cfg.workspace, None);
+            if let Ok(store) = crate::context_store::ContextStore::open(db) {
+                let seq = self.child_seq.get() + 1;
+                self.child_seq.set(seq);
+                let label = match worker {
+                    Some(index) => format!("worker-{}", index + 1),
+                    None => "node".to_string(),
+                };
+                agent = agent.with_outcome_sink(Rc::new(store), format!("{parent}:{label}-{seq}"));
+            }
+        }
+        agent.feedback_memory_mode = self.cfg.feedback_memory.clone();
+        agent.feedback_routing_mode = self.cfg.feedback_routing.clone();
         let confirmed = Rc::new(RefCell::new(None));
         let confirmed_sink = confirmed.clone();
         let observer = self.observer.clone();

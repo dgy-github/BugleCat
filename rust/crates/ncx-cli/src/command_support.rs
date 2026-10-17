@@ -46,7 +46,7 @@ pub(crate) fn render_help_for_workspace(workspace: &Path) -> String {
 pub(crate) fn render_status(cfg: &ncx_config::Config) -> String {
     let red = cfg.redacted();
     format!(
-        "model:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\nworkspace: {}\napi_key:   {}\nmodel_budget: {}  tool_budget: {}  retries: {}\ncontext_edit: {}  max_chars: {}  keep_recent: {}  tool_result_chars: {}\nhooks:     {}",
+        "model:     {}\nbase_url:  {}\nsandbox:   {}\napproval:  {}\nworkspace: {}\napi_key:   {}\nmodel_budget: {}  tool_budget: {}  retries: {}\ncontext_edit: {}  max_chars: {}  keep_recent: {}  tool_result_chars: {}\nfeedback:  memory={}  routing={}\nhooks:     {}",
         cfg.model,
         cfg.base_url,
         cfg.sandbox_mode,
@@ -60,8 +60,58 @@ pub(crate) fn render_status(cfg: &ncx_config::Config) -> String {
         cfg.context_edit_max_chars,
         cfg.context_edit_keep_recent_messages,
         cfg.context_edit_max_tool_result_chars,
+        cfg.feedback_memory,
+        cfg.feedback_routing,
         cfg.hooks.len(),
     )
+}
+
+pub(crate) fn outcome_command_text(
+    agent: &mut AgentLoop,
+    cfg: &ncx_config::Config,
+    arg: &str,
+) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("report") {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let since_ms = parse_since_duration_ms("30d")
+            .ok()
+            .map(|d| now_ms.saturating_sub(d));
+        let db_path = workspace_events_db_path(&cfg.workspace, None);
+        let (outcomes, followups) = match ContextStore::open(db_path)
+            .and_then(|store| load_outcomes_and_followups(&store, since_ms))
+        {
+            Ok(pair) => pair,
+            Err(error) => return format!("outcome report error: {error}"),
+        };
+        let group_by = vec![
+            "category".to_string(),
+            "model".to_string(),
+            "policy".to_string(),
+        ];
+        let report = build_outcome_report(&outcomes, &followups, "30d", &group_by);
+        return format_outcome_report(&report).trim_end().to_string();
+    }
+    let (head, rest) = match trimmed.find(char::is_whitespace) {
+        Some(sp) => (&trimmed[..sp], trimmed[sp..].trim()),
+        None => (trimmed, ""),
+    };
+    let good = match head.to_ascii_lowercase().as_str() {
+        "good" | "ok" | "pass" => true,
+        "bad" | "fail" => false,
+        _ => return "Usage: /outcome <good|bad> [note] | /outcome report".to_string(),
+    };
+    let note = (!rest.is_empty()).then(|| rest.to_string());
+    match agent.record_explicit_outcome_label(good, note) {
+        Ok(task_id) => format!(
+            "Recorded outcome label ({}) for task {task_id}.",
+            if good { "good" } else { "bad" }
+        ),
+        Err(error) => error,
+    }
 }
 
 // ── /export ──────────────────────────────────────────────────────────────────

@@ -46,12 +46,18 @@ pub(crate) fn create_checkpoint_text(workspace: &Path, label: &str) -> String {
     }
 }
 
-pub(crate) fn restore_checkpoint_text(workspace: &Path, id: &str) -> String {
+pub(crate) fn restore_checkpoint_text(cfg: &Config, agent: &AgentLoop, id: &str) -> String {
     if id.trim().is_empty() {
         return "usage: /restore <checkpoint-id>".into();
     }
-    match CheckpointStore::new(workspace).restore(id) {
+    let workspace = cfg.workspace.as_path();
+    let checkpoints = CheckpointStore::new(workspace);
+    let created_ms = checkpoints.get(id).and_then(|meta| meta.created_at_ms());
+    match checkpoints.restore(id) {
         Ok(report) => {
+            if let Some(created_ms) = created_ms {
+                record_restore_rollback(cfg, agent, &report.checkpoint_id, created_ms);
+            }
             let safety = report
                 .safety_checkpoint_id
                 .map(|id| format!("\nsafety checkpoint: {id}"))
@@ -63,6 +69,28 @@ pub(crate) fn restore_checkpoint_text(workspace: &Path, id: &str) -> String {
         }
         Err(e) => format!("restore failed: {e}"),
     }
+}
+
+/// I3: blame the restore on the latest task of this session that the
+/// checkpoint undid. Failure to record never blocks the restore itself.
+fn record_restore_rollback(cfg: &Config, agent: &AgentLoop, checkpoint_id: &str, created_ms: u64) {
+    let db = workspace_events_db_path(&cfg.workspace, agent.session.log_path.as_deref());
+    let Ok(store) = ContextStore::open(db) else {
+        return;
+    };
+    let mut memory = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+    memory.set_feedback_mode(&cfg.feedback_memory);
+    let _ = record_checkpoint_rollback(
+        &store,
+        &cfg.workspace,
+        checkpoint_id,
+        created_ms,
+        Some(&agent.session.session_id),
+        Some(MemoryFeedback {
+            store: &memory,
+            mode: &cfg.feedback_memory,
+        }),
+    );
 }
 
 pub(crate) fn format_checkpoint_saved(meta: &CheckpointMeta) -> String {

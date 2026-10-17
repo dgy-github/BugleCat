@@ -45,6 +45,12 @@ OPTIONS:
     -o, --orchestrate       Run the prompt through the tiered flash/pro orchestrator
                             (classify → plan → parallel workers → verify). One-shot only.
         --memory-merge      Maintenance: LLM-fold near-duplicate project memory notes, then exit.
+        --memory-review [list|confirm <id>|reject <id>|restore <id>]
+                            Review experience candidates and feedback-demoted notes, then exit.
+        --outcomes [report] Print autonomous completion rate (ACR) & compounding feedback report.
+        --since <DURATION>  Time window for --outcomes (e.g. 7d, 30d, 24h; default: 30d).
+        --by <DIMS>         Slice dimensions for --outcomes (category,model,policy).
+        --json              Emit --outcomes report as JSON.
         --dump-genome       Print the default harness genome (system_prompt + core tool
                             descriptions) as TOML, then exit. Used by the ncx-forge trainer.
     -h, --help              Show this help.
@@ -77,6 +83,12 @@ pub struct Args {
     pub history: bool,
     pub orchestrate: bool,
     pub memory_merge: bool,
+    /// `--memory-review` action line (`list` when given without arguments).
+    pub memory_review: Option<String>,
+    pub outcomes: bool,
+    pub since: Option<String>,
+    pub by: Option<String>,
+    pub json: bool,
     /// Print the default genome (system_prompt + core tool descriptions) as TOML and exit.
     pub dump_genome: bool,
     pub help: bool,
@@ -106,6 +118,32 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-r" | "--resume" => args.resume = true,
             "--history" => args.history = true,
             "--memory-merge" => args.memory_merge = true,
+            "--memory-review" => {
+                let mut action = vec!["list".to_string()];
+                if let Some(verb) = argv
+                    .get(i + 1)
+                    .filter(|v| matches!(v.as_str(), "list" | "confirm" | "reject" | "restore"))
+                {
+                    action = vec![verb.clone()];
+                    i += 1;
+                    if verb != "list" {
+                        if let Some(id) = argv.get(i + 1).filter(|v| !v.starts_with('-')) {
+                            action.push(id.clone());
+                            i += 1;
+                        }
+                    }
+                }
+                args.memory_review = Some(action.join(" "));
+            }
+            "--outcomes" => {
+                args.outcomes = true;
+                if argv.get(i + 1).map(|s| s.as_str()) == Some("report") {
+                    i += 1;
+                }
+            }
+            "--since" => args.since = Some(take_value(argv, &mut i, a)?),
+            "--by" => args.by = Some(take_value(argv, &mut i, a)?),
+            "--json" => args.json = true,
             "--dump-genome" => args.dump_genome = true,
             "--disable-context-edit" => args.disable_context_edit = true,
             "--mcp" => args.mcp = true,
@@ -257,5 +295,36 @@ mod tests {
     fn dump_genome_flag() {
         assert!(args(&["--dump-genome"]).unwrap().dump_genome);
         assert!(!args(&[]).unwrap().dump_genome);
+    }
+
+    #[test]
+    fn memory_review_flags() {
+        assert_eq!(
+            args(&["--memory-review"]).unwrap().memory_review.as_deref(),
+            Some("list")
+        );
+        let a = args(&["--memory-review", "confirm", "m-abc"]).unwrap();
+        assert_eq!(a.memory_review.as_deref(), Some("confirm m-abc"));
+        assert!(a.prompt.is_none());
+        assert!(args(&[]).unwrap().memory_review.is_none());
+    }
+
+    #[test]
+    fn outcomes_flags() {
+        let a = args(&[
+            "--outcomes",
+            "report",
+            "--since",
+            "30d",
+            "--by",
+            "category,model,policy",
+            "--json",
+        ])
+        .unwrap();
+        assert!(a.outcomes);
+        assert!(a.prompt.is_none());
+        assert_eq!(a.since.as_deref(), Some("30d"));
+        assert_eq!(a.by.as_deref(), Some("category,model,policy"));
+        assert!(a.json);
     }
 }

@@ -214,6 +214,59 @@ fn record_tool_result(
     result: String,
     duration_ms: Option<u64>,
 ) {
+    let failed = classify_tool_result(&result).is_some();
+    let target = recovery_target(&call.name, &call.arguments);
+    if !failed {
+        for path in extract_touched_files(&call.name, &call.arguments) {
+            if !agent.last_files_touched.contains(&path) {
+                agent.last_files_touched.push(path);
+            }
+        }
+        // Pair only a retry of the same tool on the same target; an unrelated
+        // success after a failure says nothing about how the failure was fixed.
+        if let Some(target) = target {
+            if let Some(pos) = agent
+                .last_failed_tools
+                .iter()
+                .rposition(|f| f.tool == call.name && f.target == target)
+            {
+                let failure = agent.last_failed_tools.remove(pos);
+                let candidate_text = format!(
+                    "`{}` on `{}` failed ({}); a later `{}` on the same target succeeded in the same task.",
+                    failure.tool, failure.target, failure.excerpt, call.name
+                );
+                let source_ref = format!(
+                    "{}#turn-{}:{}",
+                    agent.session.session_id, agent.next_turn_id, call.id
+                );
+                if !agent
+                    .last_recovery_candidates
+                    .iter()
+                    .any(|(text, _)| *text == candidate_text)
+                {
+                    agent
+                        .last_recovery_candidates
+                        .push((candidate_text, source_ref));
+                }
+            }
+        }
+    } else if let Some(target) = target {
+        let excerpt: String = result
+            .lines()
+            .next()
+            .unwrap_or("tool error")
+            .chars()
+            .take(100)
+            .collect();
+        if agent.last_failed_tools.len() >= MAX_PENDING_FAILURES {
+            agent.last_failed_tools.remove(0);
+        }
+        agent.last_failed_tools.push(FailedToolCall {
+            tool: call.name.clone(),
+            target,
+            excerpt,
+        });
+    }
     emit(
         sink,
         LoopEvent::ToolResult {
@@ -224,6 +277,79 @@ fn record_tool_result(
     agent
         .session
         .add_tool_result_timed(&call.id, &call.name, &result, duration_ms);
+}
+
+const MAX_PENDING_FAILURES: usize = 16;
+
+/// A failed tool call of the current turn awaiting a same-target retry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FailedToolCall {
+    pub(crate) tool: String,
+    pub(crate) target: String,
+    pub(crate) excerpt: String,
+}
+
+/// What a tool call acted on, for failure->recovery pairing: the file for
+/// file tools, the first changed file of a patch, the program (plus
+/// subcommand) for shell. `None` means the call cannot be paired.
+fn recovery_target(tool_name: &str, args: &serde_json::Value) -> Option<String> {
+    if let Some(path) = args
+        .get("path")
+        .or_else(|| args.get("file_path"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        return Some(path.to_string());
+    }
+    if tool_name == "shell" {
+        let command = args.get("command").and_then(|v| v.as_str())?;
+        let head: Vec<&str> = command.split_whitespace().take(2).collect();
+        return (!head.is_empty()).then(|| head.join(" "));
+    }
+    extract_touched_files(tool_name, args).into_iter().next()
+}
+
+fn extract_touched_files(tool_name: &str, args: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    match tool_name {
+        "write_file" | "edit_file" | "multi_edit" | "str_replace_editor" => {
+            if let Some(p) = args
+                .get("path")
+                .or_else(|| args.get("file_path"))
+                .and_then(|v| v.as_str())
+            {
+                if !p.trim().is_empty() {
+                    out.push(p.trim().to_string());
+                }
+            }
+        }
+        "apply_patch" => {
+            if let Some(patch) = args
+                .get("patch")
+                .or_else(|| args.get("input"))
+                .and_then(|v| v.as_str())
+            {
+                for line in patch.lines() {
+                    for prefix in [
+                        "*** Update File: ",
+                        "*** Add File: ",
+                        "*** Delete File: ",
+                        "+++ b/",
+                    ] {
+                        if let Some(rest) = line.strip_prefix(prefix) {
+                            let path = rest.trim();
+                            if !path.is_empty() && path != "/dev/null" {
+                                out.push(path.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 fn is_cancelled(cancel: Option<&dyn Fn() -> bool>) -> bool {

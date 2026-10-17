@@ -179,6 +179,7 @@ tool.
 - **Pi-style in-conversation trace tree (`_trace`):** every message in `Session::messages` and `session.jsonl` embeds a structured `MessageTrace` (`id` / `parent_id` tree pointers, `turn_id`, `content_hash`, `workspace_revision`, assistant `model` / `finish_reason` / token `usage`, tool `duration_ms` / `status` / `exit_code`, and `CompactionTrace::first_kept_entry_id`), automatically stripped from wire requests before calling the LLM.
 - **OpenCode-style post-edit automatic diagnostics:** after `apply_patch` or `str_replace_editor` mutates workspace files, the harness automatically runs incremental LSP diagnostics (synchronizing `textDocument/didChange`), in-process JSON/TOML syntax validation, and Git merge-conflict marker checks, appending any errors or warnings directly to the edit result.
 - **Codex-style large tool output offloading:** tool outputs exceeding 16,000 characters are automatically written in full to an external artifact file while returning an inline head + tail preview and a `[tool_output_offloaded: path=... offset=...]` handle for on-demand inspection via `read_file`.
+- **Autonomous Completion Rate (ACR) & online compounding feedback:** records privacy-safe `TaskOutcome` events (excluding pure `Chat` and subagent worker turns from the primary denominator) and automatically resolves next-turn `OutcomeFollowup` signals (I3 checkpoint rollback, I4 multilingual ZH/EN/JA correction heuristics, I5 manual file edits, and `/outcome good|bad` labels). `ncx --outcomes report [--since 30d] [--by category,model,policy] [--json]` reports `ACR-strict`, `ACR-approval-tolerant`, 95% Wilson confidence intervals, and 60-point singularity status (`n >= 30`, `ACR-strict` lower bound `>= 60%`, `rework_rate <= 15%`), Completed tasks with no followup yet are reported as pending and enter no rate; the singularity is judged per task category. `[feedback] memory / routing = "off" | "shadow" | "on"` (default `"shadow"`) governs bounded Beta-posterior memory re-ranking (`±20%`, each resolved task scored once), demotion (only in `on`, only on rejection), and monotonic orchestrator route upgrades; `shadow` injects and routes exactly as `off` and only reports what `on` would change. Failure→recovery pairs become `Candidate` notes that are never recalled or written to `LEARNINGS.md` until a human runs `ncx --memory-review confirm <id>`.
 
 ### Why Rust For Stage 2
 
@@ -366,6 +367,8 @@ cargo run -p ncx-cli
 cargo run -p ncx-cli -- --resume
 cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
+cargo run -p ncx-cli -- --outcomes report --since 30d --by category,model,policy
+cargo run -p ncx-cli -- --memory-review            # list | confirm <id> | reject <id> | restore <id>
 
 # Tauri desktop app
 cd gui
@@ -377,7 +380,7 @@ Inside the Rust REPL, `/config` shows the resolved config file path, current
 model/sandbox/approval values, and writable keys. `/config key=value` persists a
 setting to `~/.nanocodex/config.toml`; restart the REPL for provider, model,
 sandbox, or budget changes to affect the active session. `/usage` (or `/cost`)
-shows raw token usage for the last turn and current REPL session.
+shows raw token usage for the last turn and current REPL session; `/outcome good|bad [note]` records an explicit human label for the latest primary task, and `/outcome report` prints the workspace ACR & 60-point singularity report.
 
 Legacy Python CLI (the command name remains `nanocodex` for compatibility):
 
@@ -423,6 +426,11 @@ model = "deepseek-chat"
 sandbox_mode = "workspace-write"   # read-only | workspace-write | danger-full-access
 approval_policy = "on-request"     # untrusted | on-failure | on-request | never
 reasoning_effort = "auto"          # auto | low | high | max | off
+
+# Online compounding feedback modes (off | shadow | on, default shadow)
+[feedback]
+memory = "shadow"
+routing = "shadow"
 
 # Optional
 # context_token_budget = 512000

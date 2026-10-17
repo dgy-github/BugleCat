@@ -44,6 +44,8 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "price_out",
     "price_currency",
     "available_models",
+    "feedback_memory",
+    "feedback_routing",
 ];
 
 /// Escape a string for a TOML basic (double-quoted) string value.

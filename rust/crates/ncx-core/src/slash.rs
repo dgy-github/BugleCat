@@ -92,6 +92,14 @@ pub const SLASH_HELP: &[(&str, &str)] = &[
         "Restore files from a checkpoint: /restore <id>.",
     ),
     (
+        "/outcome",
+        "Rate the last task outcome: /outcome <good|bad> [note], or /outcome report.",
+    ),
+    (
+        "/memory-review",
+        "Review memory candidates / demoted notes: /memory-review [list|confirm|reject|restore <id>].",
+    ),
+    (
         "/loop",
         "Repeat a prompt on an interval: /loop [5m] <prompt> (Ctrl+C stops).",
     ),
@@ -250,6 +258,8 @@ mod tests {
             "/checkpoint",
             "/checkpoints",
             "/restore",
+            "/outcome",
+            "/memory-review",
             "/loop",
             "/compact",
             "/clear",

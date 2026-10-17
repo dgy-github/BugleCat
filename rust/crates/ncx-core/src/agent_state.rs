@@ -8,6 +8,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Origin of the turn authority recorded in `TaskOutcome`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoritySource {
+    #[default]
+    DirectHuman,
+    SubagentTask,
+    GoalRound,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentState {

@@ -27,12 +27,15 @@ pub enum EventType {
     ApprovalDecision,
     WriteProbe,
     Checkpoint,
+    CheckpointRestore,
+    TaskOutcome,
+    OutcomeFollowup,
     RuntimeVerification,
     VerificationSnapshot,
 }
 
 impl EventType {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::UserMessage => "user_message",
             Self::ToolCall => "tool_call",
@@ -41,12 +44,15 @@ impl EventType {
             Self::ApprovalDecision => "approval_decision",
             Self::WriteProbe => "write_probe",
             Self::Checkpoint => "checkpoint",
+            Self::CheckpointRestore => "checkpoint_restore",
+            Self::TaskOutcome => "task_outcome",
+            Self::OutcomeFollowup => "outcome_followup",
             Self::RuntimeVerification => "runtime_verification",
             Self::VerificationSnapshot => "verification_snapshot",
         }
     }
 
-    fn parse(text: &str) -> Option<Self> {
+    pub fn parse(text: &str) -> Option<Self> {
         Some(match text {
             "user_message" => Self::UserMessage,
             "tool_call" => Self::ToolCall,
@@ -55,6 +61,9 @@ impl EventType {
             "approval_decision" => Self::ApprovalDecision,
             "write_probe" => Self::WriteProbe,
             "checkpoint" => Self::Checkpoint,
+            "checkpoint_restore" => Self::CheckpointRestore,
+            "task_outcome" => Self::TaskOutcome,
+            "outcome_followup" => Self::OutcomeFollowup,
             "runtime_verification" => Self::RuntimeVerification,
             "verification_snapshot" => Self::VerificationSnapshot,
             _ => return None,
@@ -244,7 +253,9 @@ impl ContextStore {
             CREATE INDEX IF NOT EXISTS idx_events_workspace
                 ON context_events(workspace);
             CREATE INDEX IF NOT EXISTS idx_events_agent
-                ON context_events(agent_id);",
+                ON context_events(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_events_type_time
+                ON context_events(event_type, timestamp);",
         )
         .map_err(|e| e.to_string())?;
         Ok(Self { conn })
@@ -377,6 +388,71 @@ impl ContextStore {
 
     pub fn session_events(&self, session_id: &str) -> Result<Vec<ContextEvent>, String> {
         self.since(session_id, 0)
+    }
+
+    /// Query all events of a given `EventType` across sessions, optionally filtered
+    /// by `timestamp >= since_ms`, ordered chronologically (`timestamp ASC, sequence ASC`).
+    pub fn events_by_type(
+        &self,
+        event_type: EventType,
+        since_ms: Option<u64>,
+    ) -> Result<Vec<ContextEvent>, String> {
+        let min_ts = since_ms.unwrap_or(0) as i64;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM context_events
+                 WHERE event_type = ?1 AND timestamp >= ?2
+                 ORDER BY timestamp ASC, sequence ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![event_type.as_str(), min_ts], row_to_event)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Events of one type recorded by one session, in append order.
+    pub fn session_events_by_type(
+        &self,
+        session_id: &str,
+        event_type: EventType,
+    ) -> Result<Vec<ContextEvent>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM context_events
+                 WHERE session_id = ?1 AND event_type = ?2
+                 ORDER BY sequence ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![session_id, event_type.as_str()], row_to_event)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Events of one type attached to one task id, oldest first.
+    pub fn task_events_by_type(
+        &self,
+        task_id: &str,
+        event_type: EventType,
+    ) -> Result<Vec<ContextEvent>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM context_events
+                 WHERE task_id = ?1 AND event_type = ?2
+                 ORDER BY timestamp ASC, sequence ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![task_id, event_type.as_str()], row_to_event)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 
     /// Everything recorded about one tool call, gathered from its start and

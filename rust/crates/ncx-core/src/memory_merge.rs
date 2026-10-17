@@ -73,6 +73,140 @@ impl MemoryStore {
             .await?;
         self.commit_summarize_consolidate(draft)
     }
+
+    /// Items awaiting human review: unconfirmed experience candidates and
+    /// notes demoted by outcome feedback. Nothing here is recalled until a
+    /// human confirms (candidate) or restores (demoted) it.
+    pub fn review_items(&self) -> Vec<MemoryReviewItem> {
+        let Ok(index) = crate::memory_index::MemoryIndex::for_store(self) else {
+            return Vec::new();
+        };
+        let mut items: Vec<MemoryReviewItem> = index
+            .candidate_notes(&self.workspace_key())
+            .into_iter()
+            .map(|note| MemoryReviewItem {
+                kind: MemoryReviewKind::Candidate,
+                id: note.note_id,
+                text: note.text,
+                detail: format!("evidence={} source={}", note.evidence_kind, note.source_ref),
+            })
+            .collect();
+        let entries = self.entries();
+        for stat in index.demoted_feedback() {
+            let text = entries
+                .iter()
+                .find(|entry| MemoryStore::note_id(&entry.text) == stat.note_id)
+                .map(|entry| entry.text.clone())
+                .unwrap_or_else(|| "(note no longer in LEARNINGS.md)".to_string());
+            items.push(MemoryReviewItem {
+                kind: MemoryReviewKind::Demoted,
+                detail: format!(
+                    "injected={} accepted={} rejected={} p={:.2}",
+                    stat.injected,
+                    stat.accepted,
+                    stat.rejected,
+                    stat.beta_posterior()
+                ),
+                id: stat.note_id,
+                text,
+            });
+        }
+        items
+    }
+
+    /// Human confirmation of one candidate: write it to `LEARNINGS.md` and mark
+    /// the index row active. Returns `false` when no such candidate exists.
+    pub fn confirm_candidate(&self, note_id: &str) -> std::io::Result<bool> {
+        let index = crate::memory_index::MemoryIndex::for_store(self).map_err(Error::other)?;
+        let Some(candidate) = index
+            .candidate_notes(&self.workspace_key())
+            .into_iter()
+            .find(|note| note.note_id == note_id)
+        else {
+            return Ok(false);
+        };
+        self.remember(&candidate.text, &candidate.tags, candidate.created_at)?;
+        index.confirm_candidate(note_id).map_err(Error::other)
+    }
+
+    /// Human rejection of one candidate: the row is deleted.
+    pub fn reject_candidate(&self, note_id: &str) -> std::io::Result<bool> {
+        crate::memory_index::MemoryIndex::for_store(self)
+            .and_then(|index| index.reject_candidate(note_id))
+            .map_err(Error::other)
+    }
+
+    /// Clear the demotion flag of one note so it is recalled again.
+    pub fn restore_demoted(&self, note_id: &str) -> std::io::Result<bool> {
+        crate::memory_index::MemoryIndex::for_store(self)
+            .and_then(|index| index.set_note_demoted(note_id, false))
+            .map_err(Error::other)
+    }
+
+    /// Text front-end shared by `ncx --memory-review` and the GUI:
+    /// `list` (default) | `confirm <id>` | `reject <id>` | `restore <id>`.
+    pub fn review_command(&self, arg: &str) -> String {
+        let mut parts = arg.split_whitespace();
+        let action = parts.next().unwrap_or("list").to_ascii_lowercase();
+        let id = parts.next().unwrap_or("");
+        let needs_id = |verb: &str| format!("usage: {verb} <id>  (ids come from `list`)");
+        let result = match action.as_str() {
+            "list" | "" => return format_review_items(&self.review_items()),
+            "confirm" if id.is_empty() => return needs_id("confirm"),
+            "reject" if id.is_empty() => return needs_id("reject"),
+            "restore" if id.is_empty() => return needs_id("restore"),
+            "confirm" => self
+                .confirm_candidate(id)
+                .map(|ok| (ok, "confirmed candidate")),
+            "reject" => self
+                .reject_candidate(id)
+                .map(|ok| (ok, "rejected candidate")),
+            "restore" => self
+                .restore_demoted(id)
+                .map(|ok| (ok, "restored demoted note")),
+            _ => return "usage: list | confirm <id> | reject <id> | restore <id>".to_string(),
+        };
+        match result {
+            Ok((true, what)) => format!("{what} {id}"),
+            Ok((false, _)) => format!("no reviewable memory item with id {id}"),
+            Err(error) => format!("memory review failed: {error}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryReviewKind {
+    Candidate,
+    Demoted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryReviewItem {
+    pub kind: MemoryReviewKind,
+    pub id: String,
+    pub text: String,
+    pub detail: String,
+}
+
+fn format_review_items(items: &[MemoryReviewItem]) -> String {
+    if items.is_empty() {
+        return "memory review: nothing pending (no candidates, no demoted notes).".to_string();
+    }
+    let mut out = vec![format!("memory review: {} item(s)", items.len())];
+    for item in items {
+        let kind = match item.kind {
+            MemoryReviewKind::Candidate => "candidate",
+            MemoryReviewKind::Demoted => "demoted",
+        };
+        out.push(format!(
+            "- [{kind}] {}\n    {}\n    {}",
+            item.id, item.text, item.detail
+        ));
+    }
+    out.push(
+        "actions: confirm <id> | reject <id> (candidates), restore <id> (demoted)".to_string(),
+    );
+    out.join("\n")
 }
 
 async fn merge_entries(

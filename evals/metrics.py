@@ -7,11 +7,50 @@ reported as None instead of being treated as a pass.
 from __future__ import annotations
 
 from collections import Counter
+import math
 from typing import Any, Iterable
 
 
 def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 4) if denominator else None
+
+
+def wilson_ci(successes: int, total: int, z: float = 1.959963984540054) -> dict[str, float] | None:
+    """95% Wilson score confidence interval for a binomial proportion."""
+    if total <= 0:
+        return None
+    n = float(total)
+    k = float(min(max(0, successes), total))
+    p = k / n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denom
+    half = (z * math.sqrt((p * (1.0 - p) + z2 / (4.0 * n)) / n)) / denom
+    return {
+        "center": round(min(1.0, max(0.0, center)), 4),
+        "lower": round(min(1.0, max(0.0, center - half)), 4),
+        "upper": round(min(1.0, max(0.0, center + half)), 4),
+    }
+
+
+def offline_acr(runs: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Compute offline Autonomous Completion Rate (first-round pass without feedback or takeover)."""
+    rows = list(runs)
+    total = len(rows)
+    passed = sum(
+        1
+        for r in rows
+        if (r.get("passed") is True or r.get("success") is True)
+        and not r.get("timed_out", False)
+        and int(r.get("feedback_rounds", 0) or 0) == 0
+        and int(r.get("human_interventions", 0) or 0) == 0
+    )
+    return {
+        "offline_acr": _rate(passed, total),
+        "offline_acr_ci": wilson_ci(passed, total),
+        "autonomous_passes": passed,
+        "runs": total,
+    }
 
 
 def _events(events: Iterable[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
@@ -39,9 +78,21 @@ def evaluate_trace(events: list[dict[str, Any]]) -> dict[str, Any]:
     recovery_successes = sum(1 for e in recoveries if e.get("success") is True)
     duplicate_actions = _duplicate_actions(calls)
     tokens = sum(int(e.get("tokens", 0) or 0) for e in events if e.get("kind") == "model_call")
+    autonomous_completed = (
+        0
+        if takeovers
+        else sum(
+            1
+            for e in completed
+            if e.get("success") is True
+            and not e.get("timed_out", False)
+            and int(e.get("feedback_rounds", 0) or 0) == 0
+        )
+    )
 
     return {
         "task_success_rate": _rate(sum(1 for e in completed if e.get("success") is True), len(completed)),
+        "offline_acr": _rate(autonomous_completed, len(completed)),
         "tool_success_rate": _rate(successful_results, len(results)),
         "tool_selection_accuracy": _rate(correctly_selected, len(calls)),
         "tool_argument_validity_rate": _rate(valid_calls, len(calls)),

@@ -76,6 +76,33 @@ export class SlashController {
     } catch (error) { this.notify(`读取 MCP 失败：${error}`); }
   };
 
+  private runOutcome = async (): Promise<void> => {
+    const raw = this.argument.trim();
+    const [head = "", ...rest] = raw.split(/\s+/);
+    const lower = head.toLowerCase();
+    try {
+      if (lower === "good" || lower === "ok" || lower === "pass" || lower === "bad" || lower === "fail") {
+        const good = lower === "good" || lower === "ok" || lower === "pass";
+        const note = rest.join(" ").trim() || null;
+        this.notify(await invoke<string>("record_outcome_label", { good, note }));
+        return;
+      }
+      const since = !raw || lower === "report" ? (rest[0] ?? "30d") : raw;
+      this.notify(await invoke<string>("get_outcome_report", { since, asJson: false }));
+    } catch (error) {
+      this.notify(`任务结果操作失败：${error}`);
+    }
+  };
+
+  private runMemoryReview = async (): Promise<void> => {
+    const action = this.argument.trim() || "list";
+    try {
+      this.notify(await invoke<string>("memory_review", { action }));
+    } catch (error) {
+      this.notify(`记忆审阅失败：${error}`);
+    }
+  };
+
   private prompt = (text: string): void => {
     const scope = this.argument.trim();
     this.writeInput(scope ? `${text}\n\n本次范围或目标：${scope}` : text);
@@ -106,6 +133,8 @@ export class SlashController {
       { id: "diff", label: "改动", desc: "查看工作区 diff", run: action.openDiff },
       { id: "branches", label: "分支", desc: "Git 分支", run: action.openBranches },
       { id: "memory", label: "记忆", desc: "项目记忆", run: action.openMemory },
+      { id: "outcome", label: "任务结果", desc: "查看无人工介入完成率报表或标记 (/outcome good|bad)", run: this.runOutcome },
+      { id: "memory-review", label: "记忆审阅", desc: "审阅经验候选与降级记忆：list | confirm <id> | reject <id> | restore <id>", run: this.runMemoryReview },
       { id: "mcp", label: "MCP", desc: "列出已配置的 MCP 服务器", run: this.showMcp },
       { id: "feedback", label: "反馈", desc: "打开 GitHub Issues", run: () => invoke("open_url", { url: "https://github.com/dgy-github/BugleCat/issues" }).catch((error) => this.notify(`打开反馈页失败：${error}`)) },
       { id: "review", label: "代码审查", desc: "填入基于真实 diff 的缺陷审查任务", run: () => this.prompt("审查当前代码改动的正确性和质量。先检查实际 git diff；逐项给出文件与行号、严重程度、问题和具体修复。重点关注真实 bug、边界、错误处理和非预期行为，最后明确是否可交付。") },

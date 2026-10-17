@@ -45,6 +45,10 @@ pub struct Orchestrator<'a> {
     cfg: OrchestratorConfig,
     telemetry: RefCell<OrchestratorTelemetry>,
     control: Option<&'a dyn OrchestratorControl>,
+    routing_mode: String,
+    routing_stats: Option<crate::outcome::RoutingStats>,
+    shadow_recommended_route: RefCell<Option<String>>,
+    initial_complexity: RefCell<Option<Complexity>>,
 }
 
 impl<'a> Orchestrator<'a> {
@@ -54,6 +58,10 @@ impl<'a> Orchestrator<'a> {
             cfg,
             telemetry: RefCell::new(OrchestratorTelemetry::default()),
             control: None,
+            routing_mode: "shadow".to_string(),
+            routing_stats: None,
+            shadow_recommended_route: RefCell::new(None),
+            initial_complexity: RefCell::new(None),
         }
     }
 
@@ -62,9 +70,31 @@ impl<'a> Orchestrator<'a> {
         self
     }
 
+    pub fn with_routing_feedback(
+        mut self,
+        mode: impl Into<String>,
+        stats: crate::outcome::RoutingStats,
+    ) -> Self {
+        self.routing_mode = mode.into();
+        self.routing_stats = Some(stats);
+        self
+    }
+
+    pub fn shadow_recommended_route(&self) -> Option<String> {
+        self.shadow_recommended_route.borrow().clone()
+    }
+
+    /// Top-level complexity chosen by the classifier, before any routing
+    /// feedback upgrade (`None` until `handle` classified the task).
+    pub fn initial_complexity(&self) -> Option<Complexity> {
+        *self.initial_complexity.borrow()
+    }
+
     /// Classify the task, then run the matching node graph (depth 0).
     pub async fn handle(&self, task: &str) -> OrchestratorOutcome {
         *self.telemetry.borrow_mut() = OrchestratorTelemetry::default();
+        *self.shadow_recommended_route.borrow_mut() = None;
+        *self.initial_complexity.borrow_mut() = None;
         if self.is_cancelled() {
             return self.cancelled_outcome(Complexity::Medium, None, vec![]);
         }
@@ -146,9 +176,35 @@ impl<'a> Orchestrator<'a> {
             if self.is_cancelled() {
                 return self.cancelled_outcome(Complexity::Medium, None, vec![]);
             }
-            let complexity = self.classify(&task).await;
+            let mut complexity = self.classify(&task).await;
             if self.is_cancelled() {
                 return self.cancelled_outcome(complexity, None, vec![]);
+            }
+            if depth == 0 {
+                *self.initial_complexity.borrow_mut() = Some(complexity);
+            }
+            if depth == 0 && self.routing_mode != "off" {
+                if let Some(stats) = &self.routing_stats {
+                    let cat = crate::outcome::TaskCategory::classify(&task, &[], true);
+                    let initial_key = match complexity {
+                        Complexity::Simple => "Simple",
+                        Complexity::Medium => "Medium",
+                        Complexity::High => "Complex",
+                    };
+                    if let Some((upgraded, reason)) =
+                        stats.recommend_complexity_upgrade(cat, initial_key)
+                    {
+                        *self.shadow_recommended_route.borrow_mut() =
+                            Some(format!("{upgraded} ({reason})"));
+                        if self.routing_mode == "on" {
+                            complexity = match upgraded.as_str() {
+                                "Medium" => Complexity::Medium,
+                                "Complex" => Complexity::High,
+                                _ => complexity,
+                            };
+                        }
+                    }
+                }
             }
             orch_trace(&format!("classified as {complexity:?} at depth {depth}"));
             match complexity {

@@ -124,6 +124,9 @@ def summarize_benchmark(agent: str, rows: list[dict[str, Any]]) -> dict[str, Any
     total_runs = sum(r["runs"] for r in rows)
     total_passes = sum(r["passes"] for r in rows)
     total_clean = sum(r.get("clean_passes", 0) for r in rows)
+    total_autonomous = sum(
+        r.get("autonomous_passes", r.get("clean_passes", 0)) for r in rows
+    )
 
     def rate(n: int) -> float | None:
         return round(n / total_runs, 4) if total_runs else None
@@ -133,11 +136,16 @@ def summarize_benchmark(agent: str, rows: list[dict[str, Any]]) -> dict[str, Any
             # A run killed at the timeout may still leave a passing file behind;
             # it did not finish. clean = passed AND exited on its own.
             "clean_pass_rate": rate(total_clean),
+            "offline_acr": rate(total_autonomous),
             "runs": total_runs, "passes": total_passes, "clean_passes": total_clean,
             "timeouts": sum(r.get("timeouts", 0) for r in rows)}
 
 
-GATE_METRICS = {"clean": "clean_pass_rate", "pass": "task_success_rate"}
+GATE_METRICS = {
+    "acr": "offline_acr",
+    "clean": "clean_pass_rate",
+    "pass": "task_success_rate",
+}
 
 
 def main(argv: list[str] | None = None) -> int:

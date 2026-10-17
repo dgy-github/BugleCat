@@ -79,6 +79,8 @@ pub struct Status {
     price_in: f64,
     price_out: f64,
     price_currency: String,
+    feedback_memory: String,
+    feedback_routing: String,
 }
 
 /// Tauri managed state: the channel into the agent thread + pending approvals.
@@ -447,6 +449,8 @@ fn get_status() -> Result<Status, String> {
         price_in: cfg.price_in,
         price_out: cfg.price_out,
         price_currency: cfg.price_currency.clone(),
+        feedback_memory: cfg.feedback_memory.clone(),
+        feedback_routing: cfg.feedback_routing.clone(),
     })
 }
 
@@ -1598,6 +1602,8 @@ pub struct Settings {
     price_in: f64,
     price_out: f64,
     price_currency: String,
+    feedback_memory: String,
+    feedback_routing: String,
     api_key_masked: String,
     has_api_key: bool,
     deepseek_api_key_masked: String,
@@ -1649,6 +1655,8 @@ fn settings_from_config(cfg: &Config) -> Settings {
         price_in: cfg.price_in,
         price_out: cfg.price_out,
         price_currency: cfg.price_currency.clone(),
+        feedback_memory: cfg.feedback_memory.clone(),
+        feedback_routing: cfg.feedback_routing.clone(),
         api_key_masked: redacted.get("api_key").cloned().unwrap_or_default(),
         has_api_key: !cfg.api_key.is_empty(),
         deepseek_api_key_masked: redacted
@@ -1815,6 +1823,13 @@ fn validate_orchestrator_setting_updates(updates: &HashMap<String, String>) -> R
             };
             if !valid {
                 return Err(format!("{key}不是受支持的值"));
+            }
+        }
+    }
+    for key in ["feedback_memory", "feedback_routing"] {
+        if let Some(raw) = updates.get(key) {
+            if !ncx_config::VALID_FEEDBACK_MODES.contains(&raw.trim()) {
+                return Err(format!("{key}不是受支持的值（期望 off / shadow / on）"));
             }
         }
     }
@@ -2487,11 +2502,44 @@ fn restore_checkpoint(
     state: tauri::State<'_, AppState>,
 ) -> Result<RestoreView, String> {
     with_workspace_snapshot(&state, &expected_workspace, |workspace| {
-        CheckpointStore::new(workspace)
+        let checkpoints = CheckpointStore::new(workspace);
+        let created_ms = checkpoints.get(&id).and_then(|meta| meta.created_at_ms());
+        let report = checkpoints
             .restore(&id)
-            .map(restore_view)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        if let Some(created_ms) = created_ms {
+            record_restore_rollback(workspace, &report.checkpoint_id, created_ms);
+        }
+        Ok(restore_view(report))
     })
+}
+
+/// I3: blame the restore on the latest primary task that started after the
+/// checkpoint. Recording failures never block the restore.
+fn record_restore_rollback(workspace: &Path, checkpoint_id: &str, created_ms: u64) {
+    let Ok(store) =
+        ncx_core::ContextStore::open(ncx_core::workspace_events_db_path(workspace, None))
+    else {
+        return;
+    };
+    let mode = load_config(Overrides {
+        workspace: Some(workspace.to_path_buf()),
+        ..Default::default()
+    })
+    .map(|cfg| cfg.feedback_memory)
+    .unwrap_or_else(|_| "shadow".to_string());
+    let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
+    let _ = ncx_core::record_checkpoint_rollback(
+        &store,
+        workspace,
+        checkpoint_id,
+        created_ms,
+        None,
+        Some(ncx_core::MemoryFeedback {
+            store: &memory,
+            mode: &mode,
+        }),
+    );
 }
 
 fn checkpoint_view(meta: CheckpointMeta) -> CheckpointView {
@@ -3458,6 +3506,73 @@ fn expand_custom_command(slash: String, arg: String) -> Result<String, String> {
         Ok(None) => Err(format!("unknown custom command: {slash}")),
         Err(e) => Err(e),
     }
+}
+
+#[tauri::command]
+fn get_outcome_report(since: Option<String>, as_json: Option<bool>) -> Result<String, String> {
+    let (_, workspace) = configured_workspace()?;
+    let since_str = since.as_deref().unwrap_or("30d");
+    let now_ms = u64::try_from(now_epoch_millis().max(0)).unwrap_or(0);
+    let since_ms = ncx_core::parse_since_duration_ms(since_str)?.min(now_ms);
+    let cutoff = Some(now_ms.saturating_sub(since_ms));
+    let db_path = ncx_core::workspace_events_db_path(&workspace, None);
+    let store = ncx_core::ContextStore::open(db_path)?;
+    let (outcomes, followups) = ncx_core::load_outcomes_and_followups(&store, cutoff)?;
+    let group_by = vec![
+        "category".to_string(),
+        "model".to_string(),
+        "policy".to_string(),
+    ];
+    let report = ncx_core::build_outcome_report(&outcomes, &followups, since_str, &group_by);
+    if as_json.unwrap_or(false) {
+        serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
+    } else {
+        Ok(ncx_core::format_outcome_report(&report))
+    }
+}
+
+#[tauri::command]
+fn record_outcome_label(good: bool, note: Option<String>) -> Result<String, String> {
+    let (cfg, workspace) = configured_workspace()?;
+    let db_path = ncx_core::workspace_events_db_path(&workspace, None);
+    let store = ncx_core::ContextStore::open(db_path)?;
+    let (outcomes, _) = ncx_core::load_outcomes_and_followups(&store, None)?;
+    let Some(last) = outcomes
+        .into_iter()
+        .rev()
+        .find(|o| o.role == ncx_core::TaskRole::Primary)
+    else {
+        return Err("当前工作区暂无可标记的主任务记录".to_string());
+    };
+    let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
+    ncx_core::record_followup(
+        &store,
+        &workspace.to_string_lossy(),
+        &last,
+        ncx_core::FollowupSignal::Label {
+            good,
+            note: note.filter(|s| !s.trim().is_empty()),
+        },
+        Some(ncx_core::MemoryFeedback {
+            store: &memory,
+            mode: &cfg.feedback_memory,
+        }),
+    )?;
+    Ok(format!(
+        "已记录任务 {} 的人工评价：{}",
+        last.task_id,
+        if good { "good" } else { "bad" }
+    ))
+}
+
+/// `list` (default) | `confirm <id>` | `reject <id>` | `restore <id>` over
+/// experience candidates and feedback-demoted notes. Nothing is promoted
+/// without this explicit human action.
+#[tauri::command]
+fn memory_review(action: Option<String>) -> Result<String, String> {
+    let (_, workspace) = configured_workspace()?;
+    let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
+    Ok(memory.review_command(action.as_deref().unwrap_or("list")))
 }
 
 fn configured_workspace() -> Result<(Config, PathBuf), String> {
@@ -4848,6 +4963,9 @@ pub fn run() {
             open_session_snapshot,
             get_custom_commands,
             expand_custom_command,
+            get_outcome_report,
+            record_outcome_label,
+            memory_review,
             open_memory_file,
             get_workspace,
         ])

@@ -127,6 +127,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - **Pi 风格会话内建树状链路追踪（In-Conversation Trace Tree）：** 每条会话消息在 `session.jsonl` 内嵌结构化 `_trace`（`id` / `parent_id` 树指针、轮次号、SHA-256 摘要、工作区 Git revision、Assistant 生效模型与单步 Token `usage`、工具墙钟耗时 `duration_ms` 与退出码、以及压缩位点 `first_kept_entry_id`），发往大模型前自动剥离，实现单文件自包含追踪且对模型零额外 Token 污染。
 - **OpenCode 风格编辑后自动诊断回写（Post-Edit Auto-Diagnostics）：** `apply_patch` 与 `str_replace_editor` 修改文件后，自动触发增量 `rust-analyzer` / LSP 诊断（自动同步 `textDocument/didChange` 并过滤 Info/Hint）、JSON/TOML 零进程语法校验与 Git 冲突标记残留检测，发现问题立即追加到工具返回结果末尾，省去额外一轮模型排查。
 - **Codex 风格超长工具输出自动落盘卸载（Large Tool Output Offloading）：** 当 `shell`、`grep`、MCP 等工具单次输出超过 16,000 字符时，自动将完整未截断输出持久化至系统临时目录，并在内联返回值中给出「前 8,000 字符 + 后 8,000 字符 + `[tool_output_offloaded]` 完整文件路径与起始行号句柄」，供模型通过 `read_file(path, offset, limit)` 按需精读中间省略段落。
+- **智能复利回流与无人工介入完成率（ACR & 60 分奇点度量）：** 在 `AgentLoop` 统一出口记录隐私安全的 `TaskOutcome`（排除纯问答 `Chat` 与子任务 worker）并在下一轮自动捕获回滚（I3）、多语言纠正（I4）与事后手改文件（I5）以及 `/outcome good|bad` 显式评价；支持 `ncx --outcomes report [--since 30d] [--by category,model,policy] [--json]` 输出 Wilson 95% 置信区间与 60 分奇点距离；尚无 followup 的已完成任务记为 pending，不进任何比率；奇点按任务类别判定。`[feedback] memory / routing = "off" | "shadow" | "on"`（默认 `shadow`）控制 Beta 后验有界记忆调权（±20%，每个已定论任务只计一次分）、低效记忆降级（仅 `on` 且仅在负反馈时）以及编排器路由单调升级；`shadow` 的注入与路由与 `off` 完全一致，只报告 `on` 会改变什么。同任务内"同工具同目标"的失败→恢复配对记为 `Candidate`，必须由人执行 `ncx --memory-review confirm <id>` 后才写入 `LEARNINGS.md`，此前永不召回。
 
 ### 第二阶段为什么改用 Rust
 
@@ -293,6 +294,8 @@ cargo run -p ncx-cli
 cargo run -p ncx-cli -- --resume
 cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
+cargo run -p ncx-cli -- --outcomes report --since 30d --by category,model,policy
+cargo run -p ncx-cli -- --memory-review            # list | confirm <id> | reject <id> | restore <id>
 
 # Tauri 桌面开发版
 cd gui
@@ -303,7 +306,7 @@ npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 Rust REPL 里可以用 `/config` 查看解析后的配置文件路径、当前 model/sandbox/approval
 值和可写 key。`/config key=value` 会把设置持久写入 `~/.nanocodex/config.toml`；
 provider、model、sandbox 或预算类变更需要重启 REPL 后影响当前会话。`/usage`（或
-`/cost`）会显示上一轮和当前 REPL session 的原始 token 用量。
+`/cost`）会显示上一轮和当前 REPL session 的原始 token 用量；`/outcome good|bad [note]` 可对上一轮主任务打人工标签，`/outcome report` 查看当前工作区 ACR 与 60 分奇点报告。
 
 旧版 Python CLI（为兼容已有用户，命令名仍保留 `nanocodex`）：
 
@@ -349,6 +352,11 @@ model = "deepseek-chat"
 sandbox_mode = "workspace-write"   # read-only | workspace-write | danger-full-access
 approval_policy = "on-request"     # untrusted | on-failure | on-request | never
 reasoning_effort = "auto"          # auto | low | high | max | off
+
+# 智能复利在线回流开关（off | shadow | on，默认 shadow）
+[feedback]
+memory = "shadow"
+routing = "shadow"
 
 # 可选
 # context_token_budget = 512000

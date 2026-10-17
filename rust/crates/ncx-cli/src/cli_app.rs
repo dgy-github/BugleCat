@@ -86,6 +86,14 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
         eprintln!("ncx: {error}");
         return Some(1);
     }
+    if args.outcomes {
+        return Some(print_outcomes_cli(cfg, args));
+    }
+    if let Some(action) = &args.memory_review {
+        let memory = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+        println!("{}", memory.review_command(action));
+        return Some(0);
+    }
     if !args.memory_merge {
         return None;
     }
@@ -95,6 +103,12 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
         match memory.summarize_consolidate(&summarizer, 0.85).await {
             Ok(count) => {
                 println!("memory: folded {count} near-duplicate note(s) via the LLM.");
+                let pending = memory.review_items().len();
+                if pending > 0 {
+                    println!(
+                        "memory: {pending} item(s) await human review; run `ncx --memory-review`."
+                    );
+                }
                 0
             }
             Err(error) => {
@@ -103,6 +117,57 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
             }
         },
     )
+}
+
+fn print_outcomes_cli(cfg: &Config, args: &Args) -> i32 {
+    let since_str = args.since.as_deref().unwrap_or("30d");
+    let since_ms = match parse_since_duration_ms(since_str) {
+        Ok(dur_ms) => {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            Some(now_ms.saturating_sub(dur_ms))
+        }
+        Err(error) => {
+            eprintln!("ncx: {error}");
+            return 1;
+        }
+    };
+    let group_by: Vec<String> = args
+        .by
+        .as_deref()
+        .unwrap_or("category,model,policy")
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let db_path = workspace_events_db_path(&cfg.workspace, None);
+    let (outcomes, followups) = match ContextStore::open(db_path)
+        .and_then(|store| load_outcomes_and_followups(&store, since_ms))
+    {
+        Ok(pair) => pair,
+        Err(error) => {
+            eprintln!("ncx: cannot open workspace events store: {error}");
+            return 1;
+        }
+    };
+    let report = build_outcome_report(&outcomes, &followups, since_str, &group_by);
+    if args.json {
+        match serde_json::to_string_pretty(&report) {
+            Ok(json_text) => {
+                println!("{json_text}");
+                0
+            }
+            Err(error) => {
+                eprintln!("ncx: json serialization error: {error}");
+                1
+            }
+        }
+    } else {
+        println!("{}", format_outcome_report(&report));
+        0
+    }
 }
 
 fn validate_cli_config(cfg: &Config, args: &Args) -> Result<(), String> {
@@ -130,7 +195,9 @@ fn build_registry(
     String,
 > {
     let runtime_profile = runtime_profile_for_args(cfg, args);
-    let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
+    let mut memory_store = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+    memory_store.set_feedback_mode(&cfg.feedback_memory);
+    let memory = Rc::new(memory_store);
     let _ = memory.consolidate(0.85);
     let genome = Genome::from_env();
     if !genome.is_empty() {
@@ -237,10 +304,11 @@ fn open_agent(
         None => Session::with_log(system_prompt, Some(log_path)),
     };
     let restored_count = session.restored_count;
-    let agent = runtime
+    let mut agent = runtime
         .profile()
         .clone()
         .apply(AgentLoop::from_runtime_services(tools, session)?);
+    agent.feedback_memory_mode = cfg.feedback_memory.clone();
     if args.resume {
         if restored_count > 0 {
             eprintln!("resumed {restored_count} message(s) from the workspace session log.");

@@ -128,6 +128,24 @@ pub struct AgentLoop {
     cost_service: Option<Rc<crate::plugins::CostTelemetryService>>,
     state_machine: Rc<StateRecorder>,
     retrieval_provider: Option<Rc<crate::context_retrieval::RetrievalContextProvider>>,
+    pub task_role: crate::outcome::TaskRole,
+    pub parent_task_id: Option<String>,
+    pub fast_model: Option<String>,
+    pub feedback_memory_mode: String,
+    pub feedback_routing_mode: String,
+    pub(crate) last_recalled_note_ids: Vec<String>,
+    pub(crate) last_memory_rank_changed: Option<bool>,
+    pub(crate) last_verification_status: Option<String>,
+    pub(crate) last_files_touched: Vec<String>,
+    /// Failed tool calls of this turn, waiting for a same-target recovery.
+    pub(crate) last_failed_tools: Vec<tool_dispatch::FailedToolCall>,
+    /// `(text, source_ref)` experience candidates paired within this turn.
+    pub(crate) last_recovery_candidates: Vec<(String, String)>,
+    /// Where outcomes go when the session has no durable event store
+    /// (orchestrator workers run on log-less sessions).
+    outcome_store: Option<Rc<crate::context_store::ContextStore>>,
+    /// Explicit task id (orchestrator workers share one session-id clock).
+    task_id_override: Option<String>,
 }
 
 impl AgentLoop {
@@ -232,6 +250,19 @@ impl AgentLoop {
             cost_service,
             state_machine,
             retrieval_provider: None,
+            task_role: crate::outcome::TaskRole::Primary,
+            parent_task_id: None,
+            fast_model: None,
+            feedback_memory_mode: "shadow".to_string(),
+            feedback_routing_mode: "shadow".to_string(),
+            last_recalled_note_ids: Vec::new(),
+            last_memory_rank_changed: None,
+            last_verification_status: None,
+            last_files_touched: Vec::new(),
+            last_failed_tools: Vec::new(),
+            last_recovery_candidates: Vec::new(),
+            outcome_store: None,
+            task_id_override: None,
         };
         // Layered recall is registered as an ordinary turn context provider, so
         // it stays reversible and cannot mutate the session or tool registry.
@@ -262,6 +293,93 @@ impl AgentLoop {
             }
         }
         agent
+    }
+
+    pub fn with_task_role(
+        mut self,
+        role: crate::outcome::TaskRole,
+        parent_task_id: Option<String>,
+    ) -> Self {
+        self.task_role = role;
+        self.parent_task_id = parent_task_id;
+        self
+    }
+
+    /// Persist outcomes into `store` and record them under `task_id` instead of
+    /// the session-derived id. Used for orchestrator workers, whose sessions
+    /// have no durable log.
+    pub fn with_outcome_sink(
+        mut self,
+        store: Rc<crate::context_store::ContextStore>,
+        task_id: String,
+    ) -> Self {
+        self.outcome_store = Some(store);
+        self.task_id_override = Some(task_id);
+        self
+    }
+
+    fn outcome_event_store(&self) -> Option<Rc<crate::context_store::ContextStore>> {
+        self.outcome_store
+            .clone()
+            .or_else(|| self.session.event_store().cloned())
+    }
+
+    /// The store recall reads from, so feedback scores the notes that were injected.
+    fn recall_memory_store(&self) -> Option<Rc<crate::memory::MemoryStore>> {
+        self.tools
+            .service::<crate::plugins::MemoryServiceDescriptor>("memory")
+            .and_then(|service| service.store.clone())
+            .or_else(|| self.tools.ctx.memory.clone())
+    }
+
+    /// Record an explicit `/outcome good|bad [note]` against the latest primary
+    /// task of this session (or, in a fresh session, of the workspace). A label
+    /// overrides automatic signals in the report and revises the task's single
+    /// memory score if it disagrees with the earlier automatic verdict.
+    pub fn record_explicit_outcome_label(
+        &mut self,
+        good: bool,
+        note: Option<String>,
+    ) -> Result<String, String> {
+        let store = self
+            .outcome_event_store()
+            .or_else(|| {
+                let db = crate::outcome::workspace_events_db_path(
+                    &self.tools.ctx.workspace,
+                    self.session.log_path.as_deref(),
+                );
+                crate::context_store::ContextStore::open(db)
+                    .ok()
+                    .map(Rc::new)
+            })
+            .ok_or_else(|| "cannot open workspace outcome event store".to_string())?;
+        let target = match crate::outcome::latest_primary_outcome(&store, &self.session.session_id)?
+        {
+            Some(outcome) => Some(outcome),
+            None => crate::outcome::load_outcomes_and_followups(&store, None)?
+                .0
+                .into_iter()
+                .rev()
+                .find(|o| o.role == crate::outcome::TaskRole::Primary),
+        };
+        let Some(outcome) = target else {
+            return Err("no previous primary task outcome found to label".to_string());
+        };
+        let memory = self.recall_memory_store();
+        let ws_str = self.tools.ctx.workspace.to_string_lossy().to_string();
+        crate::outcome::record_followup(
+            &store,
+            &ws_str,
+            &outcome,
+            crate::outcome::FollowupSignal::Label { good, note },
+            memory
+                .as_deref()
+                .map(|store| crate::outcome::MemoryFeedback {
+                    store,
+                    mode: &self.feedback_memory_mode,
+                }),
+        )?;
+        Ok(outcome.task_id)
     }
 
     /// Lifecycle state of the active task. This is intentionally separate from
@@ -555,6 +673,22 @@ impl AgentLoop {
         cancel_check: Option<&dyn Fn() -> bool>,
         authority: crate::goal_tools::GoalAuthoritySource,
     ) -> TurnResult {
+        let turn_started_ms = crate::outcome::now_millis();
+        let query_text = crate::agent_loop::turn::user_query_text(&user_input);
+        if matches!(
+            &authority,
+            crate::goal_tools::GoalAuthoritySource::DirectHuman
+        ) && self.task_role == crate::outcome::TaskRole::Primary
+        {
+            self.resolve_previous_primary_followup(&query_text);
+        }
+        self.last_recalled_note_ids.clear();
+        self.last_memory_rank_changed = None;
+        self.last_verification_status = None;
+        self.last_files_touched.clear();
+        self.last_failed_tools.clear();
+        self.last_recovery_candidates.clear();
+
         self.next_turn_id = self.next_turn_id.wrapping_add(1).max(1);
         if matches!(
             &authority,
@@ -571,10 +705,7 @@ impl AgentLoop {
                 &authority,
                 crate::goal_tools::GoalAuthoritySource::DirectHuman
             ) {
-                provider.record_user_instruction(
-                    &crate::agent_loop::turn::user_query_text(&user_input),
-                    self.next_turn_id,
-                );
+                provider.record_user_instruction(&query_text, self.next_turn_id);
             }
         }
         self.state_machine.begin_turn(self.next_turn_id);
@@ -595,7 +726,7 @@ impl AgentLoop {
             .goal_turn_authority
             .replace(Some(crate::goal_tools::GoalTurnAuthority {
                 turn_id: self.next_turn_id,
-                source: authority,
+                source: authority.clone(),
             }));
         // Take the sink out so the inner loop can emit through a local without
         // borrow-conflicting with `&mut self`; restore it after (one return path).
@@ -647,7 +778,232 @@ impl AgentLoop {
         if let Some(service) = &self.cost_service {
             service.record(&result.usage);
         }
+        self.record_turn_outcome(&query_text, &authority, terminal, &result, turn_started_ms);
         result
+    }
+
+    /// Resolve the previous primary task of this session when the human speaks
+    /// again: manual edit (I5) > inferred correction (I4) > accepted. A task
+    /// that already has a followup (label, rollback, earlier resolution) is
+    /// left alone, so each task is auto-resolved at most once.
+    fn resolve_previous_primary_followup(&mut self, next_query: &str) {
+        let Some(store) = self.outcome_event_store() else {
+            return;
+        };
+        let Ok(Some(prev)) =
+            crate::outcome::latest_primary_outcome(&store, &self.session.session_id)
+        else {
+            return;
+        };
+        if !crate::outcome::followups_for_task(&store, &prev.task_id)
+            .map(|f| f.is_empty())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let manual_edits = if prev.file_hashes.is_empty() {
+            Vec::new()
+        } else {
+            crate::outcome::detect_manual_edits(&self.tools.ctx.workspace, &prev.file_hashes)
+        };
+        let signal = if !manual_edits.is_empty() {
+            crate::outcome::FollowupSignal::ManualEdit {
+                files: manual_edits,
+            }
+        } else if crate::outcome::is_correction_prompt(next_query, &prev.files_touched) {
+            crate::outcome::FollowupSignal::Correction {
+                inferred: true,
+                note: None,
+            }
+        } else {
+            crate::outcome::FollowupSignal::Accepted
+        };
+        let memory = self.recall_memory_store();
+        let ws_str = self.tools.ctx.workspace.to_string_lossy().to_string();
+        let _ = crate::outcome::record_followup(
+            &store,
+            &ws_str,
+            &prev,
+            signal,
+            memory
+                .as_deref()
+                .map(|store| crate::outcome::MemoryFeedback {
+                    store,
+                    mode: &self.feedback_memory_mode,
+                }),
+        );
+    }
+
+    fn record_turn_outcome(
+        &mut self,
+        query_text: &str,
+        authority: &crate::goal_tools::GoalAuthoritySource,
+        terminal: AgentState,
+        result: &TurnResult,
+        turn_started_ms: u64,
+    ) {
+        let now_ms = crate::outcome::now_millis();
+        let duration_ms = now_ms.saturating_sub(turn_started_ms);
+        let history = self.state_machine.history();
+        let approvals_requested = history
+            .iter()
+            .filter(|t| {
+                t.turn_id == Some(self.next_turn_id) && t.to == AgentState::AwaitingConfirmation
+            })
+            .count() as u32;
+        let approvals_denied = history
+            .iter()
+            .filter(|t| {
+                t.turn_id == Some(self.next_turn_id)
+                    && (t.permission_decision.as_deref() == Some("denied")
+                        || (t.from == AgentState::AwaitingConfirmation
+                            && t.to == AgentState::Blocked))
+            })
+            .count() as u32;
+        let user_questions = result
+            .tools_used
+            .iter()
+            .filter(|t| t.as_str() == "ask_user_question")
+            .count() as u32;
+
+        let role = match authority {
+            crate::goal_tools::GoalAuthoritySource::GoalRound { .. } => {
+                crate::outcome::TaskRole::GoalRound
+            }
+            crate::goal_tools::GoalAuthoritySource::DirectHuman => self.task_role,
+        };
+        let auth_source = match authority {
+            crate::goal_tools::GoalAuthoritySource::DirectHuman => {
+                if role == crate::outcome::TaskRole::Primary {
+                    crate::agent_state::AuthoritySource::DirectHuman
+                } else {
+                    crate::agent_state::AuthoritySource::SubagentTask
+                }
+            }
+            crate::goal_tools::GoalAuthoritySource::GoalRound { .. } => {
+                crate::agent_state::AuthoritySource::GoalRound
+            }
+        };
+
+        let has_deliverable = !self.last_files_touched.is_empty()
+            || !result.tools_used.is_empty()
+            || result.final_text.contains("```");
+        let category =
+            crate::outcome::TaskCategory::classify(query_text, &result.tools_used, has_deliverable);
+        let permission_mode = self
+            .policy_service
+            .as_ref()
+            .map(|p| {
+                if p.plan_mode {
+                    "plan".to_string()
+                } else if self.tools.ctx.require_edit_approval {
+                    "default".to_string()
+                } else {
+                    ncx_config::derive_permission_mode(&p.sandbox.mode).to_string()
+                }
+            })
+            .unwrap_or_else(|| "accept-edits".to_string());
+        // Only a recorded verification verdict may say "passed"; a completed
+        // turn without one is unverified, not verified.
+        let verification = self.last_verification_status.clone().or_else(|| {
+            if self.verification.mode == crate::verification::Mode::Off {
+                Some("skipped".to_string())
+            } else if result.stop_reason == "verification_failed" {
+                Some("failed".to_string())
+            } else {
+                Some("unverified".to_string())
+            }
+        });
+        let file_hashes = crate::outcome::snapshot_file_hashes(
+            &self.tools.ctx.workspace,
+            &self.last_files_touched,
+        );
+        let usage = crate::outcome::Usage {
+            prompt_tokens: result
+                .usage
+                .get("prompt_tokens")
+                .copied()
+                .unwrap_or(0)
+                .max(0) as u64,
+            completion_tokens: result
+                .usage
+                .get("completion_tokens")
+                .copied()
+                .unwrap_or(0)
+                .max(0) as u64,
+            total_tokens: result
+                .usage
+                .get("total_tokens")
+                .copied()
+                .unwrap_or(0)
+                .max(0) as u64,
+        };
+        let task_id = self
+            .task_id_override
+            .clone()
+            .unwrap_or_else(|| format!("{}:turn-{}", self.session.session_id, self.next_turn_id));
+        let outcome = crate::outcome::TaskOutcome {
+            task_id,
+            parent_task_id: self.parent_task_id.clone(),
+            session_id: self.session.session_id.clone(),
+            turn_id: self.next_turn_id,
+            role,
+            authority: auth_source,
+            category,
+            query_hash: crate::outcome::hash_text(query_text),
+            model: self.provider.model().to_string(),
+            fast_model: self.fast_model.clone(),
+            permission_mode,
+            route: None,
+            terminal_state: format!("{terminal:?}"),
+            stop_reason: result.stop_reason.clone(),
+            verification,
+            iterations: result.iterations,
+            tool_calls: result.tools_used.len(),
+            tools_used: result.tools_used.clone(),
+            approvals_requested,
+            approvals_denied,
+            user_questions,
+            recalled_note_ids: self.last_recalled_note_ids.clone(),
+            files_touched: self.last_files_touched.clone(),
+            file_hashes,
+            workspace_revision: self.state_machine.workspace_revision(),
+            usage,
+            duration_ms,
+            timestamp_ms: now_ms,
+            memory_rank_changed: self.last_memory_rank_changed,
+        };
+        if let Some(store) = self.outcome_event_store() {
+            let _ = crate::outcome::append_task_outcome(&store, &outcome);
+        }
+        // A failure->recovery pair only becomes a review candidate when the
+        // whole task finished and nothing contradicted it.
+        let verification_ok = matches!(
+            outcome.verification.as_deref(),
+            Some("passed") | Some("skipped")
+        );
+        if terminal == AgentState::Completed
+            && verification_ok
+            && !self.last_recovery_candidates.is_empty()
+        {
+            if let Some(mem) = self.recall_memory_store() {
+                if let Ok(idx) = crate::memory_index::MemoryIndex::for_store(&mem) {
+                    let ws_key = mem.workspace_key();
+                    let ts_sec = now_ms / 1_000;
+                    for (text, source_ref) in &self.last_recovery_candidates {
+                        let _ = idx.record_candidate(
+                            &ws_key,
+                            text,
+                            &["recovery".to_string()],
+                            &crate::memory_index::Evidence::VerifiedToolResult {
+                                source_ref: source_ref.clone(),
+                            },
+                            ts_sec,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     async fn apply_stop_hook(

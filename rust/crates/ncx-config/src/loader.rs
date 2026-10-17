@@ -414,6 +414,8 @@ pub(crate) fn load_config_impl(
             "orchestrator_max_subtasks",
             &["NANOCODEX_ORCHESTRATOR_MAX_SUBTASKS"],
         ),
+        ("feedback_memory", &["NANOCODEX_FEEDBACK_MEMORY"]),
+        ("feedback_routing", &["NANOCODEX_FEEDBACK_ROUTING"]),
     ];
     for (field, env_keys) in env_map {
         for env_key in *env_keys {
@@ -616,6 +618,14 @@ pub(crate) fn load_config_impl(
             .get("price_currency")
             .cloned()
             .unwrap_or_else(|| "CNY".into()),
+        feedback_memory: merged
+            .get("feedback_memory")
+            .cloned()
+            .unwrap_or_else(|| "shadow".into()),
+        feedback_routing: merged
+            .get("feedback_routing")
+            .cloned()
+            .unwrap_or_else(|| "shadow".into()),
         hooks: parse_hooks(&nano_raw),
         mcp_servers: vec![],
     };

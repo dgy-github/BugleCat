@@ -16,6 +16,9 @@ pub const VALID_HOOK_EVENTS: &[&str] = &["pre_tool", "post_tool", "user_prompt",
 /// Claude-Code-style permission modes (the GUI's single permission selector).
 pub const VALID_PERMISSION_MODES: &[&str] = &["plan", "default", "accept-edits", "bypass"];
 
+/// Valid modes for online compounding feedback (`[feedback] memory` / `routing`).
+pub const VALID_FEEDBACK_MODES: &[&str] = &["off", "shadow", "on"];
+
 /// Map a CC permission mode to the underlying knobs:
 /// `(sandbox_mode, approval_policy, require_edit_approval, plan_mode)`.
 /// Unknown modes fall back to the gentle `accept-edits` behavior.
@@ -128,6 +131,10 @@ pub struct Config {
     /// Currency used for local cost estimates. Kept in the provider's original
     /// currency so no unstable exchange-rate conversion is needed.
     pub price_currency: String,
+    /// Online compounding feedback mode for project memory (`"off" | "shadow" | "on"`).
+    pub feedback_memory: String,
+    /// Online compounding feedback mode for orchestrator routing (`"off" | "shadow" | "on"`).
+    pub feedback_routing: String,
     pub hooks: Vec<HookConfig>,
     /// MCP servers loaded from `~/.nanocodex/mcp.toml`.
     pub mcp_servers: Vec<McpServerConfig>,
@@ -180,6 +187,8 @@ impl Default for Config {
             price_in: 0.0,
             price_out: 0.0,
             price_currency: "CNY".to_string(),
+            feedback_memory: "shadow".to_string(),
+            feedback_routing: "shadow".to_string(),
             hooks: vec![],
             mcp_servers: vec![],
         }
@@ -218,6 +227,18 @@ impl Config {
             return Err(ConfigError(format!(
                 "Invalid price_currency {:?}; expected one of {:?}.",
                 self.price_currency, VALID_PRICE_CURRENCIES
+            )));
+        }
+        if !VALID_FEEDBACK_MODES.contains(&self.feedback_memory.as_str()) {
+            return Err(ConfigError(format!(
+                "Invalid feedback_memory {:?}; expected one of {:?}.",
+                self.feedback_memory, VALID_FEEDBACK_MODES
+            )));
+        }
+        if !VALID_FEEDBACK_MODES.contains(&self.feedback_routing.as_str()) {
+            return Err(ConfigError(format!(
+                "Invalid feedback_routing {:?}; expected one of {:?}.",
+                self.feedback_routing, VALID_FEEDBACK_MODES
             )));
         }
         if !(1..=128).contains(&self.max_parallel_tool_calls) {

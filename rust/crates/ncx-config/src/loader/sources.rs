@@ -109,9 +109,19 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "price_out",
         "price_currency",
         "available_models",
+        "feedback_memory",
+        "feedback_routing",
     ] {
         if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);
+        }
+    }
+    if let Some(feedback) = raw.get("feedback").and_then(|v| v.as_table()) {
+        if let Some(m) = str_val(feedback, "memory") {
+            out.insert("feedback_memory".into(), m);
+        }
+        if let Some(r) = str_val(feedback, "routing") {
+            out.insert("feedback_routing".into(), r);
         }
     }
     out
@@ -164,6 +174,8 @@ const PROFILE_KEYS: &[&str] = &[
     "context_edit_max_chars",
     "context_edit_keep_recent_messages",
     "context_edit_max_tool_result_chars",
+    "feedback_memory",
+    "feedback_routing",
 ];
 
 fn profile_values(selected: &Table) -> BTreeMap<String, String> {

@@ -74,6 +74,10 @@ pub(super) async fn run(
         );
     });
     let runner = HarnessAgentRunner::new(cfg.clone())
+        .with_parent_task_id(format!(
+            "{session_id}:orch-{}",
+            protocol_turn.turn_id.as_str()
+        ))
         .with_harness_profile(harness_profile)
         .with_bindings(bindings)
         .with_cancel(Rc::new(move || cancel_check.load(Ordering::Acquire)))
@@ -85,10 +89,22 @@ pub(super) async fn run(
     };
     let is_first_turn = messages_have_no_user(&messages);
     let task = contextual_task(&messages, &expanded);
-    let outcome = Orchestrator::new(&runner, OrchestratorConfig::from_runtime_config(&cfg))
+    let routing_stats = runner.load_routing_stats();
+    let orch = Orchestrator::new(&runner, OrchestratorConfig::from_runtime_config(&cfg))
         .with_control(&control)
-        .handle(&task)
-        .await;
+        .with_routing_feedback(cfg.feedback_routing.clone(), routing_stats);
+    let started_ms = ncx_core::now_millis();
+    let outcome = orch.handle(&task).await;
+    let duration_ms = ncx_core::now_millis().saturating_sub(started_ms);
+    runner.record_orchestrated_outcome(
+        &session_id,
+        1,
+        &expanded,
+        &outcome,
+        orch.initial_complexity(),
+        orch.shadow_recommended_route(),
+        duration_ms,
+    );
     if let Ok(mut registry) = session_grants.lock() {
         registry.insert(session_id.clone(), grants.borrow().clone());
     }

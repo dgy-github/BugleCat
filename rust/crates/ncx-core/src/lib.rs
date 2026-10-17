@@ -33,6 +33,7 @@ pub mod mentions;
 pub mod model_provider;
 pub mod orchestrator;
 pub mod orchestrator_runner;
+pub mod outcome;
 pub mod plugins;
 pub mod process_tools;
 pub mod project_instructions;
@@ -87,9 +88,10 @@ pub use instruction_state::{
 pub use lsp_tool::{LspProvider, LspRequest, LspTool};
 pub use mcp_tool::{prepare_mcp_server_tools, register_mcp_server};
 pub use media_tools::{GenerateImageTool, GenerateVideoTool, MediaGenerationService, MediaPrice};
-pub use memory::{MemoryEntry, MemoryStore, Summarizer};
+pub use memory::{MemoryEntry, MemoryRecall, MemoryStore, Summarizer};
 pub use memory_index::{Evidence, IndexedNote, MemoryIndex, NoteStatus, PromotionRefused};
 pub use memory_merge::MemoryMergeDraft;
+pub use memory_merge::{MemoryReviewItem, MemoryReviewKind};
 pub use memory_summarizer::ProviderMemorySummarizer;
 pub use mentions::{expand_file_mentions, find_mentions};
 pub use ncx_context::{
@@ -104,6 +106,14 @@ pub use orchestrator::{
     OrchestratorTelemetry, Tier,
 };
 pub use orchestrator_runner::{HarnessAgentRunner, HarnessRunnerEvent};
+pub use outcome::{
+    append_checkpoint_restore, append_outcome_followup, append_task_outcome, build_outcome_report,
+    followup_polarity, followups_for_task, format_outcome_report, latest_primary_outcome,
+    load_outcomes_and_followups, now_millis, parse_since_duration_ms, record_checkpoint_rollback,
+    record_followup, wilson_ci, workspace_events_db_path, BaselineReadiness, CategorySingularity,
+    FollowupSignal, MemoryFeedback, OutcomeFollowup, OutcomeReport, OutcomeSliceReport, RouteKey,
+    RoutingStats, ShadowSummary, SingularityStatus, TaskCategory, TaskOutcome, TaskRole, WilsonCi,
+};
 pub use plugins::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
     resolve_local_marketplace_plugin, AttachmentPlugin, AttachmentServiceDescriptor,

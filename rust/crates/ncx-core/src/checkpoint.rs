@@ -29,6 +29,14 @@ pub struct CheckpointMeta {
     pub total_bytes: u64,
 }
 
+impl CheckpointMeta {
+    /// Creation time in epoch milliseconds (`created_at` is stored as a
+    /// zero-padded millisecond stamp).
+    pub fn created_at_ms(&self) -> Option<u64> {
+        self.created_at.trim().parse().ok()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreReport {
     pub checkpoint_id: String,

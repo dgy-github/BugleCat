@@ -366,6 +366,7 @@ pub(super) async fn run(
             } else {
                 "unverified"
             };
+            agent.last_verification_status = Some(status.to_string());
             emit(
                 sink,
                 LoopEvent::Verification {
@@ -409,6 +410,7 @@ pub(super) async fn run(
                         confirmed_model: agent.provider.confirmed_model(),
                     },
                 );
+                agent.last_verification_status = Some("failed".to_string());
                 return state.finish(text, iteration + 1, "verification_failed");
             }
         }
@@ -549,12 +551,20 @@ async fn prepare_prompt(
         .tools
         .service::<crate::plugins::MemoryServiceDescriptor>("memory")
         .and_then(|service| service.store.clone());
-    runtime_notes.extend(memory_recall_notes(
+    // Injection is not counted here: notes are scored only when the task is
+    // resolved (see `outcome::record_followup`), so worker, goal and
+    // unresolved turns never inflate a note's denominator.
+    let recall = memory_recall(
         &memory,
         &tool_query,
         MEMORY_RECALL_MAX_ENTRIES,
         MEMORY_RECALL_MAX_CHARS,
-    ));
+    );
+    agent.last_recalled_note_ids = recall.note_ids;
+    agent.last_memory_rank_changed = recall.rank_changed;
+    if !recall.text.is_empty() {
+        runtime_notes.push(format!("[memory recall for this prompt]\n{}", recall.text));
+    }
     Ok(PromptContext {
         deliverable: DeliverableRequirement::detect(&tool_query, &agent.tools.ctx.workspace),
         tool_query,
@@ -973,18 +983,14 @@ fn add_usage(target: &mut BTreeMap<String, i64>, usage: &BTreeMap<String, i64>) 
     }
 }
 
-fn memory_recall_notes(
+fn memory_recall(
     memory: &Option<std::rc::Rc<crate::memory::MemoryStore>>,
     query: &str,
     max_entries: usize,
     max_chars: usize,
-) -> Vec<String> {
-    let Some(store) = memory else {
-        return Vec::new();
-    };
-    let recalled = store.recall(query, max_entries, max_chars);
-    if recalled.is_empty() {
-        return Vec::new();
-    }
-    vec![format!("[memory recall for this prompt]\n{recalled}")]
+) -> crate::memory::MemoryRecall {
+    memory
+        .as_ref()
+        .map(|store| store.recall_with_feedback(query, max_entries, max_chars))
+        .unwrap_or_default()
 }

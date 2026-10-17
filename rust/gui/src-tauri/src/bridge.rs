@@ -1348,7 +1348,9 @@ async fn build_agent(
     if let Some(profile) = harness_profile {
         runtime = runtime.with_harness_profile(profile);
     }
-    let memory = Rc::new(MemoryStore::new(cfg.workspace.join(".ncx").join("memory")));
+    let mut memory_store = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+    memory_store.set_feedback_mode(&cfg.feedback_memory);
+    let memory = Rc::new(memory_store);
     // Memory is recalled per prompt by AgentLoop (query-scoped), not dumped here.
     // Workspace-only: do NOT inject the developer's global ~/.claude/~/.codex
     // files (their handoff protocol would make a plain "hi" read HANDOFF.md etc.).
@@ -1414,10 +1416,11 @@ async fn build_agent(
         Some(messages) => Session::fork(system_prompt, messages, Some(log_path.clone())),
         None => Session::with_log(system_prompt, Some(log_path.clone())),
     };
-    let agent = runtime
+    let mut agent = runtime
         .profile()
         .clone()
         .apply(AgentLoop::from_runtime_services(tools, session)?);
+    agent.feedback_memory_mode = cfg.feedback_memory.clone();
     Ok((agent, cfg.workspace.clone(), session_id, log_path))
 }
 
