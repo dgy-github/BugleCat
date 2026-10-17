@@ -75,3 +75,14 @@ bench/tasks/gen_*/
 
 # 本地隔离工作区
 .worktrees/
+
+# untracked-evidence: local evaluation evidence kept out of git (size), but
+# referenced by tracked tests/status files by exact path and partly
+# hash-frozen. Never move or delete; integrity is recorded in
+# evals/verification/untracked_evidence_manifest.json
+# (python scripts/untracked-evidence-manifest.py verify).
+# Already-tracked files here stay tracked; add a new summary with `git add -f`.
+/reports/*
+/evals/verification/reports/*
+/evals/golden/reports/*
+/evals/verification/data/mbpp/mbpp-expanded-20261011-v1.json
