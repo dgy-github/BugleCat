@@ -12,7 +12,7 @@ use regex::{NoExpand, RegexBuilder};
 use serde_json::json;
 
 use crate::isolate::copy_tree;
-use crate::workspace_promotion::{promote, snapshot, WorkspaceSnapshot};
+use crate::workspace_promotion::{promote_with_paths, snapshot, WorkspaceSnapshot};
 use crate::{
     discover_skills, load_workspace_instructions, tool_recovery::classify_tool_result,
     AgentCallResult, AgentLoop, AgentRunner, AgentRuntimeProfile, ConfiguredHarnessRuntime,
@@ -37,6 +37,46 @@ pub enum HarnessRunnerEvent {
     },
 }
 
+#[derive(Default, Clone, Debug)]
+struct SubrunTelemetry {
+    tools_used: Vec<String>,
+    files_touched: Vec<String>,
+    recalled_note_ids: Vec<String>,
+    memory_rank_changed: Option<bool>,
+    recovery_candidates: Vec<(String, String)>,
+}
+
+impl SubrunTelemetry {
+    fn merge(&mut self, other: SubrunTelemetry) {
+        self.tools_used.extend(other.tools_used);
+        for f in other.files_touched {
+            if !self.files_touched.contains(&f) {
+                self.files_touched.push(f);
+            }
+        }
+        for id in other.recalled_note_ids {
+            if !self.recalled_note_ids.contains(&id) {
+                self.recalled_note_ids.push(id);
+            }
+        }
+        if let Some(changed) = other.memory_rank_changed {
+            self.memory_rank_changed = Some(self.memory_rank_changed.unwrap_or(false) || changed);
+        }
+        for cand in other.recovery_candidates {
+            if !self.recovery_candidates.contains(&cand) {
+                self.recovery_candidates.push(cand);
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+struct HumanInterventions {
+    approvals_requested: u32,
+    approvals_denied: u32,
+    user_questions: u32,
+}
+
 pub struct HarnessAgentRunner {
     cfg: Config,
     memory: Rc<MemoryStore>,
@@ -47,7 +87,11 @@ pub struct HarnessAgentRunner {
     parent_task_id: Option<String>,
     /// Numbers worker/node outcomes under the parent task id.
     child_seq: std::cell::Cell<usize>,
+    followup_resolved: std::cell::Cell<bool>,
     scratch: RefCell<HashMap<usize, WorkerWorkspace>>,
+    worker_telemetry: RefCell<HashMap<usize, SubrunTelemetry>>,
+    promoted_telemetry: RefCell<SubrunTelemetry>,
+    interventions: RefCell<HumanInterventions>,
 }
 
 struct WorkerWorkspace {
@@ -70,7 +114,11 @@ impl HarnessAgentRunner {
             harness_profile: None,
             parent_task_id: None,
             child_seq: std::cell::Cell::new(0),
+            followup_resolved: std::cell::Cell::new(false),
             scratch: RefCell::new(HashMap::new()),
+            worker_telemetry: RefCell::new(HashMap::new()),
+            promoted_telemetry: RefCell::new(SubrunTelemetry::default()),
+            interventions: RefCell::new(HumanInterventions::default()),
         }
     }
 
@@ -103,6 +151,29 @@ impl HarnessAgentRunner {
         &self.cfg
     }
 
+    /// Resolve the previous `Primary` turn's followup (`I5` manual edit > `I4`
+    /// correction > `Accepted`) before an orchestrated turn mutates the live
+    /// workspace. Idempotent per runner instance.
+    pub fn resolve_previous_primary_followup(&self, session_id: &str, next_query: &str) {
+        if self.followup_resolved.replace(true) {
+            return;
+        }
+        let db = crate::outcome::workspace_events_db_path(&self.cfg.workspace, None);
+        let Ok(store) = crate::context_store::ContextStore::open(db) else {
+            return;
+        };
+        crate::outcome::resolve_previous_primary_followup(
+            &store,
+            &self.cfg.workspace,
+            session_id,
+            next_query,
+            Some(crate::outcome::MemoryFeedback {
+                store: &self.memory,
+                mode: &self.cfg.feedback_memory,
+            }),
+        );
+    }
+
     /// Load `RoutingStats` for the last 30 days from the workspace `events.sqlite3` store.
     pub fn load_routing_stats(&self) -> crate::outcome::RoutingStats {
         const ROUTING_WINDOW_MS: u64 = 30 * 86_400 * 1_000;
@@ -133,10 +204,17 @@ impl HarnessAgentRunner {
         shadow_recommended_route: Option<String>,
         duration_ms: u64,
     ) {
+        self.resolve_previous_primary_followup(session_id, task);
         let db = crate::outcome::workspace_events_db_path(&self.cfg.workspace, None);
         let Ok(store) = crate::context_store::ContextStore::open(db) else {
             return;
         };
+        let next_seq = crate::outcome::latest_primary_outcome(&store, session_id)
+            .ok()
+            .flatten()
+            .map(|prev| prev.turn_id + 1)
+            .unwrap_or(1);
+        let effective_turn_id = turn_id.max(next_seq);
         let complexity_key = |c: crate::Complexity| match c {
             crate::Complexity::Simple => "Simple",
             crate::Complexity::Medium => "Medium",
@@ -151,7 +229,7 @@ impl HarnessAgentRunner {
         let task_id = self
             .parent_task_id
             .clone()
-            .unwrap_or_else(|| format!("{session_id}:orch-{turn_id}"));
+            .unwrap_or_else(|| format!("{session_id}:orch-{effective_turn_id}"));
         let usage = crate::outcome::Usage {
             prompt_tokens: outcome
                 .telemetry
@@ -199,14 +277,23 @@ impl HarnessAgentRunner {
             }
             .to_string(),
         );
+        let promoted = self.promoted_telemetry.borrow().clone();
+        let inter = *self.interventions.borrow();
+        let file_hashes =
+            crate::outcome::snapshot_file_hashes(&self.cfg.workspace, &promoted.files_touched);
+        let has_deliverable = !promoted.files_touched.is_empty() || !promoted.tools_used.is_empty();
         let task_outcome = crate::outcome::TaskOutcome {
             task_id,
             parent_task_id: None,
             session_id: session_id.to_string(),
-            turn_id,
+            turn_id: effective_turn_id,
             role: crate::outcome::TaskRole::Primary,
             authority: crate::agent_state::AuthoritySource::DirectHuman,
-            category: crate::outcome::TaskCategory::classify(task, &[], true),
+            category: crate::outcome::TaskCategory::classify(
+                task,
+                &promoted.tools_used,
+                has_deliverable,
+            ),
             query_hash: crate::outcome::hash_text(task),
             model: self.cfg.model.clone(),
             fast_model: (!self.cfg.fast_model.trim().is_empty())
@@ -224,21 +311,43 @@ impl HarnessAgentRunner {
             stop_reason,
             verification,
             iterations: outcome.telemetry.calls,
-            tool_calls: 0,
-            tools_used: Vec::new(),
-            approvals_requested: 0,
-            approvals_denied: 0,
-            user_questions: 0,
-            recalled_note_ids: Vec::new(),
-            files_touched: Vec::new(),
-            file_hashes: std::collections::BTreeMap::new(),
-            workspace_revision: None,
+            tool_calls: promoted.tools_used.len(),
+            tools_used: promoted.tools_used,
+            approvals_requested: inter.approvals_requested,
+            approvals_denied: inter.approvals_denied,
+            user_questions: inter.user_questions,
+            recalled_note_ids: promoted.recalled_note_ids,
+            files_touched: promoted.files_touched,
+            file_hashes,
+            workspace_revision: crate::agent_state::read_workspace_revision(&self.cfg.workspace),
             usage,
             duration_ms,
             timestamp_ms: crate::outcome::now_millis(),
-            memory_rank_changed: None,
+            memory_rank_changed: promoted.memory_rank_changed,
         };
+        let timestamp_ms = task_outcome.timestamp_ms;
         let _ = crate::outcome::append_task_outcome(&store, &task_outcome);
+        if !outcome.cancelled
+            && outcome.promotion_error.is_none()
+            && outcome.verify_passed
+            && !promoted.recovery_candidates.is_empty()
+        {
+            if let Ok(idx) = crate::memory_index::MemoryIndex::for_store(&self.memory) {
+                let ws_key = self.memory.workspace_key();
+                let ts_sec = timestamp_ms / 1_000;
+                for (text, source_ref) in &promoted.recovery_candidates {
+                    let _ = idx.record_candidate(
+                        &ws_key,
+                        text,
+                        &["recovery".to_string()],
+                        &crate::memory_index::Evidence::VerifiedToolResult {
+                            source_ref: source_ref.clone(),
+                        },
+                        ts_sec,
+                    );
+                }
+            }
+        }
     }
 
     fn model_for(&self, tier: Tier) -> String {
@@ -342,6 +451,62 @@ impl HarnessAgentRunner {
         }));
         let cancelled = || self.cancel.as_ref().is_some_and(|check| check());
         let result = agent.run_turn(json!(task), Some(&cancelled)).await;
+        let history = agent.state_machine.history();
+        let approvals_requested = history
+            .iter()
+            .filter(|t| t.to == crate::agent_state::AgentState::AwaitingConfirmation)
+            .count() as u32;
+        let approvals_denied = history
+            .iter()
+            .filter(|t| {
+                t.permission_decision.as_deref() == Some("denied")
+                    || (t.from == crate::agent_state::AgentState::AwaitingConfirmation
+                        && t.to == crate::agent_state::AgentState::Blocked)
+            })
+            .count() as u32;
+        let user_questions = result
+            .tools_used
+            .iter()
+            .filter(|t| t.as_str() == "ask_user_question")
+            .count() as u32;
+        {
+            let mut inter = self.interventions.borrow_mut();
+            inter.approvals_requested += approvals_requested;
+            inter.approvals_denied += approvals_denied;
+            inter.user_questions += user_questions;
+        }
+        let normalize_touched = |p: String| -> String {
+            let path = Path::new(&p);
+            if let Ok(rel) = path.strip_prefix(workspace) {
+                return rel.to_string_lossy().replace('\\', "/");
+            }
+            p.replace('\\', "/")
+        };
+        let sub_telem = SubrunTelemetry {
+            tools_used: result.tools_used.clone(),
+            files_touched: agent
+                .last_files_touched
+                .into_iter()
+                .map(normalize_touched)
+                .collect(),
+            recalled_note_ids: agent.last_recalled_note_ids,
+            memory_rank_changed: agent.last_memory_rank_changed,
+            recovery_candidates: agent
+                .last_recovery_candidates
+                .into_iter()
+                .map(|(text, source_ref)| {
+                    (
+                        remap_workspace_paths(&text, workspace, &self.cfg.workspace),
+                        source_ref,
+                    )
+                })
+                .collect(),
+        };
+        if let Some(w_idx) = worker {
+            self.worker_telemetry.borrow_mut().insert(w_idx, sub_telem);
+        } else if with_tools {
+            self.promoted_telemetry.borrow_mut().merge(sub_telem);
+        }
         let confirmed_model = confirmed.borrow().clone();
         AgentCallResult {
             text: result.final_text,
@@ -356,6 +521,7 @@ impl HarnessAgentRunner {
         if let Some(old) = self.scratch.borrow_mut().remove(&index) {
             let _ = std::fs::remove_dir_all(old.root);
         }
+        self.worker_telemetry.borrow_mut().remove(&index);
         let next = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
         let scratch =
             std::env::temp_dir().join(format!("ncx_worker_{}_{next}", std::process::id()));
@@ -432,18 +598,29 @@ impl AgentRunner for HarnessAgentRunner {
     }
 
     async fn promote_worker(&self, index: usize) -> Result<(), String> {
-        let result = self
+        let promoted_paths = self
             .scratch
             .borrow()
             .get(&index)
             .ok_or_else(|| format!("Worker {} 没有可提升的隔离工作区", index + 1))
             .and_then(|worker| {
-                promote(&worker.baseline, &worker.root, &self.cfg.workspace).map(|_| ())
+                promote_with_paths(&worker.baseline, &worker.root, &self.cfg.workspace)
             });
         for (_, worker) in self.scratch.borrow_mut().drain() {
             let _ = std::fs::remove_dir_all(worker.root);
         }
-        result
+        let promoted_paths = promoted_paths?;
+        let mut promoted = self.promoted_telemetry.borrow_mut();
+        if let Some(w_telem) = self.worker_telemetry.borrow_mut().remove(&index) {
+            promoted.merge(w_telem);
+        }
+        for path in promoted_paths {
+            if !promoted.files_touched.contains(&path) {
+                promoted.files_touched.push(path);
+            }
+        }
+        self.worker_telemetry.borrow_mut().clear();
+        Ok(())
     }
 }
 
@@ -598,5 +775,130 @@ mod tests {
             }
         );
         assert!(!format!("{finished:?}").contains("secret-value"));
+    }
+
+    #[tokio::test]
+    async fn orchestrated_outcome_aggregates_worker_promotion_and_resolves_followup() {
+        use crate::context_store::ContextStore;
+        use crate::outcome::{
+            followups_for_task, load_outcomes_and_followups, FollowupSignal, TaskCategory,
+        };
+        use crate::{Complexity, OrchestratorOutcome, OrchestratorTelemetry};
+
+        let workspace = crate::test_support::unique_temp_dir("ncx_orch_outcome");
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("lib.rs"), "pub fn v() -> i32 { 1 }\n").unwrap();
+
+        let config = Config {
+            workspace: workspace.clone(),
+            ..Default::default()
+        };
+        let runner = HarnessAgentRunner::new(config);
+
+        // Turn 1: Worker 0 edits lib.rs in isolated workspace and gets promoted;
+        // Worker 1 is a losing worker whose recovery_candidates must NOT leak.
+        let worker_dir = runner.prepare_worker_workspace(0).unwrap();
+        let _worker_dir_1 = runner.prepare_worker_workspace(1).unwrap();
+        std::fs::write(worker_dir.join("lib.rs"), "pub fn v() -> i32 { 2 }\n").unwrap();
+        runner.worker_telemetry.borrow_mut().insert(
+            0,
+            SubrunTelemetry {
+                tools_used: vec!["edit_file".to_string()],
+                files_touched: vec!["lib.rs".to_string()],
+                recalled_note_ids: vec!["note-abc".to_string()],
+                memory_rank_changed: Some(true),
+                recovery_candidates: vec![(
+                    "winning worker recovery pattern".to_string(),
+                    "turn1:w0".to_string(),
+                )],
+            },
+        );
+        runner.worker_telemetry.borrow_mut().insert(
+            1,
+            SubrunTelemetry {
+                tools_used: vec!["shell".to_string()],
+                files_touched: Vec::new(),
+                recalled_note_ids: Vec::new(),
+                memory_rank_changed: None,
+                recovery_candidates: vec![(
+                    "losing worker noise candidate".to_string(),
+                    "turn1:w1".to_string(),
+                )],
+            },
+        );
+        runner.promote_worker(0).await.unwrap();
+        runner.interventions.borrow_mut().approvals_requested = 1;
+
+        let orch_outcome = OrchestratorOutcome {
+            final_text: "Updated v()".to_string(),
+            plan: None,
+            worker_results: Vec::new(),
+            best_worker: 0,
+            complexity: Complexity::Medium,
+            verify_rounds: 1,
+            verify_passed: true,
+            cancelled: false,
+            promotion_error: None,
+            telemetry: OrchestratorTelemetry {
+                calls: 2,
+                ..Default::default()
+            },
+        };
+        runner.record_orchestrated_outcome(
+            "sess-orch",
+            1,
+            "新增 v() 返回值并在代码里加上注释说明",
+            &orch_outcome,
+            Some(Complexity::Simple),
+            Some("Medium (shadow)".to_string()),
+            400,
+        );
+
+        let idx = crate::memory_index::MemoryIndex::for_store(&runner.memory).unwrap();
+        let cands = idx.candidate_notes(&runner.memory.workspace_key());
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].text, "winning worker recovery pattern");
+
+        // User manually edits lib.rs before Turn 2 -> should resolve Turn 1 as ManualEdit (I5).
+        std::fs::write(workspace.join("lib.rs"), "pub fn v() -> i32 { 99 }\n").unwrap();
+        let runner2 = HarnessAgentRunner::new(Config {
+            workspace: workspace.clone(),
+            ..Default::default()
+        });
+        runner2.resolve_previous_primary_followup("sess-orch", "继续优化");
+        runner2.record_orchestrated_outcome(
+            "sess-orch",
+            1,
+            "继续优化",
+            &orch_outcome,
+            Some(Complexity::Simple),
+            None,
+            300,
+        );
+
+        let db_path = crate::outcome::workspace_events_db_path(&workspace, None);
+        let store = ContextStore::open(db_path).unwrap();
+        let (outcomes, _) = load_outcomes_and_followups(&store, None).unwrap();
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].turn_id, 1);
+        assert_eq!(outcomes[1].turn_id, 2);
+        assert_eq!(outcomes[0].category, TaskCategory::Feature);
+        assert_eq!(outcomes[0].files_touched, vec!["lib.rs".to_string()]);
+        assert!(outcomes[0].file_hashes.contains_key("lib.rs"));
+        assert_eq!(outcomes[0].tools_used, vec!["edit_file".to_string()]);
+        assert_eq!(outcomes[0].tool_calls, 1);
+        assert_eq!(outcomes[0].recalled_note_ids, vec!["note-abc".to_string()]);
+        assert_eq!(outcomes[0].memory_rank_changed, Some(true));
+        assert_eq!(outcomes[0].approvals_requested, 1);
+
+        let f1 = followups_for_task(&store, &outcomes[0].task_id).unwrap();
+        assert_eq!(f1.len(), 1);
+        assert!(matches!(
+            &f1[0].signal,
+            FollowupSignal::ManualEdit { files } if files == &vec!["lib.rs".to_string()]
+        ));
+
+        let _ = std::fs::remove_dir_all(workspace);
     }
 }

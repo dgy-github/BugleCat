@@ -19,6 +19,8 @@
     orchestrator_verify_retries: number;
     orchestrator_max_depth: number;
     orchestrator_max_subtasks: number;
+    feedback_memory: "off" | "shadow" | "on";
+    feedback_routing: "off" | "shadow" | "on";
     context_edit_enabled: boolean;
     context_edit_max_chars: number;
     context_edit_keep_recent_messages: number;
@@ -282,6 +284,10 @@
                 <label><span><strong>验证重试</strong><small>验证失败后的重跑次数（0–3）</small></span><input type="number" min="0" max="3" bind:value={settings.orchestrator_verify_retries} /></label>
                 <label><span><strong>递归深度</strong><small>复杂任务继续拆分的层数（0–2）</small></span><input type="number" min="0" max="2" bind:value={settings.orchestrator_max_depth} /></label>
                 <label><span><strong>子任务上限</strong><small>单次分解最多子任务（1–12）</small></span><input type="number" min="1" max="12" bind:value={settings.orchestrator_max_subtasks} /></label>
+              </div>
+              <div class="settings-card"><div class="settings-card-title"><strong>智能复利反馈闭环</strong><small>控制项目记忆效用加权与编排复杂度在线升档策略</small></div>
+                <label><span><strong>记忆效用反馈</strong><small>shadow 仅统计对比；on 启用 Beta 后验加权与自动降级</small></span><select bind:value={settings.feedback_memory}><option value="off">off（关闭）</option><option value="shadow">shadow（影子观察）</option><option value="on">on（启用加权与降级）</option></select></label>
+                <label><span><strong>编排路由反馈</strong><small>shadow 仅记录推荐；on 在低通过率分桶上自动单调升档</small></span><select bind:value={settings.feedback_routing}><option value="off">off（关闭）</option><option value="shadow">shadow（影子观察）</option><option value="on">on（启用自动升档）</option></select></label>
               </div>
               <div class="settings-callout">权限模式在对话输入框中切换，设置页不再维护第二套沙箱与审批状态。</div>
             </section>

@@ -3508,71 +3508,126 @@ fn expand_custom_command(slash: String, arg: String) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
-fn get_outcome_report(since: Option<String>, as_json: Option<bool>) -> Result<String, String> {
-    let (_, workspace) = configured_workspace()?;
-    let since_str = since.as_deref().unwrap_or("30d");
-    let now_ms = u64::try_from(now_epoch_millis().max(0)).unwrap_or(0);
-    let since_ms = ncx_core::parse_since_duration_ms(since_str)?.min(now_ms);
-    let cutoff = Some(now_ms.saturating_sub(since_ms));
-    let db_path = ncx_core::workspace_events_db_path(&workspace, None);
-    let store = ncx_core::ContextStore::open(db_path)?;
-    let (outcomes, followups) = ncx_core::load_outcomes_and_followups(&store, cutoff)?;
-    let group_by = vec![
-        "category".to_string(),
-        "model".to_string(),
-        "policy".to_string(),
-    ];
-    let report = ncx_core::build_outcome_report(&outcomes, &followups, since_str, &group_by);
-    if as_json.unwrap_or(false) {
-        serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
-    } else {
-        Ok(ncx_core::format_outcome_report(&report))
+fn with_optional_workspace_snapshot<T>(
+    state: &AppState,
+    expected_workspace: Option<&str>,
+    operation: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    if let Some(expected) = expected_workspace.filter(|s| !s.trim().is_empty()) {
+        return with_workspace_snapshot(state, expected, operation);
     }
+    let _workspace_gate = state
+        .workspace_gate
+        .lock()
+        .map_err(|_| "工作区切换状态不可用".to_string())?;
+    let current = std::env::current_dir().map_err(|error| error.to_string())?;
+    operation(&current)
 }
 
 #[tauri::command]
-fn record_outcome_label(good: bool, note: Option<String>) -> Result<String, String> {
-    let (cfg, workspace) = configured_workspace()?;
-    let db_path = ncx_core::workspace_events_db_path(&workspace, None);
-    let store = ncx_core::ContextStore::open(db_path)?;
-    let (outcomes, _) = ncx_core::load_outcomes_and_followups(&store, None)?;
-    let Some(last) = outcomes
-        .into_iter()
-        .rev()
-        .find(|o| o.role == ncx_core::TaskRole::Primary)
-    else {
-        return Err("当前工作区暂无可标记的主任务记录".to_string());
-    };
-    let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
-    ncx_core::record_followup(
-        &store,
-        &workspace.to_string_lossy(),
-        &last,
-        ncx_core::FollowupSignal::Label {
-            good,
-            note: note.filter(|s| !s.trim().is_empty()),
-        },
-        Some(ncx_core::MemoryFeedback {
-            store: &memory,
-            mode: &cfg.feedback_memory,
-        }),
-    )?;
-    Ok(format!(
-        "已记录任务 {} 的人工评价：{}",
-        last.task_id,
-        if good { "good" } else { "bad" }
-    ))
+fn get_outcome_report(
+    since: Option<String>,
+    as_json: Option<bool>,
+    expected_workspace: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    with_optional_workspace_snapshot(&state, expected_workspace.as_deref(), |workspace| {
+        let since_str = since.as_deref().unwrap_or("30d");
+        let now_ms = u64::try_from(now_epoch_millis().max(0)).unwrap_or(0);
+        let since_ms = ncx_core::parse_since_duration_ms(since_str)?.min(now_ms);
+        let cutoff = Some(now_ms.saturating_sub(since_ms));
+        let db_path = ncx_core::workspace_events_db_path(workspace, None);
+        let store = ncx_core::ContextStore::open(db_path)?;
+        let (outcomes, followups) = ncx_core::load_outcomes_and_followups(&store, cutoff)?;
+        let group_by = vec![
+            "category".to_string(),
+            "model".to_string(),
+            "policy".to_string(),
+        ];
+        let report = ncx_core::build_outcome_report(&outcomes, &followups, since_str, &group_by);
+        if as_json.unwrap_or(false) {
+            serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
+        } else {
+            Ok(ncx_core::format_outcome_report(&report))
+        }
+    })
+}
+
+#[tauri::command]
+fn record_outcome_label(
+    good: bool,
+    note: Option<String>,
+    session_id: Option<String>,
+    turn_index: Option<usize>,
+    expected_workspace: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    with_optional_workspace_snapshot(&state, expected_workspace.as_deref(), |workspace| {
+        let cfg = load_config(Overrides {
+            workspace: Some(workspace.to_path_buf()),
+            ..Default::default()
+        })
+        .map_err(|e| e.to_string())?;
+        let db_path = ncx_core::workspace_events_db_path(workspace, None);
+        let store = ncx_core::ContextStore::open(db_path)?;
+        let last = if let Some(sid) = session_id.as_deref().filter(|s| !s.trim().is_empty()) {
+            let primaries = ncx_core::primary_outcomes_for_session(&store, sid)?;
+            if let Some(idx) = turn_index {
+                let target_turn_id = (idx as u64) + 1;
+                primaries
+                    .iter()
+                    .find(|o| o.turn_id == target_turn_id)
+                    .cloned()
+                    .or_else(|| primaries.get(idx).cloned())
+                    .or_else(|| primaries.into_iter().last())
+            } else {
+                primaries.into_iter().last()
+            }
+        } else {
+            let (outcomes, _) = ncx_core::load_outcomes_and_followups(&store, None)?;
+            outcomes
+                .into_iter()
+                .rev()
+                .find(|o| o.role == ncx_core::TaskRole::Primary)
+        };
+        let Some(last) = last else {
+            return Err("当前会话暂无可标记的主任务记录".to_string());
+        };
+        let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
+        ncx_core::record_followup(
+            &store,
+            &workspace.to_string_lossy(),
+            &last,
+            ncx_core::FollowupSignal::Label {
+                good,
+                note: note.filter(|s| !s.trim().is_empty()),
+            },
+            Some(ncx_core::MemoryFeedback {
+                store: &memory,
+                mode: &cfg.feedback_memory,
+            }),
+        )?;
+        Ok(format!(
+            "已记录任务 {} 的人工评价：{}",
+            last.task_id,
+            if good { "good" } else { "bad" }
+        ))
+    })
 }
 
 /// `list` (default) | `confirm <id>` | `reject <id>` | `restore <id>` over
 /// experience candidates and feedback-demoted notes. Nothing is promoted
 /// without this explicit human action.
 #[tauri::command]
-fn memory_review(action: Option<String>) -> Result<String, String> {
-    let (_, workspace) = configured_workspace()?;
-    let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
-    Ok(memory.review_command(action.as_deref().unwrap_or("list")))
+fn memory_review(
+    action: Option<String>,
+    expected_workspace: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    with_optional_workspace_snapshot(&state, expected_workspace.as_deref(), |workspace| {
+        let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
+        Ok(memory.review_command(action.as_deref().unwrap_or("list")))
+    })
 }
 
 fn configured_workspace() -> Result<(Config, PathBuf), String> {

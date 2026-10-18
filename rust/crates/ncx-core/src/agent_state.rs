@@ -373,7 +373,7 @@ impl StateRecorder {
     }
 }
 
-fn read_workspace_revision(workspace: &std::path::Path) -> Option<String> {
+pub(crate) fn read_workspace_revision(workspace: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .arg("-C")
         .arg(workspace)

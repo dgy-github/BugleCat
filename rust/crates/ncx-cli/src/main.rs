@@ -121,8 +121,15 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
     let feedback_routing = cfg.feedback_routing.clone();
     let orchestrator_config = OrchestratorConfig::from_runtime_config(&cfg);
     let session_id = recorder.session_id().to_string();
+    let numeric_turn_id = turn_id
+        .as_str()
+        .rsplit('-')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1);
     let runner =
         HarnessAgentRunner::new(cfg).with_parent_task_id(format!("{session_id}:orch-{turn_id}"));
+    runner.resolve_previous_primary_followup(&session_id, prompt);
     let routing_stats = runner.load_routing_stats();
     let orch = Orchestrator::new(&runner, orchestrator_config)
         .with_routing_feedback(feedback_routing, routing_stats);
@@ -131,7 +138,7 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
     let duration_ms = ncx_core::now_millis().saturating_sub(started_ms);
     runner.record_orchestrated_outcome(
         &session_id,
-        1,
+        numeric_turn_id,
         prompt,
         &outcome,
         orch.initial_complexity(),

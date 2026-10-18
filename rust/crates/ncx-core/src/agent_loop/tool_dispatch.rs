@@ -217,11 +217,6 @@ fn record_tool_result(
     let failed = classify_tool_result(&result).is_some();
     let target = recovery_target(&call.name, &call.arguments);
     if !failed {
-        for path in extract_touched_files(&call.name, &call.arguments) {
-            if !agent.last_files_touched.contains(&path) {
-                agent.last_files_touched.push(path);
-            }
-        }
         // Pair only a retry of the same tool on the same target; an unrelated
         // success after a failure says nothing about how the failure was fixed.
         if let Some(target) = target {
@@ -231,9 +226,47 @@ fn record_tool_result(
                 .rposition(|f| f.tool == call.name && f.target == target)
             {
                 let failure = agent.last_failed_tools.remove(pos);
+                let intervening_files: Vec<String> = agent
+                    .last_files_touched
+                    .iter()
+                    .skip(failure.files_touched_len)
+                    .cloned()
+                    .collect();
+                let current_detail = tool_call_detail(&call.name, &call.arguments);
+                let resolution_clause = match (
+                    !intervening_files.is_empty(),
+                    current_detail
+                        .as_deref()
+                        .filter(|d| Some(*d) != failure.detail.as_deref()),
+                ) {
+                    (true, Some(cmd)) => format!(
+                        "a later `{}` on the same target succeeded after editing `{}` (`{cmd}`).",
+                        call.name,
+                        intervening_files.join("`, `")
+                    ),
+                    (true, None) => format!(
+                        "a later `{}` on the same target succeeded after editing `{}`.",
+                        call.name,
+                        intervening_files.join("`, `")
+                    ),
+                    (false, Some(cmd)) => format!(
+                        "a later `{}` on the same target succeeded with `{cmd}`.",
+                        call.name
+                    ),
+                    (false, None) => format!(
+                        "a later `{}` on the same target succeeded in the same task.",
+                        call.name
+                    ),
+                };
+                let failed_context = match &failure.detail {
+                    Some(detail) if detail != &failure.target => {
+                        format!("`{detail}` -> {}", failure.excerpt)
+                    }
+                    _ => failure.excerpt.clone(),
+                };
                 let candidate_text = format!(
-                    "`{}` on `{}` failed ({}); a later `{}` on the same target succeeded in the same task.",
-                    failure.tool, failure.target, failure.excerpt, call.name
+                    "`{}` on `{}` failed ({}); {}",
+                    failure.tool, failure.target, failed_context, resolution_clause
                 );
                 let source_ref = format!(
                     "{}#turn-{}:{}",
@@ -250,14 +283,14 @@ fn record_tool_result(
                 }
             }
         }
+        for path in extract_touched_files(&call.name, &call.arguments) {
+            if !agent.last_files_touched.contains(&path) {
+                agent.last_files_touched.push(path);
+            }
+        }
     } else if let Some(target) = target {
-        let excerpt: String = result
-            .lines()
-            .next()
-            .unwrap_or("tool error")
-            .chars()
-            .take(100)
-            .collect();
+        let excerpt = extract_error_excerpt(&result);
+        let detail = tool_call_detail(&call.name, &call.arguments);
         if agent.last_failed_tools.len() >= MAX_PENDING_FAILURES {
             agent.last_failed_tools.remove(0);
         }
@@ -265,6 +298,8 @@ fn record_tool_result(
             tool: call.name.clone(),
             target,
             excerpt,
+            detail,
+            files_touched_len: agent.last_files_touched.len(),
         });
     }
     emit(
@@ -287,6 +322,45 @@ pub(crate) struct FailedToolCall {
     pub(crate) tool: String,
     pub(crate) target: String,
     pub(crate) excerpt: String,
+    pub(crate) detail: Option<String>,
+    pub(crate) files_touched_len: usize,
+}
+
+fn extract_error_excerpt(result: &str) -> String {
+    let lines: Vec<&str> = result
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return "tool error".to_string();
+    }
+    let first = lines[0];
+    let diagnostic = lines.iter().skip(1).copied().find(|l| {
+        let lower = l.to_ascii_lowercase();
+        lower.contains("error")
+            || lower.contains("failed")
+            || lower.contains("panic")
+            || lower.contains("not found")
+            || lower.contains("denied")
+            || lower.contains("invalid")
+    });
+    let combined = match diagnostic {
+        Some(diag) if !first.to_ascii_lowercase().contains("error") => format!("{first}: {diag}"),
+        _ => first.to_string(),
+    };
+    combined.chars().take(120).collect()
+}
+
+fn tool_call_detail(tool_name: &str, args: &serde_json::Value) -> Option<String> {
+    if tool_name == "shell" {
+        let cmd = args.get("command").and_then(|v| v.as_str())?.trim();
+        if !cmd.is_empty() {
+            let single_line = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
+            return Some(single_line.chars().take(80).collect());
+        }
+    }
+    None
 }
 
 /// What a tool call acted on, for failure->recovery pairing: the file for

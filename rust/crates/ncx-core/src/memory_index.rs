@@ -147,6 +147,7 @@ pub struct IndexedNote {
     pub status: NoteStatus,
     pub created_at: u64,
     pub superseded_by: Option<String>,
+    pub occurrences: u64,
 }
 
 pub struct MemoryIndex {
@@ -194,7 +195,8 @@ impl MemoryIndex {
                 evidence_kind TEXT NOT NULL,
                 status        TEXT NOT NULL,
                 created_at    INTEGER NOT NULL,
-                superseded_by TEXT
+                superseded_by TEXT,
+                occurrences   INTEGER NOT NULL DEFAULT 1
             );
             CREATE INDEX IF NOT EXISTS idx_memory_workspace_status
                 ON memory_index(workspace, status);
@@ -212,9 +214,13 @@ impl MemoryIndex {
             );",
         )
         .map_err(|e| e.to_string())?;
-        // Databases created before the flag existed: add it, ignore "duplicate column".
+        // Databases created before the columns existed: add them, ignore "duplicate column".
         let _ = conn.execute(
             "ALTER TABLE memory_feedback ADD COLUMN demoted INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE memory_index ADD COLUMN occurrences INTEGER NOT NULL DEFAULT 1",
             [],
         );
         Ok(Self { conn })
@@ -276,16 +282,29 @@ impl MemoryIndex {
             "m-{}",
             crate::context_trace::content_hash(&format!("{workspace}|{text}"))
         );
-        let existing: Option<String> = self
+        let existing_status: Option<String> = self
             .conn
             .query_row(
-                "SELECT note_id FROM memory_index WHERE note_id = ?1",
+                "SELECT status FROM memory_index WHERE note_id = ?1",
                 params![note_id],
                 |row| row.get(0),
             )
             .optional()
             .map_err(|e| PromotionRefused::Storage(e.to_string()))?;
-        if existing.is_some() {
+        if let Some(existing_status) = existing_status {
+            if status == NoteStatus::Candidate && existing_status == "candidate" {
+                self.conn
+                    .execute(
+                        "UPDATE memory_index
+                         SET occurrences = occurrences + 1,
+                             created_at = MAX(created_at, ?2),
+                             source_ref = ?3
+                         WHERE note_id = ?1",
+                        params![note_id, created_at as i64, evidence.source_ref()],
+                    )
+                    .map_err(|e| PromotionRefused::Storage(e.to_string()))?;
+                return Ok(note_id);
+            }
             return Err(PromotionRefused::Duplicate);
         }
         let keywords = instruction_state::parse(text).1.join(" ");
@@ -293,8 +312,8 @@ impl MemoryIndex {
             .execute(
                 "INSERT INTO memory_index (
                     note_id, workspace, text, tags, keywords, source_ref,
-                    evidence_kind, status, created_at, superseded_by
-                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,NULL)",
+                    evidence_kind, status, created_at, superseded_by, occurrences
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,NULL,1)",
                 params![
                     note_id,
                     workspace,
@@ -553,7 +572,7 @@ impl MemoryIndex {
 
     pub fn candidate_notes(&self, workspace: &str) -> Vec<IndexedNote> {
         self.query_notes(
-            "SELECT * FROM memory_index WHERE workspace = ?1 AND status = 'candidate'",
+            "SELECT * FROM memory_index WHERE workspace = ?1 AND status = 'candidate' ORDER BY occurrences DESC, created_at DESC",
             workspace,
         )
     }
@@ -666,6 +685,12 @@ fn row_to_feedback(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryFeedbackSt
 fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<IndexedNote> {
     let tags: String = row.get("tags")?;
     let status: String = row.get("status")?;
+    let occurrences = row
+        .get::<_, Option<i64>>("occurrences")
+        .ok()
+        .flatten()
+        .unwrap_or(1)
+        .max(1) as u64;
     Ok(IndexedNote {
         note_id: row.get("note_id")?,
         workspace: row.get("workspace")?,
@@ -680,6 +705,7 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<IndexedNote> {
         status: NoteStatus::parse(&status),
         created_at: row.get::<_, i64>("created_at")? as u64,
         superseded_by: row.get("superseded_by")?,
+        occurrences,
     })
 }
 

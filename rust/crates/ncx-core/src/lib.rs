@@ -109,10 +109,11 @@ pub use orchestrator_runner::{HarnessAgentRunner, HarnessRunnerEvent};
 pub use outcome::{
     append_checkpoint_restore, append_outcome_followup, append_task_outcome, build_outcome_report,
     followup_polarity, followups_for_task, format_outcome_report, latest_primary_outcome,
-    load_outcomes_and_followups, now_millis, parse_since_duration_ms, record_checkpoint_rollback,
-    record_followup, wilson_ci, workspace_events_db_path, BaselineReadiness, CategorySingularity,
-    FollowupSignal, MemoryFeedback, OutcomeFollowup, OutcomeReport, OutcomeSliceReport, RouteKey,
-    RoutingStats, ShadowSummary, SingularityStatus, TaskCategory, TaskOutcome, TaskRole, WilsonCi,
+    load_outcomes_and_followups, now_millis, parse_since_duration_ms, primary_outcomes_for_session,
+    record_checkpoint_rollback, record_followup, wilson_ci, workspace_events_db_path,
+    BaselineReadiness, CategorySingularity, FollowupSignal, MemoryFeedback, OutcomeFollowup,
+    OutcomeReport, OutcomeSliceReport, RouteKey, RoutingStats, ShadowSummary, SingularityStatus,
+    TaskCategory, TaskOutcome, TaskRole, WilsonCi,
 };
 pub use plugins::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,

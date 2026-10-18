@@ -124,6 +124,23 @@ fn ascii_keywords_match_on_word_boundaries_not_substrings() {
 }
 
 #[test]
+fn feature_prompts_with_comment_or_exception_handling_mentions_stay_feature() {
+    let edit = ["edit_file".to_string()];
+    assert_eq!(
+        TaskCategory::classify("实现导出按钮并补充注释说明", &edit, true),
+        TaskCategory::Feature
+    );
+    assert_eq!(
+        TaskCategory::classify("新增重试中间件，解决超时异常", &edit, true),
+        TaskCategory::Feature
+    );
+    assert_eq!(
+        TaskCategory::classify("更新 README 文档说明", &edit, true),
+        TaskCategory::Docs
+    );
+}
+
+#[test]
 fn multilingual_correction_detector_recognizes_zh_en_ja_and_file_mentions() {
     assert!(is_correction_prompt("不对，还是报错了", &[]));
     assert!(is_correction_prompt("That didn't work, revert that", &[]));

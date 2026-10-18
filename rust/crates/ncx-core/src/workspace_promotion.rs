@@ -41,11 +41,20 @@ pub(crate) fn snapshot(root: &Path) -> io::Result<WorkspaceSnapshot> {
     Ok(result)
 }
 
+#[cfg(test)]
 pub(crate) fn promote(
     baseline: &WorkspaceSnapshot,
     worker_root: &Path,
     live_root: &Path,
 ) -> Result<usize, String> {
+    promote_with_paths(baseline, worker_root, live_root).map(|paths| paths.len())
+}
+
+pub(crate) fn promote_with_paths(
+    baseline: &WorkspaceSnapshot,
+    worker_root: &Path,
+    live_root: &Path,
+) -> Result<Vec<String>, String> {
     let worker = snapshot(worker_root).map_err(|error| format!("读取 Worker 结果失败：{error}"))?;
     let live = snapshot(live_root).map_err(|error| format!("读取当前工作区失败：{error}"))?;
     let changed = baseline
@@ -68,6 +77,7 @@ pub(crate) fn promote(
         ));
     }
 
+    let mut promoted_paths = Vec::with_capacity(changed.len());
     for relative in &changed {
         let destination = live_root.join(relative);
         if worker.contains_key(relative) {
@@ -82,8 +92,9 @@ pub(crate) fn promote(
                 .map_err(|error| format!("删除 {} 失败：{error}", relative.display()))?;
             remove_empty_parents(destination.parent(), live_root);
         }
+        promoted_paths.push(relative.to_string_lossy().replace('\\', "/"));
     }
-    Ok(changed.len())
+    Ok(promoted_paths)
 }
 
 fn fingerprint(path: &Path) -> io::Result<FileFingerprint> {

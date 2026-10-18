@@ -88,7 +88,14 @@ impl MemoryStore {
                 kind: MemoryReviewKind::Candidate,
                 id: note.note_id,
                 text: note.text,
-                detail: format!("evidence={} source={}", note.evidence_kind, note.source_ref),
+                detail: if note.occurrences > 1 {
+                    format!(
+                        "命中 {} 次 · evidence={} source={}",
+                        note.occurrences, note.evidence_kind, note.source_ref
+                    )
+                } else {
+                    format!("evidence={} source={}", note.evidence_kind, note.source_ref)
+                },
             })
             .collect();
         let entries = self.entries();
@@ -152,6 +159,10 @@ impl MemoryStore {
         let needs_id = |verb: &str| format!("usage: {verb} <id>  (ids come from `list`)");
         let result = match action.as_str() {
             "list" | "" => return format_review_items(&self.review_items()),
+            "json" => {
+                return serde_json::to_string(&self.review_items())
+                    .unwrap_or_else(|_| "[]".to_string())
+            }
             "confirm" if id.is_empty() => return needs_id("confirm"),
             "reject" if id.is_empty() => return needs_id("reject"),
             "restore" if id.is_empty() => return needs_id("restore"),
@@ -174,13 +185,14 @@ impl MemoryStore {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MemoryReviewKind {
     Candidate,
     Demoted,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MemoryReviewItem {
     pub kind: MemoryReviewKind,
     pub id: String,

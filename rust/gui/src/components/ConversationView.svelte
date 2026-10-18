@@ -26,6 +26,8 @@
     toolOutcome,
     forkCurrent,
     selectPrompt,
+    sessionId = "",
+    workspace = "",
   }: {
     messages: Message[];
     activeView: "chat" | "trajectory";
@@ -38,6 +40,8 @@
     toolOutcome: (result: string) => "ok" | "err" | "empty";
     forkCurrent: () => void;
     selectPrompt: (prompt: string) => void;
+    sessionId?: string;
+    workspace?: string;
   } = $props();
 
   let copiedIndex = $state<number | null>(null);
@@ -69,7 +73,19 @@
 
   function toggleFeedback(index: number, value: "good" | "bad") {
     const next = { ...feedback };
-    if (next[index] === value) delete next[index]; else next[index] = value;
+    if (next[index] === value) {
+      delete next[index];
+    } else {
+      next[index] = value;
+      const turnIndex = messages.slice(0, index).filter((m) => m.role === "assistant").length;
+      void invoke("record_outcome_label", {
+        good: value === "good",
+        note: null,
+        sessionId: sessionId || null,
+        turnIndex,
+        expectedWorkspace: workspace || null,
+      }).catch(() => {});
+    }
     feedback = next;
   }
 

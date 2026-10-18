@@ -89,6 +89,14 @@ pub(super) async fn run(
     };
     let is_first_turn = messages_have_no_user(&messages);
     let task = contextual_task(&messages, &expanded);
+    let numeric_turn_id = protocol_turn
+        .turn_id
+        .as_str()
+        .rsplit('-')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1);
+    runner.resolve_previous_primary_followup(&session_id, &expanded);
     let routing_stats = runner.load_routing_stats();
     let orch = Orchestrator::new(&runner, OrchestratorConfig::from_runtime_config(&cfg))
         .with_control(&control)
@@ -98,7 +106,7 @@ pub(super) async fn run(
     let duration_ms = ncx_core::now_millis().saturating_sub(started_ms);
     runner.record_orchestrated_outcome(
         &session_id,
-        1,
+        numeric_turn_id,
         &expanded,
         &outcome,
         orch.initial_complexity(),

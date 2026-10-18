@@ -301,15 +301,78 @@ impl MemoryStore {
     }
 }
 
-/// Words worth matching on: lowercased, length ≥ 3, deduped.
-fn keywords(s: &str) -> Vec<String> {
+fn is_cjk_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x3040..=0x30FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xAC00..=0xD7AF
+            | 0xF900..=0xFAFF
+    )
+}
+
+/// Extract lexical tokens from mixed ASCII/CJK text:
+/// - ASCII/Latin alphanumeric runs with length >= 3
+/// - Contiguous CJK runs decomposed into character bigrams (2-grams) so
+///   unsegmented Chinese/Japanese text has meaningful Jaccard and keyword overlap.
+fn tokenize_mixed(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for w in s.to_lowercase().split(|c: char| !c.is_alphanumeric()) {
-        if w.len() >= 3 && !out.iter().any(|x| x == w) {
-            out.push(w.to_string());
+    let mut push_unique = |tok: String| {
+        if !out.contains(&tok) {
+            out.push(tok);
         }
+    };
+    for raw in s.to_lowercase().split(|c: char| !c.is_alphanumeric()) {
+        if raw.is_empty() {
+            continue;
+        }
+        if !raw.chars().any(is_cjk_char) {
+            if raw.len() >= 3 {
+                push_unique(raw.to_string());
+            }
+            continue;
+        }
+        let mut ascii_buf = String::new();
+        let mut cjk_buf: Vec<char> = Vec::new();
+        let flush_ascii = |buf: &mut String, push: &mut dyn FnMut(String)| {
+            if buf.len() >= 3 {
+                push(std::mem::take(buf));
+            } else {
+                buf.clear();
+            }
+        };
+        let flush_cjk = |buf: &mut Vec<char>, push: &mut dyn FnMut(String)| {
+            if buf.len() == 1 {
+                buf.clear();
+            } else if buf.len() == 2 {
+                push(buf.iter().collect());
+                buf.clear();
+            } else if buf.len() >= 3 {
+                for pair in buf.windows(2) {
+                    push(pair.iter().collect());
+                }
+                buf.clear();
+            }
+        };
+        for ch in raw.chars() {
+            if is_cjk_char(ch) {
+                flush_ascii(&mut ascii_buf, &mut push_unique);
+                cjk_buf.push(ch);
+            } else {
+                flush_cjk(&mut cjk_buf, &mut push_unique);
+                ascii_buf.push(ch);
+            }
+        }
+        flush_ascii(&mut ascii_buf, &mut push_unique);
+        flush_cjk(&mut cjk_buf, &mut push_unique);
     }
     out
+}
+
+/// Words worth matching on: lowercased, length ≥ 3 (plus CJK bigrams), deduped.
+fn keywords(s: &str) -> Vec<String> {
+    tokenize_mixed(s)
 }
 
 fn expanded_keywords(s: &str) -> Vec<String> {
@@ -379,13 +442,9 @@ fn normalize(text: &str) -> String {
         .to_lowercase()
 }
 
-/// Significant words of an entry (lowercased, length ≥ 3), as a set.
+/// Significant words of an entry (lowercased ASCII >= 3 or CJK bigrams), as a set.
 pub(crate) fn word_set(text: &str) -> std::collections::HashSet<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() >= 3)
-        .map(|w| w.to_string())
-        .collect()
+    tokenize_mixed(text).into_iter().collect()
 }
 
 fn phrases(text: &str) -> Vec<String> {
@@ -673,5 +732,74 @@ mod tests {
         }
         let block = s.recall("widgets", 3, 4000);
         assert_eq!(block.lines().filter(|l| l.starts_with("- ")).count(), 3);
+    }
+
+    #[test]
+    fn cjk_bigrams_enable_chinese_consolidation_and_recall() {
+        let s = store("cjk_bigram");
+        s.remember(
+            "在 Windows 环境下编译桌面端 Tauri 应用需要启用 GNU 工具链配置",
+            &[],
+            1,
+        )
+        .unwrap();
+        s.remember(
+            "在 Windows 环境下编译桌面端 Tauri 应用需要启用 GNU 工具链设置",
+            &[],
+            2,
+        )
+        .unwrap();
+        s.remember("前端状态管理使用 Svelte runes 响应式存储", &[], 3)
+            .unwrap();
+
+        let removed = s.consolidate(0.75).unwrap();
+        assert_eq!(removed, 1, "Chinese near-duplicate notes should merge");
+        assert_eq!(s.entries().len(), 2);
+
+        let recalled = s.recall("如何配置 Windows 编译工具链", 1, 4000);
+        assert!(recalled.contains("GNU 工具链"), "got: {recalled}");
+        assert!(!recalled.contains("Svelte"), "got: {recalled}");
+    }
+
+    #[test]
+    fn review_command_json_returns_structured_candidates() {
+        use crate::memory_index::{Evidence, MemoryIndex};
+        let s = store("review_json");
+        let idx = MemoryIndex::for_store(&s).unwrap();
+        idx.record_candidate(
+            &s.workspace_key(),
+            "single-hit candidate",
+            &["experience".into()],
+            &Evidence::VerifiedToolResult {
+                source_ref: "ev-0".to_string(),
+            },
+            20,
+        )
+        .unwrap();
+        for t in [10, 30, 40] {
+            idx.record_candidate(
+                &s.workspace_key(),
+                "cargo check failed (`error[E0433]`) — resolved on retry",
+                &["experience".into()],
+                &Evidence::VerifiedToolResult {
+                    source_ref: format!("ev-{t}"),
+                },
+                t,
+            )
+            .unwrap();
+        }
+        let raw = s.review_command("json");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        // The 3-hit candidate ranks before the 1-hit candidate.
+        assert_eq!(arr[0]["kind"], "candidate");
+        assert!(arr[0]["text"].as_str().unwrap().contains("E0433"));
+        assert!(
+            arr[0]["detail"].as_str().unwrap().contains("命中 3 次"),
+            "got: {}",
+            arr[0]["detail"]
+        );
+        assert_eq!(arr[1]["text"], "single-hit candidate");
     }
 }

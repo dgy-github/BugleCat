@@ -8,6 +8,7 @@ type SlashActions = {
   showUsage: () => void; openCheckpoints: () => void; openFiles: () => void; openDiff: () => void;
   openBranches: () => void; openMemory: () => void; openHistory: () => void; refreshSessions: () => Promise<void>;
   currentThreadId: () => string; currentTitle: () => string; setTitle: (title: string) => void;
+  currentWorkspace?: () => string;
 };
 
 export class SlashController {
@@ -80,15 +81,17 @@ export class SlashController {
     const raw = this.argument.trim();
     const [head = "", ...rest] = raw.split(/\s+/);
     const lower = head.toLowerCase();
+    const expectedWorkspace = this.actions.currentWorkspace?.() || null;
+    const sessionId = this.actions.currentThreadId() || null;
     try {
       if (lower === "good" || lower === "ok" || lower === "pass" || lower === "bad" || lower === "fail") {
         const good = lower === "good" || lower === "ok" || lower === "pass";
         const note = rest.join(" ").trim() || null;
-        this.notify(await invoke<string>("record_outcome_label", { good, note }));
+        this.notify(await invoke<string>("record_outcome_label", { good, note, sessionId, expectedWorkspace }));
         return;
       }
       const since = !raw || lower === "report" ? (rest[0] ?? "30d") : raw;
-      this.notify(await invoke<string>("get_outcome_report", { since, asJson: false }));
+      this.notify(await invoke<string>("get_outcome_report", { since, asJson: false, expectedWorkspace }));
     } catch (error) {
       this.notify(`任务结果操作失败：${error}`);
     }
@@ -96,8 +99,9 @@ export class SlashController {
 
   private runMemoryReview = async (): Promise<void> => {
     const action = this.argument.trim() || "list";
+    const expectedWorkspace = this.actions.currentWorkspace?.() || null;
     try {
-      this.notify(await invoke<string>("memory_review", { action }));
+      this.notify(await invoke<string>("memory_review", { action, expectedWorkspace }));
     } catch (error) {
       this.notify(`记忆审阅失败：${error}`);
     }

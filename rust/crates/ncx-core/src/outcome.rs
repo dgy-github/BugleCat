@@ -93,13 +93,35 @@ impl TaskCategory {
         if tools_used.is_empty() && !has_deliverable {
             return Self::Chat;
         }
+        let has_feature_cue = contains_term_any(
+            &q,
+            &[
+                "add",
+                "implement",
+                "implementation",
+                "create",
+                "support",
+                "feature",
+                "build a",
+                "新增",
+                "实现",
+                "开发",
+                "加上",
+                "支持",
+                "添加",
+                "実装",
+                "追加",
+            ],
+        );
         if contains_term_any(
             &q,
             &[
-                "bug", "fix", "error", "panic", "crash", "broken", "issue", "failure", "修复",
-                "报错", "崩溃", "异常", "解决", "故障", "バグ", "修正",
+                "bug", "fix", "panic", "crash", "broken", "修复", "报错", "崩溃", "故障", "バグ",
+                "修正",
             ],
-        ) {
+        ) || (!has_feature_cue
+            && contains_term_any(&q, &["error", "issue", "failure", "异常", "解决"]))
+        {
             return Self::Bugfix;
         }
         if contains_term_any(
@@ -151,20 +173,22 @@ impl TaskCategory {
         ) {
             return Self::Build;
         }
-        if contains_term_any(
-            &q,
-            &[
-                "readme",
-                "doc",
-                "docs",
-                "comment",
-                "markdown",
-                "文档",
-                "注释",
-                "说明",
-                "ドキュメント",
-            ],
-        ) {
+        if !has_feature_cue
+            && contains_term_any(
+                &q,
+                &[
+                    "readme",
+                    "doc",
+                    "docs",
+                    "comment",
+                    "markdown",
+                    "文档",
+                    "注释",
+                    "说明",
+                    "ドキュメント",
+                ],
+            )
+        {
             return Self::Docs;
         }
         if contains_term_any(
@@ -190,26 +214,7 @@ impl TaskCategory {
         }) {
             return Self::Explain;
         }
-        if contains_term_any(
-            &q,
-            &[
-                "add",
-                "implement",
-                "implementation",
-                "create",
-                "support",
-                "feature",
-                "build a",
-                "新增",
-                "实现",
-                "开发",
-                "加上",
-                "支持",
-                "添加",
-                "実装",
-                "追加",
-            ],
-        ) {
+        if has_feature_cue {
             return Self::Feature;
         }
         if tools_used.iter().any(|t| {
@@ -888,17 +893,68 @@ pub fn followups_for_task(
     )?))
 }
 
+/// All primary outcomes recorded under `session_id` in chronological (append) order.
+pub fn primary_outcomes_for_session(
+    store: &ContextStore,
+    session_id: &str,
+) -> Result<Vec<TaskOutcome>, String> {
+    Ok(
+        parse_outcomes(store.session_events_by_type(session_id, EventType::TaskOutcome)?)
+            .into_iter()
+            .filter(|o| o.role == TaskRole::Primary)
+            .collect(),
+    )
+}
+
 /// Most recent primary outcome recorded under `session_id` (append order).
 pub fn latest_primary_outcome(
     store: &ContextStore,
     session_id: &str,
 ) -> Result<Option<TaskOutcome>, String> {
-    Ok(
-        parse_outcomes(store.session_events_by_type(session_id, EventType::TaskOutcome)?)
-            .into_iter()
-            .rev()
-            .find(|o| o.role == TaskRole::Primary),
-    )
+    Ok(primary_outcomes_for_session(store, session_id)?
+        .into_iter()
+        .last())
+}
+
+/// Resolve the previous primary task of `session_id` when the human speaks
+/// again: manual edit (I5) > inferred correction (I4) > accepted. A task
+/// that already has a followup (label, rollback, earlier resolution) is
+/// left alone, so each task is auto-resolved at most once.
+pub fn resolve_previous_primary_followup(
+    store: &ContextStore,
+    workspace: &Path,
+    session_id: &str,
+    next_query: &str,
+    memory: Option<MemoryFeedback<'_>>,
+) {
+    let Ok(Some(prev)) = latest_primary_outcome(store, session_id) else {
+        return;
+    };
+    if !followups_for_task(store, &prev.task_id)
+        .map(|f| f.is_empty())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let manual_edits = if prev.file_hashes.is_empty() {
+        Vec::new()
+    } else {
+        detect_manual_edits(workspace, &prev.file_hashes)
+    };
+    let signal = if !manual_edits.is_empty() {
+        FollowupSignal::ManualEdit {
+            files: manual_edits,
+        }
+    } else if is_correction_prompt(next_query, &prev.files_touched) {
+        FollowupSignal::Correction {
+            inferred: true,
+            note: None,
+        }
+    } else {
+        FollowupSignal::Accepted
+    };
+    let ws_str = workspace.to_string_lossy().to_string();
+    let _ = record_followup(store, &ws_str, &prev, signal, memory);
 }
 
 /// Verdict implied by a task's followups: the last human label wins;

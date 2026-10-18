@@ -59,7 +59,10 @@
   forkSession={threadLifecycle.fork} openSessionLog={threadLifecycle.openLog}
   openSessionSnapshot={threadLifecycle.openSnapshot} refreshSessions={threadLifecycle.refresh}
   bind:newNote={memoryController.newNote} bind:newNoteTags={memoryController.newNoteTags}
-  hermesBusy={memoryController.busy} notes={memoryController.notes} addNote={memoryController.add}
+  hermesBusy={memoryController.busy} notes={memoryController.notes}
+  reviewItems={memoryController.reviewItems} reviewMemory={memoryController.review}
+  outcomeReport={memoryController.outcomeReport}
+  addNote={memoryController.add}
   consolidateMemory={memoryController.consolidate} loadNotes={memoryController.refresh}
   mergeMemory={memoryController.mergeWithModel} cancelMemoryMerge={memoryController.cancelMerge}
   memoryMergeStatus={memoryController.mergeStatus}

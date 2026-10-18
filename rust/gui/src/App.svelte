@@ -94,7 +94,7 @@
       openCheckpoints: () => void panels.openCheckpoints(), openFiles: () => void panels.openFiles(), openDiff: () => void panels.openDiff(),
       openBranches: () => void panels.openBranches(), openMemory: () => void panels.openMemory(),
       refreshSessions: threadLifecycle.refresh, currentThreadId: () => thread.currentId, currentTitle: () => thread.title,
-      setTitle: (title) => (thread.title = title),
+      setTitle: (title) => (thread.title = title), currentWorkspace: workspace,
     },
   );
   composer.connectSlash(slashController);
@@ -210,6 +210,8 @@
       {renderMarkdown}
       {toolGroupFailureCount}
       {toolOutcome}
+      sessionId={thread.currentId}
+      workspace={runtime.workspace}
       forkCurrent={() => thread.currentId && threadLifecycle.fork(thread.currentId, thread.title)}
       selectPrompt={(prompt) => { composer.input = prompt; document.getElementById("task-input")?.focus(); }}
     />

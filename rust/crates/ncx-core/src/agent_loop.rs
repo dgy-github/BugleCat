@@ -126,7 +126,7 @@ pub struct AgentLoop {
     context_service: Option<Rc<crate::plugins::ContextServiceDescriptor>>,
     media_service: Option<Rc<crate::plugins::MediaServiceDescriptor>>,
     cost_service: Option<Rc<crate::plugins::CostTelemetryService>>,
-    state_machine: Rc<StateRecorder>,
+    pub(crate) state_machine: Rc<StateRecorder>,
     retrieval_provider: Option<Rc<crate::context_retrieval::RetrievalContextProvider>>,
     pub task_role: crate::outcome::TaskRole,
     pub parent_task_id: Option<String>,
@@ -790,41 +790,12 @@ impl AgentLoop {
         let Some(store) = self.outcome_event_store() else {
             return;
         };
-        let Ok(Some(prev)) =
-            crate::outcome::latest_primary_outcome(&store, &self.session.session_id)
-        else {
-            return;
-        };
-        if !crate::outcome::followups_for_task(&store, &prev.task_id)
-            .map(|f| f.is_empty())
-            .unwrap_or(false)
-        {
-            return;
-        }
-        let manual_edits = if prev.file_hashes.is_empty() {
-            Vec::new()
-        } else {
-            crate::outcome::detect_manual_edits(&self.tools.ctx.workspace, &prev.file_hashes)
-        };
-        let signal = if !manual_edits.is_empty() {
-            crate::outcome::FollowupSignal::ManualEdit {
-                files: manual_edits,
-            }
-        } else if crate::outcome::is_correction_prompt(next_query, &prev.files_touched) {
-            crate::outcome::FollowupSignal::Correction {
-                inferred: true,
-                note: None,
-            }
-        } else {
-            crate::outcome::FollowupSignal::Accepted
-        };
         let memory = self.recall_memory_store();
-        let ws_str = self.tools.ctx.workspace.to_string_lossy().to_string();
-        let _ = crate::outcome::record_followup(
+        crate::outcome::resolve_previous_primary_followup(
             &store,
-            &ws_str,
-            &prev,
-            signal,
+            &self.tools.ctx.workspace,
+            &self.session.session_id,
+            next_query,
             memory
                 .as_deref()
                 .map(|store| crate::outcome::MemoryFeedback {
@@ -885,9 +856,7 @@ impl AgentLoop {
             }
         };
 
-        let has_deliverable = !self.last_files_touched.is_empty()
-            || !result.tools_used.is_empty()
-            || result.final_text.contains("```");
+        let has_deliverable = !self.last_files_touched.is_empty() || !result.tools_used.is_empty();
         let category =
             crate::outcome::TaskCategory::classify(query_text, &result.tools_used, has_deliverable);
         let permission_mode = self
@@ -977,12 +946,16 @@ impl AgentLoop {
             let _ = crate::outcome::append_task_outcome(&store, &outcome);
         }
         // A failure->recovery pair only becomes a review candidate when the
-        // whole task finished and nothing contradicted it.
+        // whole task finished and nothing contradicted it. Orchestrator workers
+        // defer candidate persistence to `HarnessAgentRunner`, which remaps
+        // scratch workspace paths and only commits candidates from the winning
+        // promoted worker.
         let verification_ok = matches!(
             outcome.verification.as_deref(),
             Some("passed") | Some("skipped")
         );
-        if terminal == AgentState::Completed
+        if role == crate::outcome::TaskRole::Primary
+            && terminal == AgentState::Completed
             && verification_ok
             && !self.last_recovery_candidates.is_empty()
         {

@@ -7,6 +7,7 @@ export type Settings = {
   approval_policy: string; reasoning_effort: string; max_iterations: number; max_tool_calls: number;
   orchestrator_workers: number; orchestrator_high_workers: number; orchestrator_verify_retries: number;
   orchestrator_max_depth: number; orchestrator_max_subtasks: number;
+  feedback_memory: "off" | "shadow" | "on"; feedback_routing: "off" | "shadow" | "on";
   context_edit_enabled: boolean; context_edit_max_chars: number; context_edit_keep_recent_messages: number;
   context_edit_max_tool_result_chars: number; price_in: number; price_out: number; price_currency: "CNY" | "USD";
   alibaba_attachment_parser_enabled: boolean;
@@ -177,6 +178,8 @@ export class SettingsController {
       orchestrator_workers: String(settings.orchestrator_workers), orchestrator_high_workers: String(settings.orchestrator_high_workers),
       orchestrator_verify_retries: String(settings.orchestrator_verify_retries), orchestrator_max_depth: String(settings.orchestrator_max_depth),
       orchestrator_max_subtasks: String(settings.orchestrator_max_subtasks),
+      feedback_memory: settings.feedback_memory || "shadow",
+      feedback_routing: settings.feedback_routing || "shadow",
       context_edit_enabled: String(settings.context_edit_enabled), context_edit_max_chars: String(settings.context_edit_max_chars),
       context_edit_keep_recent_messages: String(settings.context_edit_keep_recent_messages),
       context_edit_max_tool_result_chars: String(settings.context_edit_max_tool_result_chars),

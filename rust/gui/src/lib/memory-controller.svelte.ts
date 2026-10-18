@@ -2,10 +2,51 @@ import { invoke } from "@tauri-apps/api/core";
 import { appServerRequest } from "./app-server-client";
 
 export type MemoryNote = { ts: number; tags: string[]; text: string };
+export type MemoryReviewItem = { kind: "candidate" | "demoted"; id: string; text: string; detail: string };
 export type MemoryMergeStatus = { generation: number; status: string; requestedModel?: string | null; removed?: number | null; error?: string | null };
+export type OutcomeSingularity = {
+  reached: boolean;
+  sample_size: number;
+  min_required_sample: number;
+  acr_strict: number;
+  acr_strict_lower_bound: number;
+  target_lower_bound: number;
+  distance_to_singularity: number;
+  rework_rate: number;
+  max_rework_rate: number;
+};
+export type OutcomeReportSummary = {
+  window_label: string;
+  overall: {
+    sample_size: number;
+    pending_count: number;
+    acr_strict: number;
+    acr_tolerant: number;
+    rework_rate: number;
+    first_pass_verify_rate: number;
+    avg_interventions: number;
+  };
+  singularity: OutcomeSingularity;
+  category_singularity: { category: string; status: OutcomeSingularity }[];
+  shadow: {
+    memory_observed: number;
+    memory_rank_changed: number;
+    routing_observed: number;
+    routing_would_upgrade: number;
+  };
+  baseline: {
+    days_observed: number;
+    categories_ready: string[];
+    memory_ready: boolean;
+    routing_ready: boolean;
+    blockers: string[];
+  };
+};
 
 export class MemoryController {
   notes = $state<MemoryNote[]>([]);
+  reviewItems = $state<MemoryReviewItem[]>([]);
+  outcomeReport = $state<OutcomeReportSummary | null>(null);
   busy = $state(false);
   newNote = $state("");
   newNoteTags = $state("");
@@ -24,6 +65,8 @@ export class MemoryController {
     this.activeBusyOperations.clear();
     this.busy = false;
     this.notes = [];
+    this.reviewItems = [];
+    this.outcomeReport = null;
     this.newNote = "";
     this.newNoteTags = "";
     this.mergeStatus = null;
@@ -33,11 +76,46 @@ export class MemoryController {
     const generation = ++this.loadGeneration;
     const workspace = this.workspace();
     if (!workspace) throw new Error("当前工作区不可用，请重新打开项目记忆后再试");
-    const notes = await appServerRequest<MemoryNote[]>({
-      method: "memoryList",
-      params: { workspace },
-    });
-    if (generation === this.loadGeneration) this.notes = notes;
+    const [notes, rawReview, rawOutcome] = await Promise.all([
+      appServerRequest<MemoryNote[]>({
+        method: "memoryList",
+        params: { workspace },
+      }),
+      invoke<string>("memory_review", { action: "json", expectedWorkspace: workspace }).catch(() => "[]"),
+      invoke<string>("get_outcome_report", { since: "30d", asJson: true, expectedWorkspace: workspace }).catch(() => ""),
+    ]);
+    if (generation === this.loadGeneration) {
+      this.notes = notes;
+      try {
+        const parsed = JSON.parse(rawReview);
+        this.reviewItems = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        this.reviewItems = [];
+      }
+      try {
+        this.outcomeReport = rawOutcome ? (JSON.parse(rawOutcome) as OutcomeReportSummary) : null;
+      } catch {
+        this.outcomeReport = null;
+      }
+    }
+  };
+
+  review = async (verb: "confirm" | "reject" | "restore", id: string): Promise<void> => {
+    const operation = this.beginBusy();
+    try {
+      const workspace = this.workspace();
+      const msg = await invoke<string>("memory_review", {
+        action: `${verb} ${id}`,
+        expectedWorkspace: workspace || null,
+      });
+      if (!this.isBusyOperation(operation)) return;
+      this.notify(`记忆审阅：${msg}`);
+      await this.load();
+    } catch (error) {
+      if (this.isBusyOperation(operation)) this.notify(`记忆审阅失败：${error}`);
+    } finally {
+      this.endBusy(operation);
+    }
   };
 
   refresh = async (): Promise<void> => {
