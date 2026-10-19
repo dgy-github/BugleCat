@@ -1,6 +1,5 @@
 //! Cross-platform raw PTY lifecycle with Windows Job Object containment.
 
-use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,15 +7,24 @@ use std::sync::{Arc, Mutex, Weak};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 
+use crate::executor::build_env;
+use crate::output_buffer::{OutputRingBuffer, SequencedChunk};
 use crate::text_encoding::Utf8StreamDecoder;
 use crate::PolicyExecutor;
-
-const MAX_BUFFERED_BYTES: usize = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PtyOutputChunk {
     pub seq: u64,
     pub text: String,
+}
+
+impl SequencedChunk for PtyOutputChunk {
+    fn seq(&self) -> u64 {
+        self.seq
+    }
+    fn text_len(&self) -> usize {
+        self.text.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,25 +35,20 @@ pub struct PtySnapshot {
     pub next_cursor: u64,
 }
 
-/// An unrestricted interactive shell attached to a real PTY/ConPTY.
+/// An interactive shell attached to a real PTY/ConPTY with sanitized environment.
 pub struct PtyProcess {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     writer: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
-    output: Arc<Mutex<OutputBuffer>>,
+    output: Arc<Mutex<OutputRingBuffer<PtyOutputChunk>>>,
     exit_code: Option<u32>,
     #[cfg(windows)]
     job: Option<crate::executor::win_job::Job>,
 }
 
-#[derive(Default)]
-struct OutputBuffer {
-    chunks: VecDeque<PtyOutputChunk>,
-    bytes: usize,
-}
-
 impl PolicyExecutor {
-    /// Start the platform shell in a raw PTY under the same process cap.
+    /// Start the platform shell in a raw PTY under the same process cap and
+    /// minimal sanitized environment allowlist as one-shot subprocesses.
     pub fn spawn_pty(&self, cwd: &Path, rows: u16, cols: u16) -> Result<PtyProcess, String> {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -57,6 +60,10 @@ impl PolicyExecutor {
             .map_err(|error| format!("PTY open failed: {error}"))?;
         let mut command = shell_command();
         command.cwd(cwd);
+        command.env_clear();
+        for (key, value) in build_env() {
+            command.env(key, value);
+        }
         command.env("TERM", "xterm-256color");
         let child = pair
             .slave
@@ -75,7 +82,7 @@ impl PolicyExecutor {
             .take_writer()
             .map_err(|error| format!("PTY writer failed: {error}"))?;
         let writer = Arc::new(Mutex::new(writer));
-        let output = Arc::new(Mutex::new(OutputBuffer::default()));
+        let output = Arc::new(Mutex::new(OutputRingBuffer::default()));
         spawn_reader(reader, output.clone(), Arc::downgrade(&writer));
         Ok(PtyProcess {
             master: pair.master,
@@ -124,14 +131,7 @@ impl PtyProcess {
                 .map_err(|error| format!("PTY status failed: {error}"))?
                 .map(|status| status.exit_code());
         }
-        let output = self.output.lock().unwrap();
-        let chunks = output
-            .chunks
-            .iter()
-            .filter(|chunk| chunk.seq > after)
-            .cloned()
-            .collect::<Vec<_>>();
-        let next_cursor = output.chunks.back().map_or(after, |chunk| chunk.seq);
+        let (chunks, next_cursor) = self.output.lock().unwrap().snapshot_after(after);
         Ok(PtySnapshot {
             running: self.exit_code.is_none(),
             exit_code: self.exit_code,
@@ -175,7 +175,7 @@ fn shell_command() -> CommandBuilder {
 
 fn spawn_reader(
     mut reader: Box<dyn Read + Send>,
-    output: Arc<Mutex<OutputBuffer>>,
+    output: Arc<Mutex<OutputRingBuffer<PtyOutputChunk>>>,
     writer: Weak<Mutex<Box<dyn Write + Send>>>,
 ) {
     std::thread::Builder::new()
@@ -206,31 +206,17 @@ fn spawn_reader(
                         let _ = writer.flush();
                     }
                 }
-                push_chunk(&mut output.lock().unwrap(), chunk);
+                output.lock().unwrap().push(chunk);
             }
             let trailing = decoder.finish();
             if !trailing.is_empty() {
-                push_chunk(
-                    &mut output.lock().unwrap(),
-                    PtyOutputChunk {
-                        seq: sequence.fetch_add(1, Ordering::Relaxed),
-                        text: trailing,
-                    },
-                );
+                output.lock().unwrap().push(PtyOutputChunk {
+                    seq: sequence.fetch_add(1, Ordering::Relaxed),
+                    text: trailing,
+                });
             }
         })
         .expect("PTY reader thread starts");
-}
-
-fn push_chunk(output: &mut OutputBuffer, chunk: PtyOutputChunk) {
-    output.bytes += chunk.text.len();
-    output.chunks.push_back(chunk);
-    while output.bytes > MAX_BUFFERED_BYTES {
-        let Some(removed) = output.chunks.pop_front() else {
-            break;
-        };
-        output.bytes = output.bytes.saturating_sub(removed.text.len());
-    }
 }
 
 #[cfg(test)]

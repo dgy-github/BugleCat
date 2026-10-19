@@ -13,9 +13,14 @@ pub mod approval;
 pub mod policy;
 
 pub use approval::{
-    step_decision, ApprovalRequest, Approver, Decision, NEVER, ON_FAILURE, ON_REQUEST, UNTRUSTED,
+    command_needs_escalation, command_uses_network, is_trusted, looks_read_only,
+    matches_dangerous_pattern, split_chain, step_decision, ApprovalRequest, Approver, Decision,
+    NEVER, ON_FAILURE, ON_REQUEST, UNTRUSTED,
 };
-pub use policy::{SandboxPolicy, DANGER_FULL_ACCESS, READ_ONLY, WORKSPACE_WRITE};
+pub use policy::{
+    is_protected_write_path, is_sensitive_read_path, normalize, resolve_for_policy,
+    strip_verbatim_prefix, SandboxPolicy, DANGER_FULL_ACCESS, READ_ONLY, WORKSPACE_WRITE,
+};
 
 #[derive(Debug, Clone)]
 pub struct PolicyService {

@@ -4,7 +4,7 @@
 //! fixed read-only commands through [`PolicyExecutor`]; model-provided shell
 //! fragments never cross the process boundary.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use async_trait::async_trait;
@@ -73,7 +73,7 @@ impl Tool for ListDirectoryTool {
             .get("include_hidden")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let resolved = resolve_path(ctx, path);
+        let resolved = ctx.resolve_path(path);
 
         if !ctx.policy.can_read(&resolved) {
             return format!("Error: reading {path} is not allowed under the sandbox policy.");
@@ -133,7 +133,7 @@ impl Tool for PathInfoTool {
         let Some(path) = args.get("path").and_then(Value::as_str) else {
             return "Error: 'path' is required and must be a string.".into();
         };
-        let resolved = resolve_path(ctx, path);
+        let resolved = ctx.resolve_path(path);
         if !ctx.policy.can_read(&resolved) {
             return format!("Error: reading {path} is not allowed under the sandbox policy.");
         }
@@ -243,16 +243,6 @@ fn bounded_usize(args: &Value, key: &str, default: usize, min: usize, max: usize
         .and_then(Value::as_u64)
         .map(|value| (value as usize).clamp(min, max))
         .unwrap_or(default)
-}
-
-fn resolve_path(ctx: &ToolContext, path: &str) -> PathBuf {
-    let input = PathBuf::from(path);
-    let joined = if input.is_absolute() {
-        input
-    } else {
-        ctx.workspace.join(input)
-    };
-    joined.canonicalize().unwrap_or(joined)
 }
 
 fn display_path(ctx: &ToolContext, path: &Path) -> String {
@@ -369,6 +359,8 @@ async fn run_git(ctx: &ToolContext, tool_name: &str, command: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::tools::ToolRegistry;
     use ncx_sandbox::{SandboxPolicy, READ_ONLY};

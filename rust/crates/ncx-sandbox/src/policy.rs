@@ -67,21 +67,42 @@ impl SandboxPolicy {
     }
 
     fn writable_dirs(&self) -> Vec<PathBuf> {
-        let mut roots = vec![self.workspace.clone()];
-        roots.extend(self.writable_roots.iter().cloned());
+        let mut roots = vec![resolve_for_policy(&self.workspace, &self.workspace)];
+        roots.extend(
+            self.writable_roots
+                .iter()
+                .map(|root| resolve_for_policy(&self.workspace, root)),
+        );
         if self.allow_temp_write {
-            roots.push(normalize(&std::env::temp_dir()));
+            let temp = std::env::temp_dir();
+            roots.push(resolve_for_policy(&temp, &temp));
         }
         roots
     }
 
-    /// All three modes permit reads (secret-file protection is a tool-layer
-    /// concern, like the Python side).
-    pub fn can_read(&self, _path: impl AsRef<Path>) -> bool {
-        true
+    /// Whether reading `path` is permitted under this policy.
+    ///
+    /// Outside `danger-full-access`, sensitive credential and private-key files
+    /// (`.env`, SSH private keys, `.git-credentials`, `.nanocodex/config.toml`,
+    /// cloud credentials, etc.) are blocked from automatic reads.
+    pub fn can_read(&self, path: impl AsRef<Path>) -> bool {
+        if self.mode == DANGER_FULL_ACCESS {
+            return true;
+        }
+        let raw = path.as_ref();
+        if is_sensitive_read_path(raw) {
+            return false;
+        }
+        let target = resolve_for_policy(&self.workspace, raw);
+        !is_sensitive_read_path(&target)
     }
 
-    /// Whether a write to `path` is allowed under this policy.
+    /// Whether a write to `path` is allowed under this policy without escalation.
+    ///
+    /// Resolves existing ancestor symlinks/junctions to prevent symlink escape
+    /// out of the workspace, and treats execution-hijack or secret targets
+    /// (`.git/hooks/**`, `.git/config`, `.env*`, `.nanocodex/config.toml`) as
+    /// requiring explicit escalation even inside `writable_roots`.
     pub fn can_write(&self, path: impl AsRef<Path>) -> bool {
         if self.mode == DANGER_FULL_ACCESS {
             return true;
@@ -89,7 +110,15 @@ impl SandboxPolicy {
         if self.mode == READ_ONLY {
             return false;
         }
-        let target = normalize(&make_absolute(&self.workspace, path.as_ref()));
+        let raw = path.as_ref();
+        let lexical = normalize(&make_absolute(&self.workspace, raw));
+        if is_protected_write_path(raw) || is_protected_write_path(&lexical) {
+            return false;
+        }
+        let target = resolve_for_policy(&self.workspace, raw);
+        if is_protected_write_path(&target) {
+            return false;
+        }
         // `starts_with` is component-wise, so it covers both `target == root`
         // and `root` being an ancestor of `target` (and won't match a mere
         // string prefix like `/a/bc` under `/a/b`).
@@ -130,7 +159,7 @@ fn make_absolute(base: &Path, p: &Path) -> PathBuf {
 
 /// Lexically normalize a path: drop `.`, resolve `..` against prior components.
 /// No filesystem access, so it works on paths that don't exist.
-fn normalize(p: &Path) -> PathBuf {
+pub fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for comp in p.components() {
         match comp {
@@ -142,6 +171,128 @@ fn normalize(p: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// Strip Windows extended-length path prefixes (`\\?\` and `\\?\UNC\`) so
+/// canonicalized paths compare cleanly with lexically normalized paths.
+pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    text.strip_prefix(r"\\?\")
+        .map_or_else(|| path.clone(), PathBuf::from)
+}
+
+/// Normalize `p` against `base` and resolve the deepest existing ancestor on
+/// disk so symlinks/junctions inside the workspace cannot escape the boundary.
+pub fn resolve_for_policy(base: &Path, p: &Path) -> PathBuf {
+    let lexical = normalize(&make_absolute(base, p));
+    let mut current: &Path = &lexical;
+    let mut suffix: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        if let Ok(canonical) = current.canonicalize() {
+            let mut resolved = strip_verbatim_prefix(canonical);
+            for part in suffix.into_iter().rev() {
+                resolved.push(part);
+            }
+            return normalize(&resolved);
+        }
+        let Some(name) = current.file_name() else {
+            break;
+        };
+        suffix.push(name.to_os_string());
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        current = parent;
+    }
+    lexical
+}
+
+/// True when `path` refers to a credential, private key, or secret file that
+/// should not be read without `danger-full-access`.
+pub fn is_sensitive_read_path(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let lower_name = file_name.to_ascii_lowercase();
+    if is_secret_dotenv_name(&lower_name) {
+        return true;
+    }
+    if matches!(
+        lower_name.as_str(),
+        "id_rsa"
+            | "id_ed25519"
+            | "id_ecdsa"
+            | "id_dsa"
+            | ".git-credentials"
+            | ".netrc"
+            | ".npmrc"
+            | ".pypirc"
+            | "authorized_keys"
+    ) {
+        return true;
+    }
+    if let Some(ext) = Path::new(&lower_name).extension().and_then(|e| e.to_str()) {
+        if matches!(ext, "pem" | "key" | "pfx" | "p12" | "kdbx") {
+            return true;
+        }
+    }
+    let comps: Vec<String> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(os) => Some(os.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+    for window in comps.windows(2) {
+        if matches!(
+            (window[0].as_str(), window[1].as_str()),
+            (".nanocodex", "config.toml")
+                | (".aws", "credentials")
+                | (".ssh", "config")
+                | (".kube", "config")
+                | (".git", "credentials")
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
+/// True when `path` targets an execution-hijack hook/config or secret file
+/// inside the workspace that must require explicit escalation before writing.
+pub fn is_protected_write_path(path: &Path) -> bool {
+    if is_sensitive_read_path(path) {
+        return true;
+    }
+    let comps: Vec<String> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(os) => Some(os.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+    for window in comps.windows(2) {
+        if window[0] == ".git" && matches!(window[1].as_str(), "hooks" | "config") {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_secret_dotenv_name(lower_name: &str) -> bool {
+    if lower_name == ".env" {
+        return true;
+    }
+    if let Some(suffix) = lower_name.strip_prefix(".env.") {
+        return !matches!(
+            suffix,
+            "example" | "sample" | "template" | "dist" | "schema" | "defaults"
+        );
+    }
+    false
 }
 
 #[cfg(test)]
@@ -214,6 +365,8 @@ mod tests {
     fn danger_full_access_allows_everything() {
         let p = SandboxPolicy::new(DANGER_FULL_ACCESS, base());
         assert!(p.can_write("/etc/passwd"));
+        assert!(p.can_read(".env"));
+        assert!(p.can_write(".git/hooks/pre-commit"));
         // The policy itself does NOT force network on — callers (load_config) do.
         assert!(!p.network_access);
     }
@@ -224,5 +377,19 @@ mod tests {
         let p = SandboxPolicy::new(WORKSPACE_WRITE, &ws);
         assert!(p.can_write("a.py")); // relative -> ws/a.py, inside
         assert!(!p.can_write(Path::new("..").join("escape.py"))); // climbs out
+    }
+
+    #[test]
+    fn sensitive_credential_files_blocked_from_read_and_write_outside_full_access() {
+        let ws = base().join("ws");
+        let p = SandboxPolicy::new(WORKSPACE_WRITE, &ws);
+        assert!(!p.can_read(ws.join(".env")));
+        assert!(!p.can_read(ws.join(".env.local")));
+        assert!(p.can_read(ws.join(".env.example")));
+        assert!(!p.can_read(ws.join("secrets/server.pem")));
+        assert!(!p.can_read(ws.join(".nanocodex/config.toml")));
+        assert!(!p.can_write(ws.join(".env")));
+        assert!(!p.can_write(ws.join(".git/hooks/pre-commit")));
+        assert!(!p.can_write(ws.join(".git/config")));
     }
 }

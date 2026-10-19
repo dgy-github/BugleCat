@@ -1,6 +1,6 @@
 //! Managed subprocess lifecycle using the same command boundary as PolicyExecutor.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,15 +11,23 @@ use tokio::process::{Child, ChildStdin};
 use tokio::task::JoinHandle;
 
 use crate::executor::{command_with_env, PolicyExecutor};
+use crate::output_buffer::{OutputRingBuffer, SequencedChunk};
 use crate::text_encoding::Utf8StreamDecoder;
-
-const MAX_BUFFERED_BYTES: usize = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessOutputChunk {
     pub seq: u64,
     pub stream: &'static str,
     pub text: String,
+}
+
+impl SequencedChunk for ProcessOutputChunk {
+    fn seq(&self) -> u64 {
+        self.seq
+    }
+    fn text_len(&self) -> usize {
+        self.text.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,17 +41,11 @@ pub struct ProcessSnapshot {
 pub struct ManagedProcess {
     child: Child,
     stdin: Option<ChildStdin>,
-    output: Arc<Mutex<OutputBuffer>>,
+    output: Arc<Mutex<OutputRingBuffer<ProcessOutputChunk>>>,
     readers: Vec<JoinHandle<()>>,
     exit_code: Option<i32>,
     #[cfg(windows)]
     job: Option<crate::executor::win_job::Job>,
-}
-
-#[derive(Default)]
-struct OutputBuffer {
-    chunks: VecDeque<ProcessOutputChunk>,
-    bytes: usize,
 }
 
 impl PolicyExecutor {
@@ -71,7 +73,7 @@ impl PolicyExecutor {
             .stderr
             .take()
             .ok_or_else(|| "managed process stderr was not piped".to_string())?;
-        let output = Arc::new(Mutex::new(OutputBuffer::default()));
+        let output = Arc::new(Mutex::new(OutputRingBuffer::default()));
         let sequence = Arc::new(AtomicU64::new(1));
         let readers = vec![
             spawn_reader(stdout, "stdout", output.clone(), sequence.clone()),
@@ -103,14 +105,7 @@ impl ManagedProcess {
                 }
             }
         }
-        let output = self.output.lock().unwrap();
-        let chunks = output
-            .chunks
-            .iter()
-            .filter(|chunk| chunk.seq > after)
-            .cloned()
-            .collect::<Vec<_>>();
-        let next_cursor = output.chunks.back().map_or(after, |chunk| chunk.seq);
+        let (chunks, next_cursor) = self.output.lock().unwrap().snapshot_after(after);
         Ok(ProcessSnapshot {
             running: self.exit_code.is_none(),
             exit_code: self.exit_code,
@@ -156,7 +151,7 @@ impl Drop for ManagedProcess {
 fn spawn_reader<R>(
     mut reader: R,
     stream: &'static str,
-    output: Arc<Mutex<OutputBuffer>>,
+    output: Arc<Mutex<OutputRingBuffer<ProcessOutputChunk>>>,
     sequence: Arc<AtomicU64>,
 ) -> JoinHandle<()>
 where
@@ -178,31 +173,17 @@ where
                 stream,
                 text,
             };
-            push_chunk(&mut output.lock().unwrap(), chunk);
+            output.lock().unwrap().push(chunk);
         }
         let trailing = decoder.finish();
         if !trailing.is_empty() {
-            push_chunk(
-                &mut output.lock().unwrap(),
-                ProcessOutputChunk {
-                    seq: sequence.fetch_add(1, Ordering::Relaxed),
-                    stream,
-                    text: trailing,
-                },
-            );
+            output.lock().unwrap().push(ProcessOutputChunk {
+                seq: sequence.fetch_add(1, Ordering::Relaxed),
+                stream,
+                text: trailing,
+            });
         }
     })
-}
-
-fn push_chunk(output: &mut OutputBuffer, chunk: ProcessOutputChunk) {
-    output.bytes += chunk.text.len();
-    output.chunks.push_back(chunk);
-    while output.bytes > MAX_BUFFERED_BYTES {
-        let Some(removed) = output.chunks.pop_front() else {
-            break;
-        };
-        output.bytes = output.bytes.saturating_sub(removed.text.len());
-    }
 }
 
 #[cfg(test)]

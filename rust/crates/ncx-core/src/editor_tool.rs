@@ -1,7 +1,5 @@
 //! Harness-compatible literal editor layered on the existing patch boundary.
 
-use std::path::PathBuf;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -36,6 +34,10 @@ impl Tool for StrReplaceEditorTool {
         })
     }
 
+    fn call_is_read_only(&self, args: &Value) -> bool {
+        args.get("command").and_then(Value::as_str) == Some("view")
+    }
+
     async fn execute(&self, ctx: &ToolContext, args: &Value) -> String {
         let Some(command) = args.get("command").and_then(Value::as_str) else {
             return "Error: 'command' is required and must be a string.".into();
@@ -57,7 +59,7 @@ async fn create(ctx: &ToolContext, path: &str, args: &Value) -> String {
     let Some(content) = args.get("new_str").and_then(Value::as_str) else {
         return "Error: 'new_str' is required for create.".into();
     };
-    let resolved = resolve(ctx, path);
+    let resolved = ctx.resolve_path(path);
     if resolved.exists() {
         return format!("Error: file already exists: {path}");
     }
@@ -114,23 +116,13 @@ async fn insert(ctx: &ToolContext, path: &str, args: &Value) -> String {
 }
 
 fn read_utf8(ctx: &ToolContext, path: &str) -> Result<String, String> {
-    let resolved = resolve(ctx, path);
-    if !ctx.policy.can_read(&resolved) {
+    let resolved = ctx.resolve_path(path);
+    if !ctx.policy.can_read(&resolved) || !ctx.policy.can_read(std::path::Path::new(path)) {
         return Err(format!(
             "Error: reading {path} is not allowed under the sandbox policy."
         ));
     }
     std::fs::read_to_string(&resolved).map_err(|error| format!("Error reading file: {error}"))
-}
-
-fn resolve(ctx: &ToolContext, path: &str) -> PathBuf {
-    let candidate = PathBuf::from(path);
-    let joined = if candidate.is_absolute() {
-        candidate
-    } else {
-        ctx.workspace.join(candidate)
-    };
-    joined.canonicalize().unwrap_or(joined)
 }
 
 fn add_patch(path: &str, content: &str) -> String {
@@ -162,6 +154,8 @@ async fn apply(ctx: &ToolContext, patch: String) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
 
     use super::*;

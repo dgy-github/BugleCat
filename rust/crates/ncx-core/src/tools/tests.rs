@@ -109,11 +109,8 @@ mod tests {
     #[tokio::test]
     async fn denied_escaping_patch_is_blocked() {
         let ws = tmp_ws("deny");
-        let ctx = ToolContext::new(
-            ws,
-            SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()),
-        )
-        .with_approver(Rc::new(Answer(false)));
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(false)));
         let out = ApplyPatchTool
             .execute(&ctx, &json!({ "patch": ESCAPING }))
             .await;
@@ -123,10 +120,7 @@ mod tests {
     #[tokio::test]
     async fn no_approver_escaping_patch_errors_out_of_sandbox() {
         let ws = tmp_ws("noapprover");
-        let ctx = ToolContext::new(
-            ws,
-            SandboxPolicy::new(WORKSPACE_WRITE, std::env::temp_dir()),
-        );
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
         let out = ApplyPatchTool
             .execute(&ctx, &json!({ "patch": ESCAPING }))
             .await;
@@ -718,5 +712,87 @@ mod tests {
             middle.contains("251| MIDDLE_CRITICAL_TRACEBACK_MARKER_LINE_251"),
             "{middle}"
         );
+    }
+
+    #[tokio::test]
+    async fn workspace_write_shell_escalates_for_network_and_escaping_paths() {
+        let ws = tmp_ws("ws_write_esc");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(false)));
+
+        // Network command when network_access == false must prompt and be denied when Answer(false):
+        let net_out = ShellTool
+            .execute(&ctx, &json!({ "command": "curl https://example.com" }))
+            .await;
+        assert!(net_out.contains("not approved"), "{net_out}");
+
+        // Redirecting outside workspace must prompt and be denied:
+        let esc_out = ShellTool
+            .execute(&ctx, &json!({ "command": "echo pwn > ../escape.txt" }))
+            .await;
+        assert!(esc_out.contains("not approved"), "{esc_out}");
+
+        // Writing to .git/hooks inside workspace must prompt and be denied:
+        let hook_out = ShellTool
+            .execute(
+                &ctx,
+                &json!({ "command": "echo pwn > .git/hooks/pre-commit" }),
+            )
+            .await;
+        assert!(hook_out.contains("not approved"), "{hook_out}");
+    }
+
+    #[tokio::test]
+    async fn read_file_and_apply_patch_protect_sensitive_and_hook_paths() {
+        let ws = tmp_ws("sensitive_protect");
+        std::fs::write(ws.join(".env"), "API_KEY=secret123\n").unwrap();
+        std::fs::write(ws.join(".env.example"), "API_KEY=placeholder\n").unwrap();
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws))
+            .with_approver(Rc::new(Answer(false)));
+
+        // Reading .env is blocked outside danger-full-access:
+        let env_read = ReadFileTool.execute(&ctx, &json!({ "path": ".env" })).await;
+        assert!(env_read.contains("not allowed"), "{env_read}");
+
+        // Reading .env.example is allowed:
+        let example_read = ReadFileTool
+            .execute(&ctx, &json!({ "path": ".env.example" }))
+            .await;
+        assert!(example_read.contains("placeholder"), "{example_read}");
+
+        // Patching .git/hooks/pre-commit inside workspace requires escalation approval:
+        let hook_patch = "*** Begin Patch\n*** Add File: .git/hooks/pre-commit\n+#!/bin/sh\n*** End Patch";
+        let hook_res = ApplyPatchTool
+            .execute(&ctx, &json!({ "patch": hook_patch }))
+            .await;
+        assert!(hook_res.contains("not approved"), "{hook_res}");
+    }
+
+    #[tokio::test]
+    async fn on_failure_policy_denies_escalating_command_before_running_then_retries_on_approval() {
+        let ws = tmp_ws("on_failure_sandbox");
+        // With a denying approver under ON_FAILURE, an escalating command (mkdir in READ_ONLY)
+        // must be blocked BEFORE touching the filesystem!
+        let ctx_deny = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::READ_ONLY, &ws))
+            .with_approval_policy(ON_FAILURE)
+            .with_approver(Rc::new(Answer(false)));
+        let denied_out = ShellTool
+            .execute(&ctx_deny, &json!({ "command": "mkdir should_not_exist" }))
+            .await;
+        assert!(denied_out.contains("Sandbox denied"), "{denied_out}");
+        assert!(
+            !ws.join("should_not_exist").exists(),
+            "escalating command must not run before approval under ON_FAILURE"
+        );
+
+        // With an approving handler under ON_FAILURE, the retry runs and succeeds:
+        let ctx_ok = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::READ_ONLY, &ws))
+            .with_approval_policy(ON_FAILURE)
+            .with_approver(Rc::new(Answer(true)));
+        let ok_out = ShellTool
+            .execute(&ctx_ok, &json!({ "command": "mkdir approved_on_retry" }))
+            .await;
+        assert!(ok_out.contains("Exit code: 0"), "{ok_out}");
+        assert!(ws.join("approved_on_retry").is_dir());
     }
 }

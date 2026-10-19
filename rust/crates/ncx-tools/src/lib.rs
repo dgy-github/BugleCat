@@ -13,6 +13,7 @@
 pub mod detect;
 pub mod executor;
 pub mod managed;
+pub(crate) mod output_buffer;
 pub mod patch;
 pub mod pty;
 pub mod read_file;

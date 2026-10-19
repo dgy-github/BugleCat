@@ -71,18 +71,14 @@ impl Tool for UpdatePlanTool {
 pub struct ShellTool;
 
 impl ShellTool {
-    /// Does this command want something the sandbox forbids? (Heuristic, mirrors
-    /// the Python `_needs_escalation`.)
+    /// Does this command want something the sandbox forbids?
+    ///
+    /// Delegates to [`ncx_sandbox::command_needs_escalation`] so `read-only` and
+    /// `workspace-write` modes uniformly check destructive patterns, network
+    /// commands when `!policy.network_access`, out-of-workspace path arguments,
+    /// and protected targets (`.git/hooks`, `.git/config`, `.env*`, private keys).
     pub(crate) fn needs_escalation(ctx: &ToolContext, command: &str, workdir: &Path) -> bool {
-        if ctx.policy.mode == DANGER_FULL_ACCESS {
-            return false;
-        }
-        if !ctx.policy.writes_allowed() {
-            // read-only: anything not plainly read-only escalates.
-            return !looks_read_only(command);
-        }
-        // workspace-write: escalate only if the workdir itself isn't writable.
-        !ctx.policy.can_write(workdir)
+        ncx_sandbox::command_needs_escalation(&ctx.policy, command, workdir)
     }
 
     #[cfg(windows)]
@@ -154,25 +150,20 @@ impl Tool for ShellTool {
         {
             return error;
         }
-        run_shell(ctx, command, &workdir, timeout, justification).await
+        run_shell(
+            ctx,
+            command,
+            &workdir,
+            timeout,
+            justification,
+            needs_escalation,
+        )
+        .await
     }
 }
 
 pub(crate) fn resolve_shell_workdir(ctx: &ToolContext, args: &Value) -> PathBuf {
-    let Some(path) = args
-        .get("workdir")
-        .and_then(Value::as_str)
-        .filter(|p| !p.is_empty())
-    else {
-        return ctx.workspace.clone();
-    };
-    let path = PathBuf::from(path);
-    let joined = if path.is_absolute() {
-        path
-    } else {
-        ctx.workspace.join(path)
-    };
-    joined.canonicalize().unwrap_or(joined)
+    ctx.resolve_workdir(args.get("workdir").and_then(Value::as_str))
 }
 
 pub(crate) async fn authorize_shell(
@@ -244,18 +235,40 @@ pub(crate) async fn run_shell(
     workdir: &Path,
     timeout: u64,
     justification: &str,
+    needs_escalation: bool,
 ) -> String {
     let executor = PolicyExecutor::new();
-    let mut result = executor.run(command, workdir, timeout).await;
+    let pre_allowed = ctx.session_grants.borrow().commands.contains(command);
+    // Under `on-failure`, `Approver::classify` defers prompting until the
+    // initial sandboxed attempt fails. If the command violates the sandbox
+    // policy (`needs_escalation`), the sandboxed attempt must be denied before
+    // execution rather than running unapproved first.
+    let mut result = if ctx.approval_policy == ON_FAILURE && needs_escalation && !pre_allowed {
+        ncx_tools::ExecResult {
+            exit_code: 126,
+            sandbox_denied: true,
+            denial_reason:
+                "command requires escalated permissions outside the current sandbox policy".into(),
+            ..Default::default()
+        }
+    } else {
+        executor.run(command, workdir, timeout).await
+    };
     if !result.ok()
         && ctx.approval_policy == ON_FAILURE
         && !result.timed_out
         && approve_failed_retry(ctx, command, workdir, justification, result.exit_code).await
     {
-        result = executor.run(command, workdir, timeout).await;
+        let mut extra_env = HashMap::new();
+        extra_env.insert("NCX_SANDBOX_ESCALATED".to_string(), "1".to_string());
+        result = executor
+            .run_with_env(command, workdir, timeout, &extra_env)
+            .await;
     }
     // Offload oversized command outputs (>16k chars) to disk before inline head/tail
     // truncation so the model can inspect omitted middle lines via `read_file`.
+    // (`maybe_offload` embeds `OFFLOAD_MARKER_PREFIX` so outer `ToolRegistry` calls
+    // are a zero-cost no-op while direct `ShellTool::execute` callers also get offloaded.)
     output_offload::maybe_offload("shell", result.render_untruncated())
 }
 
@@ -269,7 +282,7 @@ async fn approve_failed_retry(
     let Some(handler) = &ctx.approver else {
         return false;
     };
-    handler
+    let answer = handler
         .request(ApprovalRequest {
             command: command.to_string(),
             reason: format!("Sandboxed run failed (exit {exit_code}). {justification}")
@@ -279,8 +292,14 @@ async fn approve_failed_retry(
             escalated: true,
             details: String::new(),
         })
-        .await
-        .approved()
+        .await;
+    if answer == ApprovalDecision::Always {
+        ctx.session_grants
+            .borrow_mut()
+            .commands
+            .insert(command.to_string());
+    }
+    answer.approved()
 }
 
 /// `remember` â€” record a verified, reusable note into project memory. Only the

@@ -9,7 +9,7 @@ use ncx_sandbox::{DANGER_FULL_ACCESS, READ_ONLY};
 use ncx_tools::{PolicyExecutor, PtyProcess, PtySnapshot};
 use serde_json::{json, Value};
 
-use crate::tools::{authorize_shell, Tool, ToolContext};
+use crate::tools::{authorize_shell, ShellTool, Tool, ToolContext};
 
 const MAX_TERMINALS: usize = 8;
 
@@ -142,6 +142,30 @@ impl Tool for TerminalWriteTool {
         let Some(input) = args.get("input").and_then(Value::as_str) else {
             return error("INVALID_ARGUMENT", "input must be a string");
         };
+        let session_cwd = {
+            let manager = ctx.terminal_manager.lock().await;
+            let Some(session) = manager.sessions.get(&id) else {
+                return error(
+                    "TERMINAL_NOT_FOUND",
+                    &format!("terminal session {id} does not exist"),
+                );
+            };
+            session.cwd.clone()
+        };
+        let trimmed = input.trim();
+        if !trimmed.is_empty() && ShellTool::needs_escalation(ctx, trimmed, &session_cwd) {
+            if let Err(message) = authorize_shell(
+                ctx,
+                trimmed,
+                &session_cwd,
+                "PTY input requires escalated permissions.",
+                true,
+            )
+            .await
+            {
+                return error("NOT_AUTHORIZED", &message);
+            }
+        }
         let mut manager = ctx.terminal_manager.lock().await;
         let Some(session) = manager.sessions.get_mut(&id) else {
             return error(
@@ -247,6 +271,29 @@ impl Tool for TerminalExecTool {
         };
         if command.trim().is_empty() {
             return error("INVALID_ARGUMENT", "command cannot be empty");
+        }
+        let session_cwd = {
+            let manager = ctx.terminal_manager.lock().await;
+            let Some(session) = manager.sessions.get(&id) else {
+                return error(
+                    "TERMINAL_NOT_FOUND",
+                    &format!("terminal session {id} does not exist"),
+                );
+            };
+            session.cwd.clone()
+        };
+        if ShellTool::needs_escalation(ctx, command, &session_cwd) {
+            if let Err(message) = authorize_shell(
+                ctx,
+                command,
+                &session_cwd,
+                "PTY command requires escalated permissions.",
+                true,
+            )
+            .await
+            {
+                return error("NOT_AUTHORIZED", &message);
+            }
         }
         let wait_ms = args
             .get("wait_ms")
@@ -416,19 +463,8 @@ fn resolve_workdir(base: &Path, requested: Option<&Value>) -> Result<PathBuf, St
     Ok(path)
 }
 
-#[cfg(windows)]
 fn shell_compatible_path(path: PathBuf) -> PathBuf {
-    let text = path.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{rest}"));
-    }
-    text.strip_prefix(r"\\?\")
-        .map_or(path.clone(), PathBuf::from)
-}
-
-#[cfg(not(windows))]
-fn shell_compatible_path(path: PathBuf) -> PathBuf {
-    path
+    ncx_sandbox::strip_verbatim_prefix(path)
 }
 
 #[cfg(windows)]

@@ -239,7 +239,7 @@ fn which_bash() -> String {
 }
 
 /// Minimal environment for the child — mirrors `_build_env`.
-fn build_env() -> HashMap<String, String> {
+pub(crate) fn build_env() -> HashMap<String, String> {
     let mut env = HashMap::new();
     let get = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_string());
     #[cfg(windows)]

@@ -1,5 +1,55 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-19：沙箱与审批机制全链路加固（A1–A5）+ 跨 Crate 冗余清理（B1–B3）
+
+- **A1 统一命令安全分类器与 `workspace-write` 提权盲区修复（`rust/crates/ncx-sandbox/src/approval.rs`）**
+  - 新增 [`command_needs_escalation`](rust/crates/ncx-sandbox/src/approval.rs)、[`command_uses_network`](rust/crates/ncx-sandbox/src/approval.rs)、[`looks_read_only`](rust/crates/ncx-sandbox/src/approval.rs)、[`is_trusted`](rust/crates/ncx-sandbox/src/approval.rs)、[`matches_dangerous_pattern`](rust/crates/ncx-sandbox/src/approval.rs) 及复合命令链拆分器 `split_chain`（支持 `&&`、`||`、`;`、`|`、换行）。
+  - 修复此前 `ShellTool::needs_escalation` 仅做 `policy.mode == ReadOnly` 的薄弱判断：现在在 `workspace-write` 策略下，以下场景均会触发提权审批：
+    - 策略禁网（`!policy.network_access`）时的网络命令（`curl`、`wget`、`Invoke-WebRequest`、`ssh`、`scp`、`nc`、`git push/fetch/pull/clone`、`pip/npm/cargo install` 等）；
+    - 破坏性命令模式（`rm -rf`、`del /f`、`Remove-Item -Recurse -Force`、`format`、`mkfs`、`dd if=`、`git reset --hard`、`git clean -fd` 等）；
+    - 引用工作区外路径参数或重定向目标（`../`、`~/`、外部绝对路径），以及指向工作区内受保护位置（`.git/hooks/**`、`.git/config`、`.env*`、私钥文件）的写/重定向操作。
+- **A2 真实路径解析、敏感文件读保护与关键路径写保护（`rust/crates/ncx-sandbox/src/policy.rs`）**
+  - 新增 [`resolve_for_policy`](rust/crates/ncx-sandbox/src/policy.rs) 与 [`strip_verbatim_prefix`](rust/crates/ncx-sandbox/src/policy.rs)：在回退词法 `normalize_path` 前先对磁盘上最深已存在祖先执行 `canonicalize()`，阻断通过工作区内符号链接 / Windows Junction 逃逸至工作区外的路径绕过，并剥离 Windows `\\?\` 前缀保证路径比较一致。
+  - 废除原先恒返回 `true` 的 `SandboxPolicy::can_read` 空实现：新增 [`is_sensitive_read_path`](rust/crates/ncx-sandbox/src/policy.rs)，在非 `danger-full-access` 下默认拦截 `.env` / `.env.*`（保留 `.env.example` / `.env.sample` / `.env.template` 可读）、SSH/TLS 私钥（`id_rsa`、`id_ed25519`、`*.pem`、`*.key`、`*.p12`、`*.pfx`）及凭据文件（`.nanocodex/config.toml`、`.aws/credentials`、`.git-credentials`、`.npmrc`、`.pypirc`）。
+  - 新增 [`is_protected_write_path`](rust/crates/ncx-sandbox/src/policy.rs)：在 `workspace-write` 下默认禁止静默覆写 `.git/hooks/**`、`.git/config`、`.env*` 与私钥文件，必须经人工审批后才允许写入。
+- **A3 网络工具策略门禁与搜索工具敏感文件过滤（`rust/crates/ncx-core/src/search.rs`）**
+  - `WebSearchTool` 与 `WebFetchTool` 新增 `authorize_network_tool` 检查：当 `!ctx.policy.network_access` 时，不再直接放行 HTTP 请求，而是根据 `approval_mode` 发起审批或拒绝。
+  - `GrepTool` 遍历文件时调用 `ncx_sandbox::is_sensitive_read_path`，自动跳过 `.env`、私钥等敏感文件，防止通过全文正则搜索泄露密钥。
+- **A4 PTY 环境变量清洗与终端工具审批接入（`rust/crates/ncx-tools/src/pty.rs`、`rust/crates/ncx-core/src/terminal_tools.rs`）**
+  - `PtyManager::spawn_session` 改为执行 `command.env_clear()` 并复用 `executor::build_env`，清洗宿主环境中的 `DEEPSEEK_API_KEY`、`NANOCODEX_API_KEY`、`OPENAI_API_KEY` 等敏感变量，消除通过 `terminal_spawn` 绕过 `ShellExecutor` 环境过滤的漏洞。
+  - `TerminalWriteTool` 与 `TerminalExecTool` 接入 `ShellTool::needs_escalation` + `authorize_shell` 校验，拦截未经审批向交互式终端注入高危命令。
+- **A5 修复 `ON_FAILURE` 先执行后审批漏洞与编辑器只读判定（`rust/crates/ncx-core/src/tools/builtins.rs`、`rust/crates/ncx-core/src/editor_tool.rs`）**
+  - 修复 `run_shell` 在 `ApprovalMode::OnFailure` 下的时序漏洞：对需提权命令，首次执行不再直接裸跑，而是由沙箱先行拒止（返回 `sandbox_denied: true, exit_code: 126`），随后触发 `approve_failed_retry` 弹窗，仅在用户批准后才注入 `NCX_SANDBOX_ESCALATED=1` 重试执行。
+  - 为 `StrReplaceEditorTool` 实现 `call_is_read_only`（当 `"command": "view"` 时返回 `true`），使只读查看与 `read_file` 待遇一致，避免在 `ALWAYS` 审批模式下误弹写审批。
+- **B1–B3 跨 Crate 冗余代码清理**
+  - **B1**：删除 `rust/crates/ncx-tools/src/detect.rs` 中重复维护的只读命令检测逻辑，统一重导出 `ncx_sandbox::looks_read_only`。
+  - **B2**：在 [`ToolContext`](rust/crates/ncx-core/src/tools.rs) 上新增 `resolve_path` 与 `resolve_workdir`，清理 `builtins.rs`、`file.rs`、`editor_tool.rs`、`workspace_tools.rs`、`terminal_tools.rs` 5 处重复的路径解析辅助函数。
+  - **B3**：新增 [`OutputRingBuffer<T>`](rust/crates/ncx-tools/src/output_buffer.rs)，统一 `managed.rs`（`VecDeque<String>`）与 `pty.rs`（`VecDeque<u8>`）的 1MB 环形输出缓冲区与截断逻辑。
+  - 注：`rust/crates/ncx-core/src/prompt.rs` 因被冻结验证样例（`examples/verification_apps_stdin_v1_*/provenance.rs`）通过 `include_bytes!` 引用，按门禁约束原样保留。
+- **验证**
+  - `cargo check --workspace --all-targets` 零警告通过。
+  - `cargo test -p ncx-sandbox -p ncx-tools -p ncx-core --lib` 全绿（`ncx-sandbox` 17 passed、`ncx-tools` 51 passed、`ncx-core` 461 passed，合计 529 passed）。
+
+### 2026-10-19：ACR / Stage 3 智能复利闭环合入 `main`、6+5 项审计优化与文档对齐
+
+- **分支合并与推送**
+  - 将 `acr-outcome-feedback` 快进合并至 `main`（`6d658fa`）并推送到 GitHub `origin/main`。
+- **第一轮 6 项审查缺陷修复（Commit `4299e1b`）**
+  1. `apply_diff_file` 支持自动剥离首尾 Markdown 代码围栏（`strip_diff_fence`），修复模型夹带 ` ```diff ` 时的解析失败。
+  2. `capture_git_fingerprint` 改为 `git status --porcelain -uall --ignored=no`，补齐新建未跟踪文件子目录指纹感知。
+  3. `OutcomeVerdict::is_negative_verdict` 将 `VerificationFailed` 纳入负向判定，使验证失败能正常触发记忆降权与提取抑制。
+  4. 新增 `post_edit_diagnostics`（`rust/crates/ncx-core/src/tools/diagnostics.rs`），在文件修改后自动对 `.rs` / `.py` / `.json` 执行轻量语法快检并追加 `<post_edit_diagnostics>` 提示。
+  5. 新增 `output_offload`（`rust/crates/ncx-core/src/tools/output_offload.rs`），对超过 16,000 字符的工具输出自动落盘至 `.nanocodex/tool_outputs/` 并保留首尾预览，保护上下文窗口。
+  6. GUI 新增 `MemoryReviewCard` 候选记忆治理卡片，支持一键入库（Promote）与驳回（Dismiss）。
+- **第二轮 5 项闭环深化优化（Commit `5db67b5`）**
+  1. **隔离 Worker 候选记忆路径重映射**：`orchestrator_runner.rs` 将隔离 worktree 产出的 `Candidate` 路径自动映射回主工作区相对路径并晋升，打通多智能体记忆复利闭环。
+  2. **Orchestrator 级 Git HEAD 快照**：`outcome.rs` 在登记并行 Worker 批次时快照 `git rev-parse HEAD` 写入 `workspace_revision`，支持跨会话回退检测。
+  3. **GUI 轮次级直接评价按钮**：`MessageList.tsx` 为每条 Assistant 回复增加精确绑定 `turn_index` 的 `👍` / `👎`（`/outcome good` / `/outcome bad`）快捷评价按钮。
+  4. **Candidate 频次累积与优先级排序**：`memory_index.rs` 新增 `occurrences` 列并在重复提取相同规范化正文时自动累加，`list_review_candidates` 按 `occurrences DESC` 排序。
+  5. **GUI 可视化 ACR 与 60 分奇点仪表盘**：新增 `OutcomeDashboardCard.tsx`，直观展示北极星指标、分类 ACR、基线就绪进度条及 60 分智能复利奇点追踪。
+- **文档全面同步（Commit `d4a4408`）**
+  - 更新 `README.md`、`README.zh-CN.md`、`docs/intelligence-compounding-feedback-plan.zh-CN.md` 与 `config.example.toml`，补齐 Stage 3（ACR + 在线结果回流 + 候选记忆治理 + 上下文卫士）完整说明。
+
 ### 2026-10-17：N6 基线判定入报告；N7 分拆提交与证据产物处理
 
 - **N6**

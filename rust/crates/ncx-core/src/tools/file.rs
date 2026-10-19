@@ -32,15 +32,9 @@ impl Tool for ReadFileTool {
         let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
 
-        let p = PathBuf::from(path);
-        let abs = if p.is_absolute() {
-            p
-        } else {
-            ctx.workspace.join(path)
-        };
-        let resolved = abs.canonicalize().unwrap_or(abs);
+        let resolved = ctx.resolve_path(path);
 
-        if !ctx.policy.can_read(&resolved) {
+        if !ctx.policy.can_read(&resolved) || !ctx.policy.can_read(Path::new(path)) {
             return format!("Error: reading {path} is not allowed under the sandbox policy.");
         }
         if !resolved.exists() {

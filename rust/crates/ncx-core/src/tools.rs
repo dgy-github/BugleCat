@@ -14,10 +14,8 @@ use async_trait::async_trait;
 use ncx_config::HookConfig;
 use ncx_context::ContextEntry;
 pub use ncx_sandbox::ApprovalRequest;
-use ncx_sandbox::{Approver, Decision, SandboxPolicy, DANGER_FULL_ACCESS, ON_FAILURE};
-use ncx_tools::{
-    apply_patch, decode_text, looks_read_only, parse_patch, read_file as rf, PolicyExecutor,
-};
+use ncx_sandbox::{Approver, Decision, SandboxPolicy, ON_FAILURE};
+use ncx_tools::{apply_patch, decode_text, parse_patch, read_file as rf, PolicyExecutor};
 use serde_json::{json, Value};
 
 use crate::genome::Genome;
@@ -346,6 +344,32 @@ impl ToolContext {
     pub fn with_context_entries(mut self, entries: Vec<ContextEntry>) -> Self {
         self.context_entries = Rc::new(entries);
         self
+    }
+
+    /// Resolve a workspace-relative or absolute path and canonicalize when it
+    /// exists on disk.
+    pub fn resolve_path(&self, raw: &str) -> PathBuf {
+        let candidate = PathBuf::from(raw);
+        let joined = if candidate.is_absolute() {
+            candidate
+        } else {
+            self.workspace.join(candidate)
+        };
+        joined.canonicalize().unwrap_or(joined)
+    }
+
+    /// Resolve an optional working directory argument (defaulting to the
+    /// workspace root) and strip Windows verbatim prefixes (`\\?\`) so `cmd.exe`
+    /// accepts it as `current_dir`.
+    pub fn resolve_workdir(&self, raw: Option<&str>) -> PathBuf {
+        let resolved = match raw.map(str::trim).filter(|p| !p.is_empty()) {
+            Some(path) => self.resolve_path(path),
+            None => self
+                .workspace
+                .canonicalize()
+                .unwrap_or_else(|_| self.workspace.clone()),
+        };
+        ncx_sandbox::strip_verbatim_prefix(resolved)
     }
 }
 

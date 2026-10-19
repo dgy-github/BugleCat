@@ -164,3 +164,27 @@ async fn web_tools_blocked_in_read_only() {
         .await;
     assert!(f.contains("disabled") && f.contains("read-only"), "{f}");
 }
+
+#[tokio::test]
+async fn web_tools_blocked_when_network_access_is_false_in_workspace_write() {
+    use crate::tools::ToolContext;
+    use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
+    let ws = std::env::temp_dir();
+    let policy = SandboxPolicy::new(WORKSPACE_WRITE, &ws).with_network_access(false);
+    let ctx = ToolContext::new(ws.clone(), policy);
+    let s = WebSearchTool.execute(&ctx, &json!({ "query": "x" })).await;
+    assert!(s.contains("network access is disabled"), "{s}");
+    let f = WebFetchTool
+        .execute(&ctx, &json!({ "url": "http://example.com" }))
+        .await;
+    assert!(f.contains("network access is disabled"), "{f}");
+}
+
+#[test]
+fn grep_skips_sensitive_dotenv_and_key_files() {
+    let d = fixture("grep_secrets");
+    std::fs::write(d.join(".env"), "SUPER_SECRET_TOKEN=42\n").unwrap();
+    std::fs::write(d.join("id_rsa"), "SUPER_SECRET_TOKEN=42\n").unwrap();
+    let out = grep(&d, "SUPER_SECRET_TOKEN", None, 200).unwrap();
+    assert!(out.contains("No matches"), "{out}");
+}

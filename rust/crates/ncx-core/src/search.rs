@@ -133,6 +133,9 @@ pub fn grep(
         if hits.len() >= max_results {
             break;
         }
+        if ncx_sandbox::is_sensitive_read_path(&f) {
+            continue;
+        }
         let rel = rel_slash(root, &f);
         if let Some(pr) = &path_re {
             if !pr.is_match(&rel) {
@@ -442,6 +445,37 @@ impl Tool for FindFilesTool {
     }
 }
 
+async fn authorize_network_tool(
+    ctx: &ToolContext,
+    tool_name: &str,
+    target: &str,
+) -> Result<(), String> {
+    if ctx.plan_mode || ctx.policy.mode == ncx_sandbox::READ_ONLY {
+        return Err(
+            "Error: web access is disabled in plan / read-only mode. Switch to default, \
+            accept-edits, or bypass to use the network."
+                .into(),
+        );
+    }
+    if ctx.policy.mode != ncx_sandbox::DANGER_FULL_ACCESS && !ctx.policy.network_access {
+        if ctx.approver.is_some() || ctx.approval_policy == ncx_sandbox::NEVER {
+            return crate::tools::authorize_shell(
+                ctx,
+                &format!("{tool_name} {target}"),
+                &ctx.workspace,
+                "Network access is disabled in the current sandbox policy.",
+                true,
+            )
+            .await;
+        }
+        return Err(
+            "Error: network access is disabled by the current sandbox policy (`network_access = false`)."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 /// `web_search` — keyless DuckDuckGo Instant Answer lookup (facts/definitions).
 pub struct WebSearchTool;
 
@@ -472,10 +506,8 @@ impl Tool for WebSearchTool {
         let Some(query) = args.get("query").and_then(|v| v.as_str()) else {
             return "Error: 'query' is required and must be a string.".into();
         };
-        if ctx.policy.mode == ncx_sandbox::READ_ONLY {
-            return "Error: web access is disabled in plan / read-only mode. Switch to default, \
-                    accept-edits, or bypass to use the network."
-                .into();
+        if let Err(error) = authorize_network_tool(ctx, self.name(), query).await {
+            return error;
         }
         // Keyed Tavily when configured; otherwise (or on failure) DuckDuckGo.
         if ctx.search_provider.eq_ignore_ascii_case("tavily") && !ctx.search_api_key.is_empty() {
@@ -534,10 +566,8 @@ impl Tool for WebFetchTool {
         let Some(url) = args.get("url").and_then(|v| v.as_str()) else {
             return "Error: 'url' is required and must be a string.".into();
         };
-        if ctx.policy.mode == ncx_sandbox::READ_ONLY {
-            return "Error: web access is disabled in plan / read-only mode. Switch to default, \
-                    accept-edits, or bypass to use the network."
-                .into();
+        if let Err(error) = authorize_network_tool(ctx, self.name(), url).await {
+            return error;
         }
         match ncx_provider::fetch_url(url).await {
             Ok(s) => s,
