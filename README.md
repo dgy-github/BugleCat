@@ -2,20 +2,25 @@
 
 English | [简体中文](README.zh-CN.md)
 
-## Latest Update (2026-10-14)
+## Latest Update (2026-10-19)
 
 > [!IMPORTANT]
-> **BugleCat `v0.1.2` Release & Claim-Level Contradiction Verification (`host-rules-v3.4`)**
-> - **Prebuilt Releases**: [GitHub Release `v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2) (Windows x64 NSIS installer `BugleCat_0.1.0_x64-setup.exe`, full portable bundle `buglecat-20261014-final.zip`, and macOS `arm64` / `x64` DMGs).
-> - **Host Rule Verification Scope (Default `off`)**: Deterministic host-level checks of supplied claims and tool execution evidence for execution failure, file-snapshot freshness, and scope mismatch (`policy_version: "host-rules-v3.4"`, production default `off`).
-> - **175 synthetic policy cases**: 140/140 drift cases produce `NeedEvidence` or `Contradiction`; 0/35 compliant cases produce either. `Unknown` is not counted as detection. Verdicts and reason codes match all 175 fixtures.
-> - **Limits**: These fixtures use preconstructed claims and evidence; they do not certify end-to-end production accuracy or replace independent calibration/holdout cohorts.
-> - **Deliverables & Commands**:
->   * Runtime Package & 3-Mode Acceptance Receipt: [reports/buglecat-delivery-20261014.json](reports/buglecat-delivery-20261014.json)
->   * Full Benchmark Report: [reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md) · Dataset: [evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
->   * Native Rust Eval Runner: `cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
->   * Standalone Session Audit & Replay: `python scripts/replay_verification.py path/to/.verification.jsonl --strict`
->   * Offline Independent Source Pool Audit: `python scripts/audit_claim_source_pool.py`
+> **Stage 3: Intelligence Compounding Closed-Loop, ACR & 60-Point Singularity Telemetry + Cross-Agent Harness Upgrades**
+> - **Autonomous Completion Rate (ACR) & 60-Point Singularity Gate**: Records privacy-safe `TaskOutcome` telemetry across **4 core engineering task categories** (`code_fix_test`, `compile_repair`, `feature_impl`, `doc_refactor`; pure `chat` and subagent worker turns are excluded from the primary denominator). A category crosses the 60-point singularity when rolling 30-day `n >= 30`, `ACR-strict` 95% Wilson confidence lower bound `>= 60%`, and `rework_rate <= 15%`.
+> - **Zero-Daemon Implicit & Explicit Followup Signals (`I1–I5` + `L`)**: Automatically resolves post-turn acceptance or rework via `I1` terminal failure/block, `I2` approval/question intervention, `I3` checkpoint `/restore`, `I4` multilingual (ZH/EN/JA + touched-file overlap) correction heuristics, `I5` **`LazyGitUndoDetector`** (`git merge-base --is-ancestor` + `git status --porcelain` across sessions for `git reset` / `git revert` / manual edits), and `L` explicit labels (`/outcome good|bad` in CLI/GUI + turn-indexed `♡`/`♧` assistant message buttons in GUI).
+> - **Guarded Online Feedback Loop (`shadow` -> `on` with 14-Day Baseline Gate)**: `[feedback] memory / routing = "off" | "shadow" | "on"` (default `"shadow"`). Switching to `"on"` is guarded by a mandatory **14-day shadow baseline gate** (`>= 14` days of shadow telemetry and `>= 2` core categories with `n >= 30`, overridable via `--force`). When active, it drives bounded Beta-posterior memory re-ranking (`±20%`, scored once per resolved task), low-utility memory demotion (`injected >= 8 && p < 0.25`), and monotonic orchestrator route upgrades (`Simple -> Medium -> Complex`).
+> - **Compound Recovery Chain, Worker Isolation & Frequency-Prioritized Promotion**: Captures multi-step `tool_failed -> diagnostic/read -> tool_succeeded` recovery chains (`CompoundRecoveryChain`) as `Candidate` notes, tracks cross-session recurrence (`occurrences`) sorted by hit frequency, isolates subagent worker candidates so only the winning `promoted` worker's path-remapped candidates enter the host store, and supports both high-confidence auto-promotion (`memory_auto_promote_enabled`) and human review (`ncx --memory-review` / GUI Review panel).
+> - **Cross-Agent Harness Upgrades (Pi / OpenCode / Codex)**:
+>   * **Pi-style In-Conversation Trace Tree (`_trace`)**: Every message in `session.jsonl` embeds a self-contained `MessageTrace` (`id` / `parent_id` tree pointers, `turn_id`, SHA-256 `content_hash`, `workspace_revision`, assistant `model` / `usage`, tool `duration_ms` / `exit_code`, and `CompactionTrace::first_kept_entry_id`), stripped before wire LLM requests.
+>   * **OpenCode-style Post-Edit Auto-Diagnostics**: `apply_patch` and `str_replace_editor` automatically run incremental LSP diagnostics (`textDocument/didChange`), in-process JSON/TOML syntax checks, and Git conflict-marker checks, appending diagnostics directly to the tool output.
+>   * **Codex-style Large Tool Output Offloading**: Tool outputs exceeding 16,000 chars are persisted in full to disk while returning an inline 8,000-char head + 8,000-char tail preview and a `[tool_output_offloaded: path=... offset=...]` handle for on-demand `read_file` inspection.
+> - **CLI & Desktop Entry Points**:
+>   * Singularity & ACR Report: `ncx --outcomes report --since 30d --by category,model,policy` (or `/outcome report` in CLI/GUI)
+>   * Multi-Project Cold-Start Bootstrap: `ncx --outcomes bootstrap <repo_dir_1> <repo_dir_2> ...`
+>   * Candidate Memory Review: `ncx --memory-review [list | confirm <id> | reject <id> | restore <id>]`
+>   * Desktop Visual Singularity Dashboard: Open the right-hand **Memory** panel in the Tauri GUI to inspect live 30-day ACR, Wilson 95% lower-bound progress toward 60%, per-category sample status, and 14-day Shadow baseline readiness.
+> - **Prebuilt `v0.1.2` Releases & Claim-Level Verification (`host-rules-v3.4`)**:
+>   * [GitHub Release `v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2) (`BugleCat_0.1.0_x64-setup.exe`, `buglecat-20261014-final.zip`, macOS `arm64`/`x64` DMGs) · [Delivery Receipt](reports/buglecat-delivery-20261014.json) · [175-Case Claim Drift Benchmark Report](reports/claim_drift_eval_report_v1.md)
 
 ## Collaboration & self-test evidence
 
@@ -39,6 +44,8 @@ In the **September 8, 2026** six-category source self-repair test using `deepsee
 
 🛡️ **[Context Compression Safety Protocol（中文）](docs/context-compression-safety-protocol.zh-CN.md)** — why coding agents can drift after context compaction, and how snapshots, decision provenance, Git evidence, and read-only recovery contain the risk.
 
+📈 **[智能复利回流与 60 分奇点方案（中文）](docs/intelligence-compounding-feedback-plan.zh-CN.md)** — how BugleCat closes the online loop from `Action → TaskOutcome → OutcomeFollowup → Learning` (ACR & 60-point singularity metrics, bounded Beta-posterior memory re-ranking, monotonic route upgrades, and compound recovery candidate promotion).
+
 [![BugleCat desktop screenshot: Tauri + Svelte desktop client](assets/buglecat-desktop-real.png)](nanocodex.html)
 
 **BugleCat** is a local, extensible Codex-style coding agent. A
@@ -51,10 +58,7 @@ git-worktree A/B comparison.
 
 The project evolved from the original `nanocodex` prototype. That legacy name
 still appears in compatibility paths (`~/.nanocodex/`), environment variables (`NANOCODEX_*`), and Python
-commands so existing installations keep working. The project has two clear
-stages. The important shift is not just "same
-features in another language"; it is an architectural split and a release
-performance upgrade.
+commands so existing installations keep working. The project has evolved through **three clear stages**: from fast product exploration in Python, to a strictly typed native Rust + Tauri runtime, and now to a self-evaluating **intelligence-compounding closed loop**.
 
 ## Project Phases
 
@@ -92,7 +96,7 @@ into a stricter runtime.
 
 ### Stage 2: Rust Rewrite
 
-The Rust implementation under `rust/` is the current release line. It keeps the
+The Rust implementation under `rust/` is the native release foundation. It keeps the
 Python tree intact while rebuilding the core as small crates plus a Tauri
 desktop shell. The rewrite keeps the proven Python feature map, but changes the
 internal shape so the project can ship as a smaller, faster, more predictable
@@ -179,7 +183,6 @@ tool.
 - **Pi-style in-conversation trace tree (`_trace`):** every message in `Session::messages` and `session.jsonl` embeds a structured `MessageTrace` (`id` / `parent_id` tree pointers, `turn_id`, `content_hash`, `workspace_revision`, assistant `model` / `finish_reason` / token `usage`, tool `duration_ms` / `status` / `exit_code`, and `CompactionTrace::first_kept_entry_id`), automatically stripped from wire requests before calling the LLM.
 - **OpenCode-style post-edit automatic diagnostics:** after `apply_patch` or `str_replace_editor` mutates workspace files, the harness automatically runs incremental LSP diagnostics (synchronizing `textDocument/didChange`), in-process JSON/TOML syntax validation, and Git merge-conflict marker checks, appending any errors or warnings directly to the edit result.
 - **Codex-style large tool output offloading:** tool outputs exceeding 16,000 characters are automatically written in full to an external artifact file while returning an inline head + tail preview and a `[tool_output_offloaded: path=... offset=...]` handle for on-demand inspection via `read_file`.
-- **Autonomous Completion Rate (ACR) & online compounding feedback:** records privacy-safe `TaskOutcome` events (excluding pure `Chat` and subagent worker turns from the primary denominator) and automatically resolves next-turn `OutcomeFollowup` signals (I3 checkpoint rollback, I4 multilingual ZH/EN/JA correction heuristics, I5 manual file edits, and `/outcome good|bad` labels). `ncx --outcomes report [--since 30d] [--by category,model,policy] [--json]` reports `ACR-strict`, `ACR-approval-tolerant`, 95% Wilson confidence intervals, and 60-point singularity status (`n >= 30`, `ACR-strict` lower bound `>= 60%`, `rework_rate <= 15%`), Completed tasks with no followup yet are reported as pending and enter no rate; the singularity is judged per task category. `[feedback] memory / routing = "off" | "shadow" | "on"` (default `"shadow"`) governs bounded Beta-posterior memory re-ranking (`±20%`, each resolved task scored once), demotion (only in `on`, only on rejection), and monotonic orchestrator route upgrades; `shadow` injects and routes exactly as `off` and only reports what `on` would change. Failure→recovery pairs become `Candidate` notes that are never recalled or written to `LEARNINGS.md` until a human runs `ncx --memory-review confirm <id>`.
 
 ### Why Rust For Stage 2
 
@@ -203,6 +206,41 @@ only adding more features:
   easier for Windows users.
 - **Desktop packaging path:** Tauri provides a native shell with a web UI
   frontend, a better long-term packaging fit than growing the Tkinter prototype.
+
+### Stage 3: Intelligence Compounding & 60-Point Singularity Closed-Loop (Current)
+
+Stage 2 built a reliable execution harness, but every task still started statistically cold: `TurnResult` was discarded after cost accounting, recalled memories had no outcome attribution, orchestrator routing ignored historical success rates, and post-turn human corrections or Git rollbacks were invisible. **Stage 3** upgrades BugleCat into a closed-loop compounding system (`Action → TaskOutcome → OutcomeFollowup → Learning`), designed around the **60-Point Singularity** (the structural threshold where an AI agent transitions from "humans backstopping AI" to "AI owning the engineering outcome"):
+
+1. **Four-Category Task Outcome & 60-Point Singularity Telemetry (`G1`)**
+   - Every primary turn—both single-agent turns and multi-agent orchestrated runs (`{session}:orch-{turn}`)—emits a privacy-safe `TaskOutcome` event into SQLite (`context_store`), classified into **4 core engineering task categories** to prevent sample fragmentation:
+     - `code_fix_test` (bugfixes, test repairs, assertions)
+     - `compile_repair` (compiler, typecheck, and lint error repairs)
+     - `feature_impl` (new feature implementation and wiring)
+     - `doc_refactor` (documentation, configuration, and structural refactoring)
+   - Pure Q&A turns (`chat`) and subagent worker/node turns (`OrchestratorWorker`, `OrchestratorNode`) are recorded for trace completeness but **excluded from the primary ACR denominator**. Completed turns without a resolved followup signal remain `pending` rather than inflating success rates.
+   - **60-Point Singularity Criterion**: A core task category crosses the singularity when rolling 30-day resolved tasks `n >= 30`, `ACR-strict` 95% Wilson confidence lower bound `>= 60%`, and `rework_rate <= 15%`.
+
+2. **Zero-Daemon Multi-Signal Followup Resolution (`I1–I5` & `L`)**
+   - `I1` (Explicit block/failure): terminal `NeedsHuman`, `Failed`, or `Cancelled`.
+   - `I2` (Explicit inquiry): sandbox approval prompts (`approvals_requested` / `approvals_denied`) and `ask_user_question` invocations (`ACR-strict` penalizes all `I2`; `ACR-approval-tolerant` allows approved escalations).
+   - `I3` (Checkpoint rollback): `/restore <id>` in CLI or checkpoint restoration in GUI attributes a `Rollback` followup to the most recent primary task created after that checkpoint.
+   - `I4` (Multilingual correction heuristics): next-turn `DirectHuman` prompts matching deterministic ZH/EN/JA correction patterns (or referencing the same touched files) record an inferred `Correction` followup.
+   - `I5` (**Zero-daemon `LazyGitUndoDetector`**): at session start and before the next primary turn (including GUI multi-agent orchestrated turns), BugleCat inspects the previous turn's recorded `workspace_revision` (Git `HEAD` SHA) and `files_touched`. Using `git merge-base --is-ancestor` and `git status --porcelain`, it detects cross-session `git reset --hard`, `git revert`, or manual edits to agent-touched files without any background daemon.
+   - `L` (Explicit human labels, highest priority): CLI/GUI `/outcome good|bad [note]`, A/B worktree adoption, and **turn-indexed `♡` / `♧` rating buttons** on every assistant message in the GUI accurately bind human verdicts to that specific turn's `TaskOutcome`.
+
+3. **Guarded Online Feedback (`G2`: Bounded Memory Re-Ranking & Monotonic Route Upgrades)**
+   - **14-Day Shadow Baseline Gate**: Both `[feedback] memory` and `[feedback] routing` default to `"shadow"` (which behaves identically to `"off"` while logging counterfactual diffs in `memory_rank_changed` and `shadow_recommended_route`). Switching either setting to `"on"` in CLI `/config` or GUI Settings is enforced by `check_shadow_baseline_gate`: requires `>= 14` days of shadow telemetry and `>= 2` core task categories with `n >= 30` resolved tasks (manual override available via `--force`).
+   - **Attributable Memory Recall & Bounded Beta-Posterior Scoring**: `MemoryStore::recall_entries` attaches deterministic content-hash `note_id`s to `TaskOutcome.recalled_note_ids` (unioned across promoted orchestrator workers). When a task resolves, `memory_feedback` updates `injected / accepted / rejected` **once per task** (flipping cleanly if a later human `Label` overrides an inferred signal). Beta posterior `p = (accepted + 1) / (injected + 2)` adjusts lexical retrieval scores within a strict **`±20%` bound**, while notes with `injected >= 8` and `p < 0.25` in `"on"` mode transition to `NoteStatus::Demoted` (excluded from recall, restorable via `ncx --memory-review restore <id>`).
+   - **Monotonic Orchestrator Route Upgrades**: `RoutingStats` aggregates 30-day ACR and cost medians by `(category, initial_complexity, route)`. In `"on"` mode, if a category's 95% Wilson lower bound on `Simple` (or `Medium`) drops below `40%` (`n >= 20`) and a higher pipeline tier improves the lower bound by `>= 10%`, the orchestrator upgrades the route (`Simple -> Medium -> Complex`), never downgrading automatically.
+
+4. **Compound Recovery Chain, Isolated Worker Guard & Frequency-Prioritized Promotion**
+   - **Multi-Step Recovery Extraction (`CompoundRecoveryChain`)**: Captures `failed_tool -> intermediate diagnostic/read -> recovery_tool` chains within a completed, verified turn as structured `Candidate` notes in SQLite (`memory_index.sqlite`).
+   - **Worker Isolation & Path Remapping**: Subagent workers running inside temporary `.buglecat-subruns` directories never write candidates directly to the host store; `HarnessAgentRunner` remaps scratch workspace paths back to the real project root and persists candidates **only from the winning `promoted` worker**.
+   - **Recurrence Counting (`occurrences`) & High-Confidence Auto-Promotion**: Repeatedly encountered candidates increment `occurrences` and sort by `occurrences DESC, created_at DESC` (`命中 N 次`). When `memory_auto_promote_enabled = true` (default), candidates from zero-intervention, verification-passed turns automatically promote to `.ncx/memory/LEARNINGS.md`; all other candidates remain isolated until confirmed via `ncx --memory-review confirm <id>` or the GUI Memory Review panel.
+
+5. **Multi-Project Cold-Start Bootstrap & Desktop Visual Singularity Dashboard**
+   - **Cross-Project Bootstrap (`ncx --outcomes bootstrap <paths...>`)**: Scans historical `.nanocodex/session.jsonl` transcripts across multiple local repositories, backfills `_trace` metadata, and cold-starts global `TaskOutcome` and `OutcomeFollowup` telemetry in `~/.nanocodex/global-outcomes/context.sqlite`.
+   - **GUI ACR & 60-Point Singularity Dashboard**: The Tauri + Svelte 5 right-hand **Memory** panel renders a live visual dashboard displaying 30-day `ACR-strict`, Wilson 95% lower-bound progress bar toward the 60% singularity threshold, per-category sample progress (`n/30`) and singularity badges, and 14-day Shadow baseline readiness.
 
 ## Table of Contents
 
@@ -368,7 +406,8 @@ cargo run -p ncx-cli -- --resume
 cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
 cargo run -p ncx-cli -- --outcomes report --since 30d --by category,model,policy
-cargo run -p ncx-cli -- --memory-review            # list | confirm <id> | reject <id> | restore <id>
+cargo run -p ncx-cli -- --outcomes bootstrap D:\repo1 D:\repo2  # backfill historical sessions into global ACR store
+cargo run -p ncx-cli -- --memory-review                         # list | confirm <id> | reject <id> | restore <id>
 
 # Tauri desktop app
 cd gui
@@ -378,7 +417,7 @@ npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 
 Inside the Rust REPL, `/config` shows the resolved config file path, current
 model/sandbox/approval values, and writable keys. `/config key=value` persists a
-setting to `~/.nanocodex/config.toml`; restart the REPL for provider, model,
+setting to `~/.nanocodex/config.toml` (switching `feedback.memory=on` or `feedback.routing=on` enforces the 14-day Shadow baseline gate unless `--force` is passed); restart the REPL for provider, model,
 sandbox, or budget changes to affect the active session. `/usage` (or `/cost`)
 shows raw token usage for the last turn and current REPL session; `/outcome good|bad [note]` records an explicit human label for the latest primary task, and `/outcome report` prints the workspace ACR & 60-point singularity report.
 
@@ -426,8 +465,10 @@ model = "deepseek-chat"
 sandbox_mode = "workspace-write"   # read-only | workspace-write | danger-full-access
 approval_policy = "on-request"     # untrusted | on-failure | on-request | never
 reasoning_effort = "auto"          # auto | low | high | max | off
+memory_auto_promote_enabled = true # auto-promote high-confidence zero-intervention recovery candidates
 
 # Online compounding feedback modes (off | shadow | on, default shadow)
+# Switching to "on" requires >= 14 days of shadow data and >= 2 core categories with n >= 30
 [feedback]
 memory = "shadow"
 routing = "shadow"
@@ -684,11 +725,16 @@ A user skill of the same name shadows the built-in.
 
 ## Memory & AGENTS.md
 
-Two complementary layers of persistent context, both injected each turn:
+Three complementary layers of persistent context:
 
 - **User memory** (`~/.nanocodex/memory.md`) — durable personal facts and
   preferences. Written by the `remember` tool, by typing `# something` in the
   GUI composer (quick-capture), or by hand. Wrapped in a `<user_memory>` block.
+- **Project learnings & compounding feedback** (`.ncx/memory/LEARNINGS.md` + `memory_index.sqlite`) —
+  project-scoped operational notes governed by an online feedback lifecycle:
+  - **Candidate (`Candidate`)**: multi-step `tool_failed -> diagnostic/read -> tool_succeeded` recovery chains (`CompoundRecoveryChain`) are captured with a cross-session recurrence counter (`occurrences`, sorted by `occurrences DESC, created_at DESC`). Isolated subagent workers remap scratch paths and only promote candidates from the winning worker. High-confidence candidates from zero-intervention, verified turns auto-promote when `memory_auto_promote_enabled = true`; others await `ncx --memory-review confirm <id>` or GUI confirmation.
+  - **Active (`Active`)**: recalled via hybrid lexical-semantic ranking, attributed in `TaskOutcome.recalled_note_ids`, and re-ranked within a bounded **`±20%`** window using Beta-posterior outcome scores (`p = (accepted + 1) / (injected + 2)`).
+  - **Demoted (`Demoted`)**: notes with `injected >= 8` and `p < 0.25` in `[feedback] memory = "on"` mode are automatically demoted (excluded from recall while preserving the row) and can be restored via `ncx --memory-review restore <id>`.
 - **AGENTS.md / CLAUDE.md** — project instructions layered from
   `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, then every `AGENTS.md`,
   `CLAUDE.md`, and `.claude/CLAUDE.md` from the repo root down to the workspace,
@@ -696,7 +742,7 @@ Two complementary layers of persistent context, both injected each turn:
   file can't blow the context. Rust CLI, orchestrator workers, and the Tauri GUI
   all inject this block at session startup.
 
-Memory is "who/what" (preferences, facts); skills are "how to do X";
+Memory is "who/what" (preferences, facts, verified project learnings); skills are "how to do X";
 AGENTS.md / CLAUDE.md are project-scoped guidance.
 
 ### LLM Wiki cross-agent long-term memory
@@ -820,8 +866,9 @@ otherwise.
 
 The BugleCat desktop uses Tauri 2 + Svelte 5 on Windows (`rust/gui`):
 
-- Streaming chat with reasoning/answer separation and a Stop button.
-- Project switcher, model switcher, and a multi-section Settings page.
+- Streaming chat with reasoning/answer separation, Stop button, and **turn-indexed `♡` / `♧` rating buttons** on every assistant turn (binding human `Label` verdicts directly to that turn's `TaskOutcome`).
+- **Visual ACR & 60-Point Singularity Dashboard** in the right-hand **Memory** panel: displays 30-day `ACR-strict`, Wilson 95% lower-bound progress toward the 60% singularity threshold, per-category sample counts (`n/30`) and singularity badges across the 4 core engineering categories, 14-day Shadow baseline readiness, and interactive Candidate/Demoted memory review (`Confirm` / `Reject` / `Restore` with recurrence counts `命中 N 次`).
+- Project switcher, model switcher, `/outcome good|bad|report` slash commands, and a multi-section Settings page (including `memory_auto_promote_enabled` toggle).
 - Browsable session history (click to replay a full transcript).
 - File panel, prompt enhancement, image attachment, `#` quick-capture to memory,
   MCP controls, checkpoints, and permission modes.

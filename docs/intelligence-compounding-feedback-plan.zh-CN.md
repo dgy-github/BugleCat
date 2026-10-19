@@ -1,6 +1,6 @@
 # 智能复利回流 & 无人工介入完成率 — 开发计划
 
-> 状态（2026-10-17）：P1–P6 代码已落地；首轮扫描发现的正确性缺陷已按 HANDOFF N1–N5 修正并补测试。**尚未经真实使用验证**，两个开关保持 `shadow`，进入 2 周基线期（N6）后才可评估切换 `on`。实现与本文的差异见第 6 节。
+> 状态（2026-10-19）：P1–P6 及二阶段全链路强化（4 类核心任务收敛、14 天 Shadow 基线强制门禁、零守护进程 `LazyGitUndoDetector`、复合恢复链 `CompoundRecoveryChain`、隔离 Worker 脱敏与复现计数、跨项目 `bootstrap`、GUI 消息级按轮次评价与 60 分奇点仪表盘）均已落地并通过验证。默认保持 `shadow` 观测模式，满足 14 天基线门禁后可切换 `on`。实现细节见第 6 节。
 > 来源：对照曾鸣《智能》第二章"智能复利 / 60 分奇点"对 BugleCat 的差距分析。
 > 结论一句话：harness 已经把过程与结果数据串联为"行动 → 结果（`TaskOutcome` + `OutcomeFollowup`）→ 反馈 → 学习（记忆有界调权 + 路由单调升级 + 失败恢复候选沉淀）"的闭环，并持续度量"AI 对结果负责"的无人工介入完成率（ACR）与 60 分奇点距离。
 
@@ -191,13 +191,23 @@ pub struct OutcomeFollowup {           // 追加记录，不修改原 outcome
 
 ---
 
-## 6. 实现与计划的差异（2026-10-17 修正后）
+## 6. 实现与计划的差异与二阶段强化（2026-10-19 最新版）
 
-- **记忆计分时机**：不在召回时累加 `injected`，改为任务定论时把 injected 与 accepted/rejected 一起 +1；每个任务只计一次分，之后若有方向相反的信号（如人工标签），只翻转这一次计数。worker、Goal 轮次和未定论任务因此不会进入分母。
+- **4 类核心任务收敛**：为避免单人/小团队样本被 8 个细分类别稀释，工程任务收敛为 4 个核心类别：`code_fix_test`、`compile_repair`、`feature_impl`、`doc_refactor`（纯问答 `chat` 单列且不计入主线 ACR 分母）。
+- **14 天 Shadow 基线强制门禁（`check_shadow_baseline_gate`）**：将 `[feedback] memory / routing` 从 `shadow` 切到 `on` 时，系统自动检查是否满足 **至少 14 天 Shadow 数据积累** 且 **至少 2 个核心类别样本数 `n >= 30`**（支持 `--force` 强制覆写），并在报告与 GUI 仪表盘中输出 `shadow_baseline_ready` 状态。
+- **零守护进程跨会话 Git 撤销检测（`LazyGitUndoDetector`）**：在每次新会话启动及下一轮主任务（含 GUI 多智能体编排轮次）开始前，对比上一轮记录的 `workspace_revision`（Git `HEAD` SHA）与 `files_touched`，通过 `git merge-base --is-ancestor` 与 `git status --porcelain` 自动捕获跨会话的 `git reset --hard`、`git revert` 或手工覆写文件（追加 `Rollback` / `ManualEdit` 信号）。
+- **记忆计分时机**：不在召回时累加 `injected`，改为任务定论时把 `injected` 与 `accepted`/`rejected` 一起 +1；每个任务只计一次分，之后若有方向相反的信号（如人工标签），只翻转这一次计数。worker、Goal 轮次和未定论任务因此不会进入分母。
 - **note_id**：反馈表以 LEARNINGS 的 `content_hash(normalize(text))` 为准。降级是 `memory_feedback.demoted` 上的持久标志，通过文本哈希同步到 `memory_index.status`，`rebuild_from_markdown` 之后会重新应用。降级只在 `on` 模式、且收到负反馈时发生；可用 `--memory-review restore <id>` 恢复。
 - **shadow 语义**：注入内容与路由决策都和 `off` 完全一致，只在 `TaskOutcome.memory_rank_changed` 与 `RouteKey.shadow_recommended_route` 中记录"若开启会改变什么"，由报告的 Shadow 段汇总。
 - **pending**：已完成但还没有 followup 的任务不进入任何比率；I1 失败的任务直接算已定论。
 - **回滚归因**：只归因到 checkpoint 创建之后开始的最近一个 Primary 任务；CLI 下额外限定为当前会话。
-- **候选经验**：只配对"同一工具、同一目标"的失败→成功，并且要求任务 Completed、验证结果为 passed 或 skipped；必须经 `--memory-review confirm` 人工确认后才写入 LEARNINGS.md。`--memory-merge` 不再自动晋升任何候选。
-- **路由统计**：按分类器给出的初始复杂度（`RouteKey.initial_complexity`）分桶；非编排的直接轮次不参与统计；只取最近 30 天。
-- **编排任务 id**：`{session}:orch-{turn}`。worker 和 node 的 outcome 记为 `{parent}:worker-N-k` / `{parent}:node-k`，写入工作区事件库。
+- **复合恢复链（`CompoundRecoveryChain`）、隔离 Worker 脱敏与双轨晋升**：
+  - 捕获同回合内「工具失败 → 中间诊断/只读排查 → 同一工具修复成功」的复合恢复链生成 `Candidate`；
+  - 隔离副本（`.buglecat-subruns`）中的 `OrchestratorWorker` 绝不直接写入宿主 `MemoryIndex`，仅在胜出 Worker 被主控采纳（`promoted`）且回合成功时，将临时路径脱敏还原为真实工作区路径后落盘；
+  - `memory_index` 新增 `occurrences` 跨会话复现计数，候选列表按 `occurrences DESC, created_at DESC` 排序并展示 `命中 N 次`；
+  - 支持 `memory_auto_promote_enabled`（默认 `true`，可在设置与 `/config` 开关）：当任务零人工介入且验证通过时，高置信度恢复候选自动晋升写入 `LEARNINGS.md`；其余候选需经 `--memory-review confirm <id>` 或 GUI 面板人工确认。
+- **多智能体主控全链路遥测**：`HarnessAgentRunner::record_orchestrated_outcome` 完整采集胜出 Worker 的 `recalled_note_ids`、`PromotionReceipt` 改动文件列表 `files_touched`、宿主机 `workspace_revision`（Git `HEAD`）与 `shadow_recommended_route`。
+- **跨项目冷启动与 GUI 可视化闭环**：
+  - `ncx --outcomes bootstrap <paths...>` 支持扫描多个本地仓库的历史 `.nanocodex/session.jsonl`（含 `_trace` 回填）冷启动构建全局指标库；
+  - GUI 支持按消息轮次（`turnIndex`）精准绑定的 `♡` / `♧` 评价按钮、`/outcome good|bad|report` 快捷指令，以及右侧「记忆」面板顶部的可视化 **「ACR & 60 分奇点仪表盘」**。
+

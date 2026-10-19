@@ -2,20 +2,25 @@
 
 [English](README.md) | 简体中文
 
-## 最新更新（2026-10-14）
+## 最新更新（2026-10-19）
 
 > [!IMPORTANT]
-> **BugleCat `v0.1.2` 发布与声明级矛盾核验体系（`host-rules-v3.4`）**
-> - **预编译安装包下载**：[GitHub Release `v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2)（提供 Windows x64 NSIS 安装程序 `BugleCat_0.1.0_x64-setup.exe`、完整便携运行包 `buglecat-20261014-final.zip` 以及 macOS `arm64` / `x64` DMG）。
-> - **宿主规则核验范围（默认 `off`）**：基于宿主确定性规则核对给定声明与工具执行证据中的执行失败、文件快照新鲜度与测试范围冲突（当前策略版本 `host-rules-v3.4`；生产默认 `off`）。
-> - **175 例规则层合成回归**：140/140 漂移例产生 `NeedEvidence` 或 `Contradiction`，35/35 合规例无误拦；`Unknown` 不计入检出，175 例裁决与原因码全部匹配。
-> - **验证边界**：175 例为预先构造声明与证据的规则层合成回归，不替代真实独立样本校准/留出，亦不构成生产准确率认证。
-> - **交付资产与常用核验命令**：
->   * 运行包交付与三模式实机验收收据：[reports/buglecat-delivery-20261014.json](reports/buglecat-delivery-20261014.json)
->   * 完整规则基准报告：[reports/claim_drift_eval_report_v1.md](reports/claim_drift_eval_report_v1.md) · 数据集：[evals/verification/claim_drift_dataset_v1.json](evals/verification/claim_drift_dataset_v1.json)
->   * 原生 Rust 规则基准运行器：`cargo run --manifest-path rust/Cargo.toml --example eval_claim_drift -- evals/verification/claim_drift_dataset_v1.json reports/claim_drift_eval_report_v1.json`
->   * 离线会话核验日志审计：`python scripts/replay_verification.py path/to/.verification.jsonl --strict`
->   * 声明核验独立样本池离线审计：`python scripts/audit_claim_source_pool.py`
+> **第三阶段：智能复利闭环、无人工介入完成率（ACR & 60 分奇点）+ 跨 Agent 平台升级**
+> - **无人工介入完成率（ACR）与 60 分奇点门禁**：在单 Agent 与多智能体编排主控出口统一采集隐私脱敏的 `TaskOutcome`，收敛为 **4 个核心工程任务类别**（`code_fix_test`、`compile_repair`、`feature_impl`、`doc_refactor`；纯问答 `chat` 与子任务 `OrchestratorWorker` 排除出主分母）。当某类别在滚动 30 天内已定论样本 `n >= 30`、`ACR-strict` 的 Wilson 95% 置信下界 `>= 60%` 且返工率 `<= 15%` 时，正式判定该类别跨过 **60 分奇点**。
+> - **零守护进程全链路后续信号（`I1–I5` + `L`）**：自动归因 `I1` 显式阻断/失败、`I2` 审批/提问介入、`I3` Checkpoint `/restore` 回滚、`I4` 中/英/日多语言纠正与同文件返工推断、`I5` **零常驻 `LazyGitUndoDetector`**（在新会话启动及下一轮开始前通过 `git merge-base --is-ancestor` 与 `git status --porcelain` 检测跨会话 `git reset` / `git revert` / 手工覆写 Agent 修改过的文件），以及 `L` 人工显式标签（CLI/GUI `/outcome good|bad` + GUI 消息级 `♡`/`♧` 精准按轮次绑定）。
+> - **带 14 天基线门禁的在线回流（`shadow` → `on`）**：`[feedback] memory / routing = "off" | "shadow" | "on"`（默认 `"shadow"`）。从 `shadow` 切换至 `on` 受 **14 天 Shadow 基线门禁** 保护（需满足至少 14 天 Shadow 观测期且至少 2 个核心类别 `n >= 30`，支持 `--force` 强制覆写）。开启后执行有界 Beta 后验记忆调权（`±20%`，每个已定论任务仅计分一次）、低效记忆自动降级（`injected >= 8 && p < 0.25`）与编排器路由单调升级（`Simple -> Medium -> Complex`）。
+> - **复合恢复链沉淀、Worker 隔离脱敏与频次优先晋升**：自动提取多步 `tool_failed -> diagnostic/read -> tool_succeeded` 复合恢复链（`CompoundRecoveryChain`）为 `Candidate` 候选记忆；子任务隔离副本（`.buglecat-subruns`）不直接写主库，仅在胜出 Worker 被主控 `promote` 且回合成功时，将临时路径脱敏还原为真实工作区路径后落盘；支持跨会话复现计数（`occurrences`，按 `命中 N 次` 降序排列）、零介入高置信度自动晋升（`memory_auto_promote_enabled`）与人工审阅（`ncx --memory-review` / GUI 审阅面板）。
+> - **跨 Agent 核心机制吸收（Pi / OpenCode / Codex）**：
+>   * **Pi 风格会话内建树状链路追踪（`_trace`）**：每条 `session.jsonl` 消息内嵌 `MessageTrace`（`id`/`parent_id` 树指针、轮次号、SHA-256 摘要、Git revision、生效模型与单步 `usage`、工具耗时与退出码、压缩位点 `first_kept_entry_id`），发往模型前自动剥离。
+>   * **OpenCode 风格编辑后自动诊断回写**：`apply_patch` 与 `str_replace_editor` 修改文件后自动触发增量 LSP 诊断（`textDocument/didChange`）、JSON/TOML 语法校验与 Git 冲突标记检测，直接追加至工具返回值。
+>   * **Codex 风格超长工具输出自动落盘卸载**：单次工具输出超 16,000 字符时完整落盘，内联返回前 8,000 + 后 8,000 字符预览及 `[tool_output_offloaded: path=... offset=...]` 句柄供 `read_file` 按需分段精读。
+> - **常用命令与桌面端入口**：
+>   * 查看工作区奇点与 ACR 报告：`ncx --outcomes report --since 30d --by category,model,policy`（或 REPL / GUI 输入 `/outcome report`）
+>   * 跨项目历史会话冷启动提取：`ncx --outcomes bootstrap <仓库路径1> <仓库路径2> ...`
+>   * 候选与降级记忆审阅：`ncx --memory-review [list | confirm <id> | reject <id> | restore <id>]`
+>   * 桌面端可视化奇点仪表盘：打开 Tauri 桌面端右侧 **「记忆」** 面板，即可实时查看 **ACR & 60 分奇点仪表盘**、分类样本进度与 14 天基线状态。
+> - **`v0.1.2` 预编译发行包与声明级核验基线（`host-rules-v3.4`）**：
+>   * [GitHub Release `v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2)（`BugleCat_0.1.0_x64-setup.exe`、`buglecat-20261014-final.zip`、macOS `arm64`/`x64` DMG）· [三模式验收收据](reports/buglecat-delivery-20261014.json) · [175 例声明漂移基准报告](reports/claim_drift_eval_report_v1.md)
 
 ## 合作与自测证据
 
@@ -39,6 +44,8 @@
 
 🛡️ **[上下文压缩安全协议](docs/context-compression-safety-protocol.zh-CN.md)** —— 解释 Coding Agent 为什么会在压缩后发生任务状态漂移，以及如何用任务快照、决策溯源、Git 证据和只读恢复控制风险。
 
+📈 **[智能复利回流与 60 分奇点方案](docs/intelligence-compounding-feedback-plan.zh-CN.md)** —— 详解 BugleCat 如何将过程与结果数据串联为「行动 → 结果（`TaskOutcome` + `OutcomeFollowup`）→ 反馈 → 学习（有界记忆调权 + 路由单调升级 + 复合恢复链沉淀）」的闭环，并持续度量无人工介入完成率（ACR）与 60 分奇点距离。
+
 [![BugleCat 桌面端真实截图：Tauri + Svelte 桌面客户端](assets/buglecat-desktop-real.png)](nanocodex.html)
 
 **BugleCat** 是一个本地运行且可扩展的 Codex 风格编码 Agent。chat-completions 模型
@@ -47,8 +54,7 @@
 MCP 集成、插件生态、Skills 系统、沙箱/审批状态机、上下文压缩、token 成本统计、Tauri 2 + Svelte 5 桌面客户端、定时器，以及 git worktree 的 A/B 对比。
 
 项目由最初的 `nanocodex` 原型演进而来。为了兼容已有安装，配置目录（`~/.nanocodex/`）、环境变量（`NANOCODEX_*`）和
-Python 兼容命令中仍保留旧名称；对外产品和新仓库统一使用 **BugleCat**。项目分为两个清晰
-阶段，重点不是“把同一套功能换一种语言写”，而是架构边界和发布性能的升级。
+Python 兼容命令中仍保留旧名称；对外产品和新仓库统一使用 **BugleCat**。项目历经**三个清晰的演进阶段**：从 Python 快速原型探索，到原生 Rust + Tauri 强类型运行时重构，再到当前第三阶段的**智能复利回流与 60 分奇点闭环**。
 
 ## 项目阶段
 
@@ -78,7 +84,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 
 ### 第二阶段：Rust 重构版
 
-`rust/` 下的 Rust 实现是当前的主线发布版。它保留 Python 树用于兼容与评测参考，同时把核心运行时重建为职责清晰的 Rust crates，并配套 Tauri v2 + Svelte 5 桌面端。
+`rust/` 下的 Rust 实现是原生发布底座。它保留 Python 树用于兼容与评测参考，同时把核心运行时重建为职责清晰的 Rust crates，并配套 Tauri v2 + Svelte 5 桌面端。
 
 **架构层面**
 
@@ -127,7 +133,6 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 - **Pi 风格会话内建树状链路追踪（In-Conversation Trace Tree）：** 每条会话消息在 `session.jsonl` 内嵌结构化 `_trace`（`id` / `parent_id` 树指针、轮次号、SHA-256 摘要、工作区 Git revision、Assistant 生效模型与单步 Token `usage`、工具墙钟耗时 `duration_ms` 与退出码、以及压缩位点 `first_kept_entry_id`），发往大模型前自动剥离，实现单文件自包含追踪且对模型零额外 Token 污染。
 - **OpenCode 风格编辑后自动诊断回写（Post-Edit Auto-Diagnostics）：** `apply_patch` 与 `str_replace_editor` 修改文件后，自动触发增量 `rust-analyzer` / LSP 诊断（自动同步 `textDocument/didChange` 并过滤 Info/Hint）、JSON/TOML 零进程语法校验与 Git 冲突标记残留检测，发现问题立即追加到工具返回结果末尾，省去额外一轮模型排查。
 - **Codex 风格超长工具输出自动落盘卸载（Large Tool Output Offloading）：** 当 `shell`、`grep`、MCP 等工具单次输出超过 16,000 字符时，自动将完整未截断输出持久化至系统临时目录，并在内联返回值中给出「前 8,000 字符 + 后 8,000 字符 + `[tool_output_offloaded]` 完整文件路径与起始行号句柄」，供模型通过 `read_file(path, offset, limit)` 按需精读中间省略段落。
-- **智能复利回流与无人工介入完成率（ACR & 60 分奇点度量）：** 在 `AgentLoop` 统一出口记录隐私安全的 `TaskOutcome`（排除纯问答 `Chat` 与子任务 worker）并在下一轮自动捕获回滚（I3）、多语言纠正（I4）与事后手改文件（I5）以及 `/outcome good|bad` 显式评价；支持 `ncx --outcomes report [--since 30d] [--by category,model,policy] [--json]` 输出 Wilson 95% 置信区间与 60 分奇点距离；尚无 followup 的已完成任务记为 pending，不进任何比率；奇点按任务类别判定。`[feedback] memory / routing = "off" | "shadow" | "on"`（默认 `shadow`）控制 Beta 后验有界记忆调权（±20%，每个已定论任务只计一次分）、低效记忆降级（仅 `on` 且仅在负反馈时）以及编排器路由单调升级；`shadow` 的注入与路由与 `off` 完全一致，只报告 `on` 会改变什么。同任务内"同工具同目标"的失败→恢复配对记为 `Candidate`，必须由人执行 `ncx --memory-review confirm <id>` 后才写入 `LEARNINGS.md`，此前永不召回。
 
 ### 第二阶段为什么改用 Rust
 
@@ -145,6 +150,41 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   更直接，Windows 用户拿到包即可运行。
 - **桌面打包路径：** Tauri 提供原生 shell + web UI 前端，比继续扩大 Tkinter 原型更适合
   长期发布。
+
+### 第三阶段：智能复利回流与 60 分奇点闭环（当前最新阶段）
+
+第二阶段完成了强类型的原生执行底座，但每次任务在统计意义上仍是“冷启动”的：`TurnResult` 算完 Token 成本即被丢弃，召回的记忆无法归因结果，编排器路由不看历史成功率，用户事后回滚、手改文件或出言纠正等最强负反馈信号也未被捕获。**第三阶段**对照《智能》“智能复利 / 60 分奇点”框架，将 BugleCat 升级为「行动 → 结果（`TaskOutcome`）→ 反馈（`OutcomeFollowup`）→ 学习（记忆调权 + 路由升级 + 复合恢复链沉淀）」的自进化闭环（完整设计方案见 [`docs/intelligence-compounding-feedback-plan.zh-CN.md`](docs/intelligence-compounding-feedback-plan.zh-CN.md)）：
+
+1. **四大核心工程类别与 60 分奇点度量（`G1`）**
+   - 在单 Agent 与多智能体编排主控（`{session}:orch-{turn}`）统一出口记录隐私安全的 `TaskOutcome`，为避免样本碎片化，将工程任务收敛为 **4 个核心类别**：
+     - `code_fix_test`（逻辑缺陷修复、单测修复与断言补齐）
+     - `compile_repair`（编译报错、类型检查与 Lint 修复）
+     - `feature_impl`（新功能开发与端到端接线）
+     - `doc_refactor`（文档、配置调整与结构重构）
+   - 纯问答轮次（`chat`）和子任务分支（`OrchestratorWorker`、`OrchestratorNode`）仅作链路归档，**不计入主线 ACR 分母**；已完成但尚无后续定论信号的任务记为 `pending`，绝不虚增成功率。
+   - **60 分奇点工程判据**：当某核心类别在滚动 30 天内已定论样本 `n >= 30`、`ACR-strict` 的 Wilson 95% 置信下界 `>= 60%` 且返工率 `<= 15%` 时，判定该类任务跨过从“人替 AI 兜底”到“AI 对结果负责”的结构性奇点。
+
+2. **零守护进程的多维后续信号归因（`I1–I5` & `L`）**
+   - `I1`（显式阻断/失败）：终态为 `NeedsHuman`、`Failed` 或 `Cancelled`。
+   - `I2`（显式询问）：触发沙箱审批弹窗或 `ask_user_question`（`ACR-strict` 严格扣减所有 `I2`，`ACR-approval-tolerant` 允许审批通过的轮次）。
+   - `I3`（回滚检测）：执行 `/restore <id>` 或 GUI 恢复 Checkpoint 时，自动向该快照之后最近的 `Primary` 任务追加 `Rollback` 负反馈。
+   - `I4`（多语言纠正推断）：下一条 `DirectHuman` 消息命中确定性中/英/日纠正词表（或再次触碰上一轮修改过的同一文件）时，记为 `Correction { inferred: true }`。
+   - `I5`（**零常驻 `LazyGitUndoDetector`**）：在新会话启动及下一轮主任务（含 GUI 多智能体编排轮次）开始前，对比上一轮记录的 `workspace_revision`（Git `HEAD` SHA）与 `files_touched`，利用 `git merge-base --is-ancestor` 与 `git status --porcelain` 零开销捕获跨会话的 `git reset --hard`、`git revert` 或人工覆写行为。
+   - `L`（人工显式标注，最高优先级）：支持 CLI/GUI `/outcome good|bad [note]`、A/B worktree 采纳，以及 **GUI 每条 Assistant 消息底部的 `♡` / `♧` 按钮（按 `turnIndex` 精准绑定到对应历史回合的 `TaskOutcome`）**。
+
+3. **带 14 天 Shadow 基线门禁的在线回流（`G2`：记忆有界调权 & 路由单调升级）**
+   - **14 天 Shadow 基线门禁**：`[feedback] memory` 与 `[feedback] routing` 默认均为 `"shadow"`（实际注入与路由行为与 `"off"` 完全一致，仅在 `memory_rank_changed` 与 `shadow_recommended_route` 中记录反事实差异）。通过 `/config` 或设置切换至 `"on"` 时，强制校验 **至少 14 天 Shadow 观测期 + 至少 2 个核心类别样本数 `n >= 30`**（支持 `--force` 显式跳过）。
+   - **可归因记忆召回与 Beta 后验有界调权**：`MemoryStore::recall_entries` 将笔记的内容哈希 `note_id` 写入 `TaskOutcome.recalled_note_ids`（多智能体模式下自动合并胜出 Worker 的召回笔记）。任务定论时在 SQLite `memory_feedback` 表中对 `injected / accepted / rejected` 计分一次（若后续收到人工标签可原地翻转计数）。按 Beta 后验 `p = (accepted + 1) / (injected + 2)` 对词法语义检索分施加 **`±20%` 有界乘子**；在 `"on"` 模式下当 `injected >= 8` 且 `p < 0.25` 时自动降级为 `Demoted`（不再召回但保留原行，可通过 `ncx --memory-review restore <id>` 恢复）。
+   - **编排器路由单调升级**：`RoutingStats` 按 `(category, initial_complexity, route)` 聚合近 30 天 ACR 与成本中位数。在 `"on"` 模式下，若某类别在 `Simple`（或 `Medium`）管线上的 Wilson 下界 `< 40%`（`n >= 20`）且更高档位能提升下界 `>= 10%`，自动将该类任务单调升级至 `Medium` / `Complex`，绝不自动降级。
+
+4. **复合恢复链沉淀、隔离 Worker 污染防护与频次优先晋升**
+   - **多步复合恢复链（`CompoundRecoveryChain`）**：捕获同回合内「工具失败 → 中间诊断/只读排查 → 同一工具修复成功」的完整三元组并生成 `Candidate` 候选记忆。
+   - **隔离 Worker 污染防护与路径脱敏**：运行在临时目录（`.buglecat-subruns`）中的子任务 Worker 绝不直接向宿主机写候选记忆；仅当主控最终采纳（`promoted`）胜出 Worker 且回合收敛成功时，才将其临时路径脱敏还原为真实工作区路径并写入 `MemoryIndex`，落败分支随副本一同丢弃。
+   - **跨会话复现频次计数（`occurrences`）与双轨晋升**：重复命中的候选记忆自动累加 `occurrences` 并按 `occurrences DESC, created_at DESC` 排序（审阅列表显示 `命中 N 次`）。当 `memory_auto_promote_enabled = true`（默认开启）时，零人工介入且验证通过的高置信度候选会自动晋升写入 `.ncx/memory/LEARNINGS.md`；其余候选由人工通过 `ncx --memory-review confirm <id>` 或 GUI 记忆面板确认。
+
+5. **跨项目历史会话冷启动与 GUI 可视化奇点仪表盘**
+   - **多仓库冷启动回填（`ncx --outcomes bootstrap <paths...>`）**：扫描本地多个历史项目的 `.nanocodex/session.jsonl`，自动回填 `_trace` 链路并提取历史 `TaskOutcome` 与 `OutcomeFollowup` 写入全局指标库 `~/.nanocodex/global-outcomes/context.sqlite`。
+   - **GUI「ACR & 60 分奇点仪表盘」**：在 Tauri 桌面端右侧 **「记忆」** 面板顶部提供可视化卡片，实时展示近 30 天 `ACR-strict`、面向 60% 奇点线的 Wilson 95% 下界进度条、四大核心类别各自的样本进度（`n/30`）与奇点达标徽章，以及 14 天 Shadow 基线就绪状态。
 
 ## 目录
 
@@ -295,7 +335,8 @@ cargo run -p ncx-cli -- --resume
 cargo run -p ncx-cli -- --history
 cargo run -p ncx-cli -- --memory-merge
 cargo run -p ncx-cli -- --outcomes report --since 30d --by category,model,policy
-cargo run -p ncx-cli -- --memory-review            # list | confirm <id> | reject <id> | restore <id>
+cargo run -p ncx-cli -- --outcomes bootstrap D:\repo1 D:\repo2  # 扫描多个仓库历史会话冷启动提取全局 ACR 指标
+cargo run -p ncx-cli -- --memory-review                         # list | confirm <id> | reject <id> | restore <id>
 
 # Tauri 桌面开发版
 cd gui
@@ -304,7 +345,7 @@ npm.cmd run tauri -- dev --target x86_64-pc-windows-msvc
 ```
 
 Rust REPL 里可以用 `/config` 查看解析后的配置文件路径、当前 model/sandbox/approval
-值和可写 key。`/config key=value` 会把设置持久写入 `~/.nanocodex/config.toml`；
+值和可写 key。`/config key=value` 会把设置持久写入 `~/.nanocodex/config.toml`（将 `feedback.memory=on` 或 `feedback.routing=on` 开启时会校验 14 天 Shadow 基线门禁，加 `--force` 可强制跳过）；
 provider、model、sandbox 或预算类变更需要重启 REPL 后影响当前会话。`/usage`（或
 `/cost`）会显示上一轮和当前 REPL session 的原始 token 用量；`/outcome good|bad [note]` 可对上一轮主任务打人工标签，`/outcome report` 查看当前工作区 ACR 与 60 分奇点报告。
 
@@ -352,8 +393,10 @@ model = "deepseek-chat"
 sandbox_mode = "workspace-write"   # read-only | workspace-write | danger-full-access
 approval_policy = "on-request"     # untrusted | on-failure | on-request | never
 reasoning_effort = "auto"          # auto | low | high | max | off
+memory_auto_promote_enabled = true # 零人工介入且验证通过的高置信度恢复经验自动晋升
 
 # 智能复利在线回流开关（off | shadow | on，默认 shadow）
+# 切换至 "on" 需满足 >= 14 天 Shadow 观测数据且 >= 2 个核心类别样本数 n >= 30
 [feedback]
 memory = "shadow"
 routing = "shadow"
@@ -577,17 +620,22 @@ Look for behavior regressions first, then missing tests, then maintainability.
 
 ## 记忆与 AGENTS.md
 
-两层互补的持久上下文，每轮都注入：
+三层互补的持久上下文：
 
 - **用户记忆**（`~/.nanocodex/memory.md`）—— 持久的个人事实和偏好。由 `remember`
   工具写入、在 GUI 输入框里打 `# 内容` 快速捕获、或手工编辑。包在 `<user_memory>`
   块里。
+- **项目记忆与智能复利生命周期**（`.ncx/memory/LEARNINGS.md` + `memory_index.sqlite`）——
+  受在线反馈闭环管控的项目级经验：
+  - **候选记忆（`Candidate`）**：自动捕获同回合多步复合恢复链（`CompoundRecoveryChain`），记录跨会话复现频次（`occurrences`，按 `occurrences DESC, created_at DESC` 排序并展示 `命中 N 次`）；隔离 Worker 的候选仅在胜出分支被主控采纳（`promoted`）并完成临时路径脱敏后才入库。当 `memory_auto_promote_enabled = true` 时，零介入且验证通过的高置信度候选会自动晋升写入 `LEARNINGS.md`，其余由 `ncx --memory-review confirm <id>` 或 GUI 面板确认。
+  - **生效记忆（`Active`）**：混合词法语义排序召回，通过内容哈希 `note_id` 记入 `TaskOutcome.recalled_note_ids`，并按任务定论后的 Beta 后验得分 `p = (accepted + 1) / (injected + 2)` 进行 **`±20%` 有界调权**。
+  - **降级记忆（`Demoted`）**：在 `[feedback] memory = "on"` 模式下，当 `injected >= 8` 且 `p < 0.25` 时自动降级（暂停召回但保留原行），可通过 `ncx --memory-review restore <id>` 或 GUI 一键恢复。
 - **AGENTS.md / CLAUDE.md** —— 项目指令，从 `~/.codex/AGENTS.md` 和
   `~/.claude/CLAUDE.md` 开始，再分层读取从仓库根到工作区的每个 `AGENTS.md`、
   `CLAUDE.md` 和 `.claude/CLAUDE.md`，所以嵌套目录可以细化父级。总大小有上限，避免
   一个超大文件撑爆上下文。Rust CLI、orchestrator worker 和 Tauri GUI 都会在会话启动时注入这一块。
 
-记忆讲「谁/什么」（偏好、事实）；skills 讲「怎么做 X」；AGENTS.md / CLAUDE.md 是项目级指引。
+记忆讲「谁/什么」（偏好、事实、经验证的项目经验）；skills 讲「怎么做 X」；AGENTS.md / CLAUDE.md 是项目级指引。
 
 ### LLM Wiki 跨 Agent 长期记忆
 
@@ -687,8 +735,9 @@ nanocodex schedule run        # 让它一直跑，任务才会触发
 
 BugleCat 当前桌面端使用 Tauri 2 + Svelte 5（`rust/gui`）：
 
-- 流式对话，推理/答案分离，带 Stop 按钮。
-- 工作区切换、运行中模型切换，以及多分区设置中心。
+- 流式对话，推理/答案分离，带 Stop 按钮，且每条 Assistant 消息底部支持**按轮次精准绑定的 `♡` / `♧` 评价按钮**（直接归因到对应轮次的 `TaskOutcome`）。
+- 右侧「记忆」面板内置可视化 **「ACR & 60 分奇点仪表盘」**：实时展示近 30 天 `ACR-strict`、面向 60% 奇点线的 Wilson 95% 下界进度条、四大核心任务类别的样本进度（`n/30`）与奇点达标徽章、14 天 Shadow 基线就绪状态，以及带复现频次（`命中 N 次`）的候选/降级记忆审阅操作（采纳 / 拒绝 / 恢复）。
+- 工作区切换、运行中模型切换、`/outcome good|bad|report` 快捷指令，以及多分区设置中心（含高置信度恢复经验自动晋升开关 `memory_auto_promote_enabled`）。
 - 可浏览的会话历史（点击回放完整对话）。
 - 文件、Git diff、分支、项目记忆和 checkpoint 面板。
 - 图片附件、Skills、MCP、插件、权限模式和模型商配置。
