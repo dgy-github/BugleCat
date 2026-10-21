@@ -379,7 +379,13 @@ mod tests {
         std::io::stderr().write_all(b"stderr-start\n").unwrap();
         std::io::stderr().flush().unwrap();
         if mode == "timeout" {
-            std::thread::sleep(Duration::from_secs(30));
+            // Give the parent ample time to drain the flushed markers, then
+            // record that this point was reached before blocking until killed.
+            std::thread::sleep(Duration::from_secs(1));
+            if let Ok(ready) = std::env::var("NCX_TEST_PIPE_READY") {
+                std::fs::write(ready, b"ready").unwrap();
+            }
+            std::thread::sleep(Duration::from_secs(120));
         } else {
             std::io::stderr().write_all(&vec![b'e'; 1_000_000]).unwrap();
             std::io::stdout().write_all(&vec![b'o'; 1_000_000]).unwrap();
@@ -387,6 +393,15 @@ mod tests {
     }
 
     async fn run_pipe_child(mode: &str, timeout_s: u64) -> ExecResult {
+        run_pipe_child_with_env(mode, timeout_s, HashMap::new()).await
+    }
+
+    async fn run_pipe_child_with_env(
+        mode: &str,
+        timeout_s: u64,
+        mut env: HashMap<String, String>,
+    ) -> ExecResult {
+        env.insert("NCX_TEST_PIPE_MODE".into(), mode.into());
         let exe = std::env::current_exe().unwrap();
         let prefix = if cfg!(windows) { ".\\" } else { "./" };
         let command = format!(
@@ -394,12 +409,7 @@ mod tests {
             exe.file_name().unwrap().to_str().unwrap()
         );
         PolicyExecutor::new()
-            .run_with_env(
-                &command,
-                exe.parent().unwrap(),
-                timeout_s,
-                &HashMap::from([("NCX_TEST_PIPE_MODE".into(), mode.into())]),
-            )
+            .run_with_env(&command, exe.parent().unwrap(), timeout_s, &env)
             .await
     }
 
@@ -413,7 +423,28 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_preserves_already_collected_output() {
-        let result = run_pipe_child("timeout", 2).await;
+        // The child writes a ready file once its markers have been flushed
+        // and had time to drain. A timeout before that point only means the
+        // child started slowly (e.g. under parallel test load), so retry with
+        // a longer timeout instead of asserting on an inconclusive run.
+        let ready =
+            std::env::temp_dir().join(format!("ncx-executor-timeout-ready-{}", std::process::id()));
+        let mut conclusive = None;
+        for timeout_s in [3, 10, 30, 60] {
+            let _ = std::fs::remove_file(&ready);
+            let env = HashMap::from([(
+                "NCX_TEST_PIPE_READY".to_string(),
+                ready.to_string_lossy().into_owned(),
+            )]);
+            let result = run_pipe_child_with_env("timeout", timeout_s, env).await;
+            if ready.exists() {
+                conclusive = Some(result);
+                break;
+            }
+            assert!(result.timed_out, "{}", result.render());
+        }
+        let _ = std::fs::remove_file(&ready);
+        let result = conclusive.expect("child never reached its ready point");
         assert!(result.timed_out);
         assert_eq!(result.exit_code, 124);
         assert!(
