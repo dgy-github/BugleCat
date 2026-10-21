@@ -33,7 +33,7 @@ use crate::tool_recovery::{
 };
 use crate::user_question::UserQuestionHandler;
 
-const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 20;
+const DEFAULT_VISIBLE_TOOL_LIMIT: usize = 21;
 const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
     "read_file",
     "apply_patch",
@@ -42,6 +42,7 @@ const ALWAYS_VISIBLE_TOOLS: &[&str] = &[
     "create_goal",
     "update_goal",
     "shell",
+    "remember",
     "tool_search",
     "skill",
     "list_directory",

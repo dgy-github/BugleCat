@@ -2,7 +2,7 @@
 
 use ncx_provider::ToolCall;
 
-use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent};
+use super::{AgentLoop, EventSink, LoopEvent, dump_args, emit, trace};
 use crate::tool_recovery::classify_tool_result;
 
 pub(super) enum DispatchStop {
@@ -75,7 +75,7 @@ fn starts_parallel_run(
 mod tests {
     use async_trait::async_trait;
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     use super::*;
     use crate::tools::{Tool, ToolContext, ToolRegistry};
@@ -220,66 +220,72 @@ fn record_tool_result(
         // Pair only a retry of the same tool on the same target; an unrelated
         // success after a failure says nothing about how the failure was fixed.
         if let Some(target) = target {
-            if let Some(pos) = agent
+            let matched_pos = agent
                 .last_failed_tools
                 .iter()
-                .rposition(|f| f.tool == call.name && f.target == target)
-            {
+                .rposition(|f| f.tool == call.name && f.target == target);
+            if let Some(pos) = matched_pos {
                 let failure = agent.last_failed_tools.remove(pos);
-                let intervening_files: Vec<String> = agent
-                    .last_files_touched
-                    .iter()
-                    .skip(failure.files_touched_len)
-                    .cloned()
-                    .collect();
                 let current_detail = tool_call_detail(&call.name, &call.arguments);
-                let resolution_clause = match (
-                    !intervening_files.is_empty(),
-                    current_detail
-                        .as_deref()
-                        .filter(|d| Some(*d) != failure.detail.as_deref()),
-                ) {
-                    (true, Some(cmd)) => format!(
-                        "a later `{}` on the same target succeeded after editing `{}` (`{cmd}`).",
-                        call.name,
-                        intervening_files.join("`, `")
-                    ),
-                    (true, None) => format!(
-                        "a later `{}` on the same target succeeded after editing `{}`.",
-                        call.name,
-                        intervening_files.join("`, `")
-                    ),
-                    (false, Some(cmd)) => format!(
-                        "a later `{}` on the same target succeeded with `{cmd}`.",
-                        call.name
-                    ),
-                    (false, None) => format!(
-                        "a later `{}` on the same target succeeded in the same task.",
-                        call.name
-                    ),
+                let candidate_opt = if call.name == "shell" {
+                    reusable_shell_environment_note(&failure, current_detail.as_deref())
+                } else {
+                    let intervening_files: Vec<String> = agent
+                        .last_files_touched
+                        .iter()
+                        .skip(failure.files_touched_len)
+                        .cloned()
+                        .collect();
+                    let resolution_clause = match (
+                        !intervening_files.is_empty(),
+                        current_detail
+                            .as_deref()
+                            .filter(|d| Some(*d) != failure.detail.as_deref()),
+                    ) {
+                        (true, Some(cmd)) => format!(
+                            "a later `{}` on the same target succeeded after editing `{}` (`{cmd}`).",
+                            call.name,
+                            intervening_files.join("`, `")
+                        ),
+                        (true, None) => format!(
+                            "a later `{}` on the same target succeeded after editing `{}`.",
+                            call.name,
+                            intervening_files.join("`, `")
+                        ),
+                        (false, Some(cmd)) => format!(
+                            "a later `{}` on the same target succeeded with `{cmd}`.",
+                            call.name
+                        ),
+                        (false, None) => format!(
+                            "a later `{}` on the same target succeeded in the same task.",
+                            call.name
+                        ),
+                    };
+                    let failed_context = match &failure.detail {
+                        Some(detail) if detail != &failure.target => {
+                            format!("`{detail}` -> {}", failure.excerpt)
+                        }
+                        _ => failure.excerpt.clone(),
+                    };
+                    Some(format!(
+                        "`{}` on `{}` failed ({}); {}",
+                        failure.tool, failure.target, failed_context, resolution_clause
+                    ))
                 };
-                let failed_context = match &failure.detail {
-                    Some(detail) if detail != &failure.target => {
-                        format!("`{detail}` -> {}", failure.excerpt)
-                    }
-                    _ => failure.excerpt.clone(),
-                };
-                let candidate_text = format!(
-                    "`{}` on `{}` failed ({}); {}",
-                    failure.tool, failure.target, failed_context, resolution_clause
-                );
-                let source_ref = format!(
-                    "{}#turn-{}:{}",
-                    agent.session.session_id, agent.next_turn_id, call.id
-                );
-                if !agent
-                    .last_recovery_candidates
-                    .iter()
-                    .any(|(text, _)| *text == candidate_text)
-                {
-                    agent
+                if let Some(candidate_text) = candidate_opt {
+                    let source_ref = format!(
+                        "{}#turn-{}:{}",
+                        agent.session.session_id, agent.next_turn_id, call.id
+                    );
+                    if !agent
                         .last_recovery_candidates
-                        .push((candidate_text, source_ref));
+                        .iter()
+                        .any(|(text, _)| *text == candidate_text)
+                    {
+                        agent
+                            .last_recovery_candidates
+                            .push((candidate_text, source_ref));
+                    }
                 }
             }
         }
@@ -359,6 +365,59 @@ fn tool_call_detail(tool_name: &str, args: &serde_json::Value) -> Option<String>
             let single_line = cmd.split_whitespace().collect::<Vec<_>>().join(" ");
             return Some(single_line.chars().take(80).collect());
         }
+    }
+    None
+}
+
+/// Filter `shell` failure->recovery pairs down to cross-task environment
+/// constraints, discarding one-off `python -c` / `pytest` / `git` syntax or
+/// test assertion trial-and-error logs.
+fn reusable_shell_environment_note(
+    failure: &FailedToolCall,
+    current_detail: Option<&str>,
+) -> Option<String> {
+    let target_lower = failure.target.to_ascii_lowercase();
+    if target_lower.starts_with("python -c")
+        || target_lower.starts_with("python3 -c")
+        || target_lower.starts_with("py -c")
+        || target_lower.starts_with("pytest")
+        || target_lower.starts_with("git ")
+    {
+        return None;
+    }
+    for detail in [failure.detail.as_deref(), current_detail]
+        .into_iter()
+        .flatten()
+    {
+        let lower = detail.to_ascii_lowercase();
+        if lower.contains("pip install")
+            || lower.contains("pip download")
+            || lower.contains("pip wheel")
+            || lower.contains("pytest")
+        {
+            return None;
+        }
+    }
+    let exc_lower = failure.excerpt.to_ascii_lowercase();
+    if exc_lower.contains("denied by approval policy") {
+        return None;
+    }
+    if exc_lower.contains("windows shell is cmd.exe")
+        || exc_lower.contains("does not support heredoc")
+        || exc_lower.contains("unix tail/head/wc")
+    {
+        return Some(
+            "Environment constraint: Windows shell is cmd.exe and does not support heredoc (<<) or Unix tail/head/wc commands; run commands without tail/head/wc pipes and write multiline scripts to files."
+                .to_string(),
+        );
+    }
+    if exc_lower.contains("is not recognized as an internal or external command")
+        || exc_lower.contains("command not found")
+    {
+        return Some(format!(
+            "Environment constraint: `{}` failed ({}).",
+            failure.target, failure.excerpt
+        ));
     }
     None
 }

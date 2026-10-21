@@ -354,6 +354,26 @@ impl MemoryIndex {
         Ok(changed > 0)
     }
 
+    /// Delete any indexed note by id (used when a turn's outcome is explicitly rejected).
+    pub fn remove_note(&self, note_id: &str) -> Result<bool, String> {
+        let changed = self
+            .conn
+            .execute(
+                "DELETE FROM memory_index WHERE note_id = ?1",
+                params![note_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(changed > 0)
+    }
+
+    /// Return all notes in `workspace` whose `source_ref` begins with `prefix`.
+    pub fn notes_for_source_prefix(&self, workspace: &str, prefix: &str) -> Vec<IndexedNote> {
+        self.all_notes(workspace)
+            .into_iter()
+            .filter(|note| note.source_ref.starts_with(prefix))
+            .collect()
+    }
+
     /// Score one resolved primary task against the notes it recalled. The
     /// injection and its verdict are counted together, so `injected` only ever
     /// holds resolved tasks (worker, goal and unresolved turns never inflate it).

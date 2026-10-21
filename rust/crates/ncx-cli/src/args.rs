@@ -86,6 +86,7 @@ pub struct Args {
     /// `--memory-review` action line (`list` when given without arguments).
     pub memory_review: Option<String>,
     pub outcomes: bool,
+    pub outcome_label: Option<bool>,
     pub since: Option<String>,
     pub by: Option<String>,
     pub json: bool,
@@ -135,11 +136,34 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
                 }
                 args.memory_review = Some(action.join(" "));
             }
-            "--outcomes" => {
-                args.outcomes = true;
-                if argv.get(i + 1).map(|s| s.as_str()) == Some("report") {
+            "--outcomes" => match argv.get(i + 1).map(|s| s.as_str()) {
+                Some("good" | "ok" | "pass") => {
+                    args.outcome_label = Some(true);
                     i += 1;
                 }
+                Some("bad" | "fail") => {
+                    args.outcome_label = Some(false);
+                    i += 1;
+                }
+                Some("report") => {
+                    args.outcomes = true;
+                    i += 1;
+                }
+                _ => {
+                    args.outcomes = true;
+                }
+            },
+            "--outcome-label" => {
+                let val = take_value(argv, &mut i, a)?;
+                args.outcome_label = match val.to_ascii_lowercase().as_str() {
+                    "good" | "ok" | "pass" => Some(true),
+                    "bad" | "fail" => Some(false),
+                    other => {
+                        return Err(format!(
+                            "invalid --outcome-label '{other}'; expected good or bad"
+                        ))
+                    }
+                };
             }
             "--since" => args.since = Some(take_value(argv, &mut i, a)?),
             "--by" => args.by = Some(take_value(argv, &mut i, a)?),

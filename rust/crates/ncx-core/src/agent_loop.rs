@@ -7,11 +7,11 @@
 //! vision provider.
 
 use ncx_provider::ModelResponse;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::rc::Rc;
 
 use crate::agent_state::{AgentState, StateRecorder};
-use crate::hooks::{run_matching_hooks, HookEvent};
+use crate::hooks::{HookEvent, run_matching_hooks};
 pub use crate::model_provider::Provider;
 use crate::model_provider::StreamDelta;
 use crate::runtime_profile::AgentRuntimeProfile;
@@ -216,6 +216,12 @@ impl AgentLoop {
         let context_service = tools.service::<crate::plugins::ContextServiceDescriptor>("context");
         let media_service = tools.service::<crate::plugins::MediaServiceDescriptor>("media");
         let cost_service = tools.service::<crate::plugins::CostTelemetryService>("cost.telemetry");
+        let feedback_memory_mode = tools
+            .ctx
+            .memory
+            .as_ref()
+            .map(|m| m.feedback_mode().to_string())
+            .unwrap_or_else(|| "shadow".to_string());
         let mut agent = AgentLoop {
             provider,
             vision_provider: None,
@@ -253,7 +259,7 @@ impl AgentLoop {
             task_role: crate::outcome::TaskRole::Primary,
             parent_task_id: None,
             fast_model: None,
-            feedback_memory_mode: "shadow".to_string(),
+            feedback_memory_mode,
             feedback_routing_mode: "shadow".to_string(),
             last_recalled_note_ids: Vec::new(),
             last_memory_rank_changed: None,
@@ -962,25 +968,78 @@ impl AgentLoop {
             outcome.verification.as_deref(),
             Some("passed") | Some("skipped")
         );
-        if role == crate::outcome::TaskRole::Primary
-            && terminal == AgentState::Completed
-            && verification_ok
-            && !self.last_recovery_candidates.is_empty()
-        {
-            if let Some(mem) = self.recall_memory_store() {
-                if let Ok(idx) = crate::memory_index::MemoryIndex::for_store(&mem) {
-                    let ws_key = mem.workspace_key();
-                    let ts_sec = now_ms / 1_000;
-                    for (text, source_ref) in &self.last_recovery_candidates {
-                        let _ = idx.record_candidate(
-                            &ws_key,
-                            text,
-                            &["recovery".to_string()],
-                            &crate::memory_index::Evidence::VerifiedToolResult {
-                                source_ref: source_ref.clone(),
-                            },
-                            ts_sec,
-                        );
+        if role == crate::outcome::TaskRole::Primary {
+            if self.feedback_memory_mode == "on"
+                && outcome.verification.as_deref() != Some("failed")
+                && crate::tools::python_check::failure(&self.tools.ctx).is_none()
+            {
+                if let Some(mem) = self.recall_memory_store() {
+                    if let Ok(idx) = crate::memory_index::MemoryIndex::for_store(&mem) {
+                        let ws_key = mem.workspace_key();
+                        let ts_sec = now_ms / 1_000;
+                        let auto_promote = terminal == AgentState::Completed && verification_ok;
+                        for (text, source_ref) in &self.last_recovery_candidates {
+                            let tags = vec!["recovery".to_string()];
+                            if let Ok(note_id) = idx.record_candidate(
+                                &ws_key,
+                                text,
+                                &tags,
+                                &crate::memory_index::Evidence::VerifiedToolResult {
+                                    source_ref: source_ref.clone(),
+                                },
+                                ts_sec,
+                            ) {
+                                if auto_promote {
+                                    let _ = mem.remember(text, &tags, ts_sec);
+                                    let _ = idx.confirm_candidate(&note_id);
+                                }
+                            }
+                        }
+                        if let Some((note_text, tags)) = synthesize_task_experience_note(
+                            &self.tools.ctx.workspace,
+                            query_text,
+                            &result.final_text,
+                            &self.last_files_touched,
+                            terminal == AgentState::Completed,
+                        ) {
+                            let source_ref = format!(
+                                "{}#turn-{}:task",
+                                self.session.session_id, self.next_turn_id
+                            );
+                            if let Ok(note_id) = idx.record_candidate(
+                                &ws_key,
+                                &note_text,
+                                &tags,
+                                &crate::memory_index::Evidence::VerifiedToolResult { source_ref },
+                                ts_sec,
+                            ) {
+                                if auto_promote {
+                                    let _ = mem.remember(&note_text, &tags, ts_sec);
+                                    let _ = idx.confirm_candidate(&note_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if terminal == AgentState::Completed
+                && verification_ok
+                && !self.last_recovery_candidates.is_empty()
+            {
+                if let Some(mem) = self.recall_memory_store() {
+                    if let Ok(idx) = crate::memory_index::MemoryIndex::for_store(&mem) {
+                        let ws_key = mem.workspace_key();
+                        let ts_sec = now_ms / 1_000;
+                        for (text, source_ref) in &self.last_recovery_candidates {
+                            let _ = idx.record_candidate(
+                                &ws_key,
+                                text,
+                                &["recovery".to_string()],
+                                &crate::memory_index::Evidence::VerifiedToolResult {
+                                    source_ref: source_ref.clone(),
+                                },
+                                ts_sec,
+                            );
+                        }
                     }
                 }
             }
@@ -1058,6 +1117,273 @@ fn sanitize_generated_title(text: &str) -> Option<String> {
         .trim();
     let len = title.chars().count();
     (2..=36).contains(&len).then(|| title.to_string())
+}
+
+fn is_scratch_file(rel_path: &str) -> bool {
+    let p = std::path::Path::new(rel_path);
+    for comp in p.components() {
+        if let std::path::Component::Normal(os) = comp {
+            if let Some(s) = os.to_str() {
+                let lower = s.to_ascii_lowercase();
+                if lower.starts_with("debug")
+                    || lower.starts_with("repro")
+                    || lower.starts_with("temp")
+                    || lower.starts_with("tmp")
+                    || lower.starts_with("_tmp")
+                    || lower.starts_with("scratch")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn extract_issue_summary(query_text: &str) -> String {
+    let lines: Vec<&str> = query_text.lines().map(str::trim).collect();
+    if let Some(line) = lines.iter().copied().find(|l| l.starts_with("Issue:")) {
+        let rest = line.trim_start_matches("Issue:").trim();
+        if !rest.is_empty() {
+            return rest.to_string();
+        }
+    }
+    if let Some((idx, header)) = lines.iter().copied().enumerate().find(|(_, l)| {
+        let lower = l.to_ascii_lowercase();
+        lower.starts_with("github issue #") || lower.starts_with("issue #")
+    }) {
+        let issue_tag = header
+            .split_whitespace()
+            .find(|tok| tok.starts_with('#'))
+            .map(|tok| tok.trim_end_matches(':'))
+            .unwrap_or(header.trim_end_matches(':'));
+        let title_line = lines[idx + 1..]
+            .iter()
+            .copied()
+            .find(|l| !l.is_empty() && *l != "---" && !l.starts_with("```"))
+            .unwrap_or("");
+        return if title_line.is_empty() {
+            issue_tag.to_string()
+        } else {
+            format!("{issue_tag}: {title_line}")
+        };
+    }
+    if let Some(line) = lines
+        .iter()
+        .copied()
+        .find(|l| l.starts_with('#') && l.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
+    {
+        return line.to_string();
+    }
+    lines
+        .into_iter()
+        .find(|l| {
+            !l.is_empty()
+                && !l.starts_with("You are working in a checkout")
+                && !l.starts_with("Resolve the following")
+        })
+        .unwrap_or("task")
+        .to_string()
+}
+
+fn synthesize_task_experience_note(
+    workspace: &std::path::Path,
+    query_text: &str,
+    final_text: &str,
+    files_touched: &[String],
+    completed: bool,
+) -> Option<(String, Vec<String>)> {
+    let all_existing: Vec<String> = files_touched
+        .iter()
+        .map(|f| f.replace('\\', "/"))
+        .filter(|f| {
+            !f.starts_with(".nanocodex") && !f.starts_with(".ncx") && workspace.join(f).is_file()
+        })
+        .collect();
+    if all_existing.is_empty() {
+        return None;
+    }
+    let non_scratch: Vec<String> = all_existing
+        .iter()
+        .filter(|f| !is_scratch_file(f))
+        .cloned()
+        .collect();
+    let existing_files = if non_scratch.is_empty() {
+        all_existing
+    } else {
+        non_scratch
+    };
+    let non_test: Vec<String> = existing_files
+        .iter()
+        .filter(|f| !f.starts_with("tests/") && !f.contains("/tests/"))
+        .cloned()
+        .collect();
+    let existing_files = if non_test.is_empty() {
+        existing_files
+    } else {
+        non_test
+    };
+
+    let mut tags: Vec<String> = Vec::new();
+    let mut push_tag = |raw: &str| {
+        let t = raw.trim().to_ascii_lowercase();
+        let t = t.strip_prefix("test_").unwrap_or(&t);
+        if t.len() >= 3
+            && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !matches!(
+                t,
+                "src"
+                    | "lib"
+                    | "mod"
+                    | "init"
+                    | "__init__"
+                    | "tests"
+                    | "test"
+                    | "regressions"
+                    | "regression"
+            )
+            && !tags.iter().any(|x| x == t)
+        {
+            tags.push(t.to_string());
+        }
+    };
+    for file in &existing_files {
+        let p = std::path::Path::new(file);
+        let parent_comps: Vec<&str> = p
+            .parent()
+            .into_iter()
+            .flat_map(|d| d.components())
+            .filter_map(|c| match c {
+                std::path::Component::Normal(os) => os.to_str(),
+                _ => None,
+            })
+            .collect();
+        // Skip top-level package folder (e.g. `sqlparse/`) so every note in the
+        // same repository does not share a generic repo-wide tag.
+        for s in parent_comps.iter().skip(1) {
+            push_tag(s);
+        }
+        if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+            push_tag(stem);
+        }
+    }
+    if tags.is_empty() {
+        for file in &existing_files {
+            if let Some(stem) = std::path::Path::new(file)
+                .file_stem()
+                .and_then(|s| s.to_str())
+            {
+                let t = stem.trim().to_ascii_lowercase();
+                if t.len() >= 3 && !tags.contains(&t) {
+                    tags.push(t);
+                }
+            }
+        }
+    }
+    tags.truncate(6);
+
+    let issue_line = extract_issue_summary(query_text);
+    let issue_summary: String = issue_line
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(100)
+        .collect();
+
+    let files_joined = existing_files.join("`, `");
+    let text_summary = if completed {
+        let content_lines: Vec<String> = final_text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("```"))
+            .map(|l| {
+                l.trim_start_matches("- ")
+                    .trim_start_matches("* ")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .filter(|l| !l.is_empty())
+            .collect();
+        let substantive: Vec<&str> =
+            if content_lines.len() > 1 && content_lines[0].split_whitespace().count() <= 4 {
+                content_lines[1..]
+                    .iter()
+                    .take(2)
+                    .map(String::as_str)
+                    .collect()
+            } else {
+                content_lines.iter().take(2).map(String::as_str).collect()
+            };
+        (!substantive.is_empty())
+            .then(|| substantive.join("; ").chars().take(240).collect::<String>())
+    } else {
+        None
+    };
+    let diff_summary = extract_git_diff_summary(workspace, &existing_files);
+    let summary_line = match (text_summary, diff_summary) {
+        (Some(t), Some(d)) if !t.contains(&d) => Some(format!("{t} ({d})")),
+        (Some(t), _) => Some(t),
+        (None, Some(d)) => Some(d),
+        (None, None) => None,
+    };
+
+    let note_text = match summary_line {
+        Some(summary) => format!("Task \"{issue_summary}\" modified `{files_joined}` — {summary}"),
+        None => format!("Task \"{issue_summary}\" modified `{files_joined}`."),
+    };
+    Some((note_text, tags))
+}
+
+fn extract_git_diff_summary(workspace: &std::path::Path, files: &[String]) -> Option<String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(workspace).args(["diff", "-U0", "--"]);
+    for f in files.iter().take(3) {
+        cmd.arg(f);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let diff = String::from_utf8_lossy(&out.stdout);
+    let mut funcs: Vec<String> = Vec::new();
+    let mut changes: Vec<String> = Vec::new();
+    for line in diff.lines() {
+        if let Some((_, ctx)) = line.split_once(" @@ ") {
+            let ctx = ctx.trim();
+            if !ctx.is_empty() {
+                let short_ctx: String = ctx.chars().take(60).collect();
+                if !funcs.contains(&short_ctx) && funcs.len() < 2 {
+                    funcs.push(short_ctx);
+                }
+            }
+        } else if (line.starts_with('+') && !line.starts_with("+++"))
+            || (line.starts_with('-') && !line.starts_with("---"))
+        {
+            let prefix = &line[..1];
+            let body = line[1..].trim();
+            if !body.is_empty()
+                && !body.starts_with('#')
+                && !body.starts_with("//")
+                && changes.len() < 2
+            {
+                let compact: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
+                let clipped: String = compact.chars().take(70).collect();
+                changes.push(format!("{prefix}{clipped}"));
+            }
+        }
+    }
+    match (funcs.is_empty(), changes.is_empty()) {
+        (true, true) => None,
+        (false, true) => Some(format!("in `{}`", funcs.join("`, `"))),
+        (true, false) => Some(changes.join(" / ")),
+        (false, false) => Some(format!(
+            "in `{}`: {}",
+            funcs.join("`, `"),
+            changes.join(" / ")
+        )),
+    }
 }
 
 fn dump_args(arguments: &Value) -> String {

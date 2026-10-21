@@ -86,6 +86,9 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
         eprintln!("ncx: {error}");
         return Some(1);
     }
+    if let Some(good) = args.outcome_label {
+        return Some(record_outcome_label_cli(cfg, good));
+    }
     if args.outcomes {
         return Some(print_outcomes_cli(cfg, args));
     }
@@ -117,6 +120,58 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
             }
         },
     )
+}
+
+fn record_outcome_label_cli(cfg: &Config, good: bool) -> i32 {
+    let db_path = workspace_events_db_path(&cfg.workspace, None);
+    let store = match ContextStore::open(db_path) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("ncx: cannot open workspace events store: {error}");
+            return 1;
+        }
+    };
+    let outcomes = match load_outcomes_and_followups(&store, None) {
+        Ok((outcomes, _)) => outcomes,
+        Err(error) => {
+            eprintln!("ncx: cannot load outcomes: {error}");
+            return 1;
+        }
+    };
+    let Some(target) = outcomes
+        .into_iter()
+        .rev()
+        .find(|o| o.role == ncx_core::TaskRole::Primary)
+    else {
+        eprintln!("ncx: no previous primary task outcome found to label");
+        return 1;
+    };
+    let mut memory = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+    memory.set_feedback_mode(&cfg.feedback_memory);
+    let ws_str = cfg.workspace.to_string_lossy().to_string();
+    match ncx_core::record_followup(
+        &store,
+        &ws_str,
+        &target,
+        ncx_core::FollowupSignal::Label { good, note: None },
+        Some(MemoryFeedback {
+            store: &memory,
+            mode: &cfg.feedback_memory,
+        }),
+    ) {
+        Ok(_) => {
+            println!(
+                "Recorded outcome label ({}) for task {}.",
+                if good { "good" } else { "bad" },
+                target.task_id
+            );
+            0
+        }
+        Err(error) => {
+            eprintln!("ncx: {error}");
+            1
+        }
+    }
 }
 
 fn print_outcomes_cli(cfg: &Config, args: &Args) -> i32 {

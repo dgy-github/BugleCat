@@ -215,8 +215,9 @@ fn base_command(command: &str) -> Command {
         let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
         let mut c = Command::new(comspec);
         c.arg("/D")
+            .arg("/S")
             .arg("/C")
-            .arg(format!("chcp 65001>nul & {command}"));
+            .raw_arg(format!("\"chcp 65001>nul & {command}\""));
         c
     }
     #[cfg(not(windows))]
@@ -557,5 +558,19 @@ mod tests {
         let result = exec.run("exit 3", &cwd, 30).await;
         assert_eq!(result.exit_code, 3);
         assert!(!result.ok());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_shell_preserves_double_quoted_python_c_arguments() {
+        let result = PolicyExecutor::new()
+            .run(
+                "python -c \"import sys; print('quote_ok', 1 + 2)\"",
+                &std::env::temp_dir(),
+                30,
+            )
+            .await;
+        assert!(result.ok(), "{}", result.render());
+        assert!(result.stdout.contains("quote_ok 3"), "{:?}", result.stdout);
     }
 }

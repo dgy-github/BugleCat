@@ -68,11 +68,13 @@ async fn compaction_counts_usage_and_does_not_repeat_for_a_small_followup() {
             .count(),
         1
     );
-    assert!(agent
-        .session
-        .for_model()
-        .iter()
-        .all(|m| m.get("_compaction_safety").is_none()));
+    assert!(
+        agent
+            .session
+            .for_model()
+            .iter()
+            .all(|m| m.get("_compaction_safety").is_none())
+    );
 }
 
 #[tokio::test]
@@ -141,47 +143,56 @@ async fn compaction_runs_through_openai_compatible_http_provider() {
     // serves every one of them and reports how many it answered.
     let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let served_in_server = served.clone();
-    let server = std::thread::spawn(move || loop {
-        let Ok((mut stream, _)) = listener.accept() else {
-            break;
-        };
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        let mut bytes = Vec::new();
-        let body = loop {
-            let mut buffer = [0; 8192];
-            let Ok(count) = stream.read(&mut buffer) else {
-                return;
+    let server = std::thread::spawn(move || {
+        loop {
+            let Ok((mut stream, _)) = listener.accept() else {
+                break;
             };
-            assert!(count > 0);
-            bytes.extend_from_slice(&buffer[..count]);
-            if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
-                let header = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
-                let size: usize = header
-                    .lines()
-                    .find_map(|line| line.strip_prefix("content-length:"))
-                    .unwrap()
-                    .trim()
-                    .parse()
-                    .unwrap();
-                if bytes.len() >= end + 4 + size {
-                    break bytes[end + 4..end + 4 + size].to_vec();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let body = loop {
+                let mut buffer = [0; 8192];
+                let Ok(count) = stream.read(&mut buffer) else {
+                    return;
+                };
+                assert!(count > 0);
+                bytes.extend_from_slice(&buffer[..count]);
+                if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
+                    let size: usize = header
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .unwrap()
+                        .trim()
+                        .parse()
+                        .unwrap();
+                    if bytes.len() >= end + 4 + size {
+                        break bytes[end + 4..end + 4 + size].to_vec();
+                    }
                 }
-            }
-        };
-        let request: Value = serde_json::from_slice(&body).unwrap();
-        assert!(request
-            .get("tools")
-            .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)));
-        let prompt = request["messages"][1]["content"].as_str().unwrap();
-        assert!(prompt.contains("调查证据"));
-        // Every chunk is self-describing and carries tagged source ids.
-        assert!(prompt.contains("Part "), "{prompt}");
-        assert!(prompt.contains("[S"), "{prompt}");
-        served_in_server.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let body = json!({"choices":[{"message":{"role":"assistant","content":"调查完成；保留禁止恢复旧实现的约束，下一步修复。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":40000,"completion_tokens":40,"total_tokens":40040}}).to_string();
-        let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            };
+            let request: Value = serde_json::from_slice(&body).unwrap();
+            assert!(
+                request
+                    .get("tools")
+                    .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
+            );
+            let prompt = request["messages"][1]["content"].as_str().unwrap();
+            assert!(prompt.contains("调查证据"));
+            // Every chunk is self-describing and carries tagged source ids.
+            assert!(prompt.contains("Part "), "{prompt}");
+            assert!(prompt.contains("[S"), "{prompt}");
+            served_in_server.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let body = json!({"choices":[{"message":{"role":"assistant","content":"调查完成；保留禁止恢复旧实现的约束，下一步修复。"},"finish_reason":"stop"}],"usage":{"prompt_tokens":40000,"completion_tokens":40,"total_tokens":40040}}).to_string();
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+        }
     });
     let ws = tmpdir("semantic_http");
     let provider = ncx_provider::DeepSeekProvider::new(

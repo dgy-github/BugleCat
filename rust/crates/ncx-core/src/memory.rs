@@ -148,6 +148,22 @@ impl MemoryStore {
         Ok(true)
     }
 
+    /// Remove any entry matching `text` (after normalization) from the Markdown store.
+    pub fn forget_text(&self, text: &str) -> std::io::Result<bool> {
+        let norm = normalize(text.trim());
+        if norm.is_empty() {
+            return Ok(false);
+        }
+        let mut entries = self.entries();
+        let before = entries.len();
+        entries.retain(|e| normalize(&e.text) != norm);
+        if entries.len() == before {
+            return Ok(false);
+        }
+        self.write_all(&entries)?;
+        Ok(true)
+    }
+
     /// Path of the Markdown file this store owns. The metadata index is built
     /// from it and lives beside it.
     pub fn markdown_path(&self) -> &Path {
@@ -200,7 +216,7 @@ impl MemoryStore {
             // Pack recency into the low bits so higher ts wins ties.
             let recency = e.ts.min(999_999) as i64;
             plain.push((overlap * 1_000_000 + recency, nid.clone(), e));
-            if self.feedback_mode == "off" {
+            if self.feedback_mode == "off" || (self.feedback_mode == "on" && overlap < 8) {
                 continue;
             }
             let stat = feedback_map.get(&nid);
@@ -469,11 +485,7 @@ pub(crate) fn jaccard(
     }
     let inter = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
-    if union == 0.0 {
-        0.0
-    } else {
-        inter / union
-    }
+    if union == 0.0 { 0.0 } else { inter / union }
 }
 
 pub(crate) fn parse_entries(text: &str) -> Vec<MemoryEntry> {
@@ -542,13 +554,14 @@ mod tests {
     #[test]
     fn remember_then_round_trips() {
         let s = store("rt");
-        assert!(s
-            .remember(
+        assert!(
+            s.remember(
                 "Use crate-type=lib on the gnu toolchain",
                 &["build".into()],
                 100
             )
-            .unwrap());
+            .unwrap()
+        );
         let es = s.entries();
         assert_eq!(es.len(), 1);
         assert_eq!(es[0].ts, 100);

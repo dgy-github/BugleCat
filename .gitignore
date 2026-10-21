@@ -86,3 +86,7 @@ bench/tasks/gen_*/
 /evals/verification/reports/*
 /evals/golden/reports/*
 /evals/verification/data/mbpp/mbpp-expanded-20261011-v1.json
+
+# compounding replay clones / issue cache
+evals/compounding_replay/.cache/
+evals/compounding_replay/runs/

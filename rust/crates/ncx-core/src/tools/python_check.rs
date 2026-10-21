@@ -88,6 +88,9 @@ async fn compile(ctx: &ToolContext, path: &Path) -> Result<String, (String, Opti
 }
 
 pub(crate) fn failure(ctx: &ToolContext) -> Option<&'static str> {
+    ctx.python_checks
+        .borrow_mut()
+        .retain(|path, _| path.exists());
     let checks = ctx.python_checks.borrow();
     if checks
         .values()
@@ -103,6 +106,9 @@ pub(crate) fn failure(ctx: &ToolContext) -> Option<&'static str> {
 }
 
 pub(crate) async fn recheck(ctx: &ToolContext) -> Vec<String> {
+    ctx.python_checks
+        .borrow_mut()
+        .retain(|path, _| path.exists());
     let paths: Vec<_> = ctx.python_checks.borrow().keys().cloned().collect();
     let mut evidence = Vec::new();
     for path in paths {

@@ -1024,28 +1024,63 @@ pub fn record_followup(
     let Some(memory) = memory.filter(|m| m.mode != "off") else {
         return Ok(followup);
     };
-    if outcome.recalled_note_ids.is_empty() {
-        return Ok(followup);
-    }
     let Ok(index) = crate::memory_index::MemoryIndex::for_store(memory.store) else {
         return Ok(followup);
     };
     let ws_key = memory.store.workspace_key();
     let allow_demote = memory.mode == "on";
+    if allow_demote {
+        let turn_prefix = format!("{}#turn-{}:", outcome.session_id, outcome.turn_id);
+        match after {
+            Some(true) => {
+                for note in index.notes_for_source_prefix(&ws_key, &turn_prefix) {
+                    let _ = memory
+                        .store
+                        .remember(&note.text, &note.tags, note.created_at);
+                    let _ = index.confirm_candidate(&note.note_id);
+                }
+            }
+            Some(false) => {
+                for note in index.notes_for_source_prefix(&ws_key, &turn_prefix) {
+                    let _ = memory.store.forget_text(&note.text);
+                    let _ = index.remove_note(&note.note_id);
+                }
+            }
+            None => {}
+        }
+    }
+    if outcome.recalled_note_ids.is_empty() {
+        return Ok(followup);
+    }
+    let attributed_ids = filter_attributed_note_ids(
+        memory.store,
+        &outcome.recalled_note_ids,
+        &outcome.files_touched,
+    );
     match (before, after) {
         (None, Some(accepted)) => {
+            let target_ids = if accepted {
+                &outcome.recalled_note_ids
+            } else {
+                &attributed_ids
+            };
             index.record_outcome_feedback(
                 &ws_key,
-                &outcome.recalled_note_ids,
+                target_ids,
                 accepted,
                 followup.timestamp_ms,
                 allow_demote,
             );
         }
         (Some(prev), Some(now)) if prev != now => {
+            let target_ids = if now {
+                &outcome.recalled_note_ids
+            } else {
+                &attributed_ids
+            };
             index.revise_outcome_feedback(
                 &ws_key,
-                &outcome.recalled_note_ids,
+                target_ids,
                 now,
                 followup.timestamp_ms,
                 allow_demote,
@@ -1054,6 +1089,58 @@ pub fn record_followup(
         _ => {}
     }
     Ok(followup)
+}
+
+fn filter_attributed_note_ids(
+    store: &MemoryStore,
+    recalled_note_ids: &[String],
+    files_touched: &[String],
+) -> Vec<String> {
+    if files_touched.is_empty() {
+        return recalled_note_ids.to_vec();
+    }
+    let stems: Vec<String> = files_touched
+        .iter()
+        .filter_map(|f| {
+            std::path::Path::new(f)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.trim().to_ascii_lowercase())
+        })
+        .map(|s| s.strip_prefix("test_").unwrap_or(&s).to_string())
+        .filter(|s| s.len() >= 3)
+        .collect();
+    if stems.is_empty() {
+        return recalled_note_ids.to_vec();
+    }
+    let entries = store.entries();
+    let mut kept = Vec::new();
+    for nid in recalled_note_ids {
+        let Some(entry) = entries
+            .iter()
+            .find(|e| MemoryStore::note_id(&e.text) == *nid)
+        else {
+            kept.push(nid.clone());
+            continue;
+        };
+        let is_file_specific = entry.text.contains("modified `") || !entry.tags.is_empty();
+        if !is_file_specific {
+            kept.push(nid.clone());
+            continue;
+        }
+        let lower_text = entry.text.to_ascii_lowercase();
+        let matches_stem = stems.iter().any(|stem| {
+            entry.tags.iter().any(|t| t.eq_ignore_ascii_case(stem)) || lower_text.contains(stem)
+        });
+        if matches_stem {
+            kept.push(nid.clone());
+        }
+    }
+    if kept.is_empty() {
+        recalled_note_ids.to_vec()
+    } else {
+        kept
+    }
 }
 
 /// I3 rollback. Records the restore event, then attributes it to the latest

@@ -350,7 +350,20 @@ impl Tool for RememberTool {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         match store.remember(note, &tags, now) {
-            Ok(true) => "Saved to project memory.".into(),
+            Ok(true) => {
+                if let Ok(idx) = crate::memory_index::MemoryIndex::for_store(store) {
+                    let _ = idx.promote(
+                        &store.workspace_key(),
+                        note.trim(),
+                        &tags,
+                        &crate::memory_index::Evidence::VerifiedToolResult {
+                            source_ref: format!("remember#{now}"),
+                        },
+                        now,
+                    );
+                }
+                "Saved to project memory.".into()
+            }
             Ok(false) => "Already in project memory (or empty) â€” not duplicated.".into(),
             Err(e) => format!("Error saving to memory: {e}"),
         }

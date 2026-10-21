@@ -340,9 +340,11 @@ fn routing_stats_monotonic_upgrade_when_wilson_lower_bound_below_threshold() {
     assert!(rec.is_some());
     assert_eq!(rec.unwrap().0, "Medium");
     // Complex never upgrades further or downgrades.
-    assert!(stats
-        .recommend_complexity_upgrade(TaskCategory::Bugfix, "Complex")
-        .is_none());
+    assert!(
+        stats
+            .recommend_complexity_upgrade(TaskCategory::Bugfix, "Complex")
+            .is_none()
+    );
 }
 
 #[test]
@@ -371,9 +373,11 @@ fn routing_stats_bucket_on_initial_complexity_and_skip_direct_turns() {
             .map(|b| b.sample_size),
         Some(22)
     );
-    assert!(!stats
-        .buckets
-        .contains_key(&(TaskCategory::Bugfix, "Medium".to_string())));
+    assert!(
+        !stats
+            .buckets
+            .contains_key(&(TaskCategory::Bugfix, "Medium".to_string()))
+    );
 }
 
 #[test]
@@ -536,10 +540,12 @@ fn demotion_only_happens_in_on_mode_and_only_on_rejection() {
         }),
     )
     .unwrap();
-    assert!(crate::memory_index::MemoryIndex::for_store(&memory)
-        .unwrap()
-        .feedback_stat(&memory.workspace_key(), &id)
-        .is_none());
+    assert!(
+        crate::memory_index::MemoryIndex::for_store(&memory)
+            .unwrap()
+            .feedback_stat(&memory.workspace_key(), &id)
+            .is_none()
+    );
 }
 
 #[test]

@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use ncx_provider::ModelResponse;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::deliverable::DeliverableRequirement;
 use super::tool_dispatch::{self, DispatchStop};
-use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent, TurnResult};
-use crate::hooks::{run_matching_hooks, HookEvent};
+use super::{AgentLoop, EventSink, LoopEvent, TurnResult, dump_args, emit, trace};
+use crate::hooks::{HookEvent, run_matching_hooks};
 use crate::tools::python_check;
 use crate::turn_context::TurnContextRequest;
 
@@ -177,7 +177,7 @@ pub(super) async fn run(
                         iteration + 1,
                         state,
                         tokio::time::Instant::now() >= deadline,
-                    )
+                    );
                 }
             };
         if looks_like_text_tool_calls(&response) {
@@ -269,7 +269,9 @@ pub(super) async fn run(
                 }
             }
             if let Some(reason) = python_check::failure(&agent.tools.ctx) {
-                let note = format!("Completion rejected: {reason}. Repair edited Python files and pass syntax validation before finishing. The latest runtime syntax verification contains the current path/error evidence.");
+                let note = format!(
+                    "Completion rejected: {reason}. Repair edited Python files and pass syntax validation before finishing. The latest runtime syntax verification contains the current path/error evidence."
+                );
                 if !prompt.runtime_notes.contains(&note) {
                     prompt.runtime_notes.push(note);
                 }
@@ -460,6 +462,58 @@ pub(super) async fn run(
                 .check_snapshots
                 .insert(response.tool_calls[0].id.clone(), (before, after));
         }
+        let used_calls = iteration + 1 + state.compaction_calls + state.verification_budget.calls;
+        let remaining_calls = max_model_calls.saturating_sub(used_calls);
+        let warn_threshold = (max_model_calls * 3 / 10).max(2);
+        let modified_lib_source = agent.last_files_touched.iter().any(|f| {
+            let norm = f.replace('\\', "/");
+            !super::is_scratch_file(&norm)
+                && !norm.starts_with("tests/")
+                && !norm.contains("/tests/")
+                && agent.tools.ctx.workspace.join(f).is_file()
+        });
+        let ran_pytest = response.tool_calls.iter().any(|tc| {
+            matches!(tc.name.as_str(), "shell" | "bash")
+                && tc
+                    .arguments
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|c| c.contains("pytest"))
+        });
+        if let Some(last) = agent.session.messages.last_mut() {
+            if last.get("role").and_then(Value::as_str) == Some("tool") {
+                if let Some(text) = last.get("content").and_then(Value::as_str) {
+                    let mut notices: Vec<String> = Vec::new();
+                    if modified_lib_source
+                        && ran_pytest
+                        && text.trim_end().ends_with("Exit code: 0")
+                    {
+                        notices.push(
+                            "[Verification notice: Targeted pytest passed (Exit code: 0) after modifying library source files. Remove any temporary scratch files if present and provide your concise final summary now; do not run full test suites or linters.]"
+                                .to_string(),
+                        );
+                    }
+                    if max_model_calls >= 6 && (1..=warn_threshold).contains(&remaining_calls) {
+                        if remaining_calls <= 2 {
+                            notices.push(format!(
+                                "[Runtime budget notice: {remaining_calls} model call(s) remaining in this turn (model_call {used_calls}/{max_model_calls}, tool_calls {}/{}). Wrap up any scratch files and provide your final answer now.]",
+                                state.tools_used.len(),
+                                agent.task_budget.max_tool_calls,
+                            ));
+                        } else {
+                            let pct = (remaining_calls * 100) / max_model_calls;
+                            notices.push(format!(
+                                "[Runtime budget notice: {remaining_calls} model calls remaining (~{pct}% of turn budget, model_call {used_calls}/{max_model_calls}). Complete your minimal fix, verify once with a targeted pytest command, and finish immediately without running full test suites or linters.]"
+                            ));
+                        }
+                    }
+                    if !notices.is_empty() {
+                        last["content"] =
+                            Value::String(format!("{text}\n\n{}", notices.join("\n")));
+                    }
+                }
+            }
+        }
     }
 
     model_budget_result(agent, max_model_calls, state)
@@ -593,7 +647,11 @@ async fn request_model(
     } else {
         agent.tools.schemas_for_query(&prompt.tool_query)
     };
-    let mut notes = vec![budget_note(agent, iteration + 1, state.tools_used.len())];
+    // Keep the system-prefix budget header static across iterations so the
+    // provider KV-cache prefix (system + notes + prior conversation messages)
+    // stays intact; dynamic low-budget warnings are appended to the latest tool
+    // result tail instead.
+    let mut notes = vec![budget_note(agent, 1, 0)];
     #[cfg(windows)]
     notes.push(
         "Runtime platform: Windows. The shell tool runs through Windows cmd.exe. Never use heredoc (<<), tail, head, or wc. Put multiline Python in a temporary script via apply_patch, or use PowerShell-compatible commands."
@@ -983,14 +1041,25 @@ fn add_usage(target: &mut BTreeMap<String, i64>, usage: &BTreeMap<String, i64>) 
     }
 }
 
+fn focused_recall_query(query: &str) -> &str {
+    if let Some(idx) = query
+        .find("GitHub issue #")
+        .or_else(|| query.find("Issue:"))
+    {
+        return &query[idx..];
+    }
+    query
+}
+
 fn memory_recall(
     memory: &Option<std::rc::Rc<crate::memory::MemoryStore>>,
     query: &str,
     max_entries: usize,
     max_chars: usize,
 ) -> crate::memory::MemoryRecall {
+    let focused = focused_recall_query(query);
     memory
         .as_ref()
-        .map(|store| store.recall_with_feedback(query, max_entries, max_chars))
+        .map(|store| store.recall_with_feedback(focused, max_entries, max_chars))
         .unwrap_or_default()
 }

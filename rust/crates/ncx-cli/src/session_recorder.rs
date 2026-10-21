@@ -274,8 +274,10 @@ pub(crate) fn emit_usage_line(usage: &std::collections::BTreeMap<String, i64>) {
     let prompt = usage.get("prompt_tokens").copied().unwrap_or(0);
     let completion = usage.get("completion_tokens").copied().unwrap_or(0);
     eprintln!(
-        "[ncx-usage] prompt_tokens={prompt} completion_tokens={completion} total_tokens={}",
-        prompt + completion
+        "[ncx-usage] prompt_tokens={prompt} completion_tokens={completion} total_tokens={} prompt_cache_hit_tokens={} prompt_cache_miss_tokens={}",
+        prompt + completion,
+        usage.get("prompt_cache_hit_tokens").copied().unwrap_or(0),
+        usage.get("prompt_cache_miss_tokens").copied().unwrap_or(0),
     );
 }
 
