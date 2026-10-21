@@ -171,6 +171,13 @@ impl PolicyExecutor {
                 }
                 let _ = child.start_kill();
                 let _ = child.wait().await;
+                // Output the child wrote just before the kill can still sit
+                // unread in the pipes. Drain it, bounded in case an escaped
+                // descendant keeps a pipe open.
+                tokio::join!(
+                    drain_remaining(stdout_pipe.as_mut(), &mut out),
+                    drain_remaining(stderr_pipe.as_mut(), &mut err),
+                );
                 ExecResult {
                     exit_code: 124,
                     timed_out: true,
@@ -180,6 +187,17 @@ impl PolicyExecutor {
                 }
             }
         }
+    }
+}
+
+/// Upper bound for reading what is left in a pipe after a timeout kill.
+const POST_KILL_DRAIN: Duration = Duration::from_millis(500);
+
+/// Append whatever is still buffered in `pipe` to `buf`, giving up after
+/// `POST_KILL_DRAIN` if a writer keeps the pipe open.
+async fn drain_remaining<R: tokio::io::AsyncRead + Unpin>(pipe: Option<&mut R>, buf: &mut Vec<u8>) {
+    if let Some(pipe) = pipe {
+        let _ = timeout(POST_KILL_DRAIN, pipe.read_to_end(buf)).await;
     }
 }
 
@@ -420,6 +438,30 @@ mod tests {
         assert!(result.ok(), "{}", result.render());
         assert!(result.stdout.contains(&"o".repeat(1_000_000)));
         assert!(result.stderr.contains(&"e".repeat(1_000_000)));
+    }
+
+    #[tokio::test]
+    async fn post_kill_drain_recovers_unread_output() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, mut reader) = tokio::io::duplex(1024);
+        writer.write_all(b"last-words\n").await.unwrap();
+        drop(writer);
+        let mut buf = b"earlier\n".to_vec();
+        drain_remaining(Some(&mut reader), &mut buf).await;
+        assert_eq!(buf, b"earlier\nlast-words\n");
+    }
+
+    #[tokio::test]
+    async fn post_kill_drain_is_bounded_when_a_writer_stays_open() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, mut reader) = tokio::io::duplex(1024);
+        writer.write_all(b"partial").await.unwrap();
+        let started = std::time::Instant::now();
+        let mut buf = Vec::new();
+        drain_remaining(Some(&mut reader), &mut buf).await;
+        assert!(started.elapsed() < POST_KILL_DRAIN * 4);
+        assert_eq!(buf, b"partial");
+        drop(writer);
     }
 
     #[tokio::test]

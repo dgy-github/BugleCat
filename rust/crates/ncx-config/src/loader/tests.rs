@@ -558,6 +558,13 @@ fn jev_mode_defaults_off_loads_from_file_and_legacy_env_wins() {
         load(&env1("NCX_JEV_MODE", " Enforce ")).unwrap().jev_mode,
         "enforce"
     );
+    // An unrecognised legacy env value is ignored, not fatal; a valid alias
+    // after it still applies.
+    let stray = load(&env1("NCX_JEV_MODE", "1")).unwrap();
+    assert_eq!(stray.jev_mode, "shadow");
+    let mut both = env1("NCX_JEV_MODE", "yes");
+    both.insert("NANOCODEX_JEV_MODE".into(), "enforce".into());
+    assert_eq!(load(&both).unwrap().jev_mode, "enforce");
 
     write(
         &paths.nanocodex,

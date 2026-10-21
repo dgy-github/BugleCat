@@ -421,6 +421,17 @@ pub(crate) fn load_config_impl(
     for (field, env_keys) in env_map {
         for env_key in *env_keys {
             if let Some(v) = env.get(*env_key).filter(|v| !v.is_empty()) {
+                // A stray legacy Jev variable used to mean "off"; keep it from
+                // failing every config load. Invalid file values still fail.
+                if *field == "jev_mode"
+                    && !crate::VALID_JEV_MODES.contains(&v.trim().to_lowercase().as_str())
+                {
+                    eprintln!(
+                        "warning: ignoring {env_key}={v:?}; expected one of {:?}",
+                        crate::VALID_JEV_MODES
+                    );
+                    continue;
+                }
                 merged.insert(field.to_string(), v.clone());
                 break;
             }
