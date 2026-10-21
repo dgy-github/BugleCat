@@ -237,7 +237,17 @@ pub(crate) async fn run_shell(
     justification: &str,
     needs_escalation: bool,
 ) -> String {
-    let executor = PolicyExecutor::new();
+    // Commands the policy layer considers in-sandbox also run under OS write
+    // isolation. A command that needed escalation only reaches this point
+    // after it was approved (or pre-allowed), so it runs unconfined, as does
+    // an approved retry below.
+    let sandboxed = PolicyExecutor::for_policy(&ctx.policy);
+    let unconfined = PolicyExecutor::new();
+    let executor = if needs_escalation {
+        &unconfined
+    } else {
+        &sandboxed
+    };
     let pre_allowed = ctx.session_grants.borrow().commands.contains(command);
     // Under `on-failure`, `Approver::classify` defers prompting until the
     // initial sandboxed attempt fails. If the command violates the sandbox
@@ -261,7 +271,7 @@ pub(crate) async fn run_shell(
     {
         let mut extra_env = HashMap::new();
         extra_env.insert("NCX_SANDBOX_ESCALATED".to_string(), "1".to_string());
-        result = executor
+        result = unconfined
             .run_with_env(command, workdir, timeout, &extra_env)
             .await;
     }

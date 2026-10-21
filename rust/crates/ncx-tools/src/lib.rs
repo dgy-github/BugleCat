@@ -18,9 +18,11 @@ pub mod patch;
 pub mod pty;
 pub mod read_file;
 pub mod text_encoding;
+#[cfg(windows)]
+mod win_sandbox;
 
 pub use detect::looks_read_only;
-pub use executor::{ExecResult, PolicyExecutor};
+pub use executor::{ExecResult, PolicyExecutor, WriteIsolation};
 pub use managed::{ManagedProcess, ProcessOutputChunk, ProcessSnapshot};
 pub use patch::{apply_patch, parse_patch, ActionType, ApplyOutcome, FileAction, PatchError};
 pub use pty::{PtyOutputChunk, PtyProcess, PtySnapshot};

@@ -91,7 +91,14 @@ impl Tool for BackgroundStartTool {
             .and_then(Value::as_u64)
             .unwrap_or(ctx.timeout_s)
             .clamp(1, MAX_BACKGROUND_TIMEOUT_S);
-        let process = match PolicyExecutor::new().spawn_managed(command, &workdir) {
+        // Same rule as `shell`: in-sandbox commands run under OS write
+        // isolation; approved escalations run unconfined.
+        let executor = if escalation {
+            PolicyExecutor::new()
+        } else {
+            PolicyExecutor::for_policy(&ctx.policy)
+        };
+        let process = match executor.spawn_managed(command, &workdir) {
             Ok(process) => process,
             Err(message) => return error("SPAWN_FAILED", &message),
         };

@@ -2,15 +2,13 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::{Child, ChildStdin};
 use tokio::task::JoinHandle;
 
-use crate::executor::{command_with_env, PolicyExecutor};
+use crate::executor::{BoxedWriter, JobHandle, PolicyExecutor, RunningChild, SpawnedProcess};
 use crate::output_buffer::{OutputRingBuffer, SequencedChunk};
 use crate::text_encoding::Utf8StreamDecoder;
 
@@ -39,42 +37,40 @@ pub struct ProcessSnapshot {
 }
 
 pub struct ManagedProcess {
-    child: Child,
-    stdin: Option<ChildStdin>,
+    child: RunningChild,
+    stdin: Option<BoxedWriter>,
     output: Arc<Mutex<OutputRingBuffer<ProcessOutputChunk>>>,
     readers: Vec<JoinHandle<()>>,
     exit_code: Option<i32>,
-    #[cfg(windows)]
-    job: Option<crate::executor::win_job::Job>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    job: Option<JobHandle>,
 }
 
 impl PolicyExecutor {
     /// Spawn a command that remains contained while callers poll its lifecycle.
     pub fn spawn_managed(&self, command: &str, cwd: &Path) -> Result<ManagedProcess, String> {
-        let mut process = command_with_env(command, cwd, &HashMap::new());
-        process
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = process
-            .spawn()
-            .map_err(|error| format!("spawn failed: {error}"))?;
-        #[cfg(windows)]
-        let job = child
-            .id()
-            .and_then(|pid| crate::executor::win_job::Job::contain(pid, self.active_process_limit));
-        let stdin = child.stdin.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "managed process stdout was not piped".to_string())?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| "managed process stderr was not piped".to_string())?;
+        let SpawnedProcess {
+            child,
+            stdin,
+            stdout,
+            stderr,
+            job,
+            sandbox_note,
+        } = self.spawn_process(command, cwd, &HashMap::new(), true)?;
+        let stdout = stdout.ok_or_else(|| "managed process stdout was not piped".to_string())?;
+        let stderr = stderr.ok_or_else(|| "managed process stderr was not piped".to_string())?;
         let output = Arc::new(Mutex::new(OutputRingBuffer::default()));
         let sequence = Arc::new(AtomicU64::new(1));
+        if !sandbox_note.is_empty() {
+            output.lock().unwrap().push(ProcessOutputChunk {
+                seq: sequence.fetch_add(1, Ordering::Relaxed),
+                stream: "stderr",
+                text: format!(
+                    "[sandbox] {sandbox_note}
+"
+                ),
+            });
+        }
         let readers = vec![
             spawn_reader(stdout, "stdout", output.clone(), sequence.clone()),
             spawn_reader(stderr, "stderr", output.clone(), sequence),
@@ -85,7 +81,6 @@ impl PolicyExecutor {
             output,
             readers,
             exit_code: None,
-            #[cfg(windows)]
             job,
         })
     }
@@ -97,8 +92,7 @@ impl ManagedProcess {
             self.exit_code = self
                 .child
                 .try_wait()
-                .map_err(|error| format!("process status failed: {error}"))?
-                .map(|status| status.code().unwrap_or(1));
+                .map_err(|error| format!("process status failed: {error}"))?;
             if self.exit_code.is_some() {
                 for reader in self.readers.drain(..) {
                     let _ = reader.await;
@@ -134,7 +128,7 @@ impl ManagedProcess {
         if let Some(job) = &self.job {
             job.terminate();
         }
-        let _ = self.child.start_kill();
+        self.child.start_kill();
         self.stdin = None;
     }
 }
@@ -208,5 +202,46 @@ mod tests {
             .chunks
             .iter()
             .any(|chunk| chunk.text.contains("managed_ok")));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn managed_process_runs_confined_with_stdin() {
+        let workspace = std::env::temp_dir().join(format!("ncx-managed-ws-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).unwrap();
+        let executor = PolicyExecutor {
+            write_isolation: Some(crate::WriteIsolation {
+                writable_roots: vec![workspace.clone()],
+            }),
+            ..PolicyExecutor::new()
+        };
+        let mut process = executor
+            .spawn_managed(
+                "set /p LINE= & call echo got %LINE% > out.txt & type out.txt",
+                &workspace,
+            )
+            .unwrap();
+        process
+            .write_stdin(
+                "managed_in
+",
+            )
+            .await
+            .unwrap();
+        let mut snapshot = process.poll(0).await.unwrap();
+        for _ in 0..250 {
+            if !snapshot.running {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            snapshot = process.poll(0).await.unwrap();
+        }
+        let text: String = snapshot.chunks.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(snapshot.exit_code, Some(0), "{text}");
+        assert!(!text.contains("[sandbox]"), "{text}");
+        assert!(text.contains("got managed_in"), "{text}");
+        drop(process);
+        let _ = std::fs::remove_dir_all(&workspace);
     }
 }

@@ -72,7 +72,7 @@ impl PolicyExecutor {
         #[cfg(windows)]
         let job = child
             .process_id()
-            .and_then(|pid| crate::executor::win_job::Job::contain(pid, self.active_process_limit));
+            .and_then(|pid| crate::executor::win_job::Job::contain(pid, &self.job_limits()));
         let reader = pair
             .master
             .try_clone_reader()
