@@ -1,0 +1,230 @@
+[
+ {
+  "sha": "e48000a5d7",
+  "issue": 785,
+  "subject": "Add EXTENSION as keyword (fixes #785).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "8c24779e02",
+  "issue": 542,
+  "subject": "Improve formatting of statements with JSON operators (fixes #542).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "5bb129d3fc",
+  "issue": 730,
+  "subject": "Thread-safe initialization of Lexer class (fixes #730).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "115e208bd3",
+  "issue": 742,
+  "subject": "Add option to remove trailing semicolon when splitting (fixes #742).",
+  "reason": "too many source files (4)"
+ },
+ {
+  "sha": "b90e422b06",
+  "issue": 732,
+  "subject": "Add reminder for github release (fixes #732).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "8157d16539",
+  "issue": 726,
+  "subject": "Add classifier for Python 3.11 (fixes #726).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "fc76056fb8",
+  "issue": 709,
+  "subject": "Cleanup regex for detecting keywords (fixes #709).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "8b789f286e",
+  "issue": 685,
+  "subject": "Switch to pyproject.toml (fixes #685).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "0bbfd5f832",
+  "issue": 677,
+  "subject": "Add DISTINCTROW keyword (fixes #677).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "63885dd5f1",
+  "issue": 584,
+  "subject": "Add ELSIF as keyword (fixes #584).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "ab53a4b25f",
+  "issue": 586,
+  "subject": "Remove debug print statement (fixes #586).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "6914a8259d",
+  "issue": 439,
+  "subject": "Refactored extract column defs example (fixes #439, #411, #526).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "5a3164d8db",
+  "issue": 491,
+  "subject": "Optimize parsing of literal blocks between dollar signs (fixes #491).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "5076be029a",
+  "issue": 485,
+  "subject": "Fixes #485",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "3f2ee7b32f",
+  "issue": 485,
+  "subject": "Fixes #485",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "71fd89b23d",
+  "issue": 485,
+  "subject": "Fixes #485",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "53dd1d566a",
+  "issue": 425,
+  "subject": "Fix issue with strip_comments causing a syntax error (fixes #425, by fredyw).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "3853a076c6",
+  "issue": 372,
+  "subject": "Update copyright header (fixes #372).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "7f2b6a831f",
+  "issue": 408,
+  "subject": "Add UPSERT keyword (fixes #408).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "b4121569a8",
+  "issue": 421,
+  "subject": "Add missing EXPLAIN keyword (fixes #421).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "7d91d361ad",
+  "issue": 344,
+  "subject": "Don't treat sysdate as a builtin (fixes #344).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "702468a314",
+  "issue": 296,
+  "subject": "Don't treat STATE as a keyword, it causes too much troubles (fixes #296).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "a6d372d524",
+  "issue": 315,
+  "subject": "Fix #315 support utf-8 by default",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "01da8ca24e",
+  "issue": 302,
+  "subject": "Fix CHANGELOG include (fixes #302).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "f0754a6b65",
+  "issue": 297,
+  "subject": "Handle operator grouping after identifying typecasts (fixes #297).",
+  "reason": "tests unusable on fix commit"
+ },
+ {
+  "sha": "ee2cbfea19",
+  "issue": 294,
+  "subject": "Fix parsing of UNION ALL (fixes #294).",
+  "reason": "tests unusable on fix commit"
+ },
+ {
+  "sha": "e413b7867b",
+  "issue": 286,
+  "subject": "Revert \"Fix test failure on Python 3.6 (fixes #286).\"",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "a03e7fd681",
+  "issue": 286,
+  "subject": "Fix test failure on Python 3.6 (fixes #286).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "4d05b441fc",
+  "issue": 141,
+  "subject": "Add formatter option for comma first notation (fixes #141).",
+  "reason": "tests unusable on fix commit"
+ },
+ {
+  "sha": "4430c5c163",
+  "issue": 288,
+  "subject": "Correct license link (fixes #288).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "be953c0ed7",
+  "issue": 289,
+  "subject": "Drop coveralls it spams issues with comments (fixes #289).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "31830af635",
+  "issue": 284,
+  "subject": "Fix #284 as grouping",
+  "reason": "tests unusable on fix commit"
+ },
+ {
+  "sha": "83ca5c8ed2",
+  "issue": 277,
+  "subject": "Revert \"Parse double dollars (PostgreSQL) as literal strings (fixes #277).\"",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "2893bd1857",
+  "issue": 277,
+  "subject": "Parse double dollars (PostgreSQL) as literal strings (fixes #277).",
+  "reason": "tests unusable on fix commit"
+ },
+ {
+  "sha": "b7e6ce7b7f",
+  "issue": 275,
+  "subject": "Add missing documentation (fixes #275).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "55a7d3ef1e",
+  "issue": 273,
+  "subject": "Fix parsing of streams (fixes #273).",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "9ab1464ea9",
+  "issue": 101,
+  "subject": "Improve identifier parsing when identifier is a literal combined with order keyword (fixes #101).",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "c63737f9d2",
+  "issue": 230,
+  "subject": "Fix #230 (function comparison grouping)",
+  "reason": "some tests fail even on fix commit (env drift)"
+ }
+]

@@ -1,0 +1,6 @@
+# Gold-patch validation (2026-10-20): applying fix_commit's src files on base_commit
+# and running replay.judge(). Tasks listed here FAIL even with the official fix and
+# must be excluded from every curriculum.
+sqlparse-580
+sqlparse-581
+sqlparse-784

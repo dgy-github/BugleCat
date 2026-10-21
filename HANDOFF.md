@@ -33,6 +33,59 @@
   - "第一轮 6 项"中，`strip_diff_fence`、`--ignored=no` 指纹、`OutcomeVerdict::is_negative_verdict`、`MemoryReviewCard` 在代码里都找不到。`post_edit_diagnostics`（文件名是 `tools/post_edit_diagnostics.rs`，不是 `diagnostics.rs`）和 `output_offload` 来自更早的 `ac89137` / `59e3dd4`，不是该轮的改动。
   - "第二轮"中的 `MessageList.tsx`、`OutcomeDashboardCard.tsx` 不存在。实际实现是 `ConversationView.svelte` 的评价按钮，以及 `WorkspacePanels.svelte` / `AppUtilityPanels.svelte` 中的报表。
   - 10-19 沙箱一节列出的拦截清单（`Remove-Item -Recurse -Force`、`git reset --hard`、`git clean -fd` 等），在 88f0d21 中并未实现，到本节才补上。
+- **对 10-20 实验结论的统计说明**：修复后 2 轮的结果是 B 11/16、A 9/16，每组只有 16 题，差 2 题在单轮约 ±1 题的噪声内，不能写成"解决率高出 +12.5 个百分点"。前一轮同类结论已经自我更正过一次。建议在增加轮次或题数之前标为"未定论"；成本节约 13% 同理。
+
+### 2026-10-20：“智能复利”真实仓库时序回放实验（`sqlparse` A/B 对照）+ 记忆提炼瘦身与穿越封堵
+
+- **实验设计与评测基建（`evals/compounding_replay/`）**
+  - 以真实开源仓库 `andialbrecht/sqlparse` 的历史 Issue 按修复时间顺序回放（[`tasks/sqlparse.jsonl`](evals/compounding_replay/tasks/sqlparse.jsonl)、[`replay.py`](evals/compounding_replay/replay.py)），严格遵循 **单轮预算上限 ≤ 2.00 CNY、单题成本帽 0.30 CNY**。
+  - 每题通过 `git archive <base_commit>` 重建无历史泄漏的单提交工作区；Agent 退出后才拷入隐藏的 `fail_to_pass` / `pass_to_pass` 测试执行裁判（`judge()`）。
+  - **Arm A（无复利基线）**：`feedback.memory = "off"`，每题清空 `.ncx/` 与 `.nanocodex/` 状态；
+  - **Arm B（跨题记忆复利）**：`feedback.memory = "on"`，跨题保留 `.ncx/memory` 与 `.nanocodex/sessions/events.sqlite3`，并根据裁判 `verdict["resolved"]` 自动调用 `ncx -w <ws> --outcome-label <good|bad>` 完成验证门控与记忆反馈记分。
+- **三项基础链路修复（冒烟实验 `smoke1` → `smoke3` 验证）**
+  1. **Prompt Cache 前缀稳定化（[`rust/crates/ncx-core/src/agent_loop/turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs)）**：将系统前缀中的 `budget_note` 固定为静态预算头，动态低预算提醒改为仅在 `remaining_calls <= 2` 时追加至最后一个工具输出末尾。Prompt 缓存命中率从 **25% (`3,072` tokens)** 跃升至 **92.8% (`448,128 / 483,007` tokens)**，单题平均成本从 **0.464 CNY** 降至 **0.160 CNY**。
+  2. **Windows `cmd.exe` 引号保护与 `python_check` 临时文件清理（[`rust/crates/ncx-tools/src/executor.rs`](rust/crates/ncx-tools/src/executor.rs)、[`rust/crates/ncx-core/src/tools/python_check.rs`](rust/crates/ncx-core/src/tools/python_check.rs)）**：Windows 下改用 `.arg("/D").arg("/S").arg("/C").raw_arg(format!("\"chcp 65001>nul & {command}\""))`，解决 Rust CRT 参数转义将 `python -c "import ..."` 内层双引号变成 `\"` 导致语法报错的问题；`python_check` 校验前自动剔除已被删除的临时复现脚本，消除误判 `verification_failed: file missing`。
+  3. **跨题经验提炼、召回与验证门控回流（[`agent_loop.rs`](rust/crates/ncx-core/src/agent_loop.rs)、[`outcome.rs`](rust/crates/ncx-core/src/outcome.rs)、[`memory.rs`](rust/crates/ncx-core/src/memory.rs)、[`memory_index.rs`](rust/crates/ncx-core/src/memory_index.rs)）**：将 `remember` 纳入常驻可见工具并同步 `MemoryIndex`；在 `feedback.memory = "on"` 下自动提炼任务修改经验；`--outcome-label good` 确认候选并给召回笔记记 `accepted +1`，`--outcome-label bad` 自动从 `LEARNINGS.md` 与 `index.sqlite3` 撤回当轮未验证笔记并记 `rejected +1`。
+- **首轮正式 A/B 对照实验结果（`20261019-191154-A-r1` vs `20261019-191158-B-r1`）**
+  - **2.00 CNY 预算内完成题数与解决量**：
+    - **Arm A（无复利）**：跑完 **8 题**（花费 `1.851 CNY`），有效解决 **5 题**（`5/8 = 62.5%`，解决曲线 `[1, 1, 0, 1, 0, 1, 1, 0]`；其中 `#337` 花费 `0.416 CNY`、`#359` 花费 `0.302 CNY`、`#329` 花费 `0.447 CNY` 均因超出 `0.30 CNY` 单题帽失败）。
+    - **Arm B（跨题记忆复利）**：跑完 **9 题**（花费 `1.995 CNY`），有效解决 **7 题**（`7/9 = 77.8%`，前 8 同题为 `7/8 = 87.5%`，解决曲线 `[1, 1, 1, 1, 1, 1, 1, 0, 0]`），在相同 2 元预算内 **多解决 2 题（+40%）**。
+    - **前 7 题（`idx 0..6`）表现**：Arm B 实现 **`7/7` (100%)** 连续通关（累计 `1.314 CNY` / `417.3s`），对比 Arm A 的 `5/7` (71.4%，累计 `1.404 CNY` / `478.9s`)：其中 `#337` 成本从 `0.416 → 0.253 CNY`（-39%），`#359` 成本从 `0.302 → 0.225 CNY`（-26%）、耗时从 `160.8s → 79.0s`（-51%），`#349` 直接复用 `#324` 的 `sql.Where.M_CLOSE` 定位经验（输出 token 减少 31%）。
+- **⚠️ 噪声校准后更正（2026-10-20，补跑 A/B 各 2 轮，新版二进制含记忆瘦身 + pip 封堵）**
+  - 8 题解决数：A `r1(旧)=5`、`r2=6`、`r3=6`；B `r1(旧)=7`、`r2=5`、`r3=6`。新版同条件 A 均值 6.0，B 均值 5.5；花费 A ≈1.90、B ≈1.96 CNY/轮。
+  - 单轮噪声约 ±1 题（5～7/8），上文 “B 多解决 2 题 / +40%” 落在噪声内，**不成立**；目前**没有证据**表明跨题记忆在此课程上提升解决率。
+  - 逐题：`#324/#349/#446` 6 轮全过，`#329` 6 轮全挂，只有 `#327/#337/#359/#425` 4 题在波动——有区分度的题太少，8 题课程无法检出 <25pt 的效应。
+  - 记忆瘦身本身生效：8 题后笔记数 18 → 6～8 条，无 `python -c`/`pip` 流水账；但召回仍每题注入 6～8 条（相关性门槛未做）。
+- **同主题课程（方案 2，`sqlparse.split()` 切分，2026-10-20）**
+  - 裁判 bug：`#532` 起题库测试 ID 带 `evals.compounding_replay..cache.sqlparse.` 前缀，与运行结果对不上 → 新增 `_norm_tid` 两侧归一化。gold 验证 34/37 有效，`#580/#581/#784` 打上官方修复仍失败，列入 `curricula/INVALID_TASKS.txt`。修复前的切分 4 轮作废；前 8 题课程不受影响。
+  - 有效课程 `curricula/sqlparse_split.txt`：`#496 #583 #588 #762 #812 #809 #826 #845`（按修复时间）。
+  - 前 7 题解决数：A `4, 4`，B `5, 4`；前 7 题花费 A `1.90, 1.81`，B `1.63, 1.75`。B 多 0.5 题（噪声内），便宜约 8%（样本太少，未定论）。
+  - 失败主因是单题成本帽：`#809` 4 轮 f2p 全过、0 回归，但每轮都 >0.30 CNY 判败；`#762` 4 轮全挂。
+  - 预算护栏 bug：此前改成“按均值预估”导致 B-s1 花到 2.198 CNY 超预算，已恢复为 `max(task_cap, 均值)`。
+- **收尾收敛与记忆质量 4 项核心修复及 `split-v2` 2 轮对照实测（2026-10-20）**
+  - **4 项根因修复**：
+    1. **收尾收敛提示与 30% 预算预警（[`turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs)、[`replay.py`](evals/compounding_replay/replay.py)）**：修改库源码后只要定向 `pytest` 通过（`Exit code: 0`），立即在工具返回末尾追加收敛提示（无需跑全量测试或 `flake8`/`tox`）；预算提醒从剩余 `<= 2` 次提前至剩余约 30%（`warn_threshold = 6/20`），且仅追加在最新 `tool` 消息末尾，保持前缀 100% 静态、缓存命中率不变。
+    2. **消除空壳笔记并附带 Git Diff 代码摘要（[`agent_loop.rs`](rust/crates/ncx-core/src/agent_loop.rs)）**：`synthesize_task_experience_note` 优先聚焦非 `tests/` 库文件，并新增 `extract_git_diff_summary` 提取 `@@ ... @@` 函数上下文与核心 `+/-` 行，彻底消除因 `task_budget` 未生成终答导致的空壳笔记。
+    3. **召回相关性门槛（[`memory.rs`](rust/crates/ncx-core/src/memory.rs)）**：在 `feedback.memory = "on"` 下要求 `overlap >= 8`（至少命中 1 个模块 tag 或 2 个关键词），不再凭时间戳把 `overlap == 0` 的无关笔记塞满 8 槽位。
+    4. **负向反馈按修改文件精确归因（[`outcome.rs`](rust/crates/ncx-core/src/outcome.rs)）**：新增 `filter_attributed_note_ids`，当任务失败时仅对涉及当前修改文件 stem 的笔记记 `rejected + 1`，避免跨模块误伤。
+  - **修复后 2 轮（r1 + r2）实测汇总对比（8 题有效 `split` 课程，单轮 ≤ 2.0 CNY）**：
+    - **撞 20 步上限比例（`exit_code = 1`）**：从修复前的 **55%（34/62）** 彻底降至 **3.1%（1/32，两轮共 32 任务仅 1 题超时）**。
+    - **解决率与复利优势（r1 + r2 累计 16 题/组）**：
+      - **Arm A（无记忆）**：解决 **9/16（56.3%）**，各轮解题数 `r1=5, r2=4`；总花费 **3.453 CNY**（均价 `0.216 CNY/题`）。
+      - **Arm B（复利记忆）**：解决 **11/16（68.8%）**，各轮解题数 `r1=5, r2=6`（**解决率高出 +12.5 个百分点**，r2 净胜 2 题）；总花费 **2.997 CNY**（均价 `0.187 CNY/题`，**两轮累计节约 0.456 CNY / -13.2%**）。
+    - **同模块复利加速度**：
+      - `#583`：A 组 1/2（50%，均价 0.294 CNY）vs B 组 **2/2（100%，均价 0.106 CNY，成本 -64%）**；
+      - `#809`（继 `#812` 后）：A 组 0/2 全因超成本帽判败（均价 0.358 CNY）；B 组在 r2 凭借先验定位 **50.6s / 0.151 CNY 通关**，成功解除成本帽卡点。
+- **实验暴露的 3 个负复利/噪声瓶颈与针对性治理（本轮已落地）**
+  1. **剔除 `tags:recovery` 一次性 `python -c` / `pytest` 语法试错流水账（[`rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs`](rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs)）**：
+     - 原因：Arm B 沉淀的 18 条笔记中有 12 条（67%）是单次 `python -c` 报错、`pytest` 断言失败或 `git stash` 的同目标重试流水账，满 14 条后挤占了 8 个召回槽位。
+     - 修复：新增 [`reusable_shell_environment_note`](rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs)，过滤掉所有 `python -c`、`pytest`、`git` 试错及 `pip` 命令，仅保留跨题通用的环境约束（如 Windows `cmd.exe` 禁用 `<<` heredoc 与 `tail/head/wc`）并归一化为幂等文本。
+  2. **修复 `GitHub issue #<num>:` 标题提取与消除固定 Prompt 前缀污染（[`rust/crates/ncx-core/src/agent_loop.rs`](rust/crates/ncx-core/src/agent_loop.rs)、[`rust/crates/ncx-core/src/agent_loop/turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs)）**：
+     - 原因：回放 Prompt 固定首行 `"You are working in a checkout of the andialbrecht/sqlparse Python project..."` 此前被误作任务标题写入每条笔记，且通用标签 `sqlparse,tests,regressions` 与固定模板词高频重合，导致第 4～8 题无差别召回全部笔记。
+     - 修复：新增 [`extract_issue_summary`](rust/crates/ncx-core/src/agent_loop.rs) 解析 `GitHub issue #<num>:` 及其后首行问题标题（如 `"#324: keyword INTO is not parsed properly"`），通过 [`is_scratch_file`](rust/crates/ncx-core/src/agent_loop.rs) 过滤 `debug*.py` / `temp*` 临时文件，生成模块级精简标签（剔除顶层包名 `sqlparse` 及 `tests`/`regressions`）；同时在 [`turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs) 新增 [`focused_recall_query`](rust/crates/ncx-core/src/agent_loop/turn.rs) 剥离固定模板头部后再检索记忆。
+  3. **封堵 `python -m pip download / install` 历史穿越漏洞（[`rust/crates/ncx-sandbox/src/approval.rs`](rust/crates/ncx-sandbox/src/approval.rs)、[`evals/compounding_replay/replay.py`](evals/compounding_replay/replay.py)）**：
+     - 原因：沙箱此前仅拦截 `pip install/download`，Agent 改用 `python -m pip download sqlparse` 绕过拦截下载新版 wheel 并被记入恢复笔记。
+     - 修复：在 [`command_uses_network`](rust/crates/ncx-sandbox/src/approval.rs) 中补齐对 `python/python3/py -m pip|pip3|uv install|download|wheel` 及内联网络调用（`urllib.request`、`http.client`、`requests.get`、`pip.main`、`pip._internal`）的识别；同时在 [`replay.py`](evals/compounding_replay/replay.py) 注入 `PIP_NO_INDEX=1` 与 Prompt 禁令。
 
 ### 2026-10-19：沙箱与审批机制全链路加固（A1–A5）+ 跨 Crate 冗余清理（B1–B3）
 
