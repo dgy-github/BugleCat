@@ -906,6 +906,18 @@ pub fn primary_outcomes_for_session(
     )
 }
 
+/// The outcome recorded under exactly `task_id`, if any.
+pub fn outcome_by_task_id(
+    store: &ContextStore,
+    task_id: &str,
+) -> Result<Option<TaskOutcome>, String> {
+    Ok(
+        parse_outcomes(store.task_events_by_type(task_id, EventType::TaskOutcome)?)
+            .into_iter()
+            .last(),
+    )
+}
+
 /// Most recent primary outcome recorded under `session_id` (append order).
 pub fn latest_primary_outcome(
     store: &ContextStore,

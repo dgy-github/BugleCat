@@ -211,6 +211,7 @@ pub(super) async fn run(input: GoalTurnInput) {
                     "completed".into()
                 },
                 usage: serde_json::to_value(aggregate_usage).unwrap_or(Value::Null),
+                task_id: None,
             },
         );
     }

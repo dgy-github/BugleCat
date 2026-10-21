@@ -3553,12 +3553,42 @@ fn get_outcome_report(
     })
 }
 
+/// Which task a rating applies to. A per-answer rating names its task and
+/// never falls back to another task when that one is missing; only `/outcome`
+/// (no task id) means "the latest task" of the session or workspace.
+fn outcome_label_target(
+    store: &ncx_core::ContextStore,
+    session_id: Option<&str>,
+    task_id: Option<&str>,
+) -> Result<ncx_core::TaskOutcome, String> {
+    if let Some(tid) = task_id.filter(|s| !s.trim().is_empty()) {
+        let outcome = ncx_core::outcome_by_task_id(store, tid)?
+            .ok_or_else(|| format!("找不到任务 {tid} 的结果记录，未记录评价"))?;
+        if outcome.role != ncx_core::TaskRole::Primary {
+            return Err(format!("任务 {tid} 不是主任务，不能评价"));
+        }
+        return Ok(outcome);
+    }
+    let latest = if let Some(sid) = session_id.filter(|s| !s.trim().is_empty()) {
+        ncx_core::primary_outcomes_for_session(store, sid)?
+            .into_iter()
+            .last()
+    } else {
+        ncx_core::load_outcomes_and_followups(store, None)?
+            .0
+            .into_iter()
+            .rev()
+            .find(|o| o.role == ncx_core::TaskRole::Primary)
+    };
+    latest.ok_or_else(|| "当前会话暂无可标记的主任务记录".to_string())
+}
+
 #[tauri::command]
 fn record_outcome_label(
     good: bool,
     note: Option<String>,
     session_id: Option<String>,
-    turn_index: Option<usize>,
+    task_id: Option<String>,
     expected_workspace: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
@@ -3570,29 +3600,7 @@ fn record_outcome_label(
         .map_err(|e| e.to_string())?;
         let db_path = ncx_core::workspace_events_db_path(workspace, None);
         let store = ncx_core::ContextStore::open(db_path)?;
-        let last = if let Some(sid) = session_id.as_deref().filter(|s| !s.trim().is_empty()) {
-            let primaries = ncx_core::primary_outcomes_for_session(&store, sid)?;
-            if let Some(idx) = turn_index {
-                let target_turn_id = (idx as u64) + 1;
-                primaries
-                    .iter()
-                    .find(|o| o.turn_id == target_turn_id)
-                    .cloned()
-                    .or_else(|| primaries.get(idx).cloned())
-                    .or_else(|| primaries.into_iter().last())
-            } else {
-                primaries.into_iter().last()
-            }
-        } else {
-            let (outcomes, _) = ncx_core::load_outcomes_and_followups(&store, None)?;
-            outcomes
-                .into_iter()
-                .rev()
-                .find(|o| o.role == ncx_core::TaskRole::Primary)
-        };
-        let Some(last) = last else {
-            return Err("当前会话暂无可标记的主任务记录".to_string());
-        };
+        let last = outcome_label_target(&store, session_id.as_deref(), task_id.as_deref())?;
         let memory = MemoryStore::new(workspace.join(".ncx").join("memory"));
         ncx_core::record_followup(
             &store,
@@ -5041,6 +5049,41 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rating_binds_to_the_named_task_and_never_falls_back() {
+        let store = ncx_core::ContextStore::open_in_memory().unwrap();
+        let outcome = |task_id: &str, turn_id: u64, role: ncx_core::TaskRole| {
+            serde_json::from_value::<ncx_core::TaskOutcome>(serde_json::json!({
+                "task_id": task_id, "parent_task_id": null, "session_id": "s1",
+                "turn_id": turn_id, "role": role, "authority": "direct_human",
+                "category": "feature", "query_hash": "h", "model": "m",
+                "fast_model": null, "permission_mode": "default", "route": null,
+                "terminal_state": "Completed", "stop_reason": "completed",
+                "verification": "skipped", "iterations": 1, "tool_calls": 0,
+                "tools_used": [], "approvals_requested": 0, "approvals_denied": 0,
+                "user_questions": 0, "recalled_note_ids": [], "files_touched": [],
+                "workspace_revision": null,
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "duration_ms": 1, "timestamp_ms": turn_id
+            }))
+            .unwrap()
+        };
+        for o in [
+            outcome("s1:turn-1", 1, ncx_core::TaskRole::Primary),
+            outcome("s1:turn-2", 2, ncx_core::TaskRole::GoalRound),
+            outcome("s1:turn-3", 3, ncx_core::TaskRole::Primary),
+        ] {
+            ncx_core::append_task_outcome(&store, &o).unwrap();
+        }
+        let pick = |tid: Option<&str>| outcome_label_target(&store, Some("s1"), tid);
+        assert_eq!(pick(Some("s1:turn-1")).unwrap().task_id, "s1:turn-1");
+        // Unknown or non-primary tasks are refused, not redirected to turn-3.
+        assert!(pick(Some("s1:turn-9")).unwrap_err().contains("找不到任务"));
+        assert!(pick(Some("s1:turn-2")).unwrap_err().contains("不是主任务"));
+        // `/outcome` without a task id still means the latest primary task.
+        assert_eq!(pick(None).unwrap().task_id, "s1:turn-3");
+    }
+
     use super::*;
 
     fn frontend_source(source: &str) -> String {
@@ -5581,7 +5624,10 @@ mod tests {
         assert!(topbar.contains("activeView = \"trajectory\""));
         assert!(conversation.contains("trajectory-view"));
         assert!(conversation.contains("copyMessage(message.text, index)"));
-        assert!(conversation.contains("toggleFeedback(index, \"good\")"));
+        assert!(conversation.contains("rateAnswer(index, \"good\")"));
+        // Ratings bind to the recorded task id, never to a position guess.
+        assert!(conversation.contains("taskId,"));
+        assert!(!conversation.contains("turnIndex"));
         assert!(conversation.contains("forkCurrent"));
         assert!(composer.contains("{turnCount} 轮 · {stepCount} 步"));
         assert!(composer.contains("累计 ≈"));
@@ -6459,7 +6505,7 @@ mod tests {
         assert!(files.contains("\"list_dir\", { rel: relativePath, expectedWorkspace }"));
         assert!(files.contains("\"read_workspace_file\", { rel: entry.path, expectedWorkspace }"));
         let memory = frontend_source(include_str!("../../src/lib/memory-controller.svelte.ts"));
-        assert!(memory.contains("method: \"memoryList\",\n      params: { workspace },"));
+        assert!(memory.contains("method: \"memoryList\",\n        params: { workspace },"));
         assert!(memory.contains(
             "method: \"memoryMergeStatusRead\",\n        params: { workspace, generation },"
         ));

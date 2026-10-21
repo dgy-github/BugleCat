@@ -7,7 +7,7 @@
   type ReasoningMsg = { role: "reasoning"; text: string; settled: boolean };
   type Message =
     | { role: "user"; text: string; images?: string[] }
-    | { role: "assistant" | "note" | "compact"; text: string; model?: string; confirmedModel?: string; verification?: string }
+    | { role: "assistant" | "note" | "compact"; text: string; model?: string; confirmedModel?: string; verification?: string; taskId?: string }
     | { role: "orchestration"; stage: string; text: string }
     | { role: "orchestrator_activity"; worker: number; tool: string; phase: "started" | "finished"; failure?: string }
     | { role: "artifact"; kind: "image" | "video" | "file"; name: string; url: string }
@@ -46,6 +46,7 @@
 
   let copiedIndex = $state<number | null>(null);
   let feedback = $state<Record<number, "good" | "bad">>({});
+  let feedbackError = $state<Record<number, string>>({});
   let localPreviews = $state<Record<string, string | null>>({});
   let lastAssistantIndex = $derived.by(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -71,22 +72,30 @@
     } catch { /* Clipboard denial leaves the action unchanged. */ }
   }
 
-  function toggleFeedback(index: number, value: "good" | "bad") {
-    const next = { ...feedback };
-    if (next[index] === value) {
-      delete next[index];
-    } else {
-      next[index] = value;
-      const turnIndex = messages.slice(0, index).filter((m) => m.role === "assistant").length;
-      void invoke("record_outcome_label", {
+  function taskIdOf(message: Message): string | undefined {
+    return message.role === "assistant" ? message.taskId : undefined;
+  }
+
+  // Ratings are append-only labels on one recorded task: the button shows a
+  // rating only after the backend stored it, and an answer without a task
+  // record (restored history, goal runs) cannot be rated here.
+  async function rateAnswer(index: number, value: "good" | "bad") {
+    const taskId = taskIdOf(messages[index]);
+    if (!taskId || feedback[index] === value) return;
+    try {
+      await invoke("record_outcome_label", {
         good: value === "good",
         note: null,
         sessionId: sessionId || null,
-        turnIndex,
+        taskId,
         expectedWorkspace: workspace || null,
-      }).catch(() => {});
+      });
+      feedback = { ...feedback, [index]: value };
+      const { [index]: _cleared, ...rest } = feedbackError;
+      feedbackError = rest;
+    } catch (error) {
+      feedbackError = { ...feedbackError, [index]: String(error) };
     }
-    feedback = next;
   }
 
   function openArtifact(url: string) {
@@ -208,8 +217,9 @@
         {#if index !== streamingIdx}
           <div class="message-actions assistant-actions">
             <button onclick={() => copyMessage(visibleAssistantText(message.text), index)} title="复制回答">{copiedIndex === index ? "✓" : "▢"}</button>
-            <button class:on={feedback[index] === "good"} onclick={() => toggleFeedback(index, "good")} title="回答有帮助">♡</button>
-            <button class:on={feedback[index] === "bad"} onclick={() => toggleFeedback(index, "bad")} title="回答需改进">♧</button>
+            <button class:on={feedback[index] === "good"} disabled={!taskIdOf(message)} onclick={() => rateAnswer(index, "good")} title={taskIdOf(message) ? "回答有帮助" : "这条回答没有任务记录（历史或目标运行），可用 /outcome good|bad 评价最近一次任务"}>♡</button>
+            <button class:on={feedback[index] === "bad"} disabled={!taskIdOf(message)} onclick={() => rateAnswer(index, "bad")} title={taskIdOf(message) ? "回答需改进" : "这条回答没有任务记录（历史或目标运行），可用 /outcome good|bad 评价最近一次任务"}>♧</button>
+            {#if feedbackError[index]}<span class="feedback-error" title={feedbackError[index]}>评价未记录：{feedbackError[index]}</span>{/if}
             {#if index === lastAssistantIndex}<button onclick={forkCurrent} disabled={busy} title={busy ? "执行完成后可从这里分叉" : "从这条回答分叉新会话"}>⑂</button>{/if}
           </div>
         {/if}

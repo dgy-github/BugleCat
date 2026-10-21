@@ -1,5 +1,39 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-21：审查 `origin/main@88f0d21` 后修复：门禁、沙箱绕过、评价绑定
+
+与本地未提交的复利回放实验改动分开提交；`approval.rs` 中该实验补的 `python -m pip …` 联网识别属于同一个安全修复，一并收入本提交。
+
+- **门禁**
+  - `origin/main` 上 `scripts/check_rustfmt.py` 返回 1（`ncx-sandbox/src/approval.rs` 未格式化），CI rust-gate 为红。
+  - Tauri 测试 `workspace_panel_requests_carry_and_enforce_a_workspace_snapshot` 在 `origin/main` 上就已失败：5db67b5 把 `memory-controller` 改成 `Promise.all` 后缩进变了，源码断言没有同步。CI desktop-gate 同样为红。
+  - 处理：两处都已修复；冻结文件 `prompt.rs` 的哈希核对未变。
+  - 现在 `check_rustfmt.py` 返回 0。
+- **沙箱绕过（`ncx-sandbox/src/approval.rs`）**：用 `command_needs_escalation` 实测，以下命令修复前在 workspace-write 下都不会触发审批。系统**没有操作系统级隔离**（Job Object 只管进程生命周期），所以这个分类器是唯一的闸门。
+  - 破坏性命令：`git reset --hard`、`git clean -f/-d/-x`、`git checkout -- .`、`git restore`、`git branch -D`、`git push --force`、`git stash drop|clear`、`Remove-Item -Recurse|-Force`（含行首别名 `ri` / `erase`）、`rm --recursive|--force`、`rd /s`、`del /s`。`git clean -fdx` 会直接清掉本机 198 MB 的未跟踪证据。
+  - 外壳包装：新增 `wrapped_command`，透过 `cmd /c|/k`、`powershell|pwsh -Command|-c|-File`、`bash|sh|zsh|dash -c`、`env`、`sudo`、`nohup`、`xargs`、`start`、`call` 等递归判定内层命令。`powershell -EncodedCommand` 无法检查内容，直接要求审批。`is_trusted` 下的 `env` 等前缀也不能再把不可信的内层命令洗白。
+  - 内联代码联网：`python`、`node`、`deno`、`bun`、`perl`、`ruby`、`powershell` 的内联代码中出现 `urllib.request`、`http.client`、`requests.get(`、`httpx.`、`fetch(`、`require('http`、`Net.WebClient`、`Invoke-WebRequest` 等标记时，判定为联网。
+  - 环境变量路径写入：`$HOME/…`、`${HOME}/…`、`$env:USERPROFILE\…`、`%USERPROFILE%\…`、`%APPDATA%\…` 视为写到工作区外；`$PWD`、`%CD%` 仍允许。
+  - "只读"命令带写入或执行参数：`find -delete|-exec|-execdir|-ok|-fprint*`、`git branch -D|-m|-c|<新分支名>`、`git diff|log|show --output|-o`、`rg --pre`、`tree -o` 不再算只读。
+  - 新增 3 组测试：26 条绕过反例全部要求审批；18 条日常命令不误拦（`git checkout -b`、`git reset HEAD f`、`grep -rn urllib.request`、`cmd /c dir`、`python -m pytest`、`grep -ri x -r` 等）；只读参数判定。ncx-sandbox 20 passed。
+  - 已知取舍：`git restore --staged` 也会要求审批（只多一次确认）。
+  - 未处理：`untrusted` 策略下的 `TRUSTED_COMMANDS` 仍包含 `python`、`node`、`pytest`，可以执行任意代码。这是既有设计，改动会影响用户工作流，留待决定。
+- **GUI 👍/👎 绑定（5db67b5 引入的问题）**
+  - 原实现：前端用"之前有几条助手消息"去对应后端 `turn_id`，而 Goal 轮次等也占 `turn_id`，两边会错位；对不上时后端静默改记到会话最后一个任务；前端还用 `.catch(() => {})` 吞掉错误。
+  - 现在：`UiEvent::Done` 带上本轮实际记录的 `task_id`（普通轮用 `AgentLoop::last_task_id()`，编排轮用 `{session}:orch-{turn}`，Goal 运行为 `None`）。前端把它绑定到本轮回答上，评价时传这个 `task_id`。
+  - 后端 `outcome_label_target` 按 `task_id` 精确查找（`outcome::outcome_by_task_id`）；找不到或不是主任务时直接报错，不回退。只有不带 `task_id` 的 `/outcome` 才表示"最近一个任务"。
+  - 按钮在后端记录成功后才点亮，失败时在行内显示原因。历史会话恢复出来的回答不带 `_trace`，无法可靠对应到任务，按钮置灰并提示改用 `/outcome`。
+  - 新增 Tauri 测试 `rating_binds_to_the_named_task_and_never_falls_back`。
+- **验证**
+  - `cargo test --workspace` 全绿（ncx-core 463、ncx-sandbox 20）；Tauri `cargo test --lib` 139 passed；`npm run build`（含 typecheck）与 `test:protocol` 通过。
+  - clippy 只剩 2 条既有告警：冻结 example，以及 `turn.rs` 测试模块之后还有函数定义。
+  - 没有跑 GUI 实机点击、Python 全量和真实模型。
+- **对 10-19 节记录的核对更正**（原文保留，以此为准）
+  - 合并点是 `1780a3e`，不是 `6d658fa`。`6d658fa` 和 `4299e1b` 在仓库中都不存在。
+  - "第一轮 6 项"中，`strip_diff_fence`、`--ignored=no` 指纹、`OutcomeVerdict::is_negative_verdict`、`MemoryReviewCard` 在代码里都找不到。`post_edit_diagnostics`（文件名是 `tools/post_edit_diagnostics.rs`，不是 `diagnostics.rs`）和 `output_offload` 来自更早的 `ac89137` / `59e3dd4`，不是该轮的改动。
+  - "第二轮"中的 `MessageList.tsx`、`OutcomeDashboardCard.tsx` 不存在。实际实现是 `ConversationView.svelte` 的评价按钮，以及 `WorkspacePanels.svelte` / `AppUtilityPanels.svelte` 中的报表。
+  - 10-19 沙箱一节列出的拦截清单（`Remove-Item -Recurse -Force`、`git reset --hard`、`git clean -fd` 等），在 88f0d21 中并未实现，到本节才补上。
+
 ### 2026-10-19：沙箱与审批机制全链路加固（A1–A5）+ 跨 Crate 冗余清理（B1–B3）
 
 - **A1 统一命令安全分类器与 `workspace-write` 提权盲区修复（`rust/crates/ncx-sandbox/src/approval.rs`）**

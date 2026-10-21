@@ -2458,6 +2458,7 @@ textarea:focus { background: var(--surface-soft); border-color: var(--accent); b
 }
 .message-actions button.on { color: var(--accent); }
 .message-actions button:disabled { cursor: default; opacity: 0.35; }
+.message-actions .feedback-error { color: var(--danger, #c0392b); font-size: 12px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-card {
   width: min(100%, 42rem); display: grid; grid-template-columns: 4.2rem minmax(0, 1fr) 1.5rem;
   align-items: center; gap: 0.75rem; padding: 0.6rem; border: 1px solid var(--line);

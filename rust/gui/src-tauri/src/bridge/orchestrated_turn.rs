@@ -73,11 +73,9 @@ pub(super) async fn run(
             },
         );
     });
+    let orchestrated_task_id = format!("{session_id}:orch-{}", protocol_turn.turn_id.as_str());
     let runner = HarnessAgentRunner::new(cfg.clone())
-        .with_parent_task_id(format!(
-            "{session_id}:orch-{}",
-            protocol_turn.turn_id.as_str()
-        ))
+        .with_parent_task_id(orchestrated_task_id.clone())
         .with_harness_profile(harness_profile)
         .with_bindings(bindings)
         .with_cancel(Rc::new(move || cancel_check.load(Ordering::Acquire)))
@@ -148,6 +146,7 @@ pub(super) async fn run(
             final_text: outcome.final_text.clone(),
             stop_reason: stop_reason.into(),
             usage: serde_json::to_value(&outcome.telemetry.usage).unwrap_or(Value::Null),
+            task_id: Some(orchestrated_task_id),
         },
     );
     let mut context = messages;

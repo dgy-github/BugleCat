@@ -21,7 +21,7 @@ export type UiEvent =
   | { kind: "tool_result"; session_id: string; name: string; result: string }
   | { kind: "approval"; session_id: string; id: number; command: string; reason: string; cwd: string; details: string }
   | { kind: "question"; session_id: string; id: number; question: string; options: string[]; allow_free_text: boolean }
-  | { kind: "done"; session_id: string; final_text: string; stop_reason: string; usage: Record<string, number> }
+  | { kind: "done"; session_id: string; final_text: string; stop_reason: string; usage: Record<string, number>; task_id?: string }
   | { kind: "session_title"; session_id: string; title: string }
   | { kind: "loaded"; session_id: string; messages: { role: string; text: string; model?: string; confirmed_model?: string; verification?: string; tools?: ToolEntry[]; kind?: "image" | "video" | "file"; name?: string; url?: string }[] }
   | { kind: "error"; session_id: string; message: string };
@@ -328,6 +328,11 @@ export class ThreadController {
     this.messages = hideCompletedToolActivity(this.messages);
     if (event.stop_reason === "completed") this.messages = keepConversationConclusions(this.messages, event.final_text);
     else this.messages.push({ role: "note", text: `[${event.stop_reason}] ${event.final_text}` });
+    if (event.task_id) {
+      // Bind this turn's answer to its recorded task so a rating hits exactly it.
+      const answer = [...this.messages].reverse().find((message) => message.role === "assistant");
+      if (answer?.role === "assistant" && !answer.taskId) answer.taskId = event.task_id;
+    }
     this.streamingIndex = null;
     this.messagesBySession.set(event.session_id, this.clone(this.messages));
     this.trajectoryBySession.set(event.session_id, this.clone(this.trajectory));

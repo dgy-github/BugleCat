@@ -5,7 +5,7 @@ export type ToolGroup = { role: "tool_group"; tools: ToolEntry[]; settled: boole
 export type ReasoningMessage = { role: "reasoning"; text: string; settled: boolean };
 export type ConversationMessage =
   | { role: "user"; text: string; images?: string[] }
-  | { role: "assistant"; text: string; model?: string; confirmedModel?: string; verification?: string }
+  | { role: "assistant"; text: string; model?: string; confirmedModel?: string; verification?: string; taskId?: string }
   | { role: "note" | "compact"; text: string }
   | { role: "orchestration"; stage: string; text: string }
   | { role: "orchestrator_activity"; worker: number; tool: string; phase: "started" | "finished"; failure?: string }

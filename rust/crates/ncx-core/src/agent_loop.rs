@@ -318,6 +318,14 @@ impl AgentLoop {
         self
     }
 
+    /// Task id under which the most recent turn's outcome was recorded, so a
+    /// host can bind a rating to exactly that task.
+    pub fn last_task_id(&self) -> String {
+        self.task_id_override
+            .clone()
+            .unwrap_or_else(|| format!("{}:turn-{}", self.session.session_id, self.next_turn_id))
+    }
+
     fn outcome_event_store(&self) -> Option<Rc<crate::context_store::ContextStore>> {
         self.outcome_store
             .clone()

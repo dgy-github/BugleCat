@@ -640,6 +640,10 @@ pub enum UiEvent {
         final_text: String,
         stop_reason: String,
         usage: Value,
+        /// Recorded `TaskOutcome` id of this turn; ratings bind to it exactly.
+        /// `None` for runs without a primary task (goal runs).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
     },
     /// A compact title was generated and persisted for a newly completed session.
     SessionTitle {
@@ -1906,6 +1910,7 @@ fn spawn_turn_worker(
                         final_text: result.final_text.clone(),
                         stop_reason: result.stop_reason.clone(),
                         usage: serde_json::to_value(&result.usage).unwrap_or(Value::Null),
+                        task_id: Some(agent.last_task_id()),
                     },
                 );
                 match app_server.dispatch(ClientRequest::ThreadModelContextReplace {
