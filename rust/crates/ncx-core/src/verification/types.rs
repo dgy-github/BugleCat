@@ -14,6 +14,17 @@ pub enum Mode {
     Enforce,
 }
 
+impl Mode {
+    /// Parse the persisted `jev_mode` setting; anything unrecognised is `Off`.
+    pub fn from_setting(value: &str) -> Self {
+        match value.trim().to_lowercase().as_str() {
+            "shadow" => Mode::Shadow,
+            "enforce" => Mode::Enforce,
+            _ => Mode::Off,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     pub mode: Mode,
@@ -90,6 +101,16 @@ impl Config {
             model_enabled: true,
             enforce_categories: categories,
             experimental_jev: None,
+        }
+    }
+
+    /// Apply the persisted `jev_mode` setting. Choosing `enforce` there is the
+    /// host approval for the deterministic categories when none were set via
+    /// `NCX_ENFORCE_CATEGORIES`; model-scored (semantic) claims stay opt-in.
+    pub fn apply_setting(&mut self, value: &str) {
+        self.mode = Mode::from_setting(value);
+        if self.mode == Mode::Enforce && self.enforce_categories.is_empty() {
+            self.enforce_categories = vec![ClaimKind::ExecutionSuccess, ClaimKind::TestsPassed];
         }
     }
 

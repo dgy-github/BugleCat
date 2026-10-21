@@ -431,6 +431,7 @@ impl HarnessAgentRunner {
         }
         agent.feedback_memory_mode = self.cfg.feedback_memory.clone();
         agent.feedback_routing_mode = self.cfg.feedback_routing.clone();
+        agent.verification.apply_setting(&self.cfg.jev_mode);
         let confirmed = Rc::new(RefCell::new(None));
         let confirmed_sink = confirmed.clone();
         let observer = self.observer.clone();

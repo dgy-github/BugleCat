@@ -309,6 +309,7 @@ fn open_agent(
         .clone()
         .apply(AgentLoop::from_runtime_services(tools, session)?);
     agent.feedback_memory_mode = cfg.feedback_memory.clone();
+    agent.verification.apply_setting(&cfg.jev_mode);
     if args.resume {
         if restored_count > 0 {
             eprintln!("resumed {restored_count} message(s) from the workspace session log.");

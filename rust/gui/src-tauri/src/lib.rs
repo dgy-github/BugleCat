@@ -81,6 +81,7 @@ pub struct Status {
     price_currency: String,
     feedback_memory: String,
     feedback_routing: String,
+    jev_mode: String,
 }
 
 /// Tauri managed state: the channel into the agent thread + pending approvals.
@@ -451,6 +452,7 @@ fn get_status() -> Result<Status, String> {
         price_currency: cfg.price_currency.clone(),
         feedback_memory: cfg.feedback_memory.clone(),
         feedback_routing: cfg.feedback_routing.clone(),
+        jev_mode: cfg.jev_mode.clone(),
     })
 }
 
@@ -1604,6 +1606,7 @@ pub struct Settings {
     price_currency: String,
     feedback_memory: String,
     feedback_routing: String,
+    jev_mode: String,
     api_key_masked: String,
     has_api_key: bool,
     deepseek_api_key_masked: String,
@@ -1657,6 +1660,7 @@ fn settings_from_config(cfg: &Config) -> Settings {
         price_currency: cfg.price_currency.clone(),
         feedback_memory: cfg.feedback_memory.clone(),
         feedback_routing: cfg.feedback_routing.clone(),
+        jev_mode: cfg.jev_mode.clone(),
         api_key_masked: redacted.get("api_key").cloned().unwrap_or_default(),
         has_api_key: !cfg.api_key.is_empty(),
         deepseek_api_key_masked: redacted
@@ -1831,6 +1835,11 @@ fn validate_orchestrator_setting_updates(updates: &HashMap<String, String>) -> R
             if !ncx_config::VALID_FEEDBACK_MODES.contains(&raw.trim()) {
                 return Err(format!("{key}不是受支持的值（期望 off / shadow / on）"));
             }
+        }
+    }
+    if let Some(raw) = updates.get("jev_mode") {
+        if !ncx_config::VALID_JEV_MODES.contains(&raw.trim()) {
+            return Err("jev_mode 不是受支持的值（期望 off / shadow / enforce）".into());
         }
     }
     if let Some(raw) = updates.get("price_currency") {
@@ -5263,6 +5272,7 @@ mod tests {
             ("sandbox_mode", "unrestricted"),
             ("price_in", "NaN"),
             ("price_currency", "EUR"),
+            ("jev_mode", "on"),
             ("model", "bad model"),
             ("base_url", "file:///tmp/endpoint"),
         ] {
@@ -5277,6 +5287,20 @@ mod tests {
             assert_eq!(fs::read(&path).unwrap(), original);
         }
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn jev_mode_setting_is_persisted() {
+        let root = unique_test_dir("jev-mode-setting");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.toml");
+        fs::write(&path, b"model = \"known-model\"\n").unwrap();
+        let updates = HashMap::from([("jev_mode".into(), "enforce".into())]);
+
+        persist_validated_settings(&updates, &path).unwrap();
+        let persisted = fs::read_to_string(&path).unwrap();
+        assert!(persisted.contains("jev_mode = \"enforce\""), "{persisted}");
         let _ = fs::remove_dir_all(root);
     }
 

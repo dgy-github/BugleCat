@@ -111,6 +111,7 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "available_models",
         "feedback_memory",
         "feedback_routing",
+        "jev_mode",
     ] {
         if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);
@@ -176,6 +177,7 @@ const PROFILE_KEYS: &[&str] = &[
     "context_edit_max_tool_result_chars",
     "feedback_memory",
     "feedback_routing",
+    "jev_mode",
 ];
 
 fn profile_values(selected: &Table) -> BTreeMap<String, String> {

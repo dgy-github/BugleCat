@@ -534,6 +534,41 @@ fn env_wins_over_nanocodex_file() {
 }
 
 #[test]
+fn jev_mode_defaults_off_loads_from_file_and_legacy_env_wins() {
+    let tmp = unique_temp_dir("ncx_config_test_jev_mode");
+    let paths = ConfigPaths {
+        nanocodex: tmp.join("config.toml"),
+        ..no_paths(&tmp)
+    };
+    let load = |env: &HashMap<String, String>| {
+        load_config_impl(
+            Overrides {
+                workspace: Some(tmp.clone()),
+                ..Default::default()
+            },
+            &paths,
+            env,
+        )
+    };
+    assert_eq!(load(&empty_env()).unwrap().jev_mode, "off");
+
+    write(&paths.nanocodex, "jev_mode = \"shadow\"\n");
+    assert_eq!(load(&empty_env()).unwrap().jev_mode, "shadow");
+    assert_eq!(
+        load(&env1("NCX_JEV_MODE", " Enforce ")).unwrap().jev_mode,
+        "enforce"
+    );
+
+    write(
+        &paths.nanocodex,
+        "api_key = \"sk-test\"\njev_mode = \"on\"\n",
+    );
+    let invalid = load(&empty_env()).unwrap();
+    let err = invalid.validate().unwrap_err().to_string();
+    assert!(err.contains("jev_mode"), "{err}");
+}
+
+#[test]
 fn max_retries_default_and_env() {
     let tmp = unique_temp_dir("ncx_config_test_retries");
     // Default 3

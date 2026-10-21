@@ -18,6 +18,7 @@ pub const VALID_PERMISSION_MODES: &[&str] = &["plan", "default", "accept-edits",
 
 /// Valid modes for online compounding feedback (`[feedback] memory` / `routing`).
 pub const VALID_FEEDBACK_MODES: &[&str] = &["off", "shadow", "on"];
+pub const VALID_JEV_MODES: &[&str] = &["off", "shadow", "enforce"];
 
 /// Map a CC permission mode to the underlying knobs:
 /// `(sandbox_mode, approval_policy, require_edit_approval, plan_mode)`.
@@ -135,6 +136,8 @@ pub struct Config {
     pub feedback_memory: String,
     /// Online compounding feedback mode for orchestrator routing (`"off" | "shadow" | "on"`).
     pub feedback_routing: String,
+    /// Pre-commit claim verification (Jev) mode (`"off" | "shadow" | "enforce"`).
+    pub jev_mode: String,
     pub hooks: Vec<HookConfig>,
     /// MCP servers loaded from `~/.nanocodex/mcp.toml`.
     pub mcp_servers: Vec<McpServerConfig>,
@@ -189,6 +192,7 @@ impl Default for Config {
             price_currency: "CNY".to_string(),
             feedback_memory: "shadow".to_string(),
             feedback_routing: "shadow".to_string(),
+            jev_mode: "off".to_string(),
             hooks: vec![],
             mcp_servers: vec![],
         }
@@ -239,6 +243,12 @@ impl Config {
             return Err(ConfigError(format!(
                 "Invalid feedback_routing {:?}; expected one of {:?}.",
                 self.feedback_routing, VALID_FEEDBACK_MODES
+            )));
+        }
+        if !VALID_JEV_MODES.contains(&self.jev_mode.as_str()) {
+            return Err(ConfigError(format!(
+                "Invalid jev_mode {:?}; expected one of {:?}.",
+                self.jev_mode, VALID_JEV_MODES
             )));
         }
         if !(1..=128).contains(&self.max_parallel_tool_calls) {

@@ -21,6 +21,7 @@
     orchestrator_max_subtasks: number;
     feedback_memory: "off" | "shadow" | "on";
     feedback_routing: "off" | "shadow" | "on";
+    jev_mode: "off" | "shadow" | "enforce";
     context_edit_enabled: boolean;
     context_edit_max_chars: number;
     context_edit_keep_recent_messages: number;
@@ -288,6 +289,9 @@
               <div class="settings-card"><div class="settings-card-title"><strong>智能复利反馈闭环</strong><small>控制项目记忆效用加权与编排复杂度在线升档策略</small></div>
                 <label><span><strong>记忆效用反馈</strong><small>shadow 仅统计对比；on 启用 Beta 后验加权与自动降级</small></span><select bind:value={settings.feedback_memory}><option value="off">off（关闭）</option><option value="shadow">shadow（影子观察）</option><option value="on">on（启用加权与降级）</option></select></label>
                 <label><span><strong>编排路由反馈</strong><small>shadow 仅记录推荐；on 在低通过率分桶上自动单调升档</small></span><select bind:value={settings.feedback_routing}><option value="off">off（关闭）</option><option value="shadow">shadow（影子观察）</option><option value="on">on（启用自动升档）</option></select></label>
+              </div>
+              <div class="settings-card"><div class="settings-card-title"><strong>Jev 结论核验</strong><small>回复提交前核对“已运行 / 测试通过”等声明；保存后下一轮生效</small></div>
+                <label><span><strong>核验模式</strong><small>shadow 只记录并显示核验状态；enforce 在“已运行 / 测试通过”声明缺证据或与记录矛盾时，要求先修订再提交。调用 Jev 模型需设置 NCX_JEV_API_KEY，概率分数不会显示</small></span><select bind:value={settings.jev_mode}><option value="off">off（关闭）</option><option value="shadow">shadow（影子核验）</option><option value="enforce">enforce（拦截矛盾声明）</option></select></label>
               </div>
               <div class="settings-callout">权限模式在对话输入框中切换，设置页不再维护第二套沙箱与审批状态。</div>
             </section>

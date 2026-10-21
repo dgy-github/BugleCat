@@ -512,3 +512,25 @@ async fn jev_shadow_live_records_without_changing_history() {
     assert_eq!(result.observations.len(), 1);
     assert_eq!(result.attempted_calls, 1);
 }
+
+#[test]
+fn jev_mode_setting_enables_deterministic_enforcement_without_overriding_env_categories() {
+    let mut config = Config::off();
+    config.apply_setting("shadow");
+    assert_eq!(config.mode, Mode::Shadow);
+    assert!(config.enforce_categories.is_empty());
+
+    config.apply_setting(" ENFORCE ");
+    assert_eq!(config.mode, Mode::Enforce);
+    assert_eq!(
+        config.enforce_categories,
+        vec![ClaimKind::ExecutionSuccess, ClaimKind::TestsPassed]
+    );
+
+    let mut explicit = Config::enforce(vec![ClaimKind::Semantic]);
+    explicit.apply_setting("enforce");
+    assert_eq!(explicit.enforce_categories, vec![ClaimKind::Semantic]);
+
+    config.apply_setting("bogus");
+    assert_eq!(config.mode, Mode::Off);
+}

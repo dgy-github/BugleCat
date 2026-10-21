@@ -1425,6 +1425,7 @@ async fn build_agent(
         .clone()
         .apply(AgentLoop::from_runtime_services(tools, session)?);
     agent.feedback_memory_mode = cfg.feedback_memory.clone();
+    agent.verification.apply_setting(&cfg.jev_mode);
     Ok((agent, cfg.workspace.clone(), session_id, log_path))
 }
 

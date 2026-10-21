@@ -46,6 +46,7 @@ pub const WRITABLE_KEYS: &[&str] = &[
     "available_models",
     "feedback_memory",
     "feedback_routing",
+    "jev_mode",
 ];
 
 /// Escape a string for a TOML basic (double-quoted) string value.
