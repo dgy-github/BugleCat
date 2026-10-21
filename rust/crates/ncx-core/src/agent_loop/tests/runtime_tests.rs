@@ -97,12 +97,10 @@ async fn memory_recall_is_sent_as_query_scoped_system_note() {
                     .contains("[memory recall for this prompt]")
         })
         .expect("query-scoped memory recall note is sent");
-    assert!(
-        note["content"]
-            .as_str()
-            .unwrap_or("")
-            .contains("GNU target")
-    );
+    assert!(note["content"]
+        .as_str()
+        .unwrap_or("")
+        .contains("GNU target"));
     // Runtime note only — never persisted into the session history.
     assert!(!loop_.session.messages.iter().any(|m| {
         m["content"]
@@ -156,13 +154,11 @@ async fn primary_provider_can_be_replaced_without_rebuilding_runtime_state() {
     assert_eq!(loop_.provider_model(), "counting");
     loop_.run_turn(json!("continue"), None).await;
     assert_eq!(calls.get(), 1);
-    assert!(
-        loop_
-            .session
-            .messages
-            .iter()
-            .any(|message| message["content"] == "retained")
-    );
+    assert!(loop_
+        .session
+        .messages
+        .iter()
+        .any(|message| message["content"] == "retained"));
 }
 
 #[tokio::test]
@@ -341,8 +337,8 @@ async fn image_turn_routes_to_vision_provider() {
 
 #[tokio::test]
 async fn read_only_calls_run_concurrently() {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     struct SlowReadTool {
         active: Arc<AtomicUsize>,
@@ -509,13 +505,11 @@ async fn stop_interrupts_a_hanging_tool() {
     .await
     .expect("must finish under 5s");
     assert_eq!(r.stop_reason, "cancelled");
-    assert!(
-        loop_
-            .session
-            .messages
-            .iter()
-            .any(|m| m["role"] == "tool" && m["tool_call_id"] == "h1")
-    );
+    assert!(loop_
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "tool" && m["tool_call_id"] == "h1"));
 }
 
 #[tokio::test]
@@ -573,19 +567,15 @@ async fn turn_deadline_preserves_user_message_and_clears_authority() {
     .await
     .expect("turn must terminate");
     assert_eq!(result.stop_reason, "timeout");
-    assert!(
-        agent
-            .session
-            .messages
-            .iter()
-            .any(|m| m["content"] == "keep this task")
-    );
-    assert!(
-        agent
-            .session
-            .messages
-            .iter()
-            .any(|m| m["content"] == result.final_text)
-    );
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["content"] == "keep this task"));
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["content"] == result.final_text));
     assert!(agent.tools.ctx.active_turn_id.get().is_none());
 }

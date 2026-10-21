@@ -36,13 +36,11 @@ async fn jev_enforce_revises_before_final_commit_and_honest_unknown_can_finish()
     let result = agent.run_turn(json!("Run tests"), None).await;
     assert_eq!(result.stop_reason, "completed");
     assert_eq!(result.iterations, 2);
-    assert!(
-        !agent
-            .session
-            .messages
-            .iter()
-            .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed")
-    );
+    assert!(!agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed"));
     let log = std::fs::read_to_string(ws.join("s.verification.jsonl")).unwrap();
     assert_eq!(log.lines().count(), 2);
     assert!(log.contains("missing_evidence"));
@@ -64,13 +62,11 @@ async fn jev_repeated_rejected_draft_exits_without_false_completed_state() {
     assert_eq!(result.stop_reason, "verification_failed");
     assert_eq!(result.iterations, 2);
     assert_eq!(agent.state(), crate::agent_state::AgentState::NeedsHuman);
-    assert!(
-        !agent
-            .session
-            .messages
-            .iter()
-            .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed")
-    );
+    assert!(!agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed"));
 }
 
 #[tokio::test]
@@ -124,13 +120,11 @@ async fn jev_cancel_during_check_never_commits_candidate() {
         .run_turn(json!("Run tests"), Some(&|| cancelled.get()))
         .await;
     assert_eq!(result.stop_reason, "cancelled");
-    assert!(
-        !agent
-            .session
-            .messages
-            .iter()
-            .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed")
-    );
+    assert!(!agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == "All tests passed"));
 }
 
 #[tokio::test]
@@ -243,11 +237,9 @@ async fn failed_python_compile_blocks_completion_and_budget_success() {
     let mut agent = build(&ws, Box::new(p)).with_max_iterations(2);
     let result = agent.run_turn(json!("Edit the Python file"), None).await;
     assert_eq!(result.stop_reason, "compile_failed");
-    assert!(
-        serde_json::to_string(&agent.session.full_messages())
-            .unwrap()
-            .contains("compile_failed")
-    );
+    assert!(serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("compile_failed"));
 }
 
 #[tokio::test]
@@ -450,14 +442,12 @@ async fn emits_events_for_tool_turn() {
     loop_.set_event_sink(Box::new(move |e| sink.borrow_mut().push(e)));
     loop_.run_turn(json!("create ev.txt"), None).await;
     let evs = events.borrow();
-    assert!(
-        evs.iter()
-            .any(|e| matches!(e, LoopEvent::ToolStart { name, .. } if name == "apply_patch"))
-    );
-    assert!(
-        evs.iter()
-            .any(|e| matches!(e, LoopEvent::ToolResult { name, .. } if name == "apply_patch"))
-    );
+    assert!(evs
+        .iter()
+        .any(|e| matches!(e, LoopEvent::ToolStart { name, .. } if name == "apply_patch")));
+    assert!(evs
+        .iter()
+        .any(|e| matches!(e, LoopEvent::ToolResult { name, .. } if name == "apply_patch")));
     assert!(evs
         .iter()
         .any(|e| matches!(e, LoopEvent::AssistantText { text, model, .. } if text == "done" && model == "scripted")));
@@ -832,13 +822,11 @@ async fn exhausted_provider_budget_is_not_retried_and_presents_read_timeout() {
     assert!(result.final_text.contains("模型响应中断"));
     assert!(result.final_text.contains("请重试本轮"));
     assert!(!result.final_text.contains("provider_request"));
-    assert!(
-        agent
-            .session
-            .messages
-            .iter()
-            .any(|m| m["content"] == result.final_text)
-    );
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .any(|m| m["content"] == result.final_text));
 }
 
 #[tokio::test]
@@ -887,11 +875,9 @@ async fn text_tool_calls_are_retried_as_native_calls_without_executing_the_text(
         std::fs::read_to_string(ws.join("scanned.txt")).unwrap(),
         "checked\n"
     );
-    assert!(
-        !serde_json::to_string(&agent.session.full_messages())
-            .unwrap()
-            .contains("DSML")
-    );
+    assert!(!serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("DSML"));
     assert!(events.borrow().iter().any(|event| matches!(
         event,
         LoopEvent::AssistantText { text, .. } if text.is_empty()
@@ -920,11 +906,9 @@ async fn repeated_text_tool_calls_fail_without_claiming_execution() {
     assert_eq!(result.iterations, 2);
     assert!(result.tools_used.is_empty());
     assert!(result.final_text.contains("扫描命令未执行"));
-    assert!(
-        !serde_json::to_string(&agent.session.full_messages())
-            .unwrap()
-            .contains("DSML")
-    );
+    assert!(!serde_json::to_string(&agent.session.full_messages())
+        .unwrap()
+        .contains("DSML"));
 }
 
 #[tokio::test]

@@ -7,11 +7,11 @@
 //! vision provider.
 
 use ncx_provider::ModelResponse;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::rc::Rc;
 
 use crate::agent_state::{AgentState, StateRecorder};
-use crate::hooks::{HookEvent, run_matching_hooks};
+use crate::hooks::{run_matching_hooks, HookEvent};
 pub use crate::model_provider::Provider;
 use crate::model_provider::StreamDelta;
 use crate::runtime_profile::AgentRuntimeProfile;

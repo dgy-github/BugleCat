@@ -2,7 +2,7 @@
 //! next-turn followup resolution, labels, and worker isolation.
 
 use super::*;
-use crate::outcome::{FollowupSignal, TaskRole, followups_for_task, load_outcomes_and_followups};
+use crate::outcome::{followups_for_task, load_outcomes_and_followups, FollowupSignal, TaskRole};
 
 fn text(content: &str) -> ModelResponse {
     ModelResponse {
@@ -104,11 +104,9 @@ async fn next_human_turn_resolves_previous_task_once() {
     assert!(outcomes.iter().all(|o| o.role == TaskRole::Primary));
     assert_eq!(outcomes[0].files_touched, vec!["notes.txt".to_string()]);
     // No verifier ran in this test: completed turns are never recorded as "passed".
-    assert!(
-        outcomes
-            .iter()
-            .all(|o| o.verification.as_deref() != Some("passed"))
-    );
+    assert!(outcomes
+        .iter()
+        .all(|o| o.verification.as_deref() != Some("passed")));
 }
 
 #[tokio::test]

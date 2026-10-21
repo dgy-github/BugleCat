@@ -1,7 +1,7 @@
 //! Real shell -> persisted evidence -> extraction -> policy -> correction.
 //! Only the model is scripted. No external model/verification transport is used.
 use super::*;
-use crate::verification::{Config, Mode, types::ClaimKind};
+use crate::verification::{types::ClaimKind, Config, Mode};
 
 fn answer(text: &str) -> ModelResponse {
     ModelResponse {
@@ -85,18 +85,14 @@ async fn real_failed_shell_draft_is_rejected_and_corrected() {
     let (result, rows, messages) = chain(1, Mode::Enforce, claim, correction).await;
     assert_eq!(result.stop_reason, "completed");
     assert_eq!(result.final_text, correction);
-    assert!(
-        rows[0]["result"]["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["reason_code"] == "explicit_failure")
-    );
-    assert!(
-        !messages
-            .iter()
-            .any(|m| m["role"] == "assistant" && m["content"] == claim)
-    );
+    assert!(rows[0]["result"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["reason_code"] == "explicit_failure"));
+    assert!(!messages
+        .iter()
+        .any(|m| m["role"] == "assistant" && m["content"] == claim));
     assert_eq!(rows.len(), 2);
 }
 
@@ -106,13 +102,11 @@ async fn real_success_is_kept_without_spurious_correction() {
     let (result, rows, _) = chain(0, Mode::Enforce, claim, "unexpected correction").await;
     assert_eq!(result.final_text, claim);
     assert_eq!(rows.len(), 1);
-    assert!(
-        rows[0]["result"]["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["verdict"] == "pass")
-    );
+    assert!(rows[0]["result"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["verdict"] == "pass"));
 }
 
 #[tokio::test]
@@ -121,13 +115,11 @@ async fn real_failure_shadow_records_contradiction_without_revising() {
     let (result, rows, _) = chain(1, Mode::Shadow, claim, "unexpected correction").await;
     assert_eq!(result.final_text, claim);
     assert_eq!(rows.len(), 1);
-    assert!(
-        rows[0]["result"]["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["reason_code"] == "explicit_failure")
-    );
+    assert!(rows[0]["result"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["reason_code"] == "explicit_failure"));
 }
 
 #[tokio::test]
@@ -141,13 +133,11 @@ async fn real_narrow_check_rejects_all_tests_claim() {
     .await;
     assert_eq!(result.stop_reason, "completed");
     assert_eq!(rows.len(), 2);
-    assert!(
-        rows[0]["result"]["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["reason_code"] == "scope_mismatch")
-    );
+    assert!(rows[0]["result"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["reason_code"] == "scope_mismatch"));
 }
 
 #[tokio::test]
@@ -162,13 +152,11 @@ async fn real_edit_after_check_rejects_stale_success() {
     .await;
     assert_eq!(result.stop_reason, "completed");
     assert_eq!(rows.len(), 2);
-    assert!(
-        rows[0]["result"]["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["reason_code"] == "stale_evidence")
-    );
+    assert!(rows[0]["result"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["reason_code"] == "stale_evidence"));
 }
 
 #[tokio::test]
@@ -182,11 +170,9 @@ async fn real_failed_shell_chinese_claim_is_corrected() {
     .await;
     assert_eq!(result.final_text, "测试失败 [call:run-check]");
     assert_eq!(rows.len(), 2);
-    assert!(
-        rows[0]["result"]["decisions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["reason_code"] == "explicit_failure")
-    );
+    assert!(rows[0]["result"]["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["reason_code"] == "explicit_failure"));
 }

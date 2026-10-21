@@ -485,7 +485,11 @@ pub(crate) fn jaccard(
     }
     let inter = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
-    if union == 0.0 { 0.0 } else { inter / union }
+    if union == 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
 }
 
 pub(crate) fn parse_entries(text: &str) -> Vec<MemoryEntry> {
@@ -554,14 +558,13 @@ mod tests {
     #[test]
     fn remember_then_round_trips() {
         let s = store("rt");
-        assert!(
-            s.remember(
+        assert!(s
+            .remember(
                 "Use crate-type=lib on the gnu toolchain",
                 &["build".into()],
                 100
             )
-            .unwrap()
-        );
+            .unwrap());
         let es = s.entries();
         assert_eq!(es.len(), 1);
         assert_eq!(es[0].ts, 100);

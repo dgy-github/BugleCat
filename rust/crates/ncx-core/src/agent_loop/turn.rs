@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use ncx_provider::ModelResponse;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::deliverable::DeliverableRequirement;
 use super::tool_dispatch::{self, DispatchStop};
-use super::{AgentLoop, EventSink, LoopEvent, TurnResult, dump_args, emit, trace};
-use crate::hooks::{HookEvent, run_matching_hooks};
+use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent, TurnResult};
+use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::tools::python_check;
 use crate::turn_context::TurnContextRequest;
 

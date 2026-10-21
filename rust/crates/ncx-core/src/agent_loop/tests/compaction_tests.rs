@@ -68,13 +68,11 @@ async fn compaction_counts_usage_and_does_not_repeat_for_a_small_followup() {
             .count(),
         1
     );
-    assert!(
-        agent
-            .session
-            .for_model()
-            .iter()
-            .all(|m| m.get("_compaction_safety").is_none())
-    );
+    assert!(agent
+        .session
+        .for_model()
+        .iter()
+        .all(|m| m.get("_compaction_safety").is_none()));
 }
 
 #[tokio::test]
@@ -174,11 +172,9 @@ async fn compaction_runs_through_openai_compatible_http_provider() {
                 }
             };
             let request: Value = serde_json::from_slice(&body).unwrap();
-            assert!(
-                request
-                    .get("tools")
-                    .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty))
-            );
+            assert!(request
+                .get("tools")
+                .is_none_or(|v| v.as_array().is_some_and(Vec::is_empty)));
             let prompt = request["messages"][1]["content"].as_str().unwrap();
             assert!(prompt.contains("调查证据"));
             // Every chunk is self-describing and carries tagged source ids.

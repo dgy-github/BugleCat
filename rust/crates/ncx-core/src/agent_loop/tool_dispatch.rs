@@ -2,7 +2,7 @@
 
 use ncx_provider::ToolCall;
 
-use super::{AgentLoop, EventSink, LoopEvent, dump_args, emit, trace};
+use super::{dump_args, emit, trace, AgentLoop, EventSink, LoopEvent};
 use crate::tool_recovery::classify_tool_result;
 
 pub(super) enum DispatchStop {
@@ -75,7 +75,7 @@ fn starts_parallel_run(
 mod tests {
     use async_trait::async_trait;
     use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
-    use serde_json::{Value, json};
+    use serde_json::{json, Value};
 
     use super::*;
     use crate::tools::{Tool, ToolContext, ToolRegistry};
