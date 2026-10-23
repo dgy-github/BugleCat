@@ -630,6 +630,109 @@ fn label_note_regression_detection_ignores_zero_p2p_field() {
 }
 
 #[test]
+fn label_note_regression_detection_ignores_negated_mentions() {
+    for note in [
+        "no regressions, just incomplete",
+        "incomplete fix, not a regression",
+        "didn't regress anything but misses the edge case",
+        "zero regressions; f2p still failing",
+        "fixed the regression but broke formatting",
+        "未引入回归，但没修完",
+        "没有回归，只是超时",
+        "无回归",
+    ] {
+        assert!(!label_note_indicates_regression(note), "{note}");
+    }
+    for note in [
+        "no tests ran and it regressed the parser",
+        "caused a regression in tabulate",
+        "引入了回归",
+        "未修完，而且导致回归",
+    ] {
+        assert!(label_note_indicates_regression(note), "{note}");
+    }
+}
+
+fn guardrails(memory: &MemoryStore) -> Vec<String> {
+    memory
+        .entries()
+        .into_iter()
+        .filter(|e| e.is_guardrail())
+        .map(|e| e.text)
+        .collect()
+}
+
+fn followup_on(
+    memory: &MemoryStore,
+    store: &ContextStore,
+    o: &TaskOutcome,
+    signal: FollowupSignal,
+) {
+    record_followup(
+        store,
+        "/ws",
+        o,
+        signal,
+        Some(MemoryFeedback {
+            store: memory,
+            mode: "on",
+        }),
+    )
+    .unwrap();
+}
+
+#[test]
+fn rollback_alone_does_not_write_a_regression_guardrail() {
+    let ws = temp_dir("guard_rollback");
+    let mut memory = MemoryStore::new(ws.join(".ncx").join("memory"));
+    memory.set_feedback_mode("on");
+    let store = ContextStore::open_in_memory().unwrap();
+    let mut o = sample_outcome("t-rollback", TaskRole::Primary, TaskCategory::Bugfix);
+    o.files_touched = vec!["src/lib.rs".to_string()];
+    append_task_outcome(&store, &o).unwrap();
+    followup_on(
+        &memory,
+        &store,
+        &o,
+        FollowupSignal::Rollback {
+            checkpoint_id: Some("cp-1".to_string()),
+        },
+    );
+    assert!(guardrails(&memory).is_empty());
+}
+
+#[test]
+fn later_verified_success_on_the_module_clears_its_guardrail() {
+    let ws = temp_dir("guard_clear");
+    let mut memory = MemoryStore::new(ws.join(".ncx").join("memory"));
+    memory.set_feedback_mode("on");
+    let store = ContextStore::open_in_memory().unwrap();
+
+    let mut bad = sample_outcome("t-bad", TaskRole::Primary, TaskCategory::Bugfix);
+    bad.files_touched = vec!["src/lib.rs".to_string(), "src/other.rs".to_string()];
+    append_task_outcome(&store, &bad).unwrap();
+    followup_on(
+        &memory,
+        &store,
+        &bad,
+        FollowupSignal::Label {
+            good: false,
+            note: Some("p2p_regressed=1".to_string()),
+        },
+    );
+    assert_eq!(guardrails(&memory).len(), 2);
+
+    let mut good = sample_outcome("t-good", TaskRole::Primary, TaskCategory::Bugfix);
+    good.turn_id = bad.turn_id + 1;
+    good.files_touched = vec!["src/lib.rs".to_string()];
+    append_task_outcome(&store, &good).unwrap();
+    followup_on(&memory, &store, &good, FollowupSignal::Accepted);
+    let left = guardrails(&memory);
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert!(left[0].starts_with("[Regression Guardrail: src/other.rs]"));
+}
+
+#[test]
 fn negative_label_records_regression_guardrail_only_when_regressed() {
     for (label, note, expect_guard) in [
         ("guard_zero", "judge: f2p=0/1 p2p_regressed=0", false),

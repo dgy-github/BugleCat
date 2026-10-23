@@ -327,6 +327,25 @@ impl MemoryStore {
         Ok(Some(inv_text))
     }
 
+    /// Remove the `[Regression Guardrail: <module_path>]` entry, returning its
+    /// text when one existed (so the caller can drop it from the index too).
+    pub fn clear_regression_guardrail(&self, module_path: &str) -> std::io::Result<Option<String>> {
+        let guard_prefix = format!(
+            "[Regression Guardrail: {}]",
+            module_path.trim().replace('\\', "/")
+        );
+        let mut entries = self.entries();
+        let Some(idx) = entries
+            .iter()
+            .position(|e| e.text.starts_with(&guard_prefix))
+        else {
+            return Ok(None);
+        };
+        let removed = entries.remove(idx);
+        self.write_all(&entries)?;
+        Ok(Some(removed.text))
+    }
+
     /// Upsert a bounded `[Regression Guardrail: <module_path>]` warning when a
     /// turn modifying `<module_path>` caused a `pass_to_pass` test regression or
     /// rollback (Harness² negative guardrail memory).

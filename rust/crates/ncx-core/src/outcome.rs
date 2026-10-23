@@ -1048,13 +1048,13 @@ pub fn record_followup(
                 let ts_sec = followup.timestamp_ms / 1_000;
                 for touched in &outcome.files_touched {
                     let norm = touched.replace('\\', "/");
-                    if !norm.starts_with(".nanocodex")
-                        && !norm.starts_with(".ncx")
-                        && !norm.starts_with("tests/")
-                        && !norm.contains("/tests/")
-                        && !norm.starts_with("test/")
-                        && !norm.contains("/test/")
-                    {
+                    if is_memory_module(&norm) {
+                        // A verified success on the module retires its regression
+                        // warning; otherwise guardrails would accumulate forever.
+                        if let Ok(Some(guard_text)) = memory.store.clear_regression_guardrail(&norm)
+                        {
+                            let _ = index.remove_note(&MemoryStore::note_id(&guard_text));
+                        }
                         if let Ok(Some(inv_text)) = memory
                             .store
                             .promote_module_invariant_if_due(&norm, &turn_tags, ts_sec)
@@ -1085,11 +1085,10 @@ pub fn record_followup(
                     let _ = memory.store.forget_text(&note.text);
                     let _ = index.remove_note(&note.note_id);
                 }
+                // Only an explicit regression report writes a guardrail: a
+                // rollback just undoes the turn and says nothing about which
+                // passing behavior (if any) it broke.
                 let reg_reason = match &followup.signal {
-                    FollowupSignal::Rollback { checkpoint_id } => Some(format!(
-                        "rollback to {}",
-                        checkpoint_id.as_deref().unwrap_or("checkpoint")
-                    )),
                     FollowupSignal::Label {
                         good: false,
                         note: Some(n),
@@ -1100,12 +1099,7 @@ pub fn record_followup(
                     let ts_sec = followup.timestamp_ms / 1_000;
                     for touched in &outcome.files_touched {
                         let norm = touched.replace('\\', "/");
-                        if !norm.starts_with(".nanocodex")
-                            && !norm.starts_with(".ncx")
-                            && !norm.starts_with("tests/")
-                            && !norm.contains("/tests/")
-                            && !norm.starts_with("test/")
-                            && !norm.contains("/test/")
+                        if is_memory_module(&norm)
                             && memory
                                 .store
                                 .record_regression_guardrail(&norm, &reason, ts_sec)
@@ -1758,6 +1752,17 @@ pub fn now_millis() -> u64 {
         .unwrap_or_default()
 }
 
+/// Source files that get module invariants and regression guardrails (not
+/// tests, not agent state under `.ncx` / `.nanocodex`). `path` uses `/`.
+fn is_memory_module(path: &str) -> bool {
+    !path.starts_with(".nanocodex")
+        && !path.starts_with(".ncx")
+        && !path.starts_with("tests/")
+        && !path.contains("/tests/")
+        && !path.starts_with("test/")
+        && !path.contains("/test/")
+}
+
 /// Whether a negative label note reports a pass-to-pass regression.
 ///
 /// A structured `p2p_regressed=<n>` field counts as a regression iff `n > 0`;
@@ -1780,7 +1785,52 @@ pub(crate) fn label_note_indicates_regression(note: &str) -> bool {
         rest = &after[digits_len..];
     }
     stripped.push_str(rest);
-    structured_regression || stripped.contains("regress") || stripped.contains("回归")
+    structured_regression
+        || mentions_unnegated(&stripped, "regress", english_negated)
+        || mentions_unnegated(&stripped, "回归", chinese_negated)
+}
+
+/// True when `keyword` occurs in `text` at least once without being negated
+/// by the text right before it (`no regressions`, `未引入回归`).
+fn mentions_unnegated(text: &str, keyword: &str, negated: fn(&str) -> bool) -> bool {
+    text.match_indices(keyword)
+        .any(|(pos, _)| !negated(&text[..pos]))
+}
+
+/// `before` ends in an English negation within the last three words:
+/// "no", "not", "without", "zero", "0", "never", "fixed", or a "-n't" word.
+fn english_negated(before: &str) -> bool {
+    const NEGATIONS: &[&str] = &[
+        "no", "not", "non", "without", "zero", "0", "never", "none", "fix", "fixes", "fixed",
+    ];
+    before
+        .split(|c: char| !c.is_alphanumeric() && c != '\'')
+        .filter(|word| !word.is_empty())
+        .rev()
+        .take(3)
+        .any(|word| NEGATIONS.contains(&word) || word.ends_with("n't"))
+}
+
+/// `before` ends in a Chinese negation such as 无 / 没有 / 未引入 / 不是.
+fn chinese_negated(before: &str) -> bool {
+    const NEGATIONS: &[&str] = &[
+        "无",
+        "没有",
+        "没",
+        "未",
+        "不是",
+        "非",
+        "未引入",
+        "没有引入",
+        "没引入",
+        "无引入",
+        "不会",
+        "不会引入",
+        "修复了",
+        "修复",
+    ];
+    let before = before.trim_end();
+    NEGATIONS.iter().any(|neg| before.ends_with(neg))
 }
 
 #[cfg(test)]
