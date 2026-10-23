@@ -24,8 +24,23 @@ pub(super) fn parse_complexity(value: &str) -> Complexity {
     }
 }
 
+/// The verify prompts ask the reply to start with PASS or FAIL, so that
+/// leading word decides; "PASS — the previously failing test now passes"
+/// is a pass. Without a leading verdict any FAIL anywhere counts as failure.
 pub(super) fn verdict_passed(verdict: &str) -> bool {
-    !verdict.to_uppercase().contains("FAIL")
+    let first_line = verdict
+        .lines()
+        .map(|line| line.trim_start_matches(|c: char| c.is_whitespace() || "*#>`_-[(".contains(c)))
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .to_uppercase();
+    if first_line.starts_with("PASS") {
+        true
+    } else if first_line.starts_with("FAIL") {
+        false
+    } else {
+        !verdict.to_uppercase().contains("FAIL")
+    }
 }
 
 pub(super) fn parse_subtasks(value: &str) -> Vec<String> {

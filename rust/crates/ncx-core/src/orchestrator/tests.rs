@@ -581,3 +581,17 @@ fn compose_verify_task_lists_only_merged_workers() {
     assert!(task.contains("--- worker 1 ---\nr1"));
     assert!(!task.contains("r2"));
 }
+
+#[test]
+fn verdict_uses_the_leading_pass_or_fail() {
+    assert!(verdict_passed(
+        "PASS — the previously failing test now passes\nBEST:1"
+    ));
+    assert!(verdict_passed("**PASS**: fixes the FAILURE path\nBEST:2"));
+    assert!(verdict_passed("\n  pass. no failures remain"));
+    assert!(!verdict_passed("FAIL missing import\nBEST:1"));
+    assert!(!verdict_passed("## FAIL\nPASS would need tests"));
+    // No leading verdict: any FAIL still counts as a failure.
+    assert!(!verdict_passed("Looks mostly fine but tests FAIL\nBEST:1"));
+    assert!(verdict_passed("Looks fine\nBEST:1"));
+}
