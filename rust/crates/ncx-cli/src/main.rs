@@ -186,9 +186,10 @@ async fn run_orchestrated(cfg: Config, prompt: &str, recorder: &mut SessionRecor
 /// system prompt + each registered (core) tool's description. Single-line basic
 /// strings with `\n`/`\"` escapes so it round-trips through any TOML parser.
 fn dump_genome_toml(system_prompt: &str, catalog: &[ncx_core::tools::ToolCatalogEntry]) -> String {
+    use ncx_core::orchestrator::{CLASSIFY_SYS, DECOMPOSE_SYS, PLAN_SYS, VERIFY_SYS, WORKER_SYS};
     let mut out = String::new();
     out.push_str("# Default BugleCat harness genome (ncx --dump-genome).\n");
-    out.push_str("# Edit system_prompt and tool_desc.* to evolve the agent.\n\n");
+    out.push_str("# Edit system_prompt, tool_desc.*, orchestrator_prompts.*, and memory_config.* to evolve the agent.\n\n");
     out.push_str(&format!(
         "system_prompt = \"{}\"\n\n",
         toml_escape(system_prompt)
@@ -201,6 +202,17 @@ fn dump_genome_toml(system_prompt: &str, catalog: &[ncx_core::tools::ToolCatalog
             toml_escape(&entry.description)
         ));
     }
+    out.push_str("\n[orchestrator_prompts]\n");
+    for (k, v) in [
+        ("classify_sys", CLASSIFY_SYS),
+        ("decompose_sys", DECOMPOSE_SYS),
+        ("plan_sys", PLAN_SYS),
+        ("verify_sys", VERIFY_SYS),
+        ("worker_sys", WORKER_SYS),
+    ] {
+        out.push_str(&format!("{} = \"{}\"\n", k, toml_escape(v)));
+    }
+    out.push_str("\n[memory_config]\nmax_entries = 6\nmax_chars = 2400\n");
     out
 }
 

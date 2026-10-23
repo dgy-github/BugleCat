@@ -13,8 +13,8 @@ use crate::hooks::{run_matching_hooks, HookEvent};
 use crate::tools::python_check;
 use crate::turn_context::TurnContextRequest;
 
-const MEMORY_RECALL_MAX_ENTRIES: usize = 8;
-const MEMORY_RECALL_MAX_CHARS: usize = 4_000;
+const MEMORY_RECALL_MAX_ENTRIES: usize = 6;
+const MEMORY_RECALL_MAX_CHARS: usize = 2_400;
 const MAX_CONSECUTIVE_EMPTY_RESPONSES: usize = 3;
 const MAX_CONSECUTIVE_TRANSPORT_ERRORS: usize = 3;
 const MAX_TEXT_TOOL_CALL_RESPONSES: usize = 2;
@@ -608,12 +608,17 @@ async fn prepare_prompt(
     // Injection is not counted here: notes are scored only when the task is
     // resolved (see `outcome::record_followup`), so worker, goal and
     // unresolved turns never inflate a note's denominator.
-    let recall = memory_recall(
-        &memory,
-        &tool_query,
-        MEMORY_RECALL_MAX_ENTRIES,
-        MEMORY_RECALL_MAX_CHARS,
-    );
+    let max_entries = agent
+        .tools
+        .ctx
+        .genome
+        .effective_memory_max_entries(MEMORY_RECALL_MAX_ENTRIES);
+    let max_chars = agent
+        .tools
+        .ctx
+        .genome
+        .effective_memory_max_chars(MEMORY_RECALL_MAX_CHARS);
+    let recall = memory_recall(&memory, &tool_query, max_entries, max_chars);
     agent.last_recalled_note_ids = recall.note_ids;
     agent.last_memory_rank_changed = recall.rank_changed;
     if !recall.text.is_empty() {

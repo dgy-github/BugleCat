@@ -38,6 +38,7 @@ mod types;
 pub use types::*;
 mod support;
 use support::*;
+pub use support::{CLASSIFY_SYS, DECOMPOSE_SYS, PLAN_SYS, VERIFY_SYS, WORKER_SYS};
 
 /// Drives the tiered node graph over an [`AgentRunner`].
 pub struct Orchestrator<'a> {
@@ -49,6 +50,7 @@ pub struct Orchestrator<'a> {
     routing_stats: Option<crate::outcome::RoutingStats>,
     shadow_recommended_route: RefCell<Option<String>>,
     initial_complexity: RefCell<Option<Complexity>>,
+    genome: crate::genome::Genome,
 }
 
 impl<'a> Orchestrator<'a> {
@@ -62,7 +64,13 @@ impl<'a> Orchestrator<'a> {
             routing_stats: None,
             shadow_recommended_route: RefCell::new(None),
             initial_complexity: RefCell::new(None),
+            genome: crate::genome::Genome::from_env(),
         }
+    }
+
+    pub fn with_genome(mut self, genome: crate::genome::Genome) -> Self {
+        self.genome = genome;
+        self
     }
 
     pub fn with_control(mut self, control: &'a dyn OrchestratorControl) -> Self {
@@ -88,6 +96,10 @@ impl<'a> Orchestrator<'a> {
     /// feedback upgrade (`None` until `handle` classified the task).
     pub fn initial_complexity(&self) -> Option<Complexity> {
         *self.initial_complexity.borrow()
+    }
+
+    fn sys_prompt<'b>(&'b self, key: &str, default: &'b str) -> &'b str {
+        self.genome.orchestrator_prompt(key, default)
     }
 
     /// Classify the task, then run the matching node graph (depth 0).
@@ -214,7 +226,8 @@ impl<'a> Orchestrator<'a> {
                         Some(Tier::Fast),
                         "执行单 Worker 任务",
                     );
-                    let final_text = self.run_node(Tier::Fast, WORKER_SYS, &task).await;
+                    let worker_sys = self.sys_prompt("worker_sys", WORKER_SYS);
+                    let final_text = self.run_node(Tier::Fast, worker_sys, &task).await;
                     OrchestratorOutcome {
                         complexity,
                         final_text,
@@ -252,7 +265,8 @@ impl<'a> Orchestrator<'a> {
             Some(Tier::Fast),
             "分析任务复杂度",
         );
-        let out = self.reason_node(Tier::Fast, CLASSIFY_SYS, task).await;
+        let sys = self.sys_prompt("classify_sys", CLASSIFY_SYS);
+        let out = self.reason_node(Tier::Fast, sys, task).await;
         parse_complexity(&out)
     }
 
@@ -266,7 +280,8 @@ impl<'a> Orchestrator<'a> {
         n_workers: usize,
     ) -> OrchestratorOutcome {
         self.emit_stage(OrchestratorStage::Plan, Some(Tier::Main), "生成执行计划");
-        let plan = self.reason_node(Tier::Main, PLAN_SYS, task).await;
+        let plan_sys = self.sys_prompt("plan_sys", PLAN_SYS);
+        let plan = self.reason_node(Tier::Main, plan_sys, task).await;
         if self.is_cancelled() {
             return self.cancelled_outcome(complexity, Some(plan), vec![]);
         }
@@ -303,6 +318,7 @@ impl<'a> Orchestrator<'a> {
             if self.is_cancelled() {
                 return self.cancelled_outcome(complexity, Some(plan.to_string()), vec![]);
             }
+            let worker_sys = self.sys_prompt("worker_sys", WORKER_SYS);
             // Workers run as independent attempts (best-of-N), so parallel
             // execution can't corrupt shared state. Each gets the plan (+ any
             // verifier feedback from the prior round).
@@ -311,7 +327,7 @@ impl<'a> Orchestrator<'a> {
                 async move {
                     let result = self
                         .runner
-                        .run_worker_result(i, n, WORKER_SYS, &wtask)
+                        .run_worker_result(i, n, worker_sys, &wtask)
                         .await;
                     self.record(&result);
                     result.text
@@ -327,10 +343,11 @@ impl<'a> Orchestrator<'a> {
                 Some(verify_tier),
                 format!("验证第 {rounds} 轮结果"),
             );
+            let verify_sys = self.sys_prompt("verify_sys", VERIFY_SYS);
             let verdict = self
                 .reason_node(
                     verify_tier,
-                    VERIFY_SYS,
+                    verify_sys,
                     &build_verify_task(task, plan, &worker_results),
                 )
                 .await;
@@ -430,10 +447,11 @@ impl<'a> Orchestrator<'a> {
         if self.is_cancelled() {
             return self.cancelled_outcome(Complexity::High, Some(plan), sub_results);
         }
+        let verify_sys = self.sys_prompt("verify_sys", VERIFY_SYS);
         let verdict = self
             .reason_node(
                 Tier::Main,
-                VERIFY_SYS,
+                verify_sys,
                 &build_verify_task(task, &plan, &sub_results),
             )
             .await;
@@ -464,7 +482,8 @@ impl<'a> Orchestrator<'a> {
             Some(Tier::Main),
             "为高风险任务生成计划",
         );
-        let plan = self.reason_node(Tier::Main, PLAN_SYS, task).await;
+        let plan_sys = self.sys_prompt("plan_sys", PLAN_SYS);
+        let plan = self.reason_node(Tier::Main, plan_sys, task).await;
         if self.is_cancelled() {
             return Err(self.cancelled_outcome(Complexity::High, Some(plan), vec![]));
         }
@@ -473,10 +492,11 @@ impl<'a> Orchestrator<'a> {
             Some(Tier::Main),
             "拆分独立子任务",
         );
+        let decompose_sys = self.sys_prompt("decompose_sys", DECOMPOSE_SYS);
         let raw = self
             .reason_node(
                 Tier::Main,
-                DECOMPOSE_SYS,
+                decompose_sys,
                 &build_decompose_task(task, &plan),
             )
             .await;

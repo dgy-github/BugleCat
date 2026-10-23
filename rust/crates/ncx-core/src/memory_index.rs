@@ -406,6 +406,28 @@ impl MemoryIndex {
         self.demote_if_due(workspace, note_ids)
     }
 
+    /// Record an injection where the task succeeded only at high cost and the
+    /// recalled note was not attributed to any touched file (P3 cost-aware
+    /// discounting: increments `injected` without crediting `accepted`, nudging
+    /// the note's Beta posterior downward).
+    pub fn record_unhelpful_injection(
+        &self,
+        workspace: &str,
+        note_ids: &[String],
+        timestamp_ms: u64,
+    ) {
+        for id in note_ids {
+            let _ = self.conn.execute(
+                "INSERT INTO memory_feedback (note_id, workspace, injected, accepted, rejected, last_used)
+                 VALUES (?1, ?2, 1, 0, 0, ?3)
+                 ON CONFLICT(note_id, workspace) DO UPDATE SET
+                    injected = injected + 1,
+                    last_used = excluded.last_used",
+                params![id, workspace, timestamp_ms as i64],
+            );
+        }
+    }
+
     /// Flip one already-counted verdict (a later human label or rollback
     /// disagreed with the earlier automatic verdict). `injected` is unchanged.
     pub fn revise_outcome_feedback(

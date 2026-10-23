@@ -1033,11 +1033,51 @@ pub fn record_followup(
         let turn_prefix = format!("{}#turn-{}:", outcome.session_id, outcome.turn_id);
         match after {
             Some(true) => {
+                let mut turn_tags: Vec<String> = Vec::new();
                 for note in index.notes_for_source_prefix(&ws_key, &turn_prefix) {
+                    for t in &note.tags {
+                        if !turn_tags.contains(t) {
+                            turn_tags.push(t.clone());
+                        }
+                    }
                     let _ = memory
                         .store
                         .remember(&note.text, &note.tags, note.created_at);
                     let _ = index.confirm_candidate(&note.note_id);
+                }
+                let ts_sec = followup.timestamp_ms / 1_000;
+                for touched in &outcome.files_touched {
+                    let norm = touched.replace('\\', "/");
+                    if !norm.starts_with(".nanocodex")
+                        && !norm.starts_with(".ncx")
+                        && !norm.starts_with("tests/")
+                        && !norm.contains("/tests/")
+                        && !norm.starts_with("test/")
+                        && !norm.contains("/test/")
+                    {
+                        if let Ok(Some(inv_text)) = memory
+                            .store
+                            .promote_module_invariant_if_due(&norm, &turn_tags, ts_sec)
+                        {
+                            let inv_src = format!("{turn_prefix}invariant:{norm}");
+                            let mut inv_tags = vec!["invariant".to_string()];
+                            for t in &turn_tags {
+                                if !inv_tags.contains(t) {
+                                    inv_tags.push(t.clone());
+                                }
+                            }
+                            let _ = index.promote(
+                                &ws_key,
+                                &inv_text,
+                                &inv_tags,
+                                &crate::memory_index::Evidence::VerifiedToolResult {
+                                    source_ref: inv_src,
+                                },
+                                ts_sec,
+                            );
+                            let _ = index.rebuild_from_markdown(memory.store, &ws_key);
+                        }
+                    }
                 }
             }
             Some(false) => {
@@ -1059,18 +1099,43 @@ pub fn record_followup(
     );
     match (before, after) {
         (None, Some(accepted)) => {
-            let target_ids = if accepted {
-                &outcome.recalled_note_ids
+            let high_cost = outcome.iterations > 16
+                || outcome.tool_calls > 24
+                || outcome.usage.total_tokens > 80_000;
+            if accepted && high_cost && !outcome.files_touched.is_empty() {
+                // P3 cost-aware attribution: on expensive turns, only notes matching
+                // touched files get positive `accepted` credit; unattributed recalled
+                // notes get `injected + 1, accepted + 0` so noisy broad notes decay.
+                index.record_outcome_feedback(
+                    &ws_key,
+                    &attributed_ids,
+                    true,
+                    followup.timestamp_ms,
+                    allow_demote,
+                );
+                let unattributed: Vec<String> = outcome
+                    .recalled_note_ids
+                    .iter()
+                    .filter(|id| !attributed_ids.contains(id))
+                    .cloned()
+                    .collect();
+                if !unattributed.is_empty() {
+                    index.record_unhelpful_injection(&ws_key, &unattributed, followup.timestamp_ms);
+                }
             } else {
-                &attributed_ids
-            };
-            index.record_outcome_feedback(
-                &ws_key,
-                target_ids,
-                accepted,
-                followup.timestamp_ms,
-                allow_demote,
-            );
+                let target_ids = if accepted {
+                    &outcome.recalled_note_ids
+                } else {
+                    &attributed_ids
+                };
+                index.record_outcome_feedback(
+                    &ws_key,
+                    target_ids,
+                    accepted,
+                    followup.timestamp_ms,
+                    allow_demote,
+                );
+            }
         }
         (Some(prev), Some(now)) if prev != now => {
             let target_ids = if now {

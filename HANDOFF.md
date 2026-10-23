@@ -1,5 +1,183 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-23：自进化 Harness 改进方案与版本优化详单（对照 Google RRSI / Harness²，P0–P3 已完整落地）
+
+- **完整方案**：[`harness_self_evolution_plan.md`](C:/Users/25376/.gemini/antigravity/brain/67c0cf6c-b237-42b2-96ca-824d99ff2886/harness_self_evolution_plan.md)（会话 artifact，以本节详单为准）。
+- **论文依据的可信度**：RRSI（`google-research/rrsi`，arXiv:2609.24972）与 Harness²（arXiv:2610.14224）的内容来自搜索摘要和 README 摘要，没有通读全文。下文标【论文】的是论文写明的做法，标【引申】的是本项目自己的设计。
+- **现状扫描：已有三层自进化回路，但互不相通，也都缺"正则化"**
+  - L0 任务内：`orchestrator.rs` 让 workers×N 在隔离副本里试跑，再由 verify 选优并在失败时重试。相当于 Harness² Propose–Probe–Compose 的前两步，**没有 Compose**。
+  - L1 跨任务在线：`memory.rs`、`memory_index.rs`、`outcome.rs` 每题结束后写笔记，并按结果记分、降级。**没有区分通用不变量和单题特例。**
+  - L2 离线：`genome.rs`（`NCX_GENOME` 覆盖 system_prompt + tool_desc）配合 `train/forge.py`（teacher 提议 → bench 打分 → 接受门，支持单 champion 爬山和 Pareto 种群，有 train/val/test 切分，每轮重评 incumbent）。这本身就是一个 RRSI 式搜索器，但缺正则化。
+  - 断点：`evals/compounding_replay` 的真实仓库回放没有接入 forge 的 fitness；L1 的 outcome 也没有回流到 L2。
+- **差距（按影响排序）**
+  - G1【论文】先校准噪声 δ，再判断改动是否有效 ↔ `forge.py` 写死 `accept_margin=1`，回放实验也没有 δ。**高**
+  - G2【论文】proposer 能看到完整修改历史，不重试已证伪的想法 ↔ `build_teacher_prompt` 只给当前 champion 和失败轨迹。**高**
+  - G3【论文】退火编辑预算（每个候选能打包的修改数逐轮收紧）↔ `genome.validate` 只限总长度。中
+  - G4【论文】新增 token 必须由实测收益抵消，无收益的组件会被删除 ↔ 爬山模式只看通过数，没有剪枝；记忆只增不减。**高**
+  - G5【论文】critic 拦截只对当前测试集有效的写法 ↔ 没有。中
+  - G6【论文】每个候选在独立 git worktree 里评测，并记录目标组件、假设、分数、成本、结论 ↔ lineage 只有分数。中
+  - G7【论文】搜索停滞时转去改未动过的组件 ↔ genome 只有 2 个面。中
+  - G8【论文】把单任务修改分成通用经验和任务特例，只有前者进跨任务库 ↔ 每题追加一条 `Task "#xxx" modified …`。**高**
+  - G9【论文】任务内多个候选同条件试跑后组合 ↔ orchestrator 只挑一个。低（贵）
+  - G10【引申】真实 outcome 回流到离线搜索 ↔ 两层分离。中
+- **预算现实**：8 题一轮的噪声约 ±1 题。解决率 p≈0.6 时，要检出 15pt 差异（α=0.05、power=0.8，非配对），每组约需 167 次任务运行（≈33 元/组）。所以短期以**每解决一题的成本 / token 数**为主指标，解决率只做非劣效护栏（B ≥ A − δ）。上一节已更正"解决率 +12.5pt"的表述，本方案沿用该结论。
+- **决定（2026-10-23）**：
+  1. 短期以"每解决一题的成本（`cost_per_resolved`）"为主指标，解决率只做非劣效护栏（`B - A >= -delta`）；
+  2. 第二套题新挖一个同模块反复修改的小型 Python 库（最终选定 `astanin/python-tabulate`）；
+  3. 按 **P0（评测地基与第二套题） → P1（forge RRSI 正则化） → P2（扩大 `NCX_GENOME` 可进化面） → P3（在线记忆双层结构化与成本感知归因）** 顺序全量落地。
+
+---
+
+#### 本版本详细优化点（P0–P3 完整技术详单，20 个文件，`+2170 / -216` 行）
+
+##### 1. P0：评测地基、统计配对分析器与第二基准仓库（`evals/compounding_replay/`）
+
+- **P0.1 逐题配对统计分析器与噪声下限校准（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）**
+  - **零模型开销离线诊断**：直接读取 `runs/*/results.jsonl`，支持单臂噪声校准（`--arm-a <runs...>`）与双臂配对检验（`--arm-a <runs...> --arm-b <runs...> --out <json>`）。
+  - **单臂噪声下限（`calibrate_arm`）**：
+    - 自动将全部题目划分为三类：`informative_tasks`（同臂跨轮次有时过有时不过，`0 < k < n`）、`always_pass`（全过）与 `always_fail`（全挂）。
+    - **解决数噪声下限 `delta_resolved`**：对每道题计算 Jeffreys 平滑伯努利参数 $p_i = (k_i + 0.5) / (n_i + 1)$，避免小样本（如 $K=3$ 全过）出现退化零方差；单轮方差为 $\sum_i p_i(1-p_i)$，两独立均值（各 $K$ 轮）在 95% 置信度下的最小可检出差值为 $\delta_{\text{resolved}} = 1.96 \times \sqrt{2 \sum_i p_i(1-p_i) / K}$。
+    - **成本噪声下限 `delta_cost`**：按每道题跨轮次样本方差之和估计单轮总成本方差 $\sigma_{\text{round}}^2 = \sum_i s_{\text{cost}, i}^2$，两独立 $K$ 轮均值最小可检出差值为 $\delta_{\text{cost}} = 1.96 \times \sqrt{2 \sigma_{\text{round}}^2 / K}$。
+  - **双臂逐题配对检验（`compare_arms`）**：
+    - **精确 McNemar 检验（`_mcnemar_exact`）**：在逐题 $(r, \text{task\_id})$ 配对（或跨轮次均值配对）上统计不一致对 $(n_{01}, n_{10})$，计算精确二项双侧 $p$ 值。
+    - **按题配对 Bootstrap 95% 置信区间（`B = 4000`，固定种子 `42`）**：以 `task_id` 为重采样单元（消除占总方差大头的题间固有难度差异），同时输出：
+      1. 主指标 **`cost_per_resolved` 比值 `B / A`** 及其 95% CI（若 CI 上界 `< 1.0`，则单位解决成本下降具备统计显著性）；
+      2. 每轮总成本差 **`B - A`（元/轮）** 及其配对 bootstrap 95% CI；
+      3. **非劣效护栏（Non-inferiority Guard）**：验证 `resolution_rate` 差值是否满足 $B - A \ge -\delta_{\text{rate}}$。
+
+- **P0.2 任务挖掘器加固与历史 Issue 错配过滤（[`evals/compounding_replay/mine_tasks.py`](evals/compounding_replay/mine_tasks.py)）**
+  - **第二仓库筛选**：用 `scout` 扫描 6 个纯 Python 库（`tomlkit`、`Python-Markdown`、`python-tabulate`、`mistune`、`jmespath`、`dateutil`），统计"commit 含 `fix/close/resolve #N` 且同时修改源码与测试"的提交数及模块集中度。`astanin/python-tabulate` 拥有 27 个此类提交且 100% 集中在核心模块（`tabulate.py` / `tabulate/__init__.py`），作为检验跨任务同模块记忆复利的第二基准库。
+  - **新增 `--body` 全文检索与 Merge Commit 支持**：开启 `--body` 时，git log 格式切换为 `%H%x00%cd%x00%B%x1e`，检索完整 commit body 中的 `fix/close/resolve #N`（而不只是首行标题），并支持双父节点合并提交（对第一父节点 `commit^1` 提取 diff）。不传 `--body` 时保持旧版行为不变。
+  - **Bitbucket 历史 Issue 编号碰撞拦截（时间戳护栏）**：`python-tabulate` 早期托管于 Bitbucket，其历史 commit 中的 `fixes #15/#22/#32/#55` 实际指向 Bitbucket 编号，而 GitHub API 同号 Issue 是数年后别人新提的无关问题。新增硬护栏：比较 GitHub Issue 的 `created_at` 与修复提交的 `fixed_at`，若 `issue["created_at"][:10] > fixed_at[:10]` 则直接拒收，精准拦截了全部 7 个跨平台编号错配任务。
+  - **Issue 级去重**：新增 `seen_issues` 集合，确保同一 `#issue_number` 不会被多次修正提交重复收入。
+
+- **P0.3 裁判测试路径归一化修复与官方补丁黄金验证（[`replay.py`](evals/compounding_replay/replay.py) & [`validate_gold.py`](evals/compounding_replay/validate_gold.py)）**
+  - **修复 [`replay.py::_norm_tid`](evals/compounding_replay/replay.py)**：原先 `_norm_tid` 只把 `.tests.` 截断归一化，而 `python-tabulate` 的测试目录名为 `test/`（unittest 发现路径形如 `test.test_input.test_...`），导致 `f2p_before` 与 `f2p_after` 前缀不匹配，连官方修复补丁都会被误判为 `f2p=0`。修改后同时归一化 `.tests.` 与 `.test.`。
+  - **新增官方补丁黄金校验器 [`validate_gold.py`](evals/compounding_replay/validate_gold.py)**：对题库中每道题自动在 `pre_fix_commit` 上检查 `f2p` 必挂、打上官方 `gold_code_patch` 后检查 `f2p` 全过且 `p2p` 零回归。
+  - **交付 [`tasks/tabulate.jsonl`](evals/compounding_replay/tasks/tabulate.jsonl) 与 [`curricula/tabulate.txt`](evals/compounding_replay/curricula/tabulate.txt)**：共 9 道通过黄金验证的真实历史缺陷（按修复时间排序：`#175 → #24 → #190 → #180 → #18 → #365 → #241 → #53 → #408`，跨度 2016–2025），`validate_gold.py` 验证 `tabulate` **9/9 通过**，抽查 `sqlparse` 历史题 `#496/#583/#845` **3/3 通过**。
+
+- **P0.4 `tabulate` 三臂实测汇总（Arm A vs Arm B vs Arm B'）与 `sqlparse_split` 重算**
+  - 各臂在 `tabulate` 9 题课程上的完整实测对比表（模型：`deepseek-chat`，单题上限 `0.30` 元）：
+
+    | 指标 | Arm A（无记忆，3 轮均值） | Arm B（旧单层记忆，3 轮均值） | Arm B'（P3 双层记忆，单轮实测） | B vs A 配对统计结论（[`tab_cal_AB.json`](evals/compounding_replay/runs/tab_cal_AB.json)） |
+    | :--- | :--- | :--- | :--- | :--- |
+    | 运行 ID | `1043*-A-tab-cal-r1..r3` | `1101*-B-tab-cal-r1..r3` | `115758-B-tab-p3-r1` | 各 3 轮 × 9 题 = 27 次配对 |
+    | 严格解决率（`resolved`） | `7/9, 7/9, 7/9`（**77.8%**, 21/27） | `7/9, 8/9, 7/9`（**81.5%**, 22/27） | `7/9`（**77.8%**） | `+3.7pt >= -14.9pt`（通过非劣效护栏，McNemar $p=1.0$） |
+    | 裁判通过率（`judge_ok`） | `8/9, 8/9, 7/9`（23/27） | `8/9, 8/9, 8/9`（24/27） | `8/9`（`#241` 花 `0.313` 元） | `#241` 在 B-r2 仅花 `0.137` 元（`36.5s`）即通过 |
+    | 每轮总成本（CNY） | `1.521 / 1.542 / 1.695`（均值 **1.586**） | `1.312 / 1.119 / 1.508`（均值 **1.313**） | **1.413**（较 A 省 `0.173` 元） | `B - A = -0.2728` 元/轮，配对 95% CI `[-0.5207, -0.0685]` |
+    | **每解决一题成本（`cpr`）** | **0.2265 CNY** | **0.1790 CNY**（**-21.0%**） | **0.2018 CNY**（**-10.9%**） | **`B / A = 0.7904`，配对 95% CI `[0.6239, 0.9523]`（不含 1.0，显著）** |
+    | 期末 `learnings_entries` | `0` | `8`（随题数线性增长，无上限） | **`6`（第 4～9 题全程硬封顶）** | P3 将记忆稳定控制在 `2 条模块不变量 + 2×2 条情景笔记` |
+
+  - **历史 `sqlparse_split` v2 重算（[`sqlparse_v2_AB.json`](evals/compounding_replay/runs/sqlparse_v2_AB.json)）**：用 `analyze.py` 对 `sqlparse` v2 的 A/B 各 2 轮重算，`cpr` 比值 `B/A = 0.7131`，但配对 bootstrap 95% CI 为 `[0.3693, 1.1586]`（跨过 `1.0`），McNemar $p = 0.5$，统计上定性为**未定论（Inconclusive）**。
+
+---
+
+##### 2. P1：`ncx-forge` 离线进化搜索的 RRSI 正则化（`train/`）
+
+- **P1.1 表面级 Diff 度量与按轮退火编辑预算（[`train/genome.py`](train/genome.py)）**
+  - **新增 `changed_surfaces(candidate, reference) -> list[str]`**：精确枚举候选与参考基因组之间发生变更的可进化表面标识符（如 `system_prompt`、`tool_desc:bash`、`orchestrator:plan_sys`、`memory_config:max_entries`），不再把整个 genome 视为黑盒文本。
+  - **新增 `changed_lines(candidate, reference) -> int`**：基于 `difflib.ndiff` 统计候选相对于父代新增或删除的非空代码/提示词行数。
+  - **扩展 `validate(candidate, baseline, *, parent=None, max_surfaces=None, max_changed_lines=None)`**：
+    - 在原有未知键拦截、表面长度上限（`MAX_LEN_MARGIN`）与核心锚点词（`REQUIRED_SUBSTRINGS`）检查之上，新增相对父代 `parent` 的单步变异幅度约束：
+    - 若单步修改表面数 `len(surfaces) > max_surfaces` 或修改行数 `lines > max_changed_lines`，直接在本地零评测开销拒收该候选。
+  - **按轮退火调度（Annealed Edit Budget）**：在 `forge.py` 中支持 `--max-surfaces`（默认 `2`）、`--anneal-surfaces` 与 `--max-changed-lines`（默认 `40`）；开启退火时第 $r$ 轮允许修改的最大表面数为 $\max(1, \text{max\_surfaces} - \lfloor r / 2 \rfloor)$，先允许跨面协同探索，后期强制收敛为单面精细微调。
+
+- **P1.2 规则版反过拟合/反作弊审查器（[`train/teacher.py::critic_check`](train/teacher.py)）**
+  - **拦截硬编码测试集特征**：`critic_check(candidate, parent, forbidden_terms)` 提取候选相对于 `parent` **新加入的行（`+ `）**，执行不区分大小写的词边界与子串扫描：
+    1. 严禁出现当前训练集任务名（如 `bug_off_by_one`、`sqlparse-496` 等，对 `>=4` 字符的任务名按正则表达式 `\b...\b` 匹配）；
+    2. 严禁出现评测脚本与隐藏裁判特征词：`check.py`、`_check.py`、`hidden test`、`eval_holdout`。
+  - 一旦命中立即拒收并记入实验账本（`verdict = "rejected_critic"`），防止 teacher 通过往 prompt 里写死某道题的答案或诱导偷看 `check.py` 来刷高 train 分数。
+
+- **P1.3 证伪假设账本注入与停滞自动转向（[`train/teacher.py`](train/teacher.py) & [`train/forge.py`](train/forge.py)）**
+  - **结构化实验账本 `append_ledger`（`train/runs/ledger_<stamp>.jsonl`）**：每个候选无论被 validator 拒收、被 critic 拒收、train 退化、holdout 退化还是成功晋级，均记录一行完整 JSON（含 `round`、`candidate`、`parent_hash`、`candidate_hash`、`target_surfaces`、`changed_lines`、`diff`、`train_passes`、`holdout_passes`、`mean_tokens`、`verdict`、`reason`）。
+  - **向 Teacher 注入 `Falsified / Rejected Mutations`**：`build_teacher_prompt(..., rejected_history=..., max_surfaces=..., max_changed_lines=..., focus_surface=...)` 自动将最近 6 条被拒/证伪候选的目标表面、失败原因和摘要注入给 Teacher LLM，明确指令不要重复已被证伪的修改方向。
+  - **连续停滞转向（`_pick_stagnation_surface` + `--stagnation-limit`）**：当连续 `stagnation_limit`（默认 `2`）轮无候选晋级时，`forge.py` 统计历史账本中各表面的尝试频次，自动选出探索最少的表面作为下一轮 `focus_surface` 强制注入 Teacher 提示词。
+
+- **P1.4 双通道成本感知验收门（[`train/forge.py`](train/forge.py)）**
+  - 取代原先单一的 `margin >= accept_margin` 硬编码规则，引入受 `--accept-margin`、`--delta-tokens`（默认 `200.0`）与 `--max-token-growth`（默认 `500.0`）控制的双通道验收门：
+    - **通道 1（通过数提升 + 防膨胀护栏）**：`margin >= accept_margin`，且当 `accept_margin <= 1` 时平均消耗增长不得超过 `max_token_growth`（防止为了多过 1 道题而把 prompt 或输出撑大数倍；否则判为 `rejected_token_bloat`）；
+    - **通道 2（同分降本晋级）**：`margin >= 0`（通过数不降）且 `incumbent_mean_tokens - candidate_mean_tokens >= delta_tokens`（显著节省 Token 消耗）。
+  - 两条通道均必须通过 Holdout 集非退化门（`cand_holdout >= inc_holdout`）方可晋级为新 Champion。
+
+- **P1.5 盘后结构化消融剪枝（[`train/forge.py::prune_genome`](train/forge.py)，`--prune`）**
+  - 搜索结束产生异于 `baseline` 的最终 Champion 后，若开启 `--prune`，`prune_genome` 会遍历 `changed_surfaces(champion, baseline)` 中的每一个被修改表面，**逐一将其回滚为 `baseline` 原始值**并在 train 与 holdout 上重评：
+  - 若回滚某个表面后，train 通过数不降、holdout 通过数不降、且平均 Token 未显著增加（未恶化超过 `delta_tokens`），则证明该表面的修改属于"搭便车冗余修改（Zero-benefit / Free-rider Mutation）"，予以永久剔除并记入账本（`pruned_redundant_surface`）。
+
+---
+
+##### 3. P2：扩大 `NCX_GENOME` 可进化面（`rust/` + `train/`）
+
+- **P2.1 编排器五阶段系统提示词接入 `Genome`（[`rust/crates/ncx-core/src/genome.rs`](rust/crates/ncx-core/src/genome.rs) & [`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs)）**
+  - 在 `Genome` 结构体中新增 `[orchestrator_prompts]`（`OrchestratorPrompts`），支持运行时通过 `NCX_GENOME` 覆盖编排器全部 5 个阶段的系统提示词：
+    1. `classify_sys`（难度分级器 `CLASSIFY_SYS`）
+    2. `plan_sys`（只读规划器 `PLAN_SYS`）
+    3. `decompose_sys`（高复杂度任务拆解器 `DECOMPOSE_SYS`）
+    4. `worker_sys`（并行执行器 `WORKER_SYS`）
+    5. `verify_sys`（测试与回归核验器 `VERIFY_SYS`）
+  - [`orchestrator/support.rs`](rust/crates/ncx-core/src/orchestrator/support.rs) 中暴露对应的 `pub(crate)` 默认常量，[`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs) 通过 `genome::current()` 按字段读取覆盖值，保持冻结文件 `prompt.rs` 零修改。
+
+- **P2.2 记忆召回预算参数接入 `Genome`（[`genome.rs`](rust/crates/ncx-core/src/genome.rs) & [`turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs)）**
+  - 在 `Genome` 中新增 `[memory_config]`（`MemoryConfig`）：
+    - `max_entries`：单轮最多注入的记忆条数，带安全钳制 `clamp(1, 32)`（默认 `6`）；
+    - `max_chars`：单轮注入记忆块的最大字符预算，带安全钳制 `clamp(200, 16000)`（默认 `2400`）。
+  - [`agent_loop/turn.rs::inject_memory_and_skills`](rust/crates/ncx-core/src/agent_loop/turn.rs) 通过 `g.memory_max_entries(6)` 与 `g.memory_max_chars(2400)` 动态获取召回上限。
+
+- **P2.3 全链路导出、往返校验与空 Genome 字节级等价保证（[`main.rs`](rust/crates/ncx-cli/src/main.rs) & [`train/genome.py`](train/genome.py)）**
+  - [`ncx --dump-genome`](rust/crates/ncx-cli/src/main.rs) 现完整导出 `system_prompt`、`tool_descriptions`、`orchestrator_prompts` 与 `memory_config` 四大模块。
+  - [`train/genome.py`](train/genome.py) 同步支持 `orchestrator:*`（长度上限 `len(base) + 600`）与 `memory_config:*`（整数类型与区间 `[1, 32]` / `[200, 16000]` 校验）。
+  - **字节级 No-op 保证**：当 `NCX_GENOME` 未设置或指向空 JSON `{}` 时，所有新增方法均回退到编译期静态常量，运行时行为与修改前 100% 字节级一致（已通过 `genome::tests` 与 `test_forge.py::TestExpandedGenomeSurfaces` 验证）。
+
+---
+
+##### 4. P3：在线记忆双层结构化与成本感知归因（`rust/crates/ncx-core/src/`）
+
+- **P3.1 模块级不变量提炼与单题情景笔记淘汰上限（[`rust/crates/ncx-core/src/memory.rs`](rust/crates/ncx-core/src/memory.rs)）**
+  - **问题根源**：旧版在线记忆每完成一题就追加一条 `Task "..." modified ...`，在长课程中同一模块的情景笔记无限累加，占满召回窗口并造成后期轮次 Token 膨胀。
+  - **双层记忆架构（Episodic vs Module Invariant）**：
+    - 新增常量 `MAX_EPISODIC_PER_MODULE: usize = 2` 与判定方法 `MemoryEntry::is_invariant(&self) -> bool`（识别带 `invariant` 标签或以 `[Module Invariant:` 开头的笔记）。
+    - 新增 `MemoryStore::promote_module_invariant_if_due(&self, module_path, key_symbols, rule_summary)`：
+      1. 扫描当前 `learnings.md` 中提及 `module_path` 的单题情景笔记；
+      2. 当同一模块累计达到 **`>= 2` 条**已验证笔记时，自动提取历史笔记中的高频代码符号（反引号标识符）与本次 `key_symbols` 去重合并，生成或原地更新一条结构化模块级不变量：
+         `[Module Invariant: <module_path>] Key symbols: ... Verified across N tasks; latest rule: ...`（标签：`["auto-promoted", "verified", "invariant"]`）；
+      3. **情景层自动裁剪**：在生成/更新模块不变量的同时，将该模块名下的旧单题情景笔记裁剪至最多保留最新 `MAX_EPISODIC_PER_MODULE = 2` 条，使单个模块占用的总记忆条数永远有界（$\le 1 \text{ invariant} + 2 \text{ episodic} = 3$ 条）。
+
+- **P3.2 裁判后置晋升时机与 SQLite 索引一致性修复（[`rust/crates/ncx-core/src/outcome.rs`](rust/crates/ncx-core/src/outcome.rs)）**
+  - **后置到 `outcome.rs` 的 `Some(true)` 分支执行**：模块不变量提炼不在 `agent_loop.rs` 轮次刚结束时立刻触发，而是严格放在 [`outcome.rs`](rust/crates/ncx-core/src/outcome.rs) 收到 `--outcome-label good`（即外部裁判确认 `Accepted`）的 `Some(true)` 分支内执行。这保证了：若某轮 agent 虽然退出码为 0 但实际改错了测试（随后被 `--outcome-label bad` 撤回），它绝不会污染模块级不变量，也不会提前把旧的正确情景笔记裁剪掉。
+  - **SQLite 索引同步（`index.rebuild_from_markdown`）**：当 `promote_module_invariant_if_due` 合并并裁剪了 Markdown 中的旧情景笔记后，立即调用 `index.rebuild_from_markdown(&mem)`，确保 SQLite `memory_entries` 表与 `learnings.md` 的物理条目数严格一致。
+
+- **P3.3 原地更新不变量的规范化 `note_id` 哈希（[`memory.rs::MemoryStore::note_id`](rust/crates/ncx-core/src/memory.rs)）**
+  - 普通情景笔记的 `note_id` 由全文哈希生成；但 `[Module Invariant: <module>]` 每次被同模块新任务更新时正文都会演进。
+  - 若直接哈希全文，每次更新都会生成全新的 `note_id`，导致该模块在 `memory_feedback` 表中积累的历史正面反馈权重（`injected` / `accepted`）被清零。
+  - 修复后，`MemoryStore::note_id` 检测到以 `[module invariant:` 开头的笔记时，**仅对其规范化头部 `[module invariant: <module_path>]` 计算 SHA-256 前缀**，使同一模块的不变量在原地更新正文时永久保留同一个 `note_id` 与历史 Beta 后验权重。
+
+- **P3.4 结构化不变量召回优先加权与默认召回预算收紧（[`memory.rs`](rust/crates/ncx-core/src/memory.rs) & [`turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs)）**
+  - **`semantic_score` 结构性加权**：在 `memory.rs::semantic_score` 中，若一条笔记命中了当前任务查询词（`raw > 0`）且 `entry.is_invariant()` 为真，额外赋予 **`+6` 分**结构性优先级加成，确保模块级不变量始终排在零散单题笔记之前被注入上下文。
+  - **默认召回上限收紧**：[`turn.rs`](rust/crates/ncx-core/src/agent_loop/turn.rs) 默认记忆注入上限从 `8 条 / 4000 字符` 收紧至 **`6 条 / 2400 字符`（约 600 tokens）**，在保证核心模块不变量必达的同时压缩每轮固定输入开销。
+
+- **P3.5 成本感知的精细反馈归因（[`memory_index.rs::record_unhelpful_injection`](rust/crates/ncx-core/src/memory_index.rs) & [`outcome.rs`](rust/crates/ncx-core/src/outcome.rs)）**
+  - **问题根源**：旧版在任务成功（`Some(true)`）时，对本轮被召回注入的所有 `recalled_notes` 无差别执行 `accepted + 1`，导致与本题实际修改文件毫无关系的"搭便车（Free-rider）"笔记也跟着刷高权重。
+  - **高消耗轮次精准打折**：
+    - 在 [`memory_index.rs`](rust/crates/ncx-core/src/memory_index.rs) 新增 `record_unhelpful_injection(&self, note_ids)`（仅将 `injected` 加 1，不增加 `accepted`）。
+    - 在 [`outcome.rs`](rust/crates/ncx-core/src/outcome.rs) 的 `Some(true)` 分支中，检查当前任务的资源消耗是否属于高消耗轮次（`expensive_turn = iterations > 16 || tool_calls > 24 || total_tokens > 80_000`）：
+      - 若为常规低消耗轮次，保持全部召回笔记 `accepted + 1`；
+      - 若为**高消耗轮次**，逐条核对召回笔记内容是否提及本轮实际修改的文件名（`files_modified` basename）：**仅命中实际修改文件的召回笔记获得 `accepted + 1`，未命中的搭便车笔记调用 `record_unhelpful_injection`（仅记 `injected + 1`）**，通过贝叶斯平滑乘子 `feedback_multiplier` 自动压低无关笔记的后续召回排名。
+
+---
+
+#### 回归验证与复现命令汇总
+
+- **Rust 核心库与沙箱全量单测**：
+  - `cargo test --manifest-path rust/Cargo.toml --lib` → **全绿通过**（含新增的 `promote_module_invariant_merges_and_caps_episodic_notes`、`genome` P2 扩展表面测试等）。
+  - `python scripts/check_rustfmt.py` → `{"ok": true, "checked": 63, "issue_count": 0}`（冻结文件 `prompt.rs` 零改动）。
+- **Python 离线进化框架（`train/`）全量单测**：
+  - `python -m unittest train/test_forge.py train/test_population.py train/test_evaluator.py` → **22/22 全部通过**。
+- **回放统计分析与黄金补丁验证（`evals/compounding_replay/`）**：
+  - `python evals/compounding_replay/validate_gold.py --tasks evals/compounding_replay/tasks/tabulate.jsonl` → **9/9 通过**。
+  - `python evals/compounding_replay/analyze.py --arm-a "evals/compounding_replay/runs/20261023-1043*-A-tab-cal-r*" --arm-b "evals/compounding_replay/runs/20261023-1101*-B-tab-cal-r*"` → 复现 [`tab_cal_AB.json`](evals/compounding_replay/runs/tab_cal_AB.json) 配对检验结果。
+
+- **下一步可选方向**
+  - 如需进一步扩大 P3 Arm B' 的样本量，可补跑 `tab-p3-r2`、`tab-p3-r3` 完成 3 轮 B' vs B vs A 配对检验；或在 `bench` / `sqlparse_split` 上启动启用 P1+P2 正则化的 `train/forge.py --anneal-surfaces --prune` 离线进化实验。
+
 ### 2026-10-21：审查 `origin/main@88f0d21` 后修复：门禁、沙箱绕过、评价绑定
 
 与本地未提交的复利回放实验改动分开提交；`approval.rs` 中该实验补的 `python -m pip …` 联网识别属于同一个安全修复，一并收入本提交。

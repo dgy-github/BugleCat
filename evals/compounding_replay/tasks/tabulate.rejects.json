@@ -1,0 +1,398 @@
+[
+ {
+  "sha": "c327d6c419",
+  "issue": 173,
+  "subject": "implement support of JSONL and CSV input formats in command line utility",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "5373ebfa95",
+  "issue": 176,
+  "subject": "fix #176 - implement Decimal fixed-point support",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "032dc0d107",
+  "issue": 399,
+  "subject": "fix #399 - avoid infinite loop in _CustomTextWrap on wide characters with width=1",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "4a95974490",
+  "issue": 396,
+  "subject": "check and format everything with ruff",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "75640e2b5c",
+  "issue": 396,
+  "subject": "use ruff instead of black and flake8",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "4d3809e861",
+  "issue": 312,
+  "subject": "Merge pull request #313 from gschizas/master",
+  "reason": "some tests fail even on fix commit (env drift)"
+ },
+ {
+  "sha": "c59a5ff3ef",
+  "issue": 209,
+  "subject": "Handle ValueError in _format when float conversion fails",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "3fdc1302ec",
+  "issue": 256,
+  "subject": "Fix asciidoc alignment",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "d29909b4fb",
+  "issue": 305,
+  "subject": "Fix handling \"True\"/\"False\" bool str and None",
+  "reason": "some tests fail even on fix commit (env drift)"
+ },
+ {
+  "sha": "bbc5ff1071",
+  "issue": 307,
+  "subject": "Merge pull request #308 from devdanzin/master",
+  "reason": "some tests fail even on fix commit (env drift)"
+ },
+ {
+  "sha": "f660f66fe3",
+  "issue": 124,
+  "subject": "Merge pull request #233 from ilya112358/add_msg_when_not_iterable",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "2f3a737834",
+  "issue": 207,
+  "subject": "Merge pull request #234 from ilya112358/update_readme_headers_dicts",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "72ac2ab05c",
+  "issue": 207,
+  "subject": "Fix #207. Update README: headers for dictionaries.",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "96761ee53c",
+  "issue": 124,
+  "subject": "Fix #124. Improve error reporting when non-iterable data provided.",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "69dc8ed363",
+  "issue": 18,
+  "subject": "fix #18 - update int64 recognition heuristics for Python 3.7",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "a5e70e526a",
+  "issue": 203,
+  "subject": "Fix rendering of multiline cells in outline format family.",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "2efc792093",
+  "issue": 192,
+  "subject": "Merge pull request #196 from FurcyPin/fpin/#192",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "170723430e",
+  "issue": 192,
+  "subject": "fix #192 - Can't print bytes with non-ascii encoding",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "1309bdc2f8",
+  "issue": 155,
+  "subject": "Implements {heavy,mixed}_{grid,outline}.",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "9890da99ee",
+  "issue": 28,
+  "subject": "Merge pull request #58 from chrd5273/multiline_full_width",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "2aa7e1a05e",
+  "issue": 39,
+  "subject": "Merge pull request #76 from adan79/master",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "49686ac85e",
+  "issue": 25,
+  "subject": "ENH: return a wrapped str w/ a _repr_html_ so that Jupyter displays the html (closes #25)",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "ae7e8b6f72",
+  "issue": 19,
+  "subject": "fix #19: document disable_numparse option",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "c5dd6175de",
+  "issue": 20,
+  "subject": "Merge pull request #21 from hungyao/master",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "261693284d",
+  "issue": 20,
+  "subject": "Fixes #20",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "e7daa576ff",
+  "issue": 14,
+  "subject": "fix #14: declare Python 3.8 support, enable python 3.8 CI tests",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "3c9800c77e",
+  "issue": 15,
+  "subject": "fix #15: allow empty pipe tables with columns like empty dataframes",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "3e2bccc203",
+  "issue": 16,
+  "subject": "fix #16: remove misleading example showing support of the multiline headers in github format",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "d3762270aa",
+  "issue": 3,
+  "subject": "Merge pull request #5 from ssbarnea/master",
+  "reason": "no fail_to_pass tests"
+ },
+ {
+  "sha": "e731378f5a",
+  "issue": 129,
+  "subject": "Support specifying alignment per column",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "2c408e81be",
+  "issue": 131,
+  "subject": "fix #131: make the test optional if wcwidth is not installed",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "75c2603ae8",
+  "issue": 116,
+  "subject": "Merged in samuel-phan/python-tabulate (pull request #34)",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "cd3a69c204",
+  "issue": 116,
+  "subject": "fix #116: Change the LICENSE variable to 'MIT'",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "6e9cba2a3d",
+  "issue": 105,
+  "subject": "fix #105: include benchmark.py in the source dist",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "221fb1a336",
+  "issue": 110,
+  "subject": "fix #110: add missing test/common.py to sdist",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "d70d59b6f0",
+  "issue": 85,
+  "subject": "errata in commit description: fix #85",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "0c3331576e",
+  "issue": 86,
+  "subject": "fix #86: allow ragged rows (add a test)",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "0199387238",
+  "issue": 81,
+  "subject": "fix #81: output an empty string on an empty table with headers=\"keys\"",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "2b66ab9b78",
+  "issue": 82,
+  "subject": "fix #82: escape empty values in the first column (rst format)",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "ddbb64ae2a",
+  "issue": 64,
+  "subject": "fix #64: implement boolean columns",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "17597b1569",
+  "issue": 65,
+  "subject": "fix #65: Merged in cesan3/python-tabulate (pull request #24)",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "b96fb5f477",
+  "issue": 51,
+  "subject": "fix #51: add optional wide characters support (requires wcwidth lib)",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "fdf15756e0",
+  "issue": 63,
+  "subject": "fix #63: ignore empty rows when processing file via CLI",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "a58e478e92",
+  "issue": 62,
+  "subject": "fix #62: allow numpy arrays and pandas Index as headers",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "7e3afe2f71",
+  "issue": 55,
+  "subject": "fix #55: use thead and tbody tags in HTML tables",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "c8cc559a59",
+  "issue": 56,
+  "subject": "fix #56: workaround for missing re.sub flags support in IronPython",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "65484fb14f",
+  "issue": 49,
+  "subject": "fix #49: colored numbers in a unicode/str subclass (colorclass compatibility)",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "f50230a978",
+  "issue": 47,
+  "subject": "fix #47: remove mutable default argument",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "f89db531ce",
+  "issue": 42,
+  "subject": "fix #42: broken decimal alignment of ANSI-colored numberes",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "a9b97653d3",
+  "issue": 36,
+  "subject": "fix #36: ValueError on decimal numbers with ANSI color codes",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "f652341e9e",
+  "issue": 23,
+  "subject": "fix #23: require a dict of headers for a list of dicts",
+  "reason": "referenced number is a PR, not an issue"
+ },
+ {
+  "sha": "fa3f668033",
+  "issue": 32,
+  "subject": "fix #32: escape special characters in LaTeX output",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "efcf79cf4a",
+  "issue": 31,
+  "subject": "fix #31: TypeError on Py2 on mixed column value types",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "281c0e639c",
+  "issue": 22,
+  "subject": "fix #22: allow numbers as column headers",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "4e67be0df8",
+  "issue": 20,
+  "subject": "fix #20: latex in unaligned-formats",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "1295d13e26",
+  "issue": 19,
+  "subject": "fix #19: mediawiki in unaligned-formats",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "41a6db29b6",
+  "issue": 15,
+  "subject": "fix #15: TypeError when using simple_separated_format with headers",
+  "reason": "issue created after the fix commit (number from another tracker?)"
+ },
+ {
+  "sha": "68eb66b7a1",
+  "issue": 13,
+  "subject": "fix #13: add tox basepython version for custom test environments",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "765d413349",
+  "issue": 4,
+  "subject": "fix #4: workaround for Python 2.6.4 and ealier",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "a7ad91b771",
+  "issue": 10,
+  "subject": "fix #10: support datetime, date and time as cell values",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "e209943848",
+  "issue": 9,
+  "subject": "fix #9: tabulate iterator of iterators with headers",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "483b7cbdf0",
+  "issue": 8,
+  "subject": "fix #8: broken ReStructuredText format in README",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "2ea95390bc",
+  "issue": 6,
+  "subject": "fix #6: tabulate dicts of iterables and pandas.DataFrame",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "04a4a0b14e",
+  "issue": 7,
+  "subject": "fix #7: allow headers=\"firstrow\"",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "a7673f459a",
+  "issue": 5,
+  "subject": "fix #5: proper width of the colored values in columns",
+  "reason": "needs both source and test changes"
+ },
+ {
+  "sha": "3b356a8bec",
+  "issue": 1,
+  "subject": "fix #1: None in data causes TypeError",
+  "reason": "needs both source and test changes"
+ }
+]

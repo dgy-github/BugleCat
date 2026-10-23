@@ -29,6 +29,9 @@ pub trait Summarizer {
 
 /// Hard cap so the store can't grow unbounded; oldest are dropped first.
 pub const MAX_ENTRIES: usize = 200;
+/// Cap on raw single-task episodic notes retained per module once a consolidated
+/// `[Module Invariant: <module>]` entry exists for that module (P3 stratification).
+pub const MAX_EPISODIC_PER_MODULE: usize = 2;
 const RECALL_HEADER: &str =
     "Project memory (verified notes from past work — treat as leads, verify before acting):";
 
@@ -38,6 +41,17 @@ pub struct MemoryEntry {
     pub ts: u64,
     pub tags: Vec<String>,
     pub text: String,
+}
+
+impl MemoryEntry {
+    /// Whether this entry is a promoted module-level invariant rather than a
+    /// single-task episodic note.
+    pub fn is_invariant(&self) -> bool {
+        self.tags
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("invariant"))
+            || self.text.starts_with("[Module Invariant:")
+    }
 }
 
 /// Append-only-ish markdown fact store under a project's `.ncx/memory/`.
@@ -105,8 +119,20 @@ impl MemoryStore {
     }
 
     /// Deterministic note identifier (`content_hash(&normalize(text))`).
+    /// For `[Module Invariant: <module>]` entries, keys on the canonical header
+    /// so in-place invariant updates preserve their accumulated feedback stats.
     pub fn note_id(text: &str) -> String {
-        crate::context_trace::content_hash(&normalize(text))
+        let trimmed = text.trim();
+        if let Some(rest) = trimmed.strip_prefix("[Module Invariant:") {
+            if let Some((mod_part, _)) = rest.split_once(']') {
+                let canonical = format!(
+                    "[module invariant: {}]",
+                    mod_part.trim().to_ascii_lowercase()
+                );
+                return crate::context_trace::content_hash(&canonical);
+            }
+        }
+        crate::context_trace::content_hash(&normalize(trimmed))
     }
 
     /// Workspace key associated with this memory store directory.
@@ -162,6 +188,124 @@ impl MemoryStore {
         }
         self.write_all(&entries)?;
         Ok(true)
+    }
+
+    /// Promote or update a consolidated `[Module Invariant: <module_path>]` entry
+    /// once a module has accumulated `>= 2` verified episodic notes (P3 two-tier
+    /// memory stratification). Prunes older episodic notes for `<module_path>`
+    /// down to [`MAX_EPISODIC_PER_MODULE`] so single-module curricula do not
+    /// accumulate unbounded per-task notes.
+    pub fn promote_module_invariant_if_due(
+        &self,
+        module_path: &str,
+        extra_tags: &[String],
+        now: u64,
+    ) -> std::io::Result<Option<String>> {
+        let mod_clean = module_path.trim().replace('\\', "/");
+        if mod_clean.is_empty() {
+            return Ok(None);
+        }
+        let needle = format!("`{mod_clean}`");
+        let inv_prefix = format!("[Module Invariant: {mod_clean}]");
+        let mut entries = self.entries();
+
+        let episodic_indices: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.is_invariant() && e.text.contains(&needle))
+            .map(|(i, _)| i)
+            .collect();
+        let existing_inv_idx = entries.iter().position(|e| e.text.starts_with(&inv_prefix));
+
+        if existing_inv_idx.is_none() && episodic_indices.len() < 2 {
+            return Ok(None);
+        }
+
+        // Collect concise verified lessons from the episodic notes for this module.
+        let mut snippets: Vec<String> = Vec::new();
+        if let Some(idx) = existing_inv_idx {
+            let body = entries[idx]
+                .text
+                .strip_prefix(&inv_prefix)
+                .unwrap_or(&entries[idx].text)
+                .trim();
+            for part in body.split(" | ") {
+                let p = part.trim();
+                if !p.is_empty() && !snippets.iter().any(|s| s.eq_ignore_ascii_case(p)) {
+                    snippets.push(p.to_string());
+                }
+            }
+        }
+        for &idx in &episodic_indices {
+            let txt = &entries[idx].text;
+            let detail = txt
+                .split_once(" — ")
+                .map(|(_, rhs)| rhs.trim())
+                .unwrap_or(txt.as_str());
+            let compact: String = detail.chars().take(120).collect();
+            if !compact.is_empty() && !snippets.iter().any(|s| s.eq_ignore_ascii_case(&compact)) {
+                snippets.push(compact);
+            }
+        }
+        // Keep the newest 3 distinct verified snippets so the invariant stays bounded.
+        if snippets.len() > 3 {
+            let drop = snippets.len() - 3;
+            snippets.drain(0..drop);
+        }
+        let inv_text: String = format!("{inv_prefix} {}", snippets.join(" | "))
+            .chars()
+            .take(380)
+            .collect();
+
+        let mut tags = vec!["invariant".to_string()];
+        for t in extra_tags {
+            if !tags.iter().any(|x| x.eq_ignore_ascii_case(t)) {
+                tags.push(t.clone());
+            }
+        }
+        if let Some(stem) = std::path::Path::new(&mod_clean)
+            .file_stem()
+            .and_then(|s| s.to_str())
+        {
+            let st = stem.to_ascii_lowercase();
+            if st.len() >= 3 && !tags.iter().any(|x| x == &st) {
+                tags.push(st);
+            }
+        }
+
+        if let Some(idx) = existing_inv_idx {
+            entries[idx].ts = now;
+            entries[idx].text = inv_text.clone();
+            for t in tags {
+                if !entries[idx].tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+                    entries[idx].tags.push(t);
+                }
+            }
+        } else {
+            entries.push(MemoryEntry {
+                ts: now,
+                tags,
+                text: inv_text.clone(),
+            });
+        }
+
+        // Trim older episodic notes for this module if more than MAX_EPISODIC_PER_MODULE exist.
+        entries.sort_by_key(|e| e.ts);
+        let mod_episodic_positions: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.is_invariant() && e.text.contains(&needle))
+            .map(|(i, _)| i)
+            .collect();
+        if mod_episodic_positions.len() > MAX_EPISODIC_PER_MODULE {
+            let to_remove = mod_episodic_positions.len() - MAX_EPISODIC_PER_MODULE;
+            for &pos in mod_episodic_positions[..to_remove].iter().rev() {
+                entries.remove(pos);
+            }
+        }
+
+        self.write_all(&entries)?;
+        Ok(Some(inv_text))
     }
 
     /// Path of the Markdown file this store owns. The metadata index is built
@@ -448,6 +592,9 @@ fn semantic_score(
         }
     }
     score += (jaccard(qset, &entry_set) * 20.0).round() as i64;
+    if score > 0 && e.is_invariant() {
+        score += 6;
+    }
     score
 }
 
@@ -817,5 +964,59 @@ mod tests {
             arr[0]["detail"]
         );
         assert_eq!(arr[1]["text"], "single-hit candidate");
+    }
+
+    #[test]
+    fn module_invariant_promotes_on_second_task_and_trims_episodic_bloat() {
+        let s = store("mod_invariant");
+        let tags = vec!["tabulate".to_string()];
+        s.remember(
+            "Task \"#24\" modified `tabulate.py` — in `_format`: handle multiline cells",
+            &tags,
+            10,
+        )
+        .unwrap();
+        // After 1st task: not yet promoted (< 2 episodic notes).
+        assert!(s
+            .promote_module_invariant_if_due("tabulate.py", &tags, 10)
+            .unwrap()
+            .is_none());
+
+        s.remember(
+            "Task \"#175\" modified `tabulate.py` — in `_align_column`: preserve empty strings",
+            &tags,
+            20,
+        )
+        .unwrap();
+        let inv = s
+            .promote_module_invariant_if_due("tabulate.py", &tags, 21)
+            .unwrap()
+            .expect("2nd task on tabulate.py should promote a module invariant");
+        assert!(inv.starts_with("[Module Invariant: tabulate.py]"));
+        assert!(inv.contains("_format") && inv.contains("_align_column"));
+
+        // Add a 3rd episodic note and re-promote: older episodic notes get trimmed
+        // to MAX_EPISODIC_PER_MODULE (2), keeping 1 invariant + 2 episodic = 3 total.
+        s.remember(
+            "Task \"#190\" modified `tabulate.py` — in `_type`: guard float parsing",
+            &tags,
+            30,
+        )
+        .unwrap();
+        s.promote_module_invariant_if_due("tabulate.py", &tags, 31)
+            .unwrap();
+        let entries = s.entries();
+        let inv_count = entries.iter().filter(|e| e.is_invariant()).count();
+        let ep_count = entries.iter().filter(|e| !e.is_invariant()).count();
+        assert_eq!(inv_count, 1);
+        assert_eq!(ep_count, MAX_EPISODIC_PER_MODULE);
+
+        // And the invariant ranks first on recall for `tabulate`.
+        let recalled = s.recall("fix bug in tabulate column formatting", 3, 2400);
+        let first_bullet = recalled.lines().nth(1).unwrap_or("");
+        assert!(
+            first_bullet.contains("[Module Invariant: tabulate.py]"),
+            "invariant should rank first, got: {first_bullet}"
+        );
     }
 }

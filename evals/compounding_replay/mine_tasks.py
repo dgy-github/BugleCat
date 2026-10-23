@@ -22,10 +22,12 @@ import sys
 import tempfile
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FIX_RE = re.compile(r"\bfix(?:es|ed)?\s+#(\d+)", re.IGNORECASE)
+BODY_RE = re.compile(r"\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)", re.IGNORECASE)
 
 
 def git(repo: Path, *args: str, check: bool = True) -> str:
@@ -90,14 +92,30 @@ def run_tests(repo: Path, test_files: list[str]) -> dict[str, str] | None:
         return results
 
 
-def candidates(repo: Path, since: str) -> list[tuple[str, str, int]]:
-    log = git(repo, "log", "--no-merges", f"--since={since}", "--pretty=format:%H%x09%s")
-    out = []
-    for line in log.splitlines():
-        sha, _, subject = line.partition("\t")
-        m = FIX_RE.search(subject)
-        if m:
-            out.append((sha, subject, int(m.group(1))))
+def candidates(repo: Path, since: str, body: bool = False) -> list[tuple[str, str, int]]:
+    """(sha, subject, issue) for commits referencing an issue.
+
+    Default: non-merge commits whose subject says "fix(es|ed) #N" (sqlparse
+    convention). With `body`, the full message is searched for fix/close/resolve
+    keywords and merge commits are included (diffed against their first parent),
+    which catches fixes landed via pull requests.
+    """
+    args = ["log", f"--since={since}", "--pretty=format:%H%x1f%s%x1f%B%x1e"]
+    if not body:
+        args.insert(1, "--no-merges")
+    out, seen = [], set()
+    for rec in git(repo, *args).split("\x1e"):
+        parts = rec.strip("\n").split("\x1f")
+        if len(parts) < 3:
+            continue
+        sha, subject, message = parts[0].strip(), parts[1], parts[2]
+        text = message if body else subject
+        rx = BODY_RE if body else FIX_RE
+        for m in rx.finditer(text):
+            num = int(m.group(1))
+            if (sha, num) not in seen:
+                seen.add((sha, num))
+                out.append((sha, subject, num))
     return out
 
 
@@ -109,6 +127,8 @@ def main() -> int:
     ap.add_argument("--test-prefix", default="tests/")
     ap.add_argument("--since", default="2016-01-01")
     ap.add_argument("--max-src-files", type=int, default=3)
+    ap.add_argument("--body", action="store_true",
+                    help="search full commit messages (fix/close/resolve #N) and include merge commits")
     ap.add_argument("--out", default=str(HERE / "tasks" / "sqlparse.jsonl"))
     args = ap.parse_args()
 
@@ -119,11 +139,13 @@ def main() -> int:
 
     tasks, rejects = [], []
     try:
-        for sha, subject, num in candidates(repo, args.since):
+        for sha, subject, num in candidates(repo, args.since, args.body):
             def reject(reason: str) -> None:
                 rejects.append({"sha": sha[:10], "issue": num, "subject": subject, "reason": reason})
                 print(f"  - #{num} {sha[:8]} rejected: {reason}")
 
+            if any(t["issue_number"] == num for t in tasks):
+                reject("issue already mined from another commit"); continue
             files = git(repo, "diff", "--name-only", f"{sha}^", sha).split()
             src = [f for f in files if f.startswith(args.src_prefix) and f.endswith(".py")]
             tests = [f for f in files if f.startswith(args.test_prefix) and f.endswith(".py")]
@@ -137,6 +159,11 @@ def main() -> int:
                 reject("issue not found"); continue
             if issue.get("pull_request"):
                 reject("referenced number is a PR, not an issue"); continue
+            fixed_at = git(repo, "show", "-s", "--format=%cI", sha).strip()
+            created = datetime.fromisoformat(issue["created_at"].replace("Z", "+00:00"))
+            if created > datetime.fromisoformat(fixed_at):
+                # e.g. tabulate's pre-GitHub (Bitbucket) "fix #N" refers to a different tracker
+                reject("issue created after the fix commit (number from another tracker?)"); continue
 
             parent = git(repo, "rev-parse", f"{sha}^").strip()
             git(repo, "checkout", "-q", "-f", parent)

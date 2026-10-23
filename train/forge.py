@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""ncx-forge — agent-harness trainer (M0a skeleton).
+"""ncx-forge — agent-harness trainer (M0a/M0b/M2 + P1 RRSI Regularization).
 
-M0a delivers the FOUNDATION and the safety gate, not yet the optimization loop:
+M0a delivers the FOUNDATION and the safety gate:
 
   python train/forge.py --self-check         # prove NCX_GENOME is honored
 
-The self-check is the precondition every future training run must pass: it runs
-a deliberately self-destructing genome (a system_prompt that orders the agent to
-refuse) on a couple of tasks and asserts the pass-rate DROPS versus baseline. If
-it does not drop, NCX_GENOME is not reaching the model and the optimizer would
-silently no-op — so we refuse to proceed.
-
-The optimizer loop (teacher panel -> mutate -> evaluate -> accept) is M0b; see
-train/DESIGN.md. This file currently exposes the gate + a thin baseline report.
+P1 adds RRSI-inspired regularization to the optimization loop:
+- Experiment ledger (`runs/ledger_<stamp>.jsonl`) + falsified hypothesis history
+- Annealed edit budget (`--initial-max-surfaces`, `--max-changed-lines`)
+- Anti-memorization critic gate (`teacher.critic_check`)
+- Noise-calibrated token-cost acceptance gate (`--delta-tokens`, `--max-token-growth`)
+- Stagnation surface steering (`--stagnation-limit`)
+- Post-search structural ablation pruning (`--prune`, `prune_genome`)
 """
 from __future__ import annotations
 
@@ -49,12 +48,6 @@ RUNS_DIR = Path(os.environ.get(
     "NCX_FORGE_RUNS_DIR", Path(__file__).resolve().parent / "runs"
 )).resolve()
 
-# A genome that should make ANY task fail: the agent is told to refuse and not
-# act. If pass-rate does not collapse under this, injection is not working.
-# A unique token planted in the genome's system_prompt. We then ask the agent
-# for it and assert it surfaces. This is DETERMINISTIC — unlike a "refuse all
-# tasks" genome, it does not depend on the model choosing to comply with a
-# behavior change (which is noisy: the task instruction competes with it).
 SENTINEL = "NCXFORGE_SENTINEL_4242"
 SENTINEL_GENOME = (
     f'system_prompt = "You are a wiring self-test. Your secret codeword is '
@@ -84,22 +77,15 @@ def _ask(genome_path: str | None, prompt: str, timeout: int) -> str:
 
 
 def self_check(timeout: int = 90, attempts: int = 3) -> bool:
-    """Return True iff NCX_GENOME demonstrably reaches the model's system prompt.
-
-    Gate: a sentinel codeword planted in system_prompt must appear in the agent's
-    reply WHEN the genome is set, and must be absent at baseline. The "with
-    genome" probe is RETRIED up to `attempts` times — the agent occasionally
-    doesn't echo the codeword (model noise), which is not an injection failure,
-    so a single miss must not block a training run.
-    """
+    """Return True iff NCX_GENOME demonstrably reaches the model's system prompt."""
     tmp = Path(tempfile.mkdtemp(prefix="forge_selftest_"))
-    genome = tmp / "sentinel.toml"
-    genome.write_text(SENTINEL_GENOME, encoding="utf-8")
+    gpath = tmp / "sentinel.toml"
+    gpath.write_text(SENTINEL_GENOME, encoding="utf-8")
 
     print(f"[forge] self-check: sentinel injection via NCX_GENOME ({ev.bench.NCX})")
     injected = False
     for i in range(max(1, attempts)):
-        if SENTINEL in _ask(str(genome), SENTINEL_PROMPT, timeout):
+        if SENTINEL in _ask(str(gpath), SENTINEL_PROMPT, timeout):
             injected = True
             break
         if i + 1 < attempts:
@@ -124,24 +110,125 @@ def baseline_report(tasks: list[str] | None, repeats: int, timeout: int) -> None
         print(f"  {t.task:14} {t.passes}/{t.runs}  {t.mean_s:6.1f}s")
 
 
+def append_ledger(runs_dir: Path, stamp: str, entry: dict) -> Path:
+    """Append a structured JSONL experiment record to `runs/ledger_<stamp>.jsonl`."""
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    path = runs_dir / f"ledger_{stamp}.jsonl"
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return path
+
+
+def _pick_stagnation_surface(baseline: genome.Genome, touched_counts: dict[str, int]) -> str:
+    """Return the least-frequently-attempted surface so search escapes local optima."""
+    all_surfaces = (
+        ["system_prompt"]
+        + [f"tool_desc.{k}" for k in sorted(baseline.tool_desc)]
+        + [f"orchestrator_prompts.{k}" for k in sorted(baseline.orchestrator_prompts)]
+        + [f"memory_config.{k}" for k in sorted(baseline.memory_config)]
+    )
+    return min(all_surfaces, key=lambda s: (touched_counts.get(s, 0), s))
+
+
+def prune_genome(
+    champion: genome.Genome,
+    baseline: genome.Genome,
+    train_tasks: list[str],
+    holdout_tasks: list[str],
+    repeats: int,
+    timeout: int,
+    champ_train: ev.EvalResult | None = None,
+    champ_hold: ev.EvalResult | None = None,
+    stamp: str = "prune",
+) -> tuple[genome.Genome, list[str]]:
+    """RRSI structural ablation pruning: revert individual modified surfaces (or
+    added system_prompt paragraphs) back to `baseline` if doing so does not
+    reduce train or holdout passes (and does not regress token usage when present)."""
+    GENOMES_DIR.mkdir(exist_ok=True)
+    cur = champion.copy()
+    pruned: list[str] = []
+
+    if champ_train is None:
+        tmp_p = GENOMES_DIR / f"{stamp}_prune_init.toml"
+        cur.save(tmp_p)
+        champ_train = ev.evaluate(str(tmp_p), train_tasks, repeats, timeout)
+    if champ_hold is None and holdout_tasks:
+        tmp_p = GENOMES_DIR / f"{stamp}_prune_init.toml"
+        cur.save(tmp_p)
+        champ_hold = ev.evaluate(str(tmp_p), holdout_tasks, repeats, timeout)
+
+    surfaces = genome.changed_surfaces(baseline, cur)
+    for idx, surf in enumerate(surfaces):
+        ablated = cur.copy()
+        if surf == "system_prompt":
+            ablated.system_prompt = baseline.system_prompt
+        elif surf.startswith("tool_desc."):
+            tname = surf.split(".", 1)[1]
+            if tname in baseline.tool_desc:
+                ablated.tool_desc[tname] = baseline.tool_desc[tname]
+            else:
+                ablated.tool_desc.pop(tname, None)
+        elif surf.startswith("orchestrator_prompts."):
+            okey = surf.split(".", 1)[1]
+            if okey in baseline.orchestrator_prompts:
+                ablated.orchestrator_prompts[okey] = baseline.orchestrator_prompts[okey]
+            else:
+                ablated.orchestrator_prompts.pop(okey, None)
+        elif surf.startswith("memory_config."):
+            mkey = surf.split(".", 1)[1]
+            if mkey in baseline.memory_config:
+                ablated.memory_config[mkey] = baseline.memory_config[mkey]
+            else:
+                ablated.memory_config.pop(mkey, None)
+
+        ab_path = GENOMES_DIR / f"{stamp}_prune_{idx}.toml"
+        ablated.save(ab_path)
+        ab_train = ev.evaluate(str(ab_path), train_tasks, repeats, timeout)
+        if ab_train.total_passes < champ_train.total_passes:
+            continue
+        if (
+            champ_train.mean_tokens > 0
+            and ab_train.mean_tokens > 0
+            and ab_train.mean_tokens > champ_train.mean_tokens
+        ):
+            continue
+        if holdout_tasks and champ_hold is not None:
+            ab_hold = ev.evaluate(str(ab_path), holdout_tasks, repeats, timeout)
+            if ab_hold.total_passes < champ_hold.total_passes:
+                continue
+            champ_hold = ab_hold
+        cur = ablated
+        champ_train = ab_train
+        pruned.append(surf)
+        print(f"[forge]   prune: reverted redundant surface '{surf}' without score loss")
+
+    return cur, pruned
+
+
 def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
           repeats: int, timeout: int, budget_s: float, teachers: str,
           stamp: str, test_tasks: list[str] | None = None,
           accept_margin: int = 1, reeval_incumbent: bool = True,
-          from_genome: str | None = None) -> dict:
-    """Single-champion hill-climb. Each round: every available teacher proposes a
-    mutation of the current champion; candidates are evaluated on TRAIN; the best
-    is promoted iff it beats the champion on TRAIN by `accept_margin` AND does not
-    regress on the held-out (val) split.
+          from_genome: str | None = None,
+          initial_max_surfaces: int | None = None,
+          max_changed_lines: int | None = None,
+          delta_tokens: float = 0.0,
+          max_token_growth: float | None = None,
+          stagnation_limit: int = 2,
+          prune_at_end: bool = False) -> dict:
+    """Single-champion regularized hill-climb (M0b/M1 + P1 RRSI regularization).
 
-    Noise-aware (M1): because the agent is non-deterministic, the incumbent is
-    RE-EVALUATED each round under a fresh draw (when `reeval_incumbent`), so a
-    candidate is compared against the champion's current noisy score rather than a
-    single stale gen0 number — and must clear it by `accept_margin`, not just +0.
-
-    A wall-clock governor bounds total spend. Returns a lineage dict (also written
-    to runs/lineage_<stamp>.json). `test_tasks` (if given) are scored ONCE at the
-    end for an unbiased final number — never used for acceptance.
+    Each round:
+    1. Compute annealed surface budget (`max_surfaces`) and stagnation focus surface.
+    2. Build teacher prompt including falsified/rejected hypothesis history.
+    3. Validate candidate against baseline size caps, annealed edit budget, and
+       anti-memorization critic (`teacher.critic_check`).
+    4. Evaluate on `train_tasks` and apply the two-sided acceptance rule:
+       - Pass-rate improvement: `margin >= accept_margin` (subject to `max_token_growth`)
+       - Token-cost improvement at non-inferior pass-rate:
+         `margin >= 0` and `token_saving >= delta_tokens` (when `delta_tokens > 0`)
+       AND holdout pass-rate must not regress (`chold.total_passes >= champ_hold.total_passes`).
+    5. Log every candidate and verdict to `runs/ledger_<stamp>.jsonl`.
     """
     GENOMES_DIR.mkdir(exist_ok=True)
     RUNS_DIR.mkdir(exist_ok=True)
@@ -155,10 +242,6 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
         return {"error": "no teacher"}
 
-    # `baseline` is ALWAYS the real default genome — it defines the validation
-    # caps and the legal tool set. The starting `champion` is normally the same,
-    # but `--from-genome` lets a run start from a DEGRADED scaffold to create
-    # real headroom (an honest capability test: can the optimizer recover it?).
     baseline = genome.extract_current()
     if from_genome:
         champion = genome.Genome.load(Path(from_genome))
@@ -175,14 +258,18 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
 
     lineage = {"stamp": stamp, "train_tasks": train_tasks, "holdout_tasks": holdout_tasks,
                "repeats": repeats, "rounds": [],
-               "gen0": {"train": champ_train.total_passes, "holdout": champ_hold.total_passes}}
+               "gen0": {"train": champ_train.total_passes, "holdout": champ_hold.total_passes,
+                        "mean_tokens": champ_train.mean_tokens}}
+
+    rejected_history: list[dict] = []
+    touched_counts: dict[str, int] = {}
+    stagnant_rounds = 0
+    forbidden_terms = list(train_tasks) + list(holdout_tasks) + list(test_tasks or [])
 
     for rnd in range(1, rounds + 1):
         if elapsed() > budget_s:
             print(f"[forge] budget ({budget_s}s) exhausted — stopping at round {rnd}.")
             break
-        # Noise-aware: re-score the incumbent this round so the candidate is
-        # compared against a fresh draw, not a stale gen0 number.
         if reeval_incumbent and rnd > 1:
             champ_train = ev.evaluate(str(champ_path), train_tasks, repeats, timeout)
             champ_hold = ev.evaluate(str(champ_path), holdout_tasks, repeats, timeout)
@@ -195,15 +282,35 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                 print("[forge] champion fully solves the train set — nothing to improve "
                       "(grow/harden the task set). Stopping.")
             else:
-                # Should not happen now that the evaluator synthesizes a trajectory
-                # for trajectory-less failures, but guard against a silent no-op.
                 print(f"[forge] train has failures ({champ_train.total_passes}/"
                       f"{champ_train.total_runs}) but no usable trajectories to feed the "
                       f"teacher — cannot propose. Stopping.")
             break
-        prompt = teacher.build_teacher_prompt(champion, failures)
-        round_log = {"round": rnd, "candidates": []}
-        candidates = []  # (teacher_name, genome, eval)
+
+        max_surfaces = (
+            max(1, initial_max_surfaces - (rnd - 1))
+            if initial_max_surfaces is not None
+            else None
+        )
+        focus_surface = (
+            _pick_stagnation_surface(baseline, touched_counts)
+            if (stagnation_limit > 0 and stagnant_rounds >= stagnation_limit)
+            else None
+        )
+        prompt = teacher.build_teacher_prompt(
+            champion,
+            failures,
+            rejected_history=rejected_history if rejected_history else None,
+            focus_surface=focus_surface,
+            max_surfaces=max_surfaces,
+        )
+        round_log = {
+            "round": rnd,
+            "max_surfaces": max_surfaces,
+            "focus_surface": focus_surface,
+            "candidates": [],
+        }
+        candidates = []  # (teacher_name, genome, eval, cpath, surfaces, diff_str)
         for backend in panel:
             if elapsed() > budget_s:
                 break
@@ -212,59 +319,177 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             if not cand:
                 print(f"[forge]   round {rnd} {backend.name}: rejected ({why})")
                 round_log["candidates"].append({"teacher": backend.name, "status": why})
+                entry = {
+                    "round": rnd, "teacher": backend.name, "target_surfaces": [],
+                    "diff": "", "verdict": "rejected", "reason": why,
+                }
+                append_ledger(RUNS_DIR, stamp, entry)
+                rejected_history.append(entry)
                 continue
-            errs = genome.validate(cand, baseline)
+
+            surfaces = genome.changed_surfaces(champion, cand)
+            for s in surfaces:
+                touched_counts[s] = touched_counts.get(s, 0) + 1
+            diff_str = genome.diff(champion, cand)
+
+            errs = genome.validate(
+                cand, baseline, parent=champion,
+                max_surfaces=max_surfaces, max_changed_lines=max_changed_lines,
+            )
             if errs:
-                print(f"[forge]   round {rnd} {backend.name}: invalid ({errs[0]})")
-                round_log["candidates"].append({"teacher": backend.name, "status": f"invalid: {errs[0]}"})
+                reason = f"invalid: {errs[0]}"
+                print(f"[forge]   round {rnd} {backend.name}: {reason}")
+                round_log["candidates"].append({"teacher": backend.name, "status": reason})
+                entry = {
+                    "round": rnd, "teacher": backend.name, "target_surfaces": surfaces,
+                    "diff": diff_str, "verdict": "rejected", "reason": reason,
+                }
+                append_ledger(RUNS_DIR, stamp, entry)
+                rejected_history.append(entry)
                 continue
+
+            critic_errs = teacher.critic_check(cand, champion, forbidden_terms=forbidden_terms)
+            if critic_errs:
+                reason = critic_errs[0]
+                print(f"[forge]   round {rnd} {backend.name}: rejected ({reason})")
+                round_log["candidates"].append({"teacher": backend.name, "status": reason})
+                entry = {
+                    "round": rnd, "teacher": backend.name, "target_surfaces": surfaces,
+                    "diff": diff_str, "verdict": "rejected", "reason": reason,
+                }
+                append_ledger(RUNS_DIR, stamp, entry)
+                rejected_history.append(entry)
+                continue
+
             cpath = GENOMES_DIR / f"{stamp}_gen{rnd}_{backend.name}.toml"
             cand.save(cpath)
             cev = ev.evaluate(str(cpath), train_tasks, repeats, timeout)
             print(f"[forge]   round {rnd} {backend.name}: train "
-                  f"{cev.total_passes}/{cev.total_runs}  changed[{genome.diff(champion, cand)!r}]")
-            candidates.append((backend.name, cand, cev, cpath))
+                  f"{cev.total_passes}/{cev.total_runs} (tokens={cev.mean_tokens}) "
+                  f"changed[{diff_str!r}]")
+            candidates.append((backend.name, cand, cev, cpath, surfaces, diff_str))
             round_log["candidates"].append({
                 "teacher": backend.name, "status": "evaluated",
-                "train_passes": cev.total_passes, "path": str(cpath),
+                "train_passes": cev.total_passes, "mean_tokens": cev.mean_tokens,
+                "target_surfaces": surfaces, "path": str(cpath),
             })
 
-        # Pick the best candidate; accept only if it beats champion on TRAIN and
-        # does not regress on HELD-OUT (the real anti-overfit gate).
         accepted = None
         if candidates:
-            best = max(candidates, key=lambda c: c[2].total_passes)
-            tname, cand, cev, cpath = best
+            # Sort by higher total_passes first, then lower mean_tokens (when reported).
+            best = max(
+                candidates,
+                key=lambda c: (
+                    c[2].total_passes,
+                    -c[2].mean_tokens if c[2].mean_tokens > 0 else 0.0,
+                ),
+            )
+            tname, cand, cev, cpath, surfaces, diff_str = best
             margin = cev.total_passes - champ_train.total_passes
-            if margin >= accept_margin:
+            token_saving = (
+                (champ_train.mean_tokens - cev.mean_tokens)
+                if (champ_train.mean_tokens > 0 and cev.mean_tokens > 0)
+                else 0.0
+            )
+            token_growth = -token_saving
+            token_bloated = (
+                max_token_growth is not None
+                and champ_train.mean_tokens > 0
+                and cev.mean_tokens > 0
+                and token_growth > max_token_growth
+            )
+            clears_pass_gate = (margin >= accept_margin) and not token_bloated
+            clears_token_gate = (
+                delta_tokens > 0.0
+                and margin >= 0
+                and token_saving >= delta_tokens
+            )
+
+            if token_bloated and margin >= accept_margin:
+                reason = f"token-bloat (+{token_growth:.1f} > {max_token_growth})"
+                print(f"[forge]   round {rnd}: REJECT {tname} ({reason})")
+                round_log["accept"] = {"teacher": tname, "status": "token-bloat",
+                                       "token_growth": round(token_growth, 1)}
+                entry = {
+                    "round": rnd, "teacher": tname, "target_surfaces": surfaces,
+                    "diff": diff_str, "train_passes": cev.total_passes,
+                    "mean_tokens": cev.mean_tokens, "verdict": "rejected", "reason": reason,
+                }
+                append_ledger(RUNS_DIR, stamp, entry)
+                rejected_history.append(entry)
+            elif clears_pass_gate or clears_token_gate:
                 chold = ev.evaluate(str(cpath), holdout_tasks, repeats, timeout)
                 if chold.total_passes >= champ_hold.total_passes:
                     champion, champ_train, champ_hold, champ_path = cand, cev, chold, cpath
                     accepted = tname
-                    print(f"[forge]   round {rnd}: ACCEPT {tname} "
+                    accept_mode = "pass-gain" if clears_pass_gate else "token-saving"
+                    print(f"[forge]   round {rnd}: ACCEPT {tname} [{accept_mode}] "
                           f"(train +{margin} -> {cev.total_passes}/{cev.total_runs}, "
+                          f"token_saving={token_saving:.1f}, "
                           f"holdout {chold.total_passes}/{chold.total_runs})")
-                    round_log["accept"] = {"teacher": tname, "train": cev.total_passes,
-                                           "holdout": chold.total_passes, "margin": margin}
+                    round_log["accept"] = {
+                        "teacher": tname, "mode": accept_mode,
+                        "train": cev.total_passes, "holdout": chold.total_passes,
+                        "margin": margin, "token_saving": round(token_saving, 1),
+                    }
+                    append_ledger(RUNS_DIR, stamp, {
+                        "round": rnd, "teacher": tname, "target_surfaces": surfaces,
+                        "diff": diff_str, "train_passes": cev.total_passes,
+                        "holdout_passes": chold.total_passes,
+                        "mean_tokens": cev.mean_tokens,
+                        "verdict": "accepted", "reason": accept_mode,
+                    })
                 else:
-                    print(f"[forge]   round {rnd}: REJECT {tname} (holdout regressed "
-                          f"{chold.total_passes} < {champ_hold.total_passes})")
+                    reason = f"holdout-regressed ({chold.total_passes} < {champ_hold.total_passes})"
+                    print(f"[forge]   round {rnd}: REJECT {tname} ({reason})")
                     round_log["accept"] = {"teacher": tname, "status": "holdout-regressed"}
+                    entry = {
+                        "round": rnd, "teacher": tname, "target_surfaces": surfaces,
+                        "diff": diff_str, "train_passes": cev.total_passes,
+                        "holdout_passes": chold.total_passes,
+                        "mean_tokens": cev.mean_tokens,
+                        "verdict": "rejected", "reason": reason,
+                    }
+                    append_ledger(RUNS_DIR, stamp, entry)
+                    rejected_history.append(entry)
             else:
-                print(f"[forge]   round {rnd}: no candidate cleared the margin "
-                      f"(best +{margin} < {accept_margin} needed on train).")
-        if accepted is None and "accept" not in round_log:
-            round_log.setdefault("accept", {"status": "none-cleared-margin"})
+                reason = f"below-margin (train +{margin} < {accept_margin}, token_saving={token_saving:.1f})"
+                print(f"[forge]   round {rnd}: no candidate cleared the gate ({reason}).")
+                entry = {
+                    "round": rnd, "teacher": tname, "target_surfaces": surfaces,
+                    "diff": diff_str, "train_passes": cev.total_passes,
+                    "mean_tokens": cev.mean_tokens,
+                    "verdict": "rejected", "reason": reason,
+                }
+                append_ledger(RUNS_DIR, stamp, entry)
+                rejected_history.append(entry)
+
+        if accepted is None:
+            stagnant_rounds += 1
+            if "accept" not in round_log:
+                round_log.setdefault("accept", {"status": "none-cleared-margin"})
+        else:
+            stagnant_rounds = 0
         lineage["rounds"].append(round_log)
+
+    pruned_surfaces: list[str] = []
+    if prune_at_end and genome.changed_surfaces(baseline, champion):
+        champion, pruned_surfaces = prune_genome(
+            champion, baseline, train_tasks, holdout_tasks,
+            repeats, timeout, champ_train=champ_train, champ_hold=champ_hold, stamp=stamp,
+        )
 
     champ_final = GENOMES_DIR / f"{stamp}_champion.toml"
     champion.save(champ_final)
-    lineage["champion"] = {"path": str(champ_final),
-                           "train": champ_train.total_passes, "holdout": champ_hold.total_passes,
-                           "diff_vs_baseline": genome.diff(baseline, champion)}
+    lineage["champion"] = {
+        "path": str(champ_final),
+        "train": champ_train.total_passes,
+        "holdout": champ_hold.total_passes,
+        "mean_tokens": champ_train.mean_tokens,
+        "pruned_surfaces": pruned_surfaces,
+        "diff_vs_baseline": genome.diff(baseline, champion),
+    }
 
-    # Final, unbiased number: score baseline vs champion ONCE on the frozen test
-    # split (never used for acceptance). The only honest "did training help?".
     if test_tasks:
         base_test = ev.evaluate(str(GENOMES_DIR / f"{stamp}_gen0_start.toml"),
                                 test_tasks, repeats, timeout)
@@ -283,15 +508,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
 
 
 def _objectives(ev_result) -> pareto.Objectives:
-    """Map an EvalResult to (pass-rate ↑, cost ↓).
-
-    Cost = mean total TOKENS per task when ncx reported usage (the real cost);
-    otherwise mean per-task SECONDS (a latency proxy). ncx prints a
-    `[ncx-usage]` line in one-shot mode, which the evaluator parses.
-
-    An EMPTY eval (no tasks/runs) is mapped to the WORST objective (cost=+inf),
-    never the best — otherwise a zero-task misconfiguration would be undominated
-    and silently win the front (masking the misconfig as a green champion)."""
+    """Map an EvalResult to (pass-rate ↑, cost ↓)."""
     if ev_result.total_runs == 0 or not ev_result.tasks:
         return pareto.Objectives(passrate=0.0, cost=float("inf"))
     pr = ev_result.total_passes / ev_result.total_runs
@@ -309,19 +526,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
            pop_cap: int = 4, test_tasks: list[str] | None = None,
            from_genome: str | None = None, reeval_parents: bool = True,
            model: str | None = None) -> dict:
-    """Small-population, multi-objective (Pareto) search (M2).
-
-    Maintains a population that is the Pareto front (pass-rate ↑ vs cost ↓),
-    capped to `pop_cap` by crowding distance. Each generation, every population
-    member is mutated by every available teacher; parents+children are reduced to
-    the next front. Unlike single-champion `train()`, this KEEPS trade-offs (a
-    cheap-decent genome alongside a slow-strong one). Writes a lineage JSON for
-    `viz.py`.
-
-    Noise-aware: with `reeval_parents` (default on), surviving members are
-    re-scored under a fresh draw each generation, so a lucky early evaluation
-    can't permanently pin the front (mirrors train()'s reeval_incumbent).
-    """
+    """Small-population, multi-objective (Pareto) search (M2)."""
     GENOMES_DIR.mkdir(exist_ok=True)
     RUNS_DIR.mkdir(exist_ok=True)
     t0 = time.perf_counter()
@@ -341,14 +546,14 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         counter["n"] += 1
         return f"g{counter['n']:02d}_{tag}"
 
-    def make_member(genome, gen, parent, teacher, tag):
+    def make_member(g, gen, parent, t_name, tag):
         gid = "gen0_start" if gen == 0 else new_id(tag)
         path = GENOMES_DIR / f"{stamp}_{gid}.toml"
-        genome.save(path)
+        g.save(path)
         ev_r = ev.evaluate(str(path), train_tasks, repeats, timeout, model)
         obj = _objectives(ev_r)
-        return {"id": gid, "genome": genome, "path": path, "ev": ev_r, "obj": obj,
-                "gen": gen, "parent": parent, "teacher": teacher}
+        return {"id": gid, "genome": g, "path": path, "ev": ev_r, "obj": obj,
+                "gen": gen, "parent": parent, "teacher": t_name}
 
     start_genome = genome.Genome.load(Path(from_genome)) if from_genome else baseline.copy()
     if from_genome:
@@ -368,8 +573,6 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         if elapsed() > budget_s:
             print(f"[forge] budget ({budget_s}s) exhausted — stopping before gen {rnd}.")
             break
-        # Noise-aware (mirrors train()): re-score surviving members under a fresh
-        # draw so a lucky early evaluation can't permanently pin the front.
         if reeval_parents and rnd > 1:
             for m in population:
                 m["ev"] = ev.evaluate(str(m["path"]), train_tasks, repeats, timeout, model)
@@ -380,7 +583,7 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         for parent in population:
             failures = parent["ev"].failing_trajectories(top_k=3)
             if not failures:
-                continue  # nothing to learn from this parent this round
+                continue
             prompt = teacher.build_teacher_prompt(parent["genome"], failures)
             for backend in panel:
                 if elapsed() > budget_s:
@@ -431,7 +634,6 @@ def evolve(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
 
     lin_path = RUNS_DIR / f"lineage_{stamp}.json"
     lin_path.write_text(json.dumps(lineage, indent=2), encoding="utf-8")
-    # Render the visualization next to the lineage.
     try:
         import viz
         html_path = lin_path.with_suffix(".html")
@@ -450,7 +652,7 @@ def _node(member: dict) -> dict:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="ncx-forge harness trainer (M0b).")
+    ap = argparse.ArgumentParser(description="ncx-forge harness trainer (M0b + P1 RRSI).")
     ap.add_argument("--self-check", action="store_true",
                     help="prove NCX_GENOME injection works, then exit")
     ap.add_argument("--baseline", action="store_true",
@@ -479,6 +681,18 @@ def main() -> int:
                     help="panel | codex | claude | api")
     ap.add_argument("--accept-margin", type=int, default=1,
                     help="train passes a candidate must clear the incumbent by (noise band)")
+    ap.add_argument("--initial-max-surfaces", type=int, default=0,
+                    help="RRSI annealed surface budget at round 1 (0 = disabled)")
+    ap.add_argument("--max-changed-lines", type=int, default=0,
+                    help="RRSI cap on changed lines per round (0 = disabled)")
+    ap.add_argument("--delta-tokens", type=float, default=0.0,
+                    help="accept equal-passrate candidate if mean_tokens drops by >= delta")
+    ap.add_argument("--max-token-growth", type=float, default=0.0,
+                    help="reject pass-rate gain if mean_tokens grows by > max (0 = disabled)")
+    ap.add_argument("--stagnation-limit", type=int, default=2,
+                    help="rounds without acceptance before steering teacher to untouched surface")
+    ap.add_argument("--prune", action="store_true",
+                    help="run RRSI ablation pruning on champion before saving")
     ap.add_argument("--no-reeval", action="store_true",
                     help="do NOT re-evaluate the incumbent each round (cheaper, noisier)")
     ap.add_argument("--from-genome", default="",
@@ -510,7 +724,13 @@ def main() -> int:
         train(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
               a.budget_s, a.teacher, stamp, test_tasks=test_tasks,
               accept_margin=a.accept_margin, reeval_incumbent=not a.no_reeval,
-              from_genome=(a.from_genome or None))
+              from_genome=(a.from_genome or None),
+              initial_max_surfaces=(a.initial_max_surfaces or None),
+              max_changed_lines=(a.max_changed_lines or None),
+              delta_tokens=a.delta_tokens,
+              max_token_growth=(a.max_token_growth or None),
+              stagnation_limit=a.stagnation_limit,
+              prune_at_end=a.prune)
         return 0
     if a.population:
         if not a.no_gate and not self_check(a.timeout):

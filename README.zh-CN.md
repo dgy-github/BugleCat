@@ -2,10 +2,28 @@
 
 [English](README.md) | 简体中文
 
-## 最新更新（2026-10-19）
+## 最新更新（2026-10-23）
 
 > [!IMPORTANT]
-> **第三阶段：智能复利闭环、无人工介入完成率（ACR & 60 分奇点）+ 跨 Agent 平台升级**
+> **第三阶段里程碑（2026-10-23）：自进化 Harness 正则化（对照 Google RRSI / Harness²，P0–P3 全量落地）与配对复利回放实证**
+> - **P0 —— 噪声校准配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）与第二基准仓库（`python-tabulate`）**：
+>   * **统计配对与噪声下限校准**：引入单臂噪声下限校准（解决数按 Jeffreys 平滑伯努利方差求 $\delta_{\text{resolved}}$，成本按逐题样本方差和求 $\delta_{\text{cost}}$）与双臂逐题配对检验（精确 McNemar 检验 + 4000 次按题配对 Bootstrap 95% 置信区间 + 解决率非劣效护栏）。
+>   * **第二真实仓库题库（`astanin/python-tabulate`）**：加固 [`mine_tasks.py`](evals/compounding_replay/mine_tasks.py)（新增 `--body` 全文检索与合并提交支持、`issue["created_at"] <= fixed_at` 时间戳护栏精准拦截 7 个早年 Bitbucket 编号错配任务），通过 [`validate_gold.py`](evals/compounding_replay/validate_gold.py) 完成 9/9 官方黄金补丁验证。
+>   * **`tabulate` 3 轮配对实测（每臂 27 次运行）**：Arm B 相比 Arm A 将主指标「每解决一题成本（`cost_per_resolved`）」降低了 **21.0%**（**`B / A = 0.7904`，按题配对 Bootstrap 95% CI `[0.6239, 0.9523]`，不包含 `1.0`**；每轮均摊成本 `1.313` 元 vs `1.586` 元，配对 95% CI `[-0.5207, -0.0685]`），同时严格解决率满足非劣效护栏（`22/27` vs `21/27`，`+3.7pt >= -14.9pt`）。注：用同一配对脚本重算早期 2 轮 `sqlparse_split` v2，得 `B/A = 0.7131`，95% CI `[0.3693, 1.1586]`（跨过 `1.0`，定性为未定论）。
+> - **P1 —— `ncx-forge` 离线进化搜索的 RRSI 正则化（`train/`）**：
+>   * **表面级退火编辑预算**：新增 `changed_surfaces` 与 `changed_lines`，支持按轮退火的表面数预算（$\max(1, \text{max\_surfaces} - \lfloor r / 2 \rfloor)$）与修改行数硬上限（`--max-surfaces`、`--anneal-surfaces`、`--max-changed-lines`）。
+>   * **规则版反过拟合/反作弊审查器（`critic_check`）**：自动拦截在新增文本中硬编码训练集题号、`check.py`、`_check.py`、`hidden test` 的作弊候选。
+>   * **证伪假设账本与停滞自动转向**：每个候选写入结构化实验账本 `train/runs/ledger_<stamp>.jsonl`，向 Teacher 自动注入最近被拒的证伪历史（`Falsified / Rejected Mutations`），并在连续 `--stagnation-limit` 轮停滞时自动转向探索最少的表面。
+>   * **双通道成本感知验收门与盘后消融剪枝（`--prune`）**：支持「通过数提升 + `--max-token-growth` 防膨胀护栏」或「同分下显著节省 Token（`>= --delta-tokens`）」双通道晋级，并在搜索结束后对最终 Champion 逐面回滚重评，剔除零收益的搭便车冗余修改。
+> - **P2 —— 扩大 `NCX_GENOME` 可进化面（`rust/` + `train/`）**：
+>   * 在保持空 Genome 100% 字节级 No-op 等价保证（且不触碰冻结文件 `prompt.rs`）的前提下，新增 `[orchestrator_prompts]`（覆盖 `classify_sys`、`plan_sys`、`decompose_sys`、`worker_sys`、`verify_sys`）与有界 `[memory_config]`（`max_entries` $\in [1, 32]$、`max_chars` $\in [200, 16000]$），打通 `ncx --dump-genome` 与 `train/genome.py` 双向校验。
+> - **P3 —— 在线记忆双层结构化与成本感知归因（`rust/crates/ncx-core/`）**：
+>   * **模块级不变量提炼（`promote_module_invariant_if_due`）**：当同一模块在外部裁判确认通过（`Accepted`）后累计达到 `>= 2` 条验证笔记时，自动合并提炼结构化模块不变量 `[Module Invariant: <module_path>]`（赋予 `+6` 召回优先级加分，并按规范化头部哈希保持原地更新时 `note_id` 与历史权重不变），同时将该模块名下的旧单题情景笔记裁剪至最多 `MAX_EPISODIC_PER_MODULE = 2` 条并同步重建 SQLite 索引（`rebuild_from_markdown`）。
+>   * **召回预算收紧与高消耗轮次精准打折（`record_unhelpful_injection`）**：默认召回上限从 `8 条 / 4000 字符` 收紧至 `6 条 / 2400 字符`；当高消耗轮次（`iterations > 16 || tool_calls > 24 || total_tokens > 80_000`）完成时，仅命中实际修改文件名的召回笔记获得 `accepted + 1`，未命中的搭便车笔记仅记 `injected + 1`。在 `tabulate` Arm B' 实测（`20261023-115758-B-tab-p3-r1`）中，`learnings_entries` 从第 4 题到第 9 题全程稳定封顶在 `6` 条，总成本 `1.413` 元（较 Arm A 均值下降 `10.9%`）。
+>
+> ---
+>
+> **第三阶段底座（2026-10-19）：智能复利闭环、无人工介入完成率（ACR & 60 分奇点）+ 跨 Agent 平台升级**
 > - **无人工介入完成率（ACR）与 60 分奇点门禁**：在单 Agent 与多智能体编排主控出口统一采集隐私脱敏的 `TaskOutcome`，收敛为 **4 个核心工程任务类别**（`code_fix_test`、`compile_repair`、`feature_impl`、`doc_refactor`；纯问答 `chat` 与子任务 `OrchestratorWorker` 排除出主分母）。当某类别在滚动 30 天内已定论样本 `n >= 30`、`ACR-strict` 的 Wilson 95% 置信下界 `>= 60%` 且返工率 `<= 15%` 时，正式判定该类别跨过 **60 分奇点**。
 > - **零守护进程全链路后续信号（`I1–I5` + `L`）**：自动归因 `I1` 显式阻断/失败、`I2` 审批/提问介入、`I3` Checkpoint `/restore` 回滚、`I4` 中/英/日多语言纠正与同文件返工推断、`I5` **零常驻 `LazyGitUndoDetector`**（在新会话启动及下一轮开始前通过 `git merge-base --is-ancestor` 与 `git status --porcelain` 检测跨会话 `git reset` / `git revert` / 手工覆写 Agent 修改过的文件），以及 `L` 人工显式标签（CLI/GUI `/outcome good|bad` + GUI 消息级 `♡`/`♧` 精准按轮次绑定）。
 > - **带 14 天基线门禁的在线回流（`shadow` → `on`）**：`[feedback] memory / routing = "off" | "shadow" | "on"`（默认 `"shadow"`）。从 `shadow` 切换至 `on` 受 **14 天 Shadow 基线门禁** 保护（需满足至少 14 天 Shadow 观测期且至少 2 个核心类别 `n >= 30`，支持 `--force` 强制覆写）。开启后执行有界 Beta 后验记忆调权（`±20%`，每个已定论任务仅计分一次）、低效记忆自动降级（`injected >= 8 && p < 0.25`）与编排器路由单调升级（`Simple -> Medium -> Complex`）。
@@ -185,6 +203,11 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
 5. **跨项目历史会话冷启动与 GUI 可视化奇点仪表盘**
    - **多仓库冷启动回填（`ncx --outcomes bootstrap <paths...>`）**：扫描本地多个历史项目的 `.nanocodex/session.jsonl`，自动回填 `_trace` 链路并提取历史 `TaskOutcome` 与 `OutcomeFollowup` 写入全局指标库 `~/.nanocodex/global-outcomes/context.sqlite`。
    - **GUI「ACR & 60 分奇点仪表盘」**：在 Tauri 桌面端右侧 **「记忆」** 面板顶部提供可视化卡片，实时展示近 30 天 `ACR-strict`、面向 60% 奇点线的 Wilson 95% 下界进度条、四大核心类别各自的样本进度（`n/30`）与奇点达标徽章，以及 14 天 Shadow 基线就绪状态。
+
+6. **自进化 Harness 正则化体系（P0–P3：配对复利回放校准、RRSI 离线进化与双层在线记忆）**
+   - **噪声校准与逐题配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）**：标定单臂噪声下限（$\delta_{\text{resolved}}$、$\delta_{\text{cost}}$），并对真实仓库长课程（`sqlparse`、`python-tabulate`）执行精确 McNemar 检验与按题配对 Bootstrap 95% 置信区间估计（在 `python-tabulate` 3 轮配对回放中，`cost_per_resolved` 比值 `B/A = 0.7904`，配对 95% CI `[0.6239, 0.9523]`）。
+   - **离线进化 RRSI 正则化（`train/forge.py`、`NCX_GENOME`）**：将 `NCX_GENOME` 扩展至 `system_prompt`、`tool_descriptions`、`orchestrator_prompts`（5 个编排阶段提示词）与有界 `memory_config`（`max_entries`、`max_chars`），并配套按轮退火编辑预算、规则版反作弊审查器（`critic_check`）、证伪假设账本（`ledger_<stamp>.jsonl`）、连续停滞转向、双通道成本感知验收门与盘后结构化消融剪枝（`--prune`）。
+   - **双层在线记忆与成本感知归因（`MemoryStore::promote_module_invariant_if_due`）**：区分单题情景层（每模块最多保留 `MAX_EPISODIC_PER_MODULE = 2` 条）与模块级不变量层（`[Module Invariant: <module_path>]`，`+6` 结构性召回加分，按规范化头部哈希稳定保留 `note_id` 与反馈权重），配合高消耗轮次搭便车笔记精准打折（`record_unhelpful_injection`），彻底消除长课程下在线记忆无限膨胀的问题。
 
 ## 目录
 

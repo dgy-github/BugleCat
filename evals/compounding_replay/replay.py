@@ -162,11 +162,14 @@ def _norm_tid(tid: str) -> str:
     """Repo-relative test id. Checkouts without tests/__init__.py make pytest
     derive module names from an outer rootdir (e.g. task ids mined from the
     cache repo look like "evals.compounding_replay..cache.sqlparse.tests.x::y");
-    both judge results and task ids are reduced to "tests.x::y"."""
+    both judge results and task ids are reduced to "tests.x::y" (or "test.x::y"
+    for repos whose test dir is `test/`, e.g. python-tabulate)."""
     cls, sep, name = tid.partition("::")
-    k = cls.rfind(".tests.")
-    if k >= 0:
-        cls = cls[k + 1:]
+    for marker in (".tests.", ".test."):
+        k = cls.rfind(marker)
+        if k >= 0:
+            cls = cls[k + 1:]
+            break
     return f"{cls}{sep}{name}"
 
 
