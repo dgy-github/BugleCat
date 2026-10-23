@@ -4,7 +4,8 @@ pub const CLASSIFY_SYS: &str = "You are a task-complexity classifier. You have N
 pub const PLAN_SYS: &str = "You are a senior engineer. You have NO tools and cannot read files — work only from the task text. Produce a short, concrete step-by-step plan to accomplish the task. Output the plan as plain text only — do not write code, do not call tools.";
 pub const DECOMPOSE_SYS: &str = "You are a planning lead. You have NO tools and cannot read files — work only from the task and plan text given. Break the task into the smallest set of INDEPENDENT subtasks that can be carried out one after another. Output ONLY subtask lines, each on its own line prefixed with 'SUBTASK: ' — no preamble, no prose, no tool calls. If the task is atomic (cannot be usefully split), output a single 'SUBTASK: ' line restating it.";
 pub const WORKER_SYS: &str = "You are an implementation worker. Carry out the task following the plan, using your tools. Describe what you did and the outcome.";
-pub const VERIFY_SYS: &str = "You are a strict reviewer. Given the task, plan, and the workers' results, decide whether the task is correctly and completely done. Start your reply with PASS or FAIL, then a one-line reason. If anything is wrong or missing, reply FAIL. On the LAST line, output 'BEST:<n>' giving the 1-based number of the worker whose result is best.";
+pub const VERIFY_SYS: &str = "You are a strict reviewer. Given the task, plan, and the workers' results, decide whether the task is correctly and completely done. Start your reply with PASS or FAIL, then a one-line reason. If anything is wrong or missing, reply FAIL. Then output 'BEST:<n>' on its own line, giving the 1-based number of the worker whose result is best. Only if other workers made complementary changes to DIFFERENT files that the best worker lacks and that belong in the final result, add one last line 'COMPOSE:<best>,<n>,...' listing the best worker first and then those workers; otherwise omit the COMPOSE line.";
+pub const COMPOSE_VERIFY_SYS: &str = "You are a strict reviewer checking a MERGED workspace: several workers attempted the same task in isolation, and their file changes were combined into the current directory (where two workers changed the same file, the first-listed worker's version was kept). Use your tools to read the changed files and run the relevant build or tests. Do not modify any files. Decide whether the merged result correctly and completely does the task and whether the combined changes fit together (no duplicate definitions, double-applied fixes, or broken imports). Start your reply with PASS or FAIL, then a one-line reason.";
 
 pub(super) fn orch_trace(message: &str) {
     if std::env::var_os("NCX_TRACE").is_some_and(|value| !value.is_empty()) {
@@ -98,6 +99,40 @@ pub(super) fn build_verify_task(task: &str, plan: &str, results: &[String]) -> S
     format!("Task:\n{task}\n\nPlan:\n{plan}\n\nWorker results:\n{joined}")
 }
 
+/// Task for [`COMPOSE_VERIFY_SYS`]: which workers were merged (primary first)
+/// and what each of them reported doing.
+pub(super) fn build_compose_verify_task(
+    task: &str,
+    plan: &str,
+    results: &[String],
+    composed: &[usize],
+) -> String {
+    let labels = worker_labels(composed, ", ");
+    let reports = composed
+        .iter()
+        .filter_map(|&idx| {
+            results
+                .get(idx)
+                .map(|text| format!("--- worker {} ---\n{text}", idx + 1))
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    format!(
+        "Task:\n{task}\n\nPlan:\n{plan}\n\nThe current directory holds the merged changes of workers {labels} \
+         (listed by priority; any of them whose edits clashed with an earlier one were left out).\n\n\
+         Their reports:\n{reports}"
+    )
+}
+
+/// 1-based worker numbers joined by `sep`.
+pub(super) fn worker_labels(indices: &[usize], sep: &str) -> String {
+    indices
+        .iter()
+        .map(|idx| (idx + 1).to_string())
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
 pub(super) fn synthesize(results: &[String], best: usize, verdict: &str, passed: bool) -> String {
     synthesize_composed(results, &[best], verdict, passed)
 }
@@ -187,7 +222,8 @@ pub(super) fn parse_best_worker(verdict: &str, count: usize) -> usize {
 
 /// Parse optional `COMPOSE:<n1>,<n2>...` (1-based worker numbers) from verifier
 /// output. Always returns `best` as the first element, followed by any valid
-/// distinct secondary worker indices `< count`.
+/// distinct secondary worker indices `< count`; out-of-range numbers are
+/// ignored rather than clamped onto a worker the verifier never named.
 pub(super) fn parse_compose_workers(verdict: &str, count: usize, best: usize) -> Vec<usize> {
     let mut indices = vec![best.min(count.saturating_sub(1))];
     if count <= 1 {
@@ -200,8 +236,8 @@ pub(super) fn parse_compose_workers(verdict: &str, count: usize, best: usize) ->
         for token in line.split(|c: char| c == ',' || c == '+' || c.is_whitespace()) {
             let digits: String = token.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(one_based) = digits.parse::<usize>() {
-                if one_based >= 1 {
-                    let zero_based = (one_based - 1).min(count - 1);
+                if (1..=count).contains(&one_based) {
+                    let zero_based = one_based - 1;
                     if !indices.contains(&zero_based) {
                         indices.push(zero_based);
                     }

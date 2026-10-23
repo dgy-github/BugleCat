@@ -38,7 +38,9 @@ mod types;
 pub use types::*;
 mod support;
 use support::*;
-pub use support::{CLASSIFY_SYS, DECOMPOSE_SYS, PLAN_SYS, VERIFY_SYS, WORKER_SYS};
+pub use support::{
+    CLASSIFY_SYS, COMPOSE_VERIFY_SYS, DECOMPOSE_SYS, PLAN_SYS, VERIFY_SYS, WORKER_SYS,
+};
 
 /// Drives the tiered node graph over an [`AgentRunner`].
 pub struct Orchestrator<'a> {
@@ -360,14 +362,28 @@ impl<'a> Orchestrator<'a> {
                 // The verifier names the best attempt (and optionally COMPOSE:<w1>,<w2>);
                 // promote/compose those workers' workspaces to the real one.
                 let best = parse_best_worker(&verdict, n);
-                let composed = parse_compose_workers(&verdict, n, best);
+                // Only a passing verdict may compose: once retries are exhausted
+                // the attempts are unverified, so at most the best one is promoted.
+                let requested = if verify_passed {
+                    parse_compose_workers(&verdict, n, best)
+                } else {
+                    vec![best]
+                };
+                let (composed, compose_note) = if requested.len() > 1 {
+                    self.check_composition(task, plan, &worker_results, &requested, verify_tier)
+                        .await
+                } else {
+                    (requested, None)
+                };
+                if self.is_cancelled() {
+                    return self.cancelled_outcome(
+                        complexity,
+                        Some(plan.to_string()),
+                        worker_results,
+                    );
+                }
                 let stage_detail = if composed.len() > 1 {
-                    let labels = composed
-                        .iter()
-                        .map(|idx| (idx + 1).to_string())
-                        .collect::<Vec<_>>()
-                        .join("+");
-                    format!("组合采用 Worker {labels}")
+                    format!("组合采用 Worker {}", worker_labels(&composed, "+"))
                 } else {
                     format!("采用 Worker {}", best + 1)
                 };
@@ -383,10 +399,14 @@ impl<'a> Orchestrator<'a> {
                         format!("Worker 结果已验证，但无法安全提升到当前工作区：{error}")
                     }
                     None => {
-                        if composed.len() > 1 {
+                        let text = if composed.len() > 1 {
                             synthesize_composed(&worker_results, &composed, &verdict, verify_passed)
                         } else {
                             synthesize(&worker_results, best, &verdict, verify_passed)
+                        };
+                        match &compose_note {
+                            Some(note) => format!("{text}\n\n[{note}]"),
+                            None => text,
                         }
                     }
                 };
@@ -406,6 +426,57 @@ impl<'a> Orchestrator<'a> {
             // Harness² Propose–Probe–Compose closed loop: combine the verifier's
             // complaint with a digest of all workers' probe findings for the next attempt.
             feedback = build_compose_feedback(&worker_results, &verdict);
+        }
+    }
+
+    /// Re-verify a requested composition on a staged copy before it may reach
+    /// the live workspace. Returns the workers to promote and, when it falls
+    /// back to the best worker alone, a note saying why.
+    async fn check_composition(
+        &self,
+        task: &str,
+        plan: &str,
+        worker_results: &[String],
+        requested: &[usize],
+        verify_tier: Tier,
+    ) -> (Vec<usize>, Option<String>) {
+        let best = requested[0];
+        self.emit_stage(
+            OrchestratorStage::Verify,
+            Some(verify_tier),
+            format!("复验组合 Worker {}", worker_labels(requested, "+")),
+        );
+        let system = self.sys_prompt("compose_verify_sys", COMPOSE_VERIFY_SYS);
+        let check_task = build_compose_verify_task(task, plan, worker_results, requested);
+        let fallback = |reason: String| {
+            orch_trace(&format!("composition fallback: {reason}"));
+            (
+                vec![best],
+                Some(format!("{reason}，已回退为只采用 Worker {}", best + 1)),
+            )
+        };
+        match self
+            .runner
+            .verify_composition(requested, verify_tier, system, &check_task)
+            .await
+        {
+            Ok(CompositionCheck {
+                composed,
+                verification: Some(result),
+            }) => {
+                self.record(&result);
+                let passed = verdict_passed(&result.text);
+                if passed && composed.len() > 1 {
+                    (composed, None)
+                } else {
+                    let reason = result.text.lines().next().unwrap_or("").trim();
+                    fallback(format!("组合结果复验未通过（{reason}）"))
+                }
+            }
+            Ok(CompositionCheck {
+                verification: None, ..
+            }) => fallback("其余 Worker 与主 Worker 修改了同一文件且内容不同，未组合".into()),
+            Err(error) => fallback(format!("无法复验组合结果（{error}）")),
         }
     }
 

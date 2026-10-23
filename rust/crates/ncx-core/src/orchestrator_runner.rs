@@ -15,9 +15,9 @@ use crate::isolate::copy_tree;
 use crate::workspace_promotion::{compose_with_report, snapshot, WorkspaceSnapshot};
 use crate::{
     discover_skills, load_workspace_instructions, tool_recovery::classify_tool_result,
-    AgentCallResult, AgentLoop, AgentRunner, AgentRuntimeProfile, ConfiguredHarnessRuntime,
-    ContextServiceDescriptor, LoopEvent, MemoryStore, RuntimeContextSources, RuntimeHostBindings,
-    Session, Tier,
+    AgentCallResult, AgentLoop, AgentRunner, AgentRuntimeProfile, CompositionCheck,
+    ConfiguredHarnessRuntime, ContextServiceDescriptor, LoopEvent, MemoryStore,
+    RuntimeContextSources, RuntimeHostBindings, Session, Tier,
 };
 
 type CancelCheck = Rc<dyn Fn() -> bool>;
@@ -653,6 +653,69 @@ impl AgentRunner for HarnessAgentRunner {
         self.worker_telemetry.borrow_mut().clear();
         Ok(())
     }
+
+    async fn verify_composition(
+        &self,
+        indices: &[usize],
+        tier: Tier,
+        system: &str,
+        task: &str,
+    ) -> Result<CompositionCheck, String> {
+        let next = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+        let staging =
+            std::env::temp_dir().join(format!("ncx_compose_{}_{next}", std::process::id()));
+        let composed = self.stage_composition(indices, &staging);
+        let composed = match composed {
+            Ok(composed) if composed.len() > 1 => composed,
+            other => {
+                let _ = std::fs::remove_dir_all(&staging);
+                return other.map(|composed| CompositionCheck {
+                    composed,
+                    verification: None,
+                });
+            }
+        };
+        // The verifier's own tool runs are not promoted work.
+        let promoted = self.promoted_telemetry.borrow().clone();
+        let mut result = self.run_in(&staging, tier, system, task, true, None).await;
+        *self.promoted_telemetry.borrow_mut() = promoted;
+        let _ = std::fs::remove_dir_all(&staging);
+        result.text = remap_workspace_paths(&result.text, &staging, &self.cfg.workspace);
+        Ok(CompositionCheck {
+            composed,
+            verification: Some(result),
+        })
+    }
+}
+
+impl HarnessAgentRunner {
+    /// Copy the live workspace to `staging` and compose the workers' changes
+    /// into it, leaving the live workspace and the workers' copies untouched.
+    /// Returns the workers that composed, primary first.
+    fn stage_composition(&self, indices: &[usize], staging: &Path) -> Result<Vec<usize>, String> {
+        copy_tree(&self.cfg.workspace, staging)
+            .map_err(|error| format!("复制组合预演工作区失败：{error}"))?;
+        let scratch_map = self.scratch.borrow();
+        let mut pairs = Vec::with_capacity(indices.len());
+        let mut pair_indices = Vec::with_capacity(indices.len());
+        for &idx in indices {
+            if pair_indices.contains(&idx) {
+                continue;
+            }
+            let ws = scratch_map
+                .get(&idx)
+                .ok_or_else(|| format!("Worker {} 没有可组合的隔离工作区", idx + 1))?;
+            pairs.push((&ws.baseline, ws.root.as_path()));
+            pair_indices.push(idx);
+        }
+        let report = compose_with_report(&pairs, staging)?;
+        Ok(pair_indices
+            .into_iter()
+            .enumerate()
+            .filter(|(position, _)| !report.dropped_workers.contains(position))
+            .map(|(_, idx)| idx)
+            .collect())
+    }
 }
 
 impl Drop for HarnessAgentRunner {
@@ -929,6 +992,97 @@ mod tests {
             &f1[0].signal,
             FollowupSignal::ManualEdit { files } if files == &vec!["lib.rs".to_string()]
         ));
+
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn staged_composition_leaves_live_and_worker_copies_untouched() {
+        let workspace = crate::test_support::unique_temp_dir("ncx_stage_compose");
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("a.txt"), "a0").unwrap();
+        std::fs::write(workspace.join("b.txt"), "b0").unwrap();
+        let runner = HarnessAgentRunner::new(Config {
+            workspace: workspace.clone(),
+            ..Default::default()
+        });
+        let w0 = runner.prepare_worker_workspace(0).unwrap();
+        let w1 = runner.prepare_worker_workspace(1).unwrap();
+        let w2 = runner.prepare_worker_workspace(2).unwrap();
+        std::fs::write(w0.join("a.txt"), "a-primary").unwrap();
+        std::fs::write(w1.join("b.txt"), "b-secondary").unwrap();
+        // Clashes with the primary on a.txt, so it must be left out.
+        std::fs::write(w2.join("a.txt"), "a-clash").unwrap();
+
+        let staging = crate::test_support::unique_temp_dir("ncx_stage_compose_out");
+        let composed = runner.stage_composition(&[0, 1, 2], &staging).unwrap();
+        assert_eq!(composed, vec![0, 1]);
+        assert_eq!(
+            std::fs::read_to_string(staging.join("a.txt")).unwrap(),
+            "a-primary"
+        );
+        assert_eq!(
+            std::fs::read_to_string(staging.join("b.txt")).unwrap(),
+            "b-secondary"
+        );
+        // Live workspace is untouched until a promotion.
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
+            "a0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("b.txt")).unwrap(),
+            "b0"
+        );
+
+        // Worker copies survive staging, so a failed re-verification can
+        // still fall back to promoting the best worker alone.
+        let _ = std::fs::remove_dir_all(&staging);
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(runner.promote_worker(0))
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
+            "a-primary"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("b.txt")).unwrap(),
+            "b0"
+        );
+
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[tokio::test]
+    async fn verify_composition_skips_the_verifier_when_no_secondary_survives() {
+        let workspace = crate::test_support::unique_temp_dir("ncx_stage_compose_none");
+        let _ = std::fs::remove_dir_all(&workspace);
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("a.txt"), "a0").unwrap();
+        let runner = HarnessAgentRunner::new(Config {
+            workspace: workspace.clone(),
+            ..Default::default()
+        });
+        let w0 = runner.prepare_worker_workspace(0).unwrap();
+        let w1 = runner.prepare_worker_workspace(1).unwrap();
+        std::fs::write(w0.join("a.txt"), "a-primary").unwrap();
+        std::fs::write(w1.join("a.txt"), "a-clash").unwrap();
+
+        // No model is configured, so reaching the verifier would not yield
+        // `verification: None`.
+        let check = runner
+            .verify_composition(&[0, 1], Tier::Main, "unused", "unused")
+            .await
+            .unwrap();
+        assert_eq!(check.composed, vec![0]);
+        assert!(check.verification.is_none());
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
+            "a0"
+        );
 
         let _ = std::fs::remove_dir_all(workspace);
     }

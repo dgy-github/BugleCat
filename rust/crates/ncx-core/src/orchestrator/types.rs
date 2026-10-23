@@ -109,6 +109,34 @@ pub trait AgentRunner {
         let primary = indices.first().copied().unwrap_or(0);
         self.promote_worker(primary).await
     }
+
+    /// Compose `indices` into a throwaway copy of the live workspace and run
+    /// the verifier (`system` / `task`, with tools) there. Neither the live
+    /// workspace nor the workers' own copies change, so the caller can still
+    /// promote the composition or fall back to the primary worker alone.
+    /// The default cannot stage a composition, which makes the orchestrator
+    /// promote only the primary worker.
+    async fn verify_composition(
+        &self,
+        _indices: &[usize],
+        _tier: Tier,
+        _system: &str,
+        _task: &str,
+    ) -> Result<CompositionCheck, String> {
+        Err("this runner cannot stage a composition for verification".into())
+    }
+}
+
+/// Result of [`AgentRunner::verify_composition`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompositionCheck {
+    /// Workers whose changes made it into the staged composition, primary
+    /// first; secondaries that edited a file differently from an earlier
+    /// worker are left out.
+    pub composed: Vec<usize>,
+    /// The verifier's run on the staged composition; `None` when no
+    /// secondary worker survived, so there was nothing new to verify.
+    pub verification: Option<AgentCallResult>,
 }
 
 #[derive(Debug, Clone)]

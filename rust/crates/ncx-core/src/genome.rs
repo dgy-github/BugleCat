@@ -44,7 +44,8 @@ pub struct Genome {
     /// map keep their default description.
     pub tool_desc: HashMap<String, String>,
     /// Optional overrides for orchestrator node system prompts (`classify_sys`,
-    /// `plan_sys`, `decompose_sys`, `worker_sys`, `verify_sys`).
+    /// `plan_sys`, `decompose_sys`, `worker_sys`, `verify_sys`,
+    /// `compose_verify_sys`).
     pub orchestrator_prompts: HashMap<String, String>,
     /// Optional override for the maximum number of recalled memory entries (`1..=32`).
     pub memory_max_entries: Option<usize>,

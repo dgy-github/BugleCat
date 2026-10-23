@@ -13,6 +13,13 @@ struct MockRunner {
     verdicts: RefCell<Vec<&'static str>>,
     calls: RefCell<Vec<(Tier, &'static str)>>,
     promoted: RefCell<Vec<usize>>,
+    /// Worker sets passed to `compose_workers`.
+    composed: RefCell<Vec<Vec<usize>>>,
+    /// Worker sets passed to `verify_composition`.
+    composition_requests: RefCell<Vec<Vec<usize>>>,
+    /// Scripted `verify_composition` result; `None` → the trait default
+    /// (cannot stage).
+    composition: Option<Result<CompositionCheck, String>>,
 }
 
 impl MockRunner {
@@ -24,7 +31,15 @@ impl MockRunner {
             verdicts: RefCell::new(verdicts),
             calls: RefCell::new(vec![]),
             promoted: RefCell::new(vec![]),
+            composed: RefCell::new(vec![]),
+            composition_requests: RefCell::new(vec![]),
+            composition: None,
         }
+    }
+    /// Script the staged-composition re-verification.
+    fn with_composition(mut self, result: Result<CompositionCheck, String>) -> Self {
+        self.composition = Some(result);
+        self
     }
     /// Script per-call classify results (popped from the back).
     fn with_complexities(self, q: Vec<&'static str>) -> Self {
@@ -79,6 +94,48 @@ impl AgentRunner for MockRunner {
     async fn promote_worker(&self, idx: usize) -> Result<(), String> {
         self.promoted.borrow_mut().push(idx);
         Ok(())
+    }
+    async fn compose_workers(&self, indices: &[usize]) -> Result<(), String> {
+        self.composed.borrow_mut().push(indices.to_vec());
+        Ok(())
+    }
+    async fn verify_composition(
+        &self,
+        indices: &[usize],
+        tier: Tier,
+        system: &str,
+        task: &str,
+    ) -> Result<CompositionCheck, String> {
+        assert_eq!(system, COMPOSE_VERIFY_SYS);
+        assert!(task.contains("merged changes of workers"));
+        self.calls.borrow_mut().push((tier, "compose_verify"));
+        self.composition_requests
+            .borrow_mut()
+            .push(indices.to_vec());
+        match &self.composition {
+            Some(result) => result.clone(),
+            None => Err("cannot stage".into()),
+        }
+    }
+}
+
+fn verified(text: &str) -> CompositionCheck {
+    CompositionCheck {
+        composed: vec![1, 0, 2],
+        verification: Some(AgentCallResult {
+            text: text.to_string(),
+            ..Default::default()
+        }),
+    }
+}
+
+fn three_workers() -> OrchestratorConfig {
+    OrchestratorConfig {
+        workers: 3,
+        high_workers: 3,
+        max_verify_retries: 1,
+        max_depth: 1,
+        max_subtasks: 6,
     }
 }
 
@@ -408,20 +465,15 @@ async fn parse_subtasks_falls_back_to_lists() {
 
 #[tokio::test]
 async fn verifier_composes_multiple_workers_and_builds_compose_feedback() {
-    let m = MockRunner::new("medium", vec!["PASS composed\nBEST:2\nCOMPOSE:2,1,3"]);
-    let o = Orchestrator::new(
-        &m,
-        OrchestratorConfig {
-            workers: 3,
-            high_workers: 3,
-            max_verify_retries: 1,
-            max_depth: 1,
-            max_subtasks: 6,
-        },
-    );
+    let m = MockRunner::new("medium", vec!["PASS composed\nBEST:2\nCOMPOSE:2,1,3"])
+        .with_composition(Ok(verified("PASS merged build and tests ok")));
+    let o = Orchestrator::new(&m, three_workers());
     let out = o.handle("compose disjoint fixes").await;
     assert!(out.verify_passed);
     assert_eq!(out.best_worker, 1);
+    assert_eq!(*m.composition_requests.borrow(), vec![vec![1, 0, 2]]);
+    assert_eq!(*m.composed.borrow(), vec![vec![1, 0, 2]]);
+    assert!(m.promoted.borrow().is_empty());
     assert!(out.final_text.contains("[Composed from Worker 1]"));
     assert!(out.final_text.contains("[Composed from Worker 3]"));
 
@@ -432,4 +484,100 @@ async fn verifier_composes_multiple_workers_and_builds_compose_feedback() {
     assert!(fb.contains("[Propose-Probe-Compose Peer Digest"));
     assert!(fb.contains("- Worker 1: fixed parser"));
     assert!(fb.contains("- Worker 2: added edge test"));
+}
+
+#[tokio::test]
+async fn failed_composition_reverification_falls_back_to_best_worker() {
+    let m = MockRunner::new("medium", vec!["PASS ok\nBEST:2\nCOMPOSE:2,1,3"]).with_composition(Ok(
+        verified("FAIL duplicate definition of parse()\nmore detail"),
+    ));
+    let out = Orchestrator::new(&m, three_workers())
+        .handle("compose clashing fixes")
+        .await;
+    assert!(out.verify_passed, "the best worker alone was verified");
+    assert!(m.composed.borrow().is_empty(), "nothing composed");
+    assert_eq!(*m.promoted.borrow(), vec![1]);
+    assert!(!out.final_text.contains("[Composed from Worker"));
+    assert!(out
+        .final_text
+        .contains("组合结果复验未通过（FAIL duplicate definition of parse()）"));
+    assert!(out.final_text.contains("已回退为只采用 Worker 2"));
+}
+
+#[tokio::test]
+async fn composition_without_surviving_secondaries_promotes_best_only() {
+    let m = MockRunner::new("medium", vec!["PASS ok\nBEST:1\nCOMPOSE:1,2"]).with_composition(Ok(
+        CompositionCheck {
+            composed: vec![0],
+            verification: None,
+        },
+    ));
+    let out = Orchestrator::new(&m, three_workers()).handle("t").await;
+    assert!(out.verify_passed);
+    assert!(m.composed.borrow().is_empty());
+    assert_eq!(*m.promoted.borrow(), vec![0]);
+    assert!(out.final_text.contains("未组合，已回退为只采用 Worker 1"));
+}
+
+#[tokio::test]
+async fn runner_that_cannot_stage_promotes_best_only() {
+    let m = MockRunner::new("medium", vec!["PASS ok\nBEST:3\nCOMPOSE:3,1"]);
+    let out = Orchestrator::new(&m, three_workers()).handle("t").await;
+    assert!(out.verify_passed);
+    assert_eq!(*m.composition_requests.borrow(), vec![vec![2, 0]]);
+    assert!(m.composed.borrow().is_empty());
+    assert_eq!(*m.promoted.borrow(), vec![2]);
+    assert!(out
+        .final_text
+        .contains("无法复验组合结果（cannot stage），已回退为只采用 Worker 3"));
+}
+
+#[tokio::test]
+async fn exhausted_retries_never_compose_unverified_workers() {
+    // Both rounds fail (verdicts pop from the back); the last still asks to compose.
+    let m = MockRunner::new(
+        "medium",
+        vec![
+            "FAIL still broken\nBEST:2\nCOMPOSE:2,1",
+            "FAIL broken\nBEST:1",
+        ],
+    )
+    .with_composition(Ok(verified("PASS")));
+    let out = Orchestrator::new(&m, three_workers()).handle("t").await;
+    assert!(!out.verify_passed);
+    assert_eq!(out.verify_rounds, 2);
+    assert!(
+        m.composition_requests.borrow().is_empty(),
+        "no re-verification"
+    );
+    assert!(m.composed.borrow().is_empty());
+    assert_eq!(*m.promoted.borrow(), vec![1]);
+    assert!(out.final_text.contains("[unverified after retries"));
+}
+
+#[test]
+fn verify_prompt_documents_compose_line() {
+    assert!(VERIFY_SYS.contains("BEST:<n>"));
+    assert!(VERIFY_SYS.contains("COMPOSE:<best>,<n>"));
+    assert!(COMPOSE_VERIFY_SYS.contains("Do not modify any files"));
+}
+
+#[test]
+fn parse_compose_workers_ignores_out_of_range_workers() {
+    assert_eq!(
+        parse_compose_workers("BEST:2\nCOMPOSE:2,7,0,3", 3, 1),
+        vec![1, 2]
+    );
+    assert_eq!(parse_compose_workers("BEST:1", 3, 0), vec![0]);
+    assert_eq!(parse_compose_workers("COMPOSE:1,2", 1, 0), vec![0]);
+}
+
+#[test]
+fn compose_verify_task_lists_only_merged_workers() {
+    let results = vec!["r1".to_string(), "r2".to_string(), "r3".to_string()];
+    let task = build_compose_verify_task("fix bug", "1. fix", &results, &[2, 0]);
+    assert!(task.contains("merged changes of workers 3, 1"));
+    assert!(task.contains("--- worker 3 ---\nr3"));
+    assert!(task.contains("--- worker 1 ---\nr1"));
+    assert!(!task.contains("r2"));
 }

@@ -101,7 +101,7 @@ pub use ncx_provider::model_catalog::resolve_context_capacity;
 pub use ncx_provider::preset_catalog;
 pub use ncx_provider::{parse_catalog_models, DiscoveredProviderModel};
 pub use orchestrator::{
-    AgentCallResult, AgentRunner, Complexity, Orchestrator, OrchestratorConfig,
+    AgentCallResult, AgentRunner, Complexity, CompositionCheck, Orchestrator, OrchestratorConfig,
     OrchestratorControl, OrchestratorEvent, OrchestratorOutcome, OrchestratorStage,
     OrchestratorTelemetry, Tier,
 };
