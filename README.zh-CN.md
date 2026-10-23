@@ -14,7 +14,7 @@
 >   * **表面级退火编辑预算**：新增 `changed_surfaces` 与 `changed_lines`，支持按轮退火的表面数预算（$\max(1, \text{max\_surfaces} - \lfloor r / 2 \rfloor)$）与修改行数硬上限（`--initial-max-surfaces`（别名 `--max-surfaces`）、`--anneal-surfaces`、`--max-changed-lines`）。
 >   * **规则版反过拟合/反作弊审查器（`critic_check`）**：自动拦截在新增文本中硬编码训练集题号、`check.py`、`_check.py`、`hidden test` 的作弊候选。
 >   * **证伪假设账本与停滞自动转向**：每个候选写入结构化实验账本 `train/runs/ledger_<stamp>.jsonl`，向 Teacher 自动注入最近被拒的证伪历史（`Falsified / Rejected Mutations`），并在连续 `--stagnation-limit` 轮停滞时自动转向探索最少的表面。
->   * **双通道成本感知验收门与盘后消融剪枝（`--prune`）**：支持「通过数提升 + `--max-token-growth` 防膨胀护栏」或「同分下显著节省 Token（`>= --delta-tokens`）」双通道晋级，并在搜索结束后对最终 Champion 逐面回滚重评，剔除零收益的搭便车冗余修改。
+>   * **双通道成本感知验收门与盘后消融剪枝（`--prune`）**：支持「通过数提升（须超过 `analyze.pass_noise_floor` 给出的采样噪声下限，`--noise-z` 默认单侧 95%；接受后用新 runs 重评 holdout）+ `--max-token-growth` 防膨胀护栏」或「同分下显著节省 Token（`>= --delta-tokens`）」双通道晋级，并在搜索结束后对最终 Champion 逐面回滚重评，剔除零收益的搭便车冗余修改。
 > - **P2 —— 扩大 `NCX_GENOME` 可进化面（`rust/` + `train/`）**：
 >   * 在保持空 Genome 100% 字节级 No-op 等价保证（且不触碰冻结文件 `prompt.rs`）的前提下，新增 `[orchestrator_prompts]`（覆盖 `classify_sys`、`plan_sys`、`decompose_sys`、`worker_sys`、`verify_sys`）与有界 `[memory_config]`（`max_entries` $\in [1, 32]$、`max_chars` $\in [200, 16000]$），打通 `ncx --dump-genome` 与 `train/genome.py` 双向校验。
 > - **P3 —— Harness² 在线记忆双层结构化、负向回归护栏与成本感知归因（`rust/crates/ncx-core/`）**：

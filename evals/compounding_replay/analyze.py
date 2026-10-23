@@ -28,6 +28,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / "runs"
 Z95 = 1.959964
+# One-sided 95%: for gates that only ever accept an improvement.
+Z95_ONE_SIDED = 1.644854
 
 
 def load_runs(pattern: str) -> list[dict]:
@@ -113,6 +115,27 @@ def deltas(per_task: dict, k_rounds: int, n_obs: int) -> dict:
         "single_round_sd_resolved": round(math.sqrt(var_res), 3),
         "single_round_sd_cost": round(math.sqrt(var_cost), 4),
     }
+
+
+def jeffreys(passes: int, runs: int) -> float:
+    """Jeffreys-smoothed pass rate, so 0/n and n/n do not claim zero variance."""
+    return (passes + 0.5) / (runs + 1)
+
+
+def pass_noise_floor(per_task: list[tuple[int, int, int, int]], z: float = Z95_ONE_SIDED) -> float:
+    """Noise floor on the difference of total passes between two evaluations
+    of the same tasks.
+
+    Each element is `(passes_a, runs_a, passes_b, runs_b)` for one task. Under
+    "no real difference" both evaluations share the task's pass rate, estimated
+    from the pooled runs, so Var(S_a - S_b) = sum (runs_a + runs_b) p_i (1 - p_i).
+    A difference must exceed `z * sqrt(Var)` passes before it is more than noise.
+    """
+    var = 0.0
+    for passes_a, runs_a, passes_b, runs_b in per_task:
+        p = jeffreys(passes_a + passes_b, runs_a + runs_b)
+        var += (runs_a + runs_b) * p * (1 - p)
+    return z * math.sqrt(var)
 
 
 def mcnemar_exact(b: int, c: int) -> float:

@@ -13,7 +13,7 @@
 - 因此**未发现实际本地运行命令**。按 HANDOFF.md 推荐与 argparse（L654–701）推断的等价命令：
 ```powershell
 $env:NCX_FORGE_NCX_BIN="D:\github_dgy\BugleCat\rust\target\release\ncx.exe"
-python train/forge.py --train --rounds 3 --repeats 1 --timeout 120 --budget-s 1800 `
+python train/forge.py --train --rounds 3 --repeats 3 --timeout 120 --budget-s 1800 `
   --teacher panel --initial-max-surfaces 2 --max-changed-lines 40 --stagnation-limit 2 --prune
 ```
 （`--max-surfaces` 现为 `--initial-max-surfaces` 的别名；HANDOFF/README 已统一为 `--initial-max-surfaces`。）

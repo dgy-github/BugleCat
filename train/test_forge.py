@@ -817,6 +817,173 @@ def test_lesson_merge_requires_symptom_overlap_and_caps_symptoms():
     assert len(c["trigger"]["symptoms"]) <= lesson_lib.MAX_TRIGGER_SYMPTOMS, c
 
 
+
+def _counted_eval(champ_rates: dict[str, int], cand_rates: dict[str, int], runs: int,
+                  hold_passes: list[int] | None = None, calls: list | None = None):
+    """evaluate() stand-in with `runs` repeats per task. The baseline passes
+    `champ_rates[t]` times on train task t, the IMPROVED genome `cand_rates[t]`.
+    Holdout: the baseline passes every run; the IMPROVED genome's successive
+    holdout evaluations return `hold_passes` in order (default: all pass)."""
+    hold_iter = iter(hold_passes or [])
+
+    def fake_eval(genome_path, tasks, repeats, timeout):
+        content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
+        improved = "IMPROVED" in content
+        is_holdout = all(t.startswith("hold") for t in tasks)
+        if calls is not None:
+            calls.append(("cand" if improved else "champ", "hold" if is_holdout else "train"))
+        r = ev.EvalResult(genome=str(genome_path))
+        hold_total = next(hold_iter, runs * len(tasks)) if (improved and is_holdout) else None
+        for t in tasks:
+            if is_holdout:
+                p = runs if hold_total is None else min(runs, hold_total)
+                if hold_total is not None:
+                    hold_total -= p
+            else:
+                p = (cand_rates if improved else champ_rates)[t]
+            r.tasks[t] = ev.TaskResult(
+                task=t, passes=p, runs=runs, mean_s=1.0,
+                failure_trajectory=("" if p == runs else "agent did the wrong thing"),
+            )
+        return r
+
+    return fake_eval
+
+
+def _improver_panel():
+    forge.teacher.build_panel = lambda verbose=True: [
+        FakeTeacher("fake", 'system_prompt = "IMPROVED prompt"')
+    ]
+
+
+def test_pass_noise_floor_matches_pooled_binomial_formula():
+    analyze = forge.replay_analyze
+    assert analyze.jeffreys(0, 3) == 0.5 / 4
+    assert analyze.jeffreys(3, 3) == 3.5 / 4
+    # One task, 3 runs each, 0 vs 3 passes: pooled p = jeffreys(3, 6) = 0.5,
+    # Var = 6 * 0.25 = 1.5.
+    floor = analyze.pass_noise_floor([(0, 3, 3, 3)], z=2.0)
+    assert abs(floor - 2.0 * 1.5 ** 0.5) < 1e-9, floor
+    # Variance adds across tasks and grows with repeats.
+    four = analyze.pass_noise_floor([(0, 3, 3, 3)] * 4, z=2.0)
+    assert abs(four - 2.0 * 6.0 ** 0.5) < 1e-9, four
+    assert analyze.pass_noise_floor([(1, 1, 1, 1)], z=1.0) < analyze.pass_noise_floor(
+        [(5, 10, 5, 10)], z=1.0)
+    # forge's helper reads the per-task counts and z <= 0 disables it.
+    champ = ev.EvalResult(genome="c")
+    cand = ev.EvalResult(genome="d")
+    for t in ("a", "b"):
+        champ.tasks[t] = ev.TaskResult(task=t, passes=0, runs=3, mean_s=1.0)
+        cand.tasks[t] = ev.TaskResult(task=t, passes=3, runs=3, mean_s=1.0)
+    expected = analyze.pass_noise_floor([(0, 3, 3, 3), (0, 3, 3, 3)], z=1.5)
+    assert forge.train_noise_floor(champ, cand, 1.5) == expected
+    assert forge.train_noise_floor(champ, cand, 0.0) == 0.0
+
+
+def test_noise_gate_rejects_a_gain_inside_sampling_noise():
+    # 4 tasks x 3 runs: champion 1/3 each, candidate +2 passes in total. That
+    # clears accept_margin=1 but not the ~3.9-pass one-sided noise floor.
+    champ = {f"t{i}": 1 for i in range(4)}
+    cand = dict(champ, t0=2, t1=2)
+    restore = _install(_counted_eval(champ, cand, runs=3))
+    _improver_panel()
+    try:
+        lin = forge.train(
+            rounds=1, train_tasks=list(champ), holdout_tasks=["hold_a"],
+            repeats=3, timeout=10, budget_s=999, teachers="panel", stamp="T_NOISE_REJ",
+            accept_margin=1, noise_z=forge.NOISE_Z_DEFAULT,
+        )
+        rnd = lin["rounds"][0]
+        assert "accept" not in rnd or "mode" not in rnd["accept"], rnd
+        assert rnd["required_margin"] > 2, rnd
+        assert "system_prompt" not in lin["champion"]["diff_vs_baseline"]
+    finally:
+        restore()
+
+    # The same +2 gain is accepted when the noise floor is turned off.
+    restore = _install(_counted_eval(champ, cand, runs=3))
+    _improver_panel()
+    try:
+        lin = forge.train(
+            rounds=1, train_tasks=list(champ), holdout_tasks=["hold_a"],
+            repeats=3, timeout=10, budget_s=999, teachers="panel", stamp="T_NOISE_OFF",
+            accept_margin=1, noise_z=0.0,
+        )
+        assert lin["rounds"][0]["accept"]["mode"] == "pass-gain", lin["rounds"][0]
+        assert lin["rounds"][0]["required_margin"] == 1
+    finally:
+        restore()
+
+
+def test_noise_gate_accepts_a_gain_well_above_noise():
+    # 0/3 -> 3/3 on 4 tasks: +12 passes against a ~4.0-pass floor.
+    champ = {f"t{i}": 0 for i in range(4)}
+    cand = {f"t{i}": 3 for i in range(4)}
+    restore = _install(_counted_eval(champ, cand, runs=3))
+    _improver_panel()
+    try:
+        lin = forge.train(
+            rounds=1, train_tasks=list(champ), holdout_tasks=["hold_a"],
+            repeats=3, timeout=10, budget_s=999, teachers="panel", stamp="T_NOISE_ACC",
+            accept_margin=2, noise_z=forge.NOISE_Z_DEFAULT,
+        )
+        rnd = lin["rounds"][0]
+        assert rnd["accept"]["mode"] == "pass-gain", rnd
+        assert 4 < rnd["noise_floor"] < 5 and rnd["required_margin"] == 5, rnd
+        assert rnd["accept"]["required_margin"] == 5
+    finally:
+        restore()
+
+
+def test_accepted_champion_holdout_is_reevaluated_once_and_becomes_the_bar():
+    # Holdout of the accepted genome: 3/3 at the gate, then a fresh 1/3.
+    champ = {"t0": 0, "t1": 0}
+    cand = {"t0": 3, "t1": 3}
+    calls: list = []
+    restore = _install(_counted_eval(champ, cand, runs=3, hold_passes=[3, 1], calls=calls))
+    _improver_panel()
+    try:
+        lin = forge.train(
+            rounds=2, train_tasks=list(champ), holdout_tasks=["hold_a"],
+            repeats=3, timeout=10, budget_s=999, teachers="panel", stamp="T_HOLD_RE",
+            accept_margin=1, noise_z=0.0,
+        )
+        acc = lin["rounds"][0]["accept"]
+        assert acc["holdout"] == 3 and acc["holdout_reeval"] == 1, acc
+        # Gate eval + one fresh re-eval; round 2 reuses the fresh score instead
+        # of evaluating the new champion's holdout a third time.
+        assert calls.count(("cand", "hold")) == 2, calls
+        assert lin["champion"]["holdout"] == 1, lin["champion"]
+        ledger = (forge.RUNS_DIR / "ledger_T_HOLD_RE.jsonl").read_text(encoding="utf-8")
+        accepted = [json.loads(line) for line in ledger.splitlines()
+                    if json.loads(line).get("verdict") == "accepted"]
+        assert accepted[0]["holdout_reeval_passes"] == 1, accepted
+    finally:
+        restore()
+
+
+def test_cli_defaults_repeat_three_times_and_enable_the_noise_gate():
+    captured: dict = {}
+    fake_bin = Path(tempfile.mkdtemp(prefix="forge_cli_")) / "ncx.exe"
+    fake_bin.write_text("", encoding="utf-8")
+    orig = (forge.ev.bench.NCX, forge.splits.load_splits, forge.train, sys.argv)
+    forge.ev.bench.NCX = fake_bin
+    forge.splits.load_splits = lambda: {"train": ["t"], "val": ["h"], "test": ["x"]}
+
+    def fake_train(rounds, train_tasks, holdout_tasks, repeats, timeout, *args, **kwargs):
+        captured.update(repeats=repeats, **kwargs)
+        return {}
+
+    forge.train = fake_train
+    sys.argv = ["forge.py", "--train", "--no-gate"]
+    try:
+        assert forge.main() == 0
+    finally:
+        forge.ev.bench.NCX, forge.splits.load_splits, forge.train, sys.argv = orig
+    assert captured["repeats"] == 3, captured
+    assert captured["accept_margin"] == 2, captured
+    assert captured["noise_z"] == forge.NOISE_Z_DEFAULT > 0, captured
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

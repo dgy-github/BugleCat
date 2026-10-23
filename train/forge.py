@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -45,6 +46,36 @@ import pareto  # noqa: E402
 import splits  # noqa: E402
 import teacher  # noqa: E402
 from process_control import run_owned  # noqa: E402
+
+
+def _load_replay_analyze():
+    """Import the noise statistics from evals/compounding_replay/analyze.py."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "evals" / "compounding_replay" / "analyze.py"
+    spec = importlib.util.spec_from_file_location("compounding_replay_analyze", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+replay_analyze = _load_replay_analyze()
+NOISE_Z_DEFAULT = replay_analyze.Z95_ONE_SIDED
+
+
+def train_noise_floor(champ: ev.EvalResult, cand: ev.EvalResult, z: float) -> float:
+    """Train-pass difference between `cand` and `champ` that sampling noise
+    alone would exceed only ~5% of the time (one-sided) at `z = 1.645`.
+    `z <= 0` disables the floor."""
+    if z <= 0:
+        return 0.0
+    per_task = [
+        (champ.tasks[t].passes, champ.tasks[t].runs, cand.tasks[t].passes, cand.tasks[t].runs)
+        for t in champ.tasks
+        if t in cand.tasks
+    ]
+    return replay_analyze.pass_noise_floor(per_task, z)
+
 
 GENOMES_DIR = Path(os.environ.get(
     "NCX_FORGE_GENOMES_DIR", Path(__file__).resolve().parent / "genomes"
@@ -677,7 +708,8 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
           h2_workers: int | None = None,
           h2_blind: bool = True,
           lessons_path: Path | None = None,
-          enable_lessons: bool = True) -> dict:
+          enable_lessons: bool = True,
+          noise_z: float = 0.0) -> dict:
     """Single-champion regularized hill-climb (M0b/M1 + P1 RRSI + Harness² PPC).
 
     Each round:
@@ -687,10 +719,17 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     3. Validate candidate against baseline size caps, annealed edit budget, and
        anti-memorization critic (`teacher.critic_check`).
     4. Evaluate on `train_tasks` and apply the two-sided acceptance rule:
-       - Pass-rate improvement: `margin >= accept_margin` (subject to `max_token_growth`)
+       - Pass-rate improvement: `margin >= max(accept_margin, ceil(noise floor))`
+         (subject to `max_token_growth`). The noise floor is
+         `analyze.pass_noise_floor` at `noise_z` over the per-task pass counts of
+         champion and candidate; `noise_z = 0` (the library default) disables it,
+         the CLI enables it.
        - Token-cost improvement at non-inferior pass-rate:
          `margin >= 0` and `token_saving >= delta_tokens` (when `delta_tokens > 0`)
        AND holdout pass-rate must not regress (`chold.total_passes >= champ_hold.total_passes`).
+       An accepted champion's holdout is then re-evaluated with fresh runs, because
+       `chold` was selected for clearing the gate and overstates it; the fresh score
+       is the bar for later rounds and what the lineage reports.
     5. Log every candidate and verdict to `runs/ledger_<stamp>.jsonl` and update
        `LessonLibrary` (`lessons.jsonl` + `adopted_harnesses.jsonl`).
     """
@@ -736,6 +775,9 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     touched_counts: dict[str, int] = {}
     stagnant_rounds = 0
     forbidden_terms = list(train_tasks) + list(holdout_tasks) + list(test_tasks or [])
+    # True right after an acceptance re-evaluated the champion's holdout: that
+    # score is already an independent sample, so the next round need not redo it.
+    hold_is_fresh = False
 
     for rnd in range(1, rounds + 1):
         if elapsed() > budget_s:
@@ -743,10 +785,12 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             break
         if reeval_incumbent and rnd > 1:
             champ_train = ev.evaluate(str(champ_path), train_tasks, repeats, timeout)
-            champ_hold = ev.evaluate(str(champ_path), holdout_tasks, repeats, timeout)
+            if not hold_is_fresh:
+                champ_hold = ev.evaluate(str(champ_path), holdout_tasks, repeats, timeout)
             print(f"[forge]   round {rnd}: incumbent re-eval train "
                   f"{champ_train.total_passes}/{champ_train.total_runs}, "
                   f"holdout {champ_hold.total_passes}/{champ_hold.total_runs}")
+        hold_is_fresh = False
         failures = champ_train.failing_trajectories(top_k=max(3, h2_tasks))
         if not failures:
             if champ_train.total_passes >= champ_train.total_runs:
@@ -937,6 +981,10 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             phase_label = "h2-compose" if h2_k > 0 else "propose"
 
             margin = cev.total_passes - champ_train.total_passes
+            noise_floor = train_noise_floor(champ_train, cev, noise_z)
+            required_margin = max(accept_margin, math.ceil(noise_floor))
+            round_log["noise_floor"] = round(noise_floor, 2)
+            round_log["required_margin"] = required_margin
             token_saving = (
                 (champ_train.mean_tokens - cev.mean_tokens)
                 if (champ_train.mean_tokens > 0 and cev.mean_tokens > 0)
@@ -949,14 +997,14 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                 and cev.mean_tokens > 0
                 and token_growth > max_token_growth
             )
-            clears_pass_gate = (margin >= accept_margin) and not token_bloated
+            clears_pass_gate = (margin >= required_margin) and not token_bloated
             clears_token_gate = (
                 delta_tokens > 0.0
                 and margin >= 0
                 and token_saving >= delta_tokens
             )
 
-            if token_bloated and margin >= accept_margin:
+            if token_bloated and margin >= required_margin:
                 reason = f"token-bloat (+{token_growth:.1f} > {max_token_growth})"
                 print(f"[forge]   round {rnd}: REJECT {tname} ({reason})")
                 round_log["accept"] = {"teacher": tname, "status": "token-bloat",
@@ -978,23 +1026,31 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             elif clears_pass_gate or clears_token_gate:
                 chold = ev.evaluate(str(cpath), holdout_tasks, repeats, timeout)
                 if chold.total_passes >= champ_hold.total_passes:
-                    champion, champ_train, champ_hold, champ_path = cand, cev, chold, cpath
+                    # `chold` was kept because it cleared the gate, so it overstates
+                    # the new champion; the bar for later rounds is a fresh sample.
+                    fresh_hold = ev.evaluate(str(cpath), holdout_tasks, repeats, timeout)
+                    champion, champ_train, champ_hold, champ_path = cand, cev, fresh_hold, cpath
+                    hold_is_fresh = True
                     accepted = tname
                     accept_mode = "pass-gain" if clears_pass_gate else "token-saving"
                     print(f"[forge]   round {rnd}: ACCEPT {tname} [{accept_mode}] "
                           f"(train +{margin} -> {cev.total_passes}/{cev.total_runs}, "
                           f"token_saving={token_saving:.1f}, "
-                          f"holdout {chold.total_passes}/{chold.total_runs})")
+                          f"holdout {chold.total_passes}/{chold.total_runs}, "
+                          f"re-eval {fresh_hold.total_passes}/{fresh_hold.total_runs})")
                     round_log["accept"] = {
                         "teacher": tname, "mode": accept_mode,
                         "train": cev.total_passes, "holdout": chold.total_passes,
-                        "margin": margin, "token_saving": round(token_saving, 1),
+                        "holdout_reeval": fresh_hold.total_passes,
+                        "margin": margin, "required_margin": required_margin,
+                        "token_saving": round(token_saving, 1),
                     }
                     append_ledger(RUNS_DIR, stamp, {
                         "round": rnd, "phase": phase_label, "teacher": tname,
                         "target_surfaces": surfaces, "diff": diff_str,
                         "train_passes": cev.total_passes,
                         "holdout_passes": chold.total_passes,
+                        "holdout_reeval_passes": fresh_hold.total_passes,
                         "mean_tokens": cev.mean_tokens,
                         "verdict": "accepted", "reason": accept_mode,
                     })
@@ -1019,7 +1075,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                             stamp=stamp, round_num=rnd, genome_path=str(cpath),
                             surfaces=surfaces, lessons_used=recorded_ids,
                             train_passes=cev.total_passes,
-                            holdout_passes=chold.total_passes,
+                            holdout_passes=fresh_hold.total_passes,
                             mean_tokens=cev.mean_tokens,
                         )
                 else:
@@ -1043,7 +1099,11 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                             margin=margin, token_saving=token_saving, reason=reason,
                         )
             else:
-                reason = f"below-margin (train +{margin} < {accept_margin}, token_saving={token_saving:.1f})"
+                reason = (
+                    f"below-margin (train +{margin} < {required_margin} "
+                    f"[accept_margin={accept_margin}, noise_floor={noise_floor:.2f}], "
+                    f"token_saving={token_saving:.1f})"
+                )
                 print(f"[forge]   round {rnd}: no candidate cleared the gate ({reason}).")
                 entry = {
                     "round": rnd, "phase": phase_label, "teacher": tname,
@@ -1276,14 +1336,19 @@ def main() -> int:
     ap.add_argument("--test-tasks", default="",
                     help="override test split; default = splits.json test (scored once at end)")
     ap.add_argument("--rounds", type=int, default=3)
-    ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument("--repeats", type=int, default=3,
+                    help="runs per task per evaluation; 1 is too noisy to compare genomes")
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--budget-s", type=float, default=1800.0,
                     help="wall-clock governor (seconds); stops cleanly when exceeded")
     ap.add_argument("--teacher", default="panel",
                     help="panel | codex | claude | api")
-    ap.add_argument("--accept-margin", type=int, default=1,
-                    help="train passes a candidate must clear the incumbent by (noise band)")
+    ap.add_argument("--accept-margin", type=int, default=2,
+                    help="minimum train-pass gain over the incumbent; the noise floor "
+                         "(--noise-z) raises it when sampling noise is larger")
+    ap.add_argument("--noise-z", type=float, default=NOISE_Z_DEFAULT,
+                    help="z for the train noise floor from evals/compounding_replay/analyze.py "
+                         "(default one-sided 95%%; 0 = disabled)")
     ap.add_argument("--initial-max-surfaces", "--max-surfaces", dest="initial_max_surfaces",
                     type=int, default=0,
                     help="RRSI annealed surface budget at round 1 (0 = disabled)")
@@ -1363,7 +1428,8 @@ def main() -> int:
               h2_workers=(a.h2_workers or None),
               h2_blind=a.h2_blind,
               lessons_path=(Path(a.lessons) if a.lessons else None),
-              enable_lessons=not a.no_lessons)
+              enable_lessons=not a.no_lessons,
+              noise_z=a.noise_z)
         return 0
     if a.population:
         if not a.no_gate and not self_check(a.timeout):

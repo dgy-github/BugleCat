@@ -98,6 +98,8 @@
     - **通道 1（通过数提升 + 防膨胀护栏）**：`margin >= accept_margin`，且当 `accept_margin <= 1` 时平均消耗增长不得超过 `max_token_growth`（防止为了多过 1 道题而把 prompt 或输出撑大数倍；否则判为 `rejected_token_bloat`）；
     - **通道 2（同分降本晋级）**：`margin >= 0`（通过数不降）且 `incumbent_mean_tokens - candidate_mean_tokens >= delta_tokens`（显著节省 Token 消耗）。
   - 两条通道均必须通过 Holdout 集非退化门（`cand_holdout >= inc_holdout`）方可晋级为新 Champion。
+  - **噪声下限（`--noise-z`，默认单侧 95% `z=1.645`）**：通道 1 实际要求的提升为 `max(accept_margin, ceil(noise_floor))`。`noise_floor` 由 [`analyze.py::pass_noise_floor`](evals/compounding_replay/analyze.py) 按 champion 与候选的逐题通过数计算（合并 Jeffreys 平滑通过率，`Var = Σ (runs_a + runs_b) p_i (1 - p_i)`），`--noise-z 0` 关闭。CLI 默认值改为 `--repeats 3`、`--accept-margin 2`；`round_log` 记录 `noise_floor` 与 `required_margin`。
+  - **接受后重评 Holdout**：门内的 `cand_holdout` 是"被选中才过门"的样本，偏高；接受后立即用新 runs 重评 holdout，作为后续轮次的门槛与 lineage/ledger 中报告的分数（`holdout_reeval`），下一轮开头不再重复评估 holdout。
 
 - **P1.5 盘后结构化消融剪枝（[`train/forge.py::prune_genome`](train/forge.py)，`--prune`）**
   - 搜索结束产生异于 `baseline` 的最终 Champion 后，若开启 `--prune`，`prune_genome` 会遍历 `changed_surfaces(champion, baseline)` 中的每一个被修改表面，**逐一将其回滚为 `baseline` 原始值**并在 train 与 holdout 上重评：
