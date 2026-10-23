@@ -188,7 +188,7 @@
   - **跨轮改进库（Harnessing-Level Recursion，[`train/lesson_lib.py`](train/lesson_lib.py)）**：
     - 维护跨 `stamp` 持久化的 `train/runs/lessons.jsonl` 与 `adopted_harnesses.jsonl`；
     - `task_signature(traj)` 确定性提取失败症状标签（`timeout`、`repeated full-suite pytest`、`patch_failed`、`repeated_tool_call` 等）与关键词；`LessonLibrary.retrieve(sig, k=5)` 按症状/关键词重叠度乘以 Beta 平滑后验 `(support + 1) / (support + refute + 2)` 检索 `active` 经验；
-    - 仅在外层 `train + holdout` 门验收通过（`ACCEPT`）后才将新 lesson 落盘（`support=1`，并执行与 `critic_check` 同源的反记忆化题名拦截与同模式压实合并）；被拒时对本轮引用的 lesson 记 `refute += 1`，`--prune` 剪掉冗余表面时调用 `refute_by_surface` 反写 `refute += 1`；当 `refute >= support + 2` 时自动转为 `status = "retired"` 并作为证伪禁令注入后续 Propose 提示词。
+    - 仅在外层 `train + holdout` 门验收通过（`ACCEPT`）后才将新 lesson 落盘（`support=1`，并执行与 `critic_check` 同源的反记忆化题名拦截与同模式压实合并）；被拒时只对 Compose 在 `applied_lessons` 中声明实际采用的 lesson 记 `refute += 1`（未声明的、或标准提议路径从未展示给 Teacher 的 lesson 不记功也不记过）；`--prune` 剪掉冗余表面时调用 `refute_pruned_adoptions`，只反写本次运行中改动过该表面的采纳记录所归功的 lesson；当 `refute >= support + 2` 时自动转为 `status = "retired"` 并作为证伪禁令注入后续 Propose 提示词。
   - **回放评测器接入 `--genome PATH`（[`evals/compounding_replay/replay.py`](evals/compounding_replay/replay.py)）**：支持直接传入 `forge.py` 产出的 Champion Genome TOML（自动注入 `NCX_GENOME` 环境变量），用于 `B` vs `B-RRSI` vs `B-H2p` vs `B-H2s` vs `B-H2p+L` 配对评测。
 
 ---

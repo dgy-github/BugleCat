@@ -438,9 +438,35 @@ def test_h2_lesson_library_lifecycle_and_prune_refute():
     hits = lib.retrieve(sig, k=3)
     assert len(hits) == 1 and hits[0]["id"] == "L-0001", hits
 
-    # Pruned surface increments refute
-    refuted_ids = lib.refute_by_surface(["tool_desc.read_file"], stamp="S1")
+    # A second lesson on the same surface type, credited to no adoption.
+    other = lib.record_lesson(
+        {
+            "symptoms": ["timeout"],
+            "surfaces": ["tool_desc.read_file"],
+            "edit_pattern": "Read only the failing test file first",
+            "why": "Less context churn",
+        },
+        stamp="S1", round_num=1, task_sig=sig, surfaces=["tool_desc.read_file"],
+        margin=1, token_saving=50.0, forbidden_terms=[],
+    )
+    assert other is not None and other["id"] == "L-0002"
+    lib.record_adopted_harness(
+        stamp="S1", round_num=1, genome_path="g1.toml",
+        surfaces=["system_prompt", "tool_desc.read_file"], lessons_used=["L-0001"],
+    )
+    # An adoption from another run must not be blamed for this run's pruning.
+    lib.record_adopted_harness(
+        stamp="S0", round_num=1, genome_path="g0.toml",
+        surfaces=["tool_desc.read_file"], lessons_used=["L-0002"],
+    )
+
+    # Pruning a surface refutes only lessons credited for this run's adoptions
+    # that changed it — not every lesson that targets the surface type.
+    assert lib.refute_pruned_adoptions(["tool_desc.apply_patch"], stamp="S1") == []
+    refuted_ids = lib.refute_pruned_adoptions(["tool_desc.read_file"], stamp="S1")
     assert refuted_ids == ["L-0001"]
+    by_id = {r["id"]: r for r in lib.load_all()}
+    assert by_id["L-0002"].get("refute", 0) == 0, by_id["L-0002"]
 
     # Refute until refute >= support + 2 -> status becomes 'retired'
     lib.update_outcomes(
@@ -451,7 +477,7 @@ def test_h2_lesson_library_lifecycle_and_prune_refute():
         ["L-0001"], accepted=False, stamp="S1", round_num=3,
         task_sig_hash=sig["sig_hash"], margin=0, token_saving=0.0, reason="below-margin",
     )
-    assert lib.retrieve(sig, k=3) == []
+    assert [r["id"] for r in lib.retrieve(sig, k=3)] == ["L-0002"]
     retired = lib.retired_lessons()
     assert len(retired) == 1 and retired[0]["id"] == "L-0001", retired
 
@@ -497,7 +523,8 @@ def test_h2_ppc_parallel_and_sequential_with_lessons():
                     '```json\n'
                     '{"symptoms": ["timeout"], "surfaces": ["system_prompt"], '
                     '"edit_pattern": "Use targeted verification before exit", '
-                    '"why": "Probe #1 avoided timeout and used 500 fewer tokens"}\n'
+                    '"why": "Probe #1 avoided timeout and used 500 fewer tokens", '
+                    '"applied_lessons": ["L-0001"]}\n'
                     '```'
                 )
             return '```toml\nsystem_prompt = "PROBE_RULE targeted check"\n```'
@@ -983,6 +1010,51 @@ def test_cli_defaults_repeat_three_times_and_enable_the_noise_gate():
     assert captured["repeats"] == 3, captured
     assert captured["accept_margin"] == 2, captured
     assert captured["noise_z"] == forge.NOISE_Z_DEFAULT > 0, captured
+
+
+def test_lessons_are_credited_only_when_compose_claims_them():
+    assert teacher.applied_lesson_ids(None, ["L-0001"]) == []
+    assert teacher.applied_lesson_ids({"edit_pattern": "x"}, ["L-0001"]) == []
+    assert teacher.applied_lesson_ids({"applied_lessons": "L-0001"}, ["L-0001"]) == []
+    assert teacher.applied_lesson_ids(
+        {"applied_lessons": ["L-0002", "L-9999"]}, ["L-0001", "L-0002"]
+    ) == ["L-0002"]
+    prompt = teacher.build_h2_compose_prompt(
+        BASELINE, "contrast", [{"id": "L-0001", "edit_pattern": "p", "why": "w"}]
+    )
+    assert '"applied_lessons"' in prompt and "[L-0001]" in prompt
+
+
+def test_standard_round_credits_no_lessons_it_never_showed():
+    import lesson_lib
+
+    restore = _install(_eval_from_content(improves_train=True, holdout_ok=True))
+    forge.teacher.build_panel = lambda verbose=True: [
+        FakeTeacher("fake", 'system_prompt = "IMPROVED prompt"')
+    ]
+    lessons = Path(tempfile.mkdtemp(prefix="forge_std_lessons_")) / "lessons.jsonl"
+    lib = lesson_lib.LessonLibrary(
+        lessons, adopted_path=lessons.parent / "adopted_harnesses.jsonl"
+    )
+    lib.record_lesson(
+        {"symptoms": ["general_failure"], "surfaces": ["system_prompt"],
+         "edit_pattern": "Read the failing test before editing", "why": "w"},
+        stamp="S0", round_num=1, task_sig={"sig_hash": "h"}, surfaces=["system_prompt"],
+    )
+    try:
+        lin = forge.train(
+            rounds=1, train_tasks=["t_a"], holdout_tasks=["hold_b"],
+            repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T_STD_L",
+            lessons_path=lessons,
+        )
+        assert lin["rounds"][0]["accept"]["teacher"] == "fake", lin["rounds"][0]
+    finally:
+        restore()
+    rec = lib.load_all()[0]
+    assert rec["support"] == 1 and rec.get("refute", 0) == 0, rec
+    adopted = (lessons.parent / "adopted_harnesses.jsonl").read_text(encoding="utf-8")
+    assert json.loads(adopted.splitlines()[-1])["lessons_used"] == []
+
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

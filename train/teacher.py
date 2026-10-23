@@ -471,9 +471,10 @@ Output TWO fenced blocks in order:
 1. A ```toml block containing ONLY the genome fields to override on top of the champion.
    - Keep the apply_patch description's V4A format rules and examples intact if you touch it.
    - NEVER reference task IDs, check.py, _check.py, or hidden tests.{budget_str}
-2. A ```json block recording the reusable meta-lesson distilled from this probe contrast:
+2. A ```json block recording the reusable meta-lesson distilled from this probe contrast.
+   In "applied_lessons", list the ids of the Referenced Meta-Lessons your composed genome actually applies ([] if none):
 ```json
-{{"trigger": {{"symptoms": ["timeout"], "surfaces": ["system_prompt"], "task_family": "python-bugfix"}}, "edit_pattern": "concise general rule", "why": "behavioral evidence from probe contrast"}}
+{{"trigger": {{"symptoms": ["timeout"], "surfaces": ["system_prompt"], "task_family": "python-bugfix"}}, "edit_pattern": "concise general rule", "why": "behavioral evidence from probe contrast", "applied_lessons": []}}
 ```"""
 
 
@@ -488,6 +489,19 @@ def parse_lesson(response: str) -> dict | None:
         return parsed if isinstance(parsed, dict) else None
     except json.JSONDecodeError:
         return None
+
+
+def applied_lesson_ids(draft: dict | None, offered: list[str]) -> list[str]:
+    """Ids from `offered` that a compose lesson draft says it applied.
+
+    A lesson the teacher did not claim (or a response without a parsable
+    `applied_lessons` list) earns neither support nor refute, so outcomes are
+    not credited to lessons that were merely shown in the prompt."""
+    claimed = (draft or {}).get("applied_lessons")
+    if not isinstance(claimed, list):
+        return []
+    claimed_ids = {str(c).strip() for c in claimed}
+    return [lid for lid in offered if lid in claimed_ids]
 
 
 def parse_candidate(response: str, baseline: Genome) -> tuple[Genome | None, str]:

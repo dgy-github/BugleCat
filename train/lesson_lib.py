@@ -410,25 +410,32 @@ class LessonLibrary:
             self.save_all(records)
 
     @_locked
-    def refute_by_surface(
-        self, surface: str | list[str], *, stamp: str = ""
-    ) -> list[str]:
-        """Increment `refute` on active lessons targeting `surface` (or any surface
-        in a list) when ablation pruning (`--prune`) removes that surface."""
-        target_set = {surface} if isinstance(surface, str) else set(surface or [])
-        if not target_set:
+    def refute_pruned_adoptions(self, surfaces: list[str], *, stamp: str) -> list[str]:
+        """Increment `refute` on the lessons credited for adoptions in run
+        `stamp` that changed a surface ablation pruning (`--prune`) removed.
+
+        Only those lessons argued for the now-pruned edit; other lessons that
+        merely target the same surface type are left alone."""
+        target_set = set(surfaces or [])
+        if not target_set or not self.adopted_path.is_file():
             return []
+        culprits: set[str] = set()
+        for line in self.adopted_path.read_text(encoding="utf-8").splitlines():
+            try:
+                adoption = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if adoption.get("stamp") == stamp and target_set & set(adoption.get("surfaces") or []):
+                culprits.update(str(i) for i in adoption.get("lessons_used") or [])
         records = self.load_all()
         affected: list[str] = []
         for r in records:
-            if r.get("status", "active") != "active":
+            if r.get("status", "active") != "active" or str(r.get("id")) not in culprits:
                 continue
-            surfaces = set((r.get("trigger") or {}).get("surfaces") or [])
-            if surfaces & target_set:
-                r["refute"] = int(r.get("refute", 0)) + 1
-                affected.append(str(r.get("id")))
-                if int(r["refute"]) >= int(r.get("support", 1)) + 2:
-                    r["status"] = "retired"
+            r["refute"] = int(r.get("refute", 0)) + 1
+            affected.append(str(r.get("id")))
+            if int(r["refute"]) >= int(r.get("support", 1)) + 2:
+                r["status"] = "retired"
         if affected:
             self.save_all(records)
         return affected

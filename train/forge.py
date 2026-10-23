@@ -673,9 +673,14 @@ def _h2_round(
     # Fallback: if compose failed or exceeded surface/critic bounds, fall back to an
     # already-validated single probe candidate so valid probe work isn't wasted.
     # It still has to clear the full outer train + holdout gate before promotion.
+    # Lessons earn support/refute only when the compose step says it applied
+    # them; a fallback probe genome did not come from compose, so nothing
+    # (and no compose lesson draft) is attributed to it.
+    applied_ids = teacher.applied_lesson_ids(lesson_draft, used_ids) if composed else []
     if composed is None and len(probes) > 1:
         best_probe = _select_fallback_probe(probes, blind=blind)
         composed = best_probe.genome.copy()
+        lesson_draft = None
         print(f"[forge]   round {rnd} h2[{task}]: compose fallback -> probe #{best_probe.idx} "
               f"({best_probe.kind}, blind={blind})")
 
@@ -684,7 +689,7 @@ def _h2_round(
         probes=probes,
         contrast=contrast,
         composed=composed,
-        lessons_used=used_ids,
+        lessons_used=applied_ids,
         lesson_draft=lesson_draft,
         task_sig=sig,
     )
@@ -882,8 +887,6 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
         else:
             combined_traj = "\n".join(t for _, t in failures)
             sig = lesson_lib.task_signature(combined_traj)
-            active_lessons = lesson_store.retrieve(sig, k=5) if lesson_store else []
-            used_ids = [str(l.get("id")) for l in active_lessons if l.get("id")]
             prompt = teacher.build_teacher_prompt(
                 champion,
                 failures,
@@ -951,7 +954,8 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                       f"changed[{diff_str!r}]")
                 candidates.append((backend.name, cand, cev, cpath, surfaces, diff_str))
                 candidate_meta[backend.name] = {
-                    "lessons_used": used_ids,
+                    # This prompt shows the teacher no lessons, so none can be credited.
+                    "lessons_used": [],
                     "lesson_draft": teacher.parse_lesson(resp or ""),
                     "task_sig": sig,
                     "task": ",".join(t for t, _ in failures),
@@ -1140,7 +1144,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             repeats, timeout, champ_train=champ_train, champ_hold=champ_hold, stamp=stamp,
         )
         if lesson_store and pruned_surfaces:
-            lesson_store.refute_by_surface(pruned_surfaces, stamp=stamp)
+            lesson_store.refute_pruned_adoptions(pruned_surfaces, stamp=stamp)
 
     champ_final = GENOMES_DIR / f"{stamp}_champion.toml"
     champion.save(champ_final)
