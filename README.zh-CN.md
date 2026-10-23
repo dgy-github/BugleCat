@@ -59,11 +59,11 @@
 
 ### 方式一：直接下载预编译包（推荐）
 
-前往 [GitHub Releases (`v0.1.2`)](https://github.com/dgy-github/BugleCat/releases/latest) 直接下载：
+前往 [GitHub Releases (`v0.1.3`)](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.3) 直接下载：
 
 - **Windows 安装包（NSIS）**：`BugleCat_0.1.0_x64-setup.exe`
-- **Windows 完整便携运行包（含 `BugleCat.exe`、`ncx.exe` 与离线核验工具）**：`buglecat-20261014-final.zip`
-- **macOS 安装包**：`BugleCat-arm64.dmg`（Apple Silicon） / `BugleCat-x64.dmg`（Intel）
+- **Windows CLI 便携运行包（`ncx.exe`）**：`BugleCat-0.1.3-x86_64-pc-windows-msvc.zip`（含完整离线核验工具的便携包亦可在 [`v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2) 下载 `buglecat-20261014-final.zip`）
+- **macOS 安装包（[`v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2)）**：`BugleCat-arm64.dmg`（Apple Silicon） / `BugleCat-x64.dmg`（Intel）
 
 ### 方式二：从源码构建
 
@@ -139,8 +139,7 @@ nanocodex-gui --cd .
   用量。
 - **DeepSeek + 任意 OpenAI 兼容后端** —— 把 `base_url` 指向托管 API 或本地服务
   （vLLM、llama-server、LM Studio……）。
-- **沙箱与审批状态机** —— 三种沙箱模式、四种审批策略，拦截每一次文件/shell/网络
-  动作。
+- **沙箱与审批状态机 + Windows AppContainer 隔离 + Jev 工具执行前动作复核** —— 三种沙箱模式、四种审批策略拦截每一次文件/shell/网络动作；`os_sandbox = "enforce"` 在 Windows 上提供 AppContainer 内核级文件/网络隔离，`jev_mode = "shadow" | "enforce"` 在非只读工具执行前对 `not_requested`、`exceeds_scope`、`irreversible` 三个 Noul 进行复核。
 - **MCP 集成 + 市场** —— 从 `mcp.toml` 加载服务，或从内置 / 远程目录一键安装；
   工具保留服务端提供的名称，重名会被拒绝；`/mcp reload` 支持进程内原子热重载外部工具集。
 - **插件生态** —— 可从本地、Git、NPM 或社区市场安装兼容 Codex 的资源插件，把
@@ -173,13 +172,13 @@ rust/
 │   ├── ncx-config/        # 分层配置解析与运行时限额
 │   ├── ncx-provider/      # 可替换的 OpenAI 兼容 / Anthropic 模型边界与诊断脱敏
 │   ├── ncx-sandbox/       # 沙箱策略与四档审批状态机
-│   ├── ncx-tools/         # 进程执行器（Job Object / 进程组管控）、后台任务、PTY、文件与补丁工具
+│   ├── ncx-tools/         # 进程执行器（Job Object / 进程组管控 + Windows AppContainer 隔离）、后台任务、PTY、文件与补丁工具
 │   ├── ncx-mcp/           # MCP 传输层、协议版本校验与外部工具热重载
 │   ├── ncx-context/       # 关联记忆与上下文检索
 │   ├── ncx-thread-store/  # 持久化会话与事件存储
 │   ├── ncx-protocol/      # GUI / App Server 强类型协议契约（唯一事实源）
 │   ├── ncx-app-server/    # 桌面端与宿主服务桥接层
-│   ├── ncx-core/          # AgentLoop、ToolRegistry、中间件、声明核验（verification）与编排器
+│   ├── ncx-core/          # AgentLoop、ToolRegistry、中间件、声明核验与执行前动作复核（verification）及编排器
 │   └── ncx-cli/           # 一次性与交互式命令行前端（ncx.exe）
 └── gui/
     ├── src/               # Svelte 5 桌面 UI
@@ -376,8 +375,8 @@ Windows 上每条命令以挂起方式启动并放入关闭即终止的 Job Obje
 
 - **源码自修复（2026-09-08，`deepseek-v4-pro`）。** 六类故障注入，指定目标文件并提供可见测试：首轮通过 5/6，每题最多一次反馈后 6/6；当天下午复跑首轮即 6/6（Agent 累计 609 秒）。结果经过独立验收与补丁重放。[自我测试报告](docs/reports/self_repair_20260908.md) · [复跑报告](docs/reports/self_repair_20260908_081319.md) ·
   [评测证据与复跑方法](evals/self_repair/README.md)
-- **声明漂移基准。** 175 条中英文合成用例，覆盖宿主级声明核验器（`host-rules-v3.4`）的 11 个策略类别——这是策略回归套件，不是端到端评测。[报告](reports/claim_drift_eval_report_v1.md) ·
-  [交付回执](reports/buglecat-delivery-20261014.json)
+- **声明漂移基准与 Jev 工具执行前动作复核。** 175 条中英文合成用例，覆盖宿主级声明核验器（`host-rules-v3.4`）的 11 个策略类别——这是策略回归套件，不是端到端评测（[报告](reports/claim_drift_eval_report_v1.md) ·
+  [交付回执](reports/buglecat-delivery-20261014.json)）。对非只读工具调用，`action_review.rs`（`jev-action-review-v1`）在执行前以 4s 单次 fail-open 复核 `not_requested`、`exceeds_scope`、`irreversible` 三个 Noul（详见 [核验说明](evals/verification/README.md)）。
 - **复利回放（`python-tabulate`，9 道题 × 3 轮配对，`deepseek-chat`）。** 单层记忆（Arm B）相对无记忆（Arm A），每解决一题成本从 0.2265 元降到 0.1790 元（`B/A = 0.7904`，按题配对 Bootstrap 95% CI `[0.6239, 0.9523]`），解决数 `22/27` vs `21/27`。注意事项：Bootstrap 只在 9 道题上重抽样；非劣效余量（`14.9pt`）较宽；更早的 2 轮 `sqlparse`
   回放结果未定论（`B/A = 0.7131`，CI `[0.3693, 1.1586]`）；唯一一轮双层记忆（Arm B'）把学习条目封顶在 6 条，但成本只降了 `10.9%`，少于 Arm B。工具：`evals/compounding_replay/analyze.py`（噪声下限、精确 McNemar、配对 Bootstrap）与 `validate_gold.py`（9/9 官方补丁验证通过）。
 

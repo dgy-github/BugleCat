@@ -83,11 +83,11 @@ Design documents (Chinese):
 
 ### Option 1: Prebuilt Releases (Recommended)
 
-Download directly from [GitHub Releases (`v0.1.2`)](https://github.com/dgy-github/BugleCat/releases/latest):
+Download directly from [GitHub Releases (`v0.1.3`)](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.3):
 
 - **Windows NSIS Installer**: `BugleCat_0.1.0_x64-setup.exe`
-- **Windows Full Portable Bundle (includes `BugleCat.exe`, `ncx.exe`, and offline verification tools)**: `buglecat-20261014-final.zip`
-- **macOS Disk Images**: `BugleCat-arm64.dmg` (Apple Silicon) / `BugleCat-x64.dmg` (Intel)
+- **Windows CLI Portable Bundle (`ncx.exe`)**: `BugleCat-0.1.3-x86_64-pc-windows-msvc.zip` (full offline verification bundle also available on [`v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2) as `buglecat-20261014-final.zip`)
+- **macOS Disk Images ([`v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2))**: `BugleCat-arm64.dmg` (Apple Silicon) / `BugleCat-x64.dmg` (Intel)
 
 ### Option 2: Build from Source
 
@@ -164,8 +164,7 @@ generate a Start-menu shortcut with `scripts/make-shortcut.ps1`.
   cancellation, and per-turn usage accounting.
 - **DeepSeek + any OpenAI-compatible backend** — point `base_url` at the hosted
   API or a local server (vLLM, llama-server, LM Studio, …).
-- **Sandbox & approval state machine** — three sandbox modes and four approval
-  policies gate every file/shell/network action.
+- **Sandbox & approval state machine + Windows AppContainer isolation + Jev pre-execution action review** — three sandbox modes and four approval policies gate every file/shell/network action; `os_sandbox = "enforce"` adds OS-enforced Windows AppContainer filesystem/network isolation for shell commands, and `jev_mode = "shadow" | "enforce"` checks non-read-only tool calls against three Noul hypotheses (`not_requested`, `exceeds_scope`, `irreversible`) before execution.
 - **MCP integration + marketplace** — load servers from `mcp.toml`, or install
   from a built-in / remote catalog; tools retain the names supplied by their
   servers, and duplicate names are rejected.
@@ -211,13 +210,13 @@ rust/
 │   ├── ncx-config/        # layered config and runtime limits
 │   ├── ncx-provider/      # replaceable OpenAI-compatible / Anthropic model boundary
 │   ├── ncx-sandbox/       # policy and 4-state approval decisions
-│   ├── ncx-tools/         # process executor (Job Object / process-group containment), managed jobs, PTY, file & patch tools
+│   ├── ncx-tools/         # process executor (Job Object / process-group + Windows AppContainer isolation), managed jobs, PTY, file & patch tools
 │   ├── ncx-mcp/           # MCP transport, protocol validation, and atomic tool reload
 │   ├── ncx-context/       # associative memory and context retrieval
 │   ├── ncx-thread-store/  # durable session and event storage
 │   ├── ncx-protocol/      # strongly-typed GUI / App Server protocol contract
 │   ├── ncx-app-server/    # desktop and host service bridge
-│   ├── ncx-core/          # AgentLoop, ToolRegistry, middleware, claim verification, orchestrator
+│   ├── ncx-core/          # AgentLoop, ToolRegistry, middleware, claim & pre-execution action verification, orchestrator
 │   └── ncx-cli/           # one-shot and interactive CLI front end (ncx.exe)
 └── gui/
     ├── src/               # Svelte 5 desktop UI
@@ -568,11 +567,14 @@ claims or production certification.
   [Report (Chinese)](docs/reports/self_repair_20260908.md) ·
   [rerun report](docs/reports/self_repair_20260908_081319.md) ·
   [evidence & reproduction](evals/self_repair/README.md)
-- **Claim drift benchmark.** 175 synthetic bilingual cases across 11 policy
-  categories for the host-level claim verifier (`host-rules-v3.4`) — a policy
-  regression suite, not an end-to-end evaluation.
-  [Report](reports/claim_drift_eval_report_v1.md) ·
-  [delivery receipt](reports/buglecat-delivery-20261014.json)
+- **Claim drift benchmark & Jev pre-execution action review.** 175 synthetic
+  bilingual cases across 11 policy categories for the host-level claim verifier
+  (`host-rules-v3.4`) — a policy regression suite, not an end-to-end evaluation
+  ([Report](reports/claim_drift_eval_report_v1.md) ·
+  [delivery receipt](reports/buglecat-delivery-20261014.json)). For non-read-only
+  tool calls, `action_review.rs` (`jev-action-review-v1`) adds a 4s fail-open
+  pre-execution check across `not_requested`, `exceeds_scope`, and `irreversible`
+  ([verification README](evals/verification/README.md)).
 - **Compounding replay (`python-tabulate`, 9 tasks × 3 paired rounds,
   `deepseek-chat`).** With single-tier memory (Arm B) vs no memory (Arm A),
   cost per resolved task fell from 0.2265 to 0.1790 CNY (`B/A = 0.7904`,
