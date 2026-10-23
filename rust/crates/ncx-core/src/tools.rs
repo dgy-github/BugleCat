@@ -15,7 +15,9 @@ use ncx_config::HookConfig;
 use ncx_context::ContextEntry;
 pub use ncx_sandbox::ApprovalRequest;
 use ncx_sandbox::{Approver, Decision, SandboxPolicy, ON_FAILURE};
-use ncx_tools::{apply_patch, decode_text, parse_patch, read_file as rf, PolicyExecutor};
+use ncx_tools::{
+    apply_patch, decode_text, parse_patch, read_file as rf, OsIsolation, PolicyExecutor,
+};
 use serde_json::{json, Value};
 
 use crate::genome::Genome;

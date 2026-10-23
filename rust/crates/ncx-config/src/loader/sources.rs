@@ -112,6 +112,7 @@ fn nanocodex_values(raw: &Table) -> BTreeMap<String, String> {
         "feedback_memory",
         "feedback_routing",
         "jev_mode",
+        "os_sandbox",
     ] {
         if let Some(v) = selected_scalar(raw, key) {
             out.insert(key.to_string(), v);

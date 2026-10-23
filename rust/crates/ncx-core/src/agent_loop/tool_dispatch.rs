@@ -181,6 +181,11 @@ async fn execute_serial(
     output: &mut DispatchOutput<'_>,
 ) {
     record_tool_start(output.tools_used, output.sink, call);
+    if let Some(held) = review_before_execution(agent, call, cancel).await {
+        *output.tool_failures += 1;
+        record_tool_result(agent, output.sink, call, held, None);
+        return;
+    }
     let started = std::time::Instant::now();
     let result = agent
         .tool_scheduler
@@ -192,6 +197,58 @@ async fn execute_serial(
         *output.tool_failures += 1;
     }
     record_tool_result(agent, output.sink, call, result, Some(duration_ms));
+}
+
+/// Plan, memory and skill tools only change the agent's own bookkeeping.
+fn is_bookkeeping(tools: &crate::tools::ToolRegistry, name: &str) -> bool {
+    use crate::tool_recovery::ToolCapability::{Memory, Planning, Skill};
+    tools.get(name).is_some_and(|tool| {
+        let capabilities = tool.capabilities();
+        !capabilities.is_empty()
+            && capabilities
+                .iter()
+                .all(|c| matches!(c, Planning | Memory | Skill))
+    })
+}
+
+/// Ask Jev whether a side-effecting call is really what the user wants before
+/// it runs. Read-only and bookkeeping calls are never reviewed. Returns the
+/// substitute tool result only when the review holds the call.
+async fn review_before_execution(
+    agent: &AgentLoop,
+    call: &ToolCall,
+    cancel: Option<&dyn Fn() -> bool>,
+) -> Option<String> {
+    use crate::verification::action_review;
+    let config = &agent.verification;
+    if !config.is_active()
+        || !config.model_enabled
+        || agent.tools.call_is_read_only(&call.name, &call.arguments)
+        || is_bookkeeping(&agent.tools, &call.name)
+    {
+        return None;
+    }
+    #[cfg(test)]
+    let review = match &agent.action_review_override {
+        Some((key, transport)) => {
+            action_review::review_with(
+                config,
+                &agent.session,
+                call,
+                Some(key),
+                transport.as_ref(),
+                cancel,
+            )
+            .await
+        }
+        None => action_review::review(config, &agent.session, call, cancel).await,
+    };
+    #[cfg(not(test))]
+    let review = action_review::review(config, &agent.session, call, cancel).await;
+    if let Err(reason) = action_review::persist(&agent.session, config.mode, &review) {
+        trace::action_review_unpersisted(&call.name, reason);
+    }
+    review.held().then(|| action_review::held_result(&review))
 }
 
 fn record_tool_start(tools_used: &mut Vec<String>, sink: &mut Option<EventSink>, call: &ToolCall) {

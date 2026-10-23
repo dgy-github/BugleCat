@@ -457,6 +457,7 @@ fn experiment_only_rejects_unknown_and_never_certifies_or_overrides_host_failure
             categories: vec![ClaimKind::Semantic, ClaimKind::TestsPassed],
             version: "test-only".into(),
         }),
+        action_threshold: None,
     };
     super::apply_experimental_policy(&config, &input, &mut result);
     assert_eq!(result.decisions[0].reason_code, "explicit_failure");

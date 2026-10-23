@@ -19,6 +19,9 @@ pub const VALID_PERMISSION_MODES: &[&str] = &["plan", "default", "accept-edits",
 /// Valid modes for online compounding feedback (`[feedback] memory` / `routing`).
 pub const VALID_FEEDBACK_MODES: &[&str] = &["off", "shadow", "on"];
 pub const VALID_JEV_MODES: &[&str] = &["off", "shadow", "enforce"];
+/// OS-level sandbox for shell commands: `"enforce"` runs them in a Windows
+/// AppContainer that the OS holds to the sandbox policy.
+pub const VALID_OS_SANDBOX_MODES: &[&str] = &["off", "enforce"];
 
 /// Map a CC permission mode to the underlying knobs:
 /// `(sandbox_mode, approval_policy, require_edit_approval, plan_mode)`.
@@ -138,6 +141,8 @@ pub struct Config {
     pub feedback_routing: String,
     /// Pre-commit claim verification (Jev) mode (`"off" | "shadow" | "enforce"`).
     pub jev_mode: String,
+    /// OS-level sandbox for shell commands (`"off" | "enforce"`, default off).
+    pub os_sandbox: String,
     pub hooks: Vec<HookConfig>,
     /// MCP servers loaded from `~/.nanocodex/mcp.toml`.
     pub mcp_servers: Vec<McpServerConfig>,
@@ -193,6 +198,7 @@ impl Default for Config {
             feedback_memory: "shadow".to_string(),
             feedback_routing: "shadow".to_string(),
             jev_mode: "off".to_string(),
+            os_sandbox: "off".to_string(),
             hooks: vec![],
             mcp_servers: vec![],
         }
@@ -251,6 +257,12 @@ impl Config {
                 self.jev_mode, VALID_JEV_MODES
             )));
         }
+        if !VALID_OS_SANDBOX_MODES.contains(&self.os_sandbox.as_str()) {
+            return Err(ConfigError(format!(
+                "Invalid os_sandbox {:?}; expected one of {:?}.",
+                self.os_sandbox, VALID_OS_SANDBOX_MODES
+            )));
+        }
         if !(1..=128).contains(&self.max_parallel_tool_calls) {
             return Err(ConfigError(format!(
                 "Invalid max_parallel_tool_calls {}; expected an integer from 1 to 128.",
@@ -301,6 +313,7 @@ impl Config {
         m.insert("active_provider_id", self.active_provider_id.clone());
         m.insert("model", self.model.clone());
         m.insert("sandbox_mode", self.sandbox_mode.clone());
+        m.insert("os_sandbox", self.os_sandbox.clone());
         m.insert("approval_policy", self.approval_policy.clone());
         m.insert("permission_mode", self.permission_mode.clone());
         m.insert("reasoning_effort", self.reasoning_effort.clone());

@@ -28,6 +28,10 @@ pub struct SandboxPolicy {
     pub network_access: bool,
     /// Tightened default: the system temp dir is NOT writable unless opted in.
     pub allow_temp_write: bool,
+    /// Also enforce this policy at the OS level (`os_sandbox = "enforce"`):
+    /// shell commands run in an isolated process that can only write the
+    /// writable roots and only reach the network when it is enabled.
+    pub os_enforced: bool,
 }
 
 impl SandboxPolicy {
@@ -39,6 +43,7 @@ impl SandboxPolicy {
             writable_roots: Vec::new(),
             network_access: false,
             allow_temp_write: false,
+            os_enforced: false,
         }
     }
 
@@ -58,6 +63,11 @@ impl SandboxPolicy {
 
     pub fn with_network_access(mut self, on: bool) -> Self {
         self.network_access = on;
+        self
+    }
+
+    pub fn with_os_enforcement(mut self, on: bool) -> Self {
+        self.os_enforced = on;
         self
     }
 
@@ -128,10 +138,14 @@ impl SandboxPolicy {
     }
 
     pub fn describe(&self) -> String {
-        let net = if self.network_access {
-            "network on"
-        } else {
-            "network off"
+        let net = match (
+            self.network_access,
+            self.os_enforced && self.mode != DANGER_FULL_ACCESS,
+        ) {
+            (true, false) => "network on",
+            (false, false) => "network off",
+            (true, true) => "network on, OS-enforced",
+            (false, true) => "network off, OS-enforced",
         };
         match self.mode.as_str() {
             DANGER_FULL_ACCESS => format!("{} (no restrictions, {net})", self.mode),

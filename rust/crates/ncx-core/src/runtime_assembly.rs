@@ -172,7 +172,10 @@ impl ConfiguredHarnessRuntime {
         bindings: RuntimeHostBindings,
     ) -> ToolContext {
         let entries = context_entries(&sources);
-        let policy = self.profile.sandbox_policy(&workspace);
+        let policy = self
+            .profile
+            .sandbox_policy(&workspace)
+            .with_os_enforcement(self.cfg.os_sandbox == "enforce");
         let mut context = self
             .profile
             .apply_tool_context(ToolContext::new(workspace, policy))

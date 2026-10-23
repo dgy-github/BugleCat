@@ -237,7 +237,14 @@ pub(crate) async fn run_shell(
     justification: &str,
     needs_escalation: bool,
 ) -> String {
-    let executor = PolicyExecutor::new();
+    // Commands the user approved for running beyond the sandbox run outside
+    // the OS sandbox too; everything else runs inside it when it is enforced,
+    // so whatever the command-line checks miss is still contained.
+    let isolation = (!needs_escalation)
+        .then(|| OsIsolation::from_policy(&ctx.policy))
+        .flatten();
+    let isolated = isolation.is_some();
+    let executor = PolicyExecutor::new().with_isolation(isolation);
     let pre_allowed = ctx.session_grants.borrow().commands.contains(command);
     // Under `on-failure`, `Approver::classify` defers prompting until the
     // initial sandboxed attempt fails. If the command violates the sandbox
@@ -254,16 +261,19 @@ pub(crate) async fn run_shell(
     } else {
         executor.run(command, workdir, timeout).await
     };
-    // Only a sandbox denial is worth retrying with approval: commands run
-    // without OS-level isolation, so an ordinary failure would just fail the
-    // same way again.
-    if result.sandbox_denied
+    // A retry outside the sandbox is worth offering after a sandbox denial,
+    // or after a failure inside the OS sandbox (it may have been blocked
+    // there). Without OS isolation an ordinary failure would just repeat.
+    let sandbox_may_have_caused_failure =
+        result.sandbox_denied || (isolated && !result.ok() && !result.timed_out);
+    if sandbox_may_have_caused_failure
         && ctx.approval_policy == ON_FAILURE
         && approve_failed_retry(ctx, command, workdir, justification).await
     {
         let mut extra_env = HashMap::new();
         extra_env.insert("NCX_SANDBOX_ESCALATED".to_string(), "1".to_string());
         result = executor
+            .with_isolation(None)
             .run_with_env(command, workdir, timeout, &extra_env)
             .await;
     }

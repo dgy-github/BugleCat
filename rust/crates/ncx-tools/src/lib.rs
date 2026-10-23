@@ -10,9 +10,12 @@
 //! * [`executor`] — subprocess execution with timeout and (on Windows) Job-Object
 //!   process containment.
 
+#[cfg(windows)]
+pub mod appcontainer;
 pub mod detect;
 pub mod executor;
 pub mod managed;
+pub mod os_isolation;
 pub(crate) mod output_buffer;
 pub mod patch;
 pub mod pty;
@@ -22,6 +25,7 @@ pub mod text_encoding;
 pub use detect::looks_read_only;
 pub use executor::{ExecResult, PolicyExecutor};
 pub use managed::{ManagedProcess, ProcessOutputChunk, ProcessSnapshot};
+pub use os_isolation::OsIsolation;
 pub use patch::{apply_patch, parse_patch, ActionType, ApplyOutcome, FileAction, PatchError};
 pub use pty::{PtyOutputChunk, PtyProcess, PtySnapshot};
 pub use text_encoding::{

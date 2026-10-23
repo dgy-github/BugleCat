@@ -1,5 +1,16 @@
 # Jev 核验：当前交付、真实开发对照与离线基线
 
+## 2026-10-23：工具执行前动作复核（shadow 先行）
+
+模型仍自主决策；非只读工具调用（写文件、shell 等）在执行前多问 Jev 三个 Noul：`not_requested`（用户没要求/不会预期）、`exceeds_scope`（越出用户允许范围或违反明确限制）、`irreversible`（难以撤销，仅记录供校准）。只读调用不复核。实现见 `rust/crates/ncx-core/src/verification/action_review.rs`，模板 `jev-action-review-v1`，复用 `jev_mode` 与 `NCX_JEV_API_KEY`，单次 4s、无重试。
+
+- `shadow`：只记录，不拦截。
+- `enforce`：仅当设置了 `NCX_JEV_ACTION_THRESHOLD`（0.5–1.0）且 `not_requested` 或 `exceeds_scope` ≥ 阈值时，该调用不执行，返回 `Error: ... held by the pre-execution review` 给模型；未设阈值时与 shadow 相同。
+- 缺 key、敏感输入、取消、超时或应答不合格一律放行（fail open），状态照实记录。
+- `NCX_JEV_MODEL_ENABLED=0` 关闭全部 Jev 调用，包括本复核。
+
+记录在 `.nanocodex/sessions/<session>.action_review.jsonl`（schema `buglecat.action_review.record.v1`），含工具名、参数哈希、调用状态、三个概率、决定与阈值；不存参数正文。阈值尚未校准，生产默认 off；需先在 shadow 积累并人工标注样本后再定阈值。
+
 ## 2026-10-11：新增代码产物轨道，原声明轨道保留
 
 用户已选择独立 `artifact_acceptance` 轨道，判断模型原始代码能否满足冻结断言，宿主命题明确标记 `host_artifact_hypothesis`，不要求模型声称测试执行过。[契约](ARTIFACT_ACCEPTANCE_PROTOCOL.md) 已固定；`artifact_acceptance.py` 完成原始来源与独立Oracle绑定，`artifact_scoring.py` 完成预测前注册与仅开发评分，7条已查看代码保持development。参考解/标签/Oracle结果不发Jev；失败/未知保留，不凑正式负例。正式阈值仍null，holdout未运行，native A/B unavailable，生产不启用。

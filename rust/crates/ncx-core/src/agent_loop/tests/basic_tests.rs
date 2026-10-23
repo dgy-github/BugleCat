@@ -5,6 +5,7 @@ fn verification_config(mode: crate::verification::Mode) -> crate::verification::
         mode,
         model_enabled: false,
         experimental_jev: None,
+        action_threshold: None,
         enforce_categories: vec![crate::verification::types::ClaimKind::TestsPassed],
     }
 }

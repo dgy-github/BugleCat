@@ -11,13 +11,13 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Stdio;
 use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
+use crate::os_isolation::{spawn_shell, OsIsolation};
 use crate::text_encoding::decode_text_lossy;
 
 const MAX_OUTPUT: usize = 16_000;
@@ -73,12 +73,14 @@ impl ExecResult {
     }
 }
 
-/// Run commands under policy-level enforcement plus (on Windows) Job-Object
-/// process containment.
+/// Run commands under policy-level enforcement plus process containment, and
+/// optionally inside the OS sandbox.
 #[derive(Debug, Clone)]
 pub struct PolicyExecutor {
     /// Generous fork-bomb backstop on Windows; 0 disables the active-process cap.
     pub active_process_limit: u32,
+    /// When set, commands run in the OS sandbox (`os_sandbox = "enforce"`).
+    pub isolation: Option<OsIsolation>,
 }
 
 impl Default for PolicyExecutor {
@@ -86,6 +88,7 @@ impl Default for PolicyExecutor {
         // 512 mirrors WindowsJobExecutor.ACTIVE_PROCESS_LIMIT.
         PolicyExecutor {
             active_process_limit: 512,
+            isolation: None,
         }
     }
 }
@@ -93,6 +96,12 @@ impl Default for PolicyExecutor {
 impl PolicyExecutor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Run commands inside the OS sandbox described by `isolation`.
+    pub fn with_isolation(mut self, isolation: Option<OsIsolation>) -> Self {
+        self.isolation = isolation;
+        self
     }
 
     /// Run `command` in `cwd` with a wall-clock `timeout_s`.
@@ -110,13 +119,15 @@ impl PolicyExecutor {
         timeout_s: u64,
         extra_env: &HashMap<String, String>,
     ) -> ExecResult {
-        let mut cmd = command_with_env(command, cwd, extra_env);
-        cmd.current_dir(cwd)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::null());
-
-        let (mut child, containment) = match spawn_contained(&mut cmd, self.active_process_limit) {
+        let spawned = spawn_shell(
+            command,
+            cwd,
+            extra_env,
+            false,
+            self.active_process_limit,
+            self.isolation.as_ref(),
+        );
+        let (mut child, containment) = match spawned {
             Ok(spawned) => spawned,
             Err(e) => {
                 return ExecResult {
@@ -127,8 +138,8 @@ impl PolicyExecutor {
             }
         };
 
-        let mut stdout_pipe = child.stdout.take();
-        let mut stderr_pipe = child.stderr.take();
+        let mut stdout_pipe = child.take_stdout();
+        let mut stderr_pipe = child.take_stderr();
         // Keep buffers outside the timeout future so cancellation retains the
         // output already read. Drain both pipes together: either pipe can fill
         // before the child closes the other one.
@@ -151,7 +162,7 @@ impl PolicyExecutor {
 
         match timeout(Duration::from_secs(timeout_s), collect).await {
             Ok(status) => {
-                let code = status.ok().and_then(|s| s.code()).unwrap_or(1);
+                let code = status.unwrap_or(1);
                 ExecResult {
                     exit_code: code,
                     stdout: decode_text_lossy(&out),
@@ -162,7 +173,7 @@ impl PolicyExecutor {
             Err(_) => {
                 // Timed out: kill the tree.
                 containment.terminate();
-                let _ = child.start_kill();
+                child.start_kill();
                 let _ = child.wait().await;
                 // Output the child wrote just before the kill can still sit
                 // unread in the pipes. Drain it, bounded in case an escaped
@@ -203,6 +214,11 @@ pub(crate) struct Containment {
 }
 
 impl Containment {
+    #[cfg(windows)]
+    pub(crate) fn for_job(job: Option<win_job::Job>) -> Self {
+        Containment { job }
+    }
+
     /// Kill every process in the tree at once (best effort).
     pub(crate) fn terminate(&self) {
         #[cfg(windows)]
@@ -214,8 +230,8 @@ impl Containment {
             // A negative pid targets the whole process group.
             let _ = std::process::Command::new("kill")
                 .args(["-KILL", &format!("-{pgid}")])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
                 .status();
         }
     }

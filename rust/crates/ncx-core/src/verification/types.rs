@@ -33,6 +33,9 @@ pub struct Config {
     /// are never enforcement inputs until calibration establishes a policy.
     pub enforce_categories: Vec<ClaimKind>,
     pub experimental_jev: Option<ExperimentalJevPolicy>,
+    /// Calibrated hold threshold for the pre-execution action review. `None`
+    /// keeps that review observe-only even in `enforce` mode.
+    pub action_threshold: Option<f64>,
 }
 #[derive(Debug, Clone)]
 pub struct ExperimentalJevPolicy {
@@ -69,11 +72,15 @@ impl Config {
                     .collect()
             })
             .unwrap_or_default();
+        let action_threshold = std::env::var("NCX_JEV_ACTION_THRESHOLD")
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok());
         Self {
             mode,
             model_enabled,
             enforce_categories,
             experimental_jev: None,
+            action_threshold,
         }
     }
 
@@ -83,6 +90,7 @@ impl Config {
             model_enabled: false,
             enforce_categories: vec![],
             experimental_jev: None,
+            action_threshold: None,
         }
     }
 
@@ -92,6 +100,7 @@ impl Config {
             model_enabled: true,
             enforce_categories: vec![],
             experimental_jev: None,
+            action_threshold: None,
         }
     }
 
@@ -101,6 +110,7 @@ impl Config {
             model_enabled: true,
             enforce_categories: categories,
             experimental_jev: None,
+            action_threshold: None,
         }
     }
 

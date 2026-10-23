@@ -2,15 +2,14 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::{Child, ChildStdin};
 use tokio::task::JoinHandle;
 
-use crate::executor::{command_with_env, spawn_contained, Containment, PolicyExecutor};
+use crate::executor::{Containment, PolicyExecutor};
+use crate::os_isolation::{spawn_shell, BoxWrite, ProcessChild};
 use crate::output_buffer::{OutputRingBuffer, SequencedChunk};
 use crate::text_encoding::Utf8StreamDecoder;
 
@@ -39,8 +38,8 @@ pub struct ProcessSnapshot {
 }
 
 pub struct ManagedProcess {
-    child: Child,
-    stdin: Option<ChildStdin>,
+    child: ProcessChild,
+    stdin: Option<BoxWrite>,
     output: Arc<Mutex<OutputRingBuffer<ProcessOutputChunk>>>,
     readers: Vec<JoinHandle<()>>,
     exit_code: Option<i32>,
@@ -50,22 +49,21 @@ pub struct ManagedProcess {
 impl PolicyExecutor {
     /// Spawn a command that remains contained while callers poll its lifecycle.
     pub fn spawn_managed(&self, command: &str, cwd: &Path) -> Result<ManagedProcess, String> {
-        let mut process = command_with_env(command, cwd, &HashMap::new());
-        process
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-        let (mut child, containment) = spawn_contained(&mut process, self.active_process_limit)
-            .map_err(|error| format!("spawn failed: {error}"))?;
-        let stdin = child.stdin.take();
+        let (mut child, containment) = spawn_shell(
+            command,
+            cwd,
+            &HashMap::new(),
+            true,
+            self.active_process_limit,
+            self.isolation.as_ref(),
+        )
+        .map_err(|error| format!("spawn failed: {error}"))?;
+        let stdin = child.take_stdin();
         let stdout = child
-            .stdout
-            .take()
+            .take_stdout()
             .ok_or_else(|| "managed process stdout was not piped".to_string())?;
         let stderr = child
-            .stderr
-            .take()
+            .take_stderr()
             .ok_or_else(|| "managed process stderr was not piped".to_string())?;
         let output = Arc::new(Mutex::new(OutputRingBuffer::default()));
         let sequence = Arc::new(AtomicU64::new(1));
@@ -90,8 +88,7 @@ impl ManagedProcess {
             self.exit_code = self
                 .child
                 .try_wait()
-                .map_err(|error| format!("process status failed: {error}"))?
-                .map(|status| status.code().unwrap_or(1));
+                .map_err(|error| format!("process status failed: {error}"))?;
             if self.exit_code.is_some() {
                 for reader in self.readers.drain(..) {
                     let _ = reader.await;
@@ -128,7 +125,7 @@ impl ManagedProcess {
         if self.exit_code.is_none() {
             self.containment.terminate();
         }
-        let _ = self.child.start_kill();
+        self.child.start_kill();
         self.stdin = None;
     }
 }

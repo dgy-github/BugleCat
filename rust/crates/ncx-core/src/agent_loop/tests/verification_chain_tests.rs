@@ -63,6 +63,7 @@ async fn chain_with_edit(
         mode,
         model_enabled: false,
         experimental_jev: None,
+        action_threshold: None,
         enforce_categories: vec![ClaimKind::TestsPassed, ClaimKind::ExecutionSuccess],
     });
     let result = agent

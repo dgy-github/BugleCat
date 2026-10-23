@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use ncx_tools::{ManagedProcess, PolicyExecutor, ProcessSnapshot};
+use ncx_tools::{ManagedProcess, OsIsolation, PolicyExecutor, ProcessSnapshot};
 use serde_json::{json, Value};
 
 use crate::tools::{authorize_shell, resolve_shell_workdir, ShellTool, Tool, ToolContext};
@@ -91,7 +91,13 @@ impl Tool for BackgroundStartTool {
             .and_then(Value::as_u64)
             .unwrap_or(ctx.timeout_s)
             .clamp(1, MAX_BACKGROUND_TIMEOUT_S);
-        let process = match PolicyExecutor::new().spawn_managed(command, &workdir) {
+        let isolation = (!escalation)
+            .then(|| OsIsolation::from_policy(&ctx.policy))
+            .flatten();
+        let process = match PolicyExecutor::new()
+            .with_isolation(isolation)
+            .spawn_managed(command, &workdir)
+        {
             Ok(process) => process,
             Err(message) => return error("SPAWN_FAILED", &message),
         };

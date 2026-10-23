@@ -119,6 +119,7 @@ fn assistant_toolcall(calls: Vec<ToolCall>) -> ModelResponse {
     }
 }
 
+mod action_review_tests;
 mod basic_tests;
 mod compaction_tests;
 mod outcome_tests;

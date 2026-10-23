@@ -114,6 +114,9 @@ pub struct AgentLoop {
     context_usage: std::cell::Cell<Option<(usize, i64)>>,
     pub reasoning_effort: Option<String>,
     pub verification: crate::verification::Config,
+    /// Test-only Jev key and transport for the pre-execution action review.
+    #[cfg(test)]
+    pub(crate) action_review_override: Option<(String, Rc<dyn ncx_provider::jev::JevTransport>)>,
     max_parallel_tool_calls: usize,
     tool_scheduler: Box<dyn ToolScheduler>,
     turn_context: TurnContextRegistry,
@@ -242,6 +245,8 @@ impl AgentLoop {
             context_usage: std::cell::Cell::new(None),
             reasoning_effort: None,
             verification: crate::verification::Config::from_env(),
+            #[cfg(test)]
+            action_review_override: None,
             max_parallel_tool_calls: DEFAULT_MAX_PARALLEL_TOOL_CALLS,
             tool_scheduler: Box::new(BoundedToolScheduler),
             turn_context: TurnContextRegistry::default(),

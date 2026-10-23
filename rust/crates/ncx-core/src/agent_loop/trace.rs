@@ -44,6 +44,12 @@ pub(super) fn tool_result(tool_name: &str, result: &str) {
     }
 }
 
+pub(super) fn action_review_unpersisted(tool_name: &str, reason: &str) {
+    if enabled() {
+        eprintln!("[ncx-trace]   action review for {tool_name} not persisted: {reason}");
+    }
+}
+
 fn truncate(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()

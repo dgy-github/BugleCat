@@ -417,6 +417,7 @@ pub(crate) fn load_config_impl(
         ("feedback_memory", &["NANOCODEX_FEEDBACK_MEMORY"]),
         ("feedback_routing", &["NANOCODEX_FEEDBACK_ROUTING"]),
         ("jev_mode", &["NCX_JEV_MODE", "NANOCODEX_JEV_MODE"]),
+        ("os_sandbox", &["NCX_OS_SANDBOX"]),
     ];
     for (field, env_keys) in env_map {
         for env_key in *env_keys {
@@ -640,6 +641,10 @@ pub(crate) fn load_config_impl(
             .unwrap_or_else(|| "shadow".into()),
         jev_mode: merged
             .get("jev_mode")
+            .map(|s| s.trim().to_lowercase())
+            .unwrap_or_else(|| "off".into()),
+        os_sandbox: merged
+            .get("os_sandbox")
             .map(|s| s.trim().to_lowercase())
             .unwrap_or_else(|| "off".into()),
         hooks: parse_hooks(&nano_raw),
