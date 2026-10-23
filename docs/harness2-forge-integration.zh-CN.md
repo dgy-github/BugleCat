@@ -16,7 +16,7 @@ $env:NCX_FORGE_NCX_BIN="D:\github_dgy\BugleCat\rust\target\release\ncx.exe"
 python train/forge.py --train --rounds 3 --repeats 1 --timeout 120 --budget-s 1800 `
   --teacher panel --initial-max-surfaces 2 --max-changed-lines 40 --stagnation-limit 2 --prune
 ```
-（注意：HANDOFF L83/L179 写的是 `--max-surfaces/--anneal-surfaces`，实际代码参数是 `--initial-max-surfaces`，文档与代码不一致。）
+（`--max-surfaces` 现为 `--initial-max-surfaces` 的别名；HANDOFF/README 已统一为 `--initial-max-surfaces`。）
 
 ### 1.2 循环结构（`train()`，L208–507）
 | 步骤 | 代码 |
@@ -139,7 +139,7 @@ def _run_probes(probes, task, timeout, repeats, workers=1):
 | `critic_check` | 对 probe 和合成都跑；"领域特定"提议是主要风险点，forbidden_terms 不变 |
 | 双通道成本门 / holdout | 只对**合成 genome**执行，完全复用 L377–465；probe 结果**不能**直接晋级（probe 仅在单任务上跑，样本太小） |
 | `--max-token-growth` | probe 记录 token；compose prompt 告知 token 预算 |
-| 停滞转向 | `focus_surface` 传给 propose；若 K 个 probe 均无行为差异，计为一次停滞 |
+| 停滞转向 | `focus_surface` 传给 propose；仅当本轮**未接受**新 champion 时计为一次停滞（接受即清零，即使 probe 无行为差异；该信号记录在 `round_log.h2_behavioral_variation`） |
 | ledger | 新增 `phase` 字段：`"h2-probe"`/`"h2-compose"`，含 `task`、`probe_idx`、`kind`、`passed`、`contrast_hash`；probe 的失败也进 `rejected_history`（标 `phase=h2-probe` 便于去重） |
 | `--prune` | 不变，在最终 champion 上做消融；被剪掉的 surface 反写 lesson 的 `refuted`（见 §3） |
 | `budget_s` | 每个 probe 前检查 `elapsed()`；PPC 成本 ≈ (K+1)·R 次单任务 run + K+1 次 teacher 调用 |
@@ -203,6 +203,7 @@ def _run_probes(probes, task, timeout, repeats, workers=1):
 - **过拟合/泄漏**："领域特定"提议易写入任务特征 → critic 同时校验 probe、合成与 lesson 文本；replay 课程只作 test。
 - **成本膨胀**：K+1 倍单任务运行 → `--h2-tasks` 默认 1，受 `budget_s` 与 token 门约束。
 - **并发**：Windows 下并发 `ncx.exe` 子进程与 `run_owned` 进程组管理需验证；默认 workers 保守。
-- **Compose 越界**：合成易超出退火面预算 → 强制再 validate，越界则回退到最佳单 probe 候选再走外层门。
+- **Compose 越界**：合成易超出退火面预算 → 强制再 validate，越界/解析失败/预算耗尽则回退到单个 probe 候选再走外层门（train + holdout）。回退选择遵守 blind：`blind=True` 时**不读取 probe 的 pass/fail**，按纯行为确定性排序（未超时优先 → 与 control 的行为差异最大 → token 更少 → probe 编号最小）；仅 `--no-h2-blind` 消融时按单任务 probe 通过数选择。
 - **lesson 漂移**：错误 lesson 自我强化 → 只在外层门接受后写入，refute 自动退役。
-- 文档不一致：HANDOFF 的 `--max-surfaces/--anneal-surfaces` 与代码 `--initial-max-surfaces` 需统一。
+- 文档一致性：已统一为 `--initial-max-surfaces`（`--max-surfaces` 保留为别名）。
+- **lesson 库并发/持久化**：`lessons.jsonl` 读改写在跨进程锁（`lessons.jsonl.lock`，`O_CREAT|O_EXCL`，120s 视为陈旧锁）下进行，写入走临时文件 + `os.replace` 原子替换；新 lesson ID 取现有最大编号 +1；同 `edit_pattern` 仅在 symptom 有交集时合并（trigger.symptoms 上限 8 条），否则另建 lesson。

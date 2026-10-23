@@ -1093,13 +1093,7 @@ pub fn record_followup(
                     FollowupSignal::Label {
                         good: false,
                         note: Some(n),
-                    } => {
-                        let lower = n.to_ascii_lowercase();
-                        let has_p2p_reg =
-                            lower.contains("p2p_regressed=") && !lower.contains("p2p_regressed=0");
-                        let has_reg_kw = lower.contains("regress") || lower.contains("回归");
-                        (has_p2p_reg || has_reg_kw).then(|| n.clone())
-                    }
+                    } => label_note_indicates_regression(n).then(|| n.clone()),
                     _ => None,
                 };
                 if let Some(reason) = reg_reason {
@@ -1112,16 +1106,14 @@ pub fn record_followup(
                             && !norm.contains("/tests/")
                             && !norm.starts_with("test/")
                             && !norm.contains("/test/")
-                        {
-                            if memory
+                            && memory
                                 .store
                                 .record_regression_guardrail(&norm, &reason, ts_sec)
                                 .ok()
                                 .flatten()
                                 .is_some()
-                            {
-                                let _ = index.rebuild_from_markdown(memory.store, &ws_key);
-                            }
+                        {
+                            let _ = index.rebuild_from_markdown(memory.store, &ws_key);
                         }
                     }
                 }
@@ -1764,6 +1756,31 @@ pub fn now_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or_default()
+}
+
+/// Whether a negative label note reports a pass-to-pass regression.
+///
+/// A structured `p2p_regressed=<n>` field counts as a regression iff `n > 0`;
+/// the field itself is stripped before the free-text keyword match so that
+/// `p2p_regressed=0` never false-triggers on the substring "regress".
+pub(crate) fn label_note_indicates_regression(note: &str) -> bool {
+    const FIELD: &str = "p2p_regressed=";
+    let lower = note.to_ascii_lowercase();
+    let mut stripped = String::with_capacity(lower.len());
+    let mut structured_regression = false;
+    let mut rest = lower.as_str();
+    while let Some(pos) = rest.find(FIELD) {
+        stripped.push_str(&rest[..pos]);
+        let after = &rest[pos + FIELD.len()..];
+        let digits_len = after.bytes().take_while(u8::is_ascii_digit).count();
+        if let Ok(n) = after[..digits_len].parse::<u64>() {
+            structured_regression |= n > 0;
+        }
+        stripped.push(' ');
+        rest = &after[digits_len..];
+    }
+    stripped.push_str(rest);
+    structured_regression || stripped.contains("regress") || stripped.contains("回归")
 }
 
 #[cfg(test)]

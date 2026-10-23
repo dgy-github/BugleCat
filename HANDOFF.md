@@ -80,7 +80,7 @@
   - **扩展 `validate(candidate, baseline, *, parent=None, max_surfaces=None, max_changed_lines=None)`**：
     - 在原有未知键拦截、表面长度上限（`MAX_LEN_MARGIN`）与核心锚点词（`REQUIRED_SUBSTRINGS`）检查之上，新增相对父代 `parent` 的单步变异幅度约束：
     - 若单步修改表面数 `len(surfaces) > max_surfaces` 或修改行数 `lines > max_changed_lines`，直接在本地零评测开销拒收该候选。
-  - **按轮退火调度（Annealed Edit Budget）**：在 `forge.py` 中支持 `--max-surfaces`（默认 `2`）、`--anneal-surfaces` 与 `--max-changed-lines`（默认 `40`）；开启退火时第 $r$ 轮允许修改的最大表面数为 $\max(1, \text{max\_surfaces} - \lfloor r / 2 \rfloor)$，先允许跨面协同探索，后期强制收敛为单面精细微调。
+  - **按轮退火调度（Annealed Edit Budget）**：在 `forge.py` 中支持 `--initial-max-surfaces`（旧名 `--max-surfaces` 仍作为别名可用；未设置且开启退火时默认 `2`）、`--anneal-surfaces` 与 `--max-changed-lines`（默认 `40`）；开启退火时第 $r$ 轮允许修改的最大表面数为 $\max(1, \text{max\_surfaces} - \lfloor r / 2 \rfloor)$，先允许跨面协同探索，后期强制收敛为单面精细微调。
 
 - **P1.2 规则版反过拟合/反作弊审查器（[`train/teacher.py::critic_check`](train/teacher.py)）**
   - **拦截硬编码测试集特征**：`critic_check(candidate, parent, forbidden_terms)` 提取候选相对于 `parent` **新加入的行（`+ `）**，执行不区分大小写的词边界与子串扫描：

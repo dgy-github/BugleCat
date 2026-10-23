@@ -538,6 +538,285 @@ def test_h2_ppc_parallel_and_sequential_with_lessons():
         restore()
 
 
+# ---------------------------------------------------------------------------
+# Follow-up fixes: blind fallback, budget exit, threaded probes, lesson library
+# persistence/concurrency, stagnation accounting.
+# ---------------------------------------------------------------------------
+
+_TRAJ_A = "  #01 [tool] read_file (ok, 10ms): mod.py\n  #02 [tool] edit_file (ok, 12ms): mod.py\n"
+_TRAJ_B = "  #01 [tool] bash (ok, 900ms): pytest\n  TIMEOUT after 60s\n"
+
+
+def _probe(idx, traj, passed=0, tokens=1000.0, text="x"):
+    return forge.Probe(
+        idx=idx, kind="control" if idx == 0 else "general",
+        genome=genome.Genome(system_prompt=text), path=Path(f"p{idx}.toml"),
+        trajectory=traj, passed=passed, runs=1, mean_tokens=tokens,
+    )
+
+
+def test_h2_blind_fallback_ignores_grader_scores():
+    ctrl = _probe(0, _TRAJ_B)
+    same_as_ctrl_but_passed = _probe(1, _TRAJ_B, passed=1, text="p1")
+    behaviorally_new = _probe(2, _TRAJ_A, passed=0, text="p2")
+    probes = [ctrl, same_as_ctrl_but_passed, behaviorally_new]
+    # Blind: pick by behavior (no timeout, largest divergence) -> probe #2.
+    assert forge._select_fallback_probe(probes, blind=True).idx == 2
+    # Flipping pass counts must not change the blind choice.
+    same_as_ctrl_but_passed.passed, behaviorally_new.passed = 0, 1
+    assert forge._select_fallback_probe(probes, blind=True).idx == 2
+    same_as_ctrl_but_passed.passed, behaviorally_new.passed = 1, 0
+    # Non-blind ablation uses the probe score.
+    assert forge._select_fallback_probe(probes, blind=False).idx == 1
+    # Deterministic tie-break on identical behavior: lowest idx.
+    twins = [ctrl, _probe(1, _TRAJ_A), _probe(2, _TRAJ_A)]
+    assert forge._select_fallback_probe(twins, blind=True).idx == 1
+
+
+def _h2_fake_eval(sleep_s=0.0, tracker=None):
+    import threading
+    import time as _t
+
+    lock = threading.Lock()
+
+    def h2_eval(genome_path, tasks, repeats, timeout, model=None, keep_trajectory=False):
+        if tracker is not None:
+            with lock:
+                tracker["active"] += 1
+                tracker["peak"] = max(tracker["peak"], tracker["active"])
+        try:
+            if sleep_s:
+                _t.sleep(sleep_s)
+            content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
+            ok = "PROBE_RULE" in content or "COMPOSED_RULE" in content
+            r = ev.EvalResult(genome=str(genome_path))
+            for t in tasks:
+                p = 1 if (t.startswith("hold") or ok) else 0
+                traj = _TRAJ_A if ok else _TRAJ_B
+                # Encode the genome file name so threaded results can be checked.
+                traj = traj + f"  genome={Path(genome_path).name}\n"
+                r.tasks[t] = ev.TaskResult(
+                    task=t, passes=p, runs=1, mean_s=1.0,
+                    mean_tokens=700.0 if ok else 1200.0,
+                    failure_trajectory=("" if p else traj),
+                    trajectory=(traj if (keep_trajectory or not p) else ""),
+                )
+            return r
+        finally:
+            if tracker is not None:
+                with lock:
+                    tracker["active"] -= 1
+
+    return h2_eval
+
+
+class _ProbeOnlyTeacher:
+    """Proposes a valid probe; the compose reply contains no TOML (rejected)."""
+
+    name = "h2_probe_only"
+
+    def __init__(self, n_variants=1):
+        self.calls = []
+        self.n = 0
+        self.n_variants = n_variants
+
+    def propose(self, prompt: str) -> str:
+        self.calls.append(prompt)
+        if "Compose phase" in prompt:
+            return "I cannot decide on a composition."
+        self.n += 1
+        return f'```toml\nsystem_prompt = "PROBE_RULE variant {self.n % self.n_variants}"\n```'
+
+
+def test_h2_compose_rejected_falls_back_to_probe_and_still_gated():
+    restore = _install(_h2_fake_eval())
+    tb = _ProbeOnlyTeacher()
+    forge.teacher.build_panel = lambda verbose=True: [tb]
+    try:
+        lin = forge.train(
+            rounds=1, train_tasks=["t_alpha"], holdout_tasks=["hold_beta"],
+            repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T_H2_FB",
+            h2_k=2, h2_mode="parallel", h2_tasks=1, h2_blind=True, enable_lessons=False,
+        )
+        rnd0 = lin["rounds"][0]
+        assert rnd0["h2"][0]["composed"] is True, rnd0
+        assert rnd0.get("accept", {}).get("mode") == "pass-gain", rnd0
+        ledger = (forge.RUNS_DIR / "ledger_T_H2_FB.jsonl").read_text(encoding="utf-8")
+        rows = [json.loads(x) for x in ledger.splitlines() if x.strip()]
+        assert any(r.get("phase") == "h2-compose" and r.get("verdict") == "rejected"
+                   for r in rows), rows
+    finally:
+        restore()
+
+
+def test_h2_budget_exhaustion_exits_cleanly():
+    restore = _install(_h2_fake_eval())
+    tb = _ProbeOnlyTeacher()
+    forge.teacher.build_panel = lambda verbose=True: [tb]
+    try:
+        # Budget already exhausted after gen0 evaluation -> no rounds, no teacher calls.
+        lin = forge.train(
+            rounds=3, train_tasks=["t_alpha"], holdout_tasks=["hold_beta"],
+            repeats=1, timeout=10, budget_s=-1, teachers="panel", stamp="T_H2_BUD",
+            h2_k=2, enable_lessons=False,
+        )
+        assert lin["rounds"] == [], lin["rounds"]
+        assert tb.calls == []
+
+        # Budget expiring inside a PPC round: only the control probe runs, nothing composed.
+        res = forge._h2_round(
+            1, "t_alpha", _TRAJ_B, BASELINE.copy(), BASELINE.copy(), [tb],
+            k=3, mode="parallel", max_surfaces=None, focus_surface=None,
+            max_changed_lines=None, max_token_growth=None, forbidden_terms=[],
+            rejected_history=[], touched_counts={}, lesson_store=None, timeout=10,
+            probe_repeats=1, workers=2, blind=True, stamp="T_H2_BUD2",
+            elapsed_fn=lambda: 10.0, budget_s=1.0,
+        )
+        assert len(res.probes) == 1 and res.composed is None, res
+        assert tb.calls == []
+    finally:
+        restore()
+
+
+def test_h2_parallel_workers_run_concurrently_and_map_results():
+    tracker = {"active": 0, "peak": 0}
+    restore = _install(_h2_fake_eval(sleep_s=0.2, tracker=tracker))
+    tb = _ProbeOnlyTeacher(n_variants=3)
+    forge.GENOMES_DIR.mkdir(parents=True, exist_ok=True)
+    forge.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        res = forge._h2_round(
+            1, "t_alpha", _TRAJ_B, BASELINE.copy(), BASELINE.copy(), [tb],
+            k=3, mode="parallel", max_surfaces=None, focus_surface=None,
+            max_changed_lines=None, max_token_growth=None, forbidden_terms=[],
+            rejected_history=[], touched_counts={}, lesson_store=None, timeout=10,
+            probe_repeats=1, workers=3, blind=True, stamp="T_H2_THR",
+            elapsed_fn=lambda: 0.0, budget_s=999,
+        )
+        assert len(res.probes) == 4, res.probes
+        assert tracker["peak"] >= 2, tracker
+        for p in res.probes:
+            assert f"genome={p.path.name}" in p.trajectory, (p.idx, p.trajectory)
+        assert all(p.passed == 1 for p in res.probes[1:])
+        assert res.probes[0].passed == 0
+    finally:
+        restore()
+
+
+def test_h2_accepted_round_resets_stagnation_even_without_variation():
+    # Trajectories/tokens are identical for every genome -> no behavioral variation,
+    # but the probe genome still clears the train gate on t_alpha.
+    def flat_eval(genome_path, tasks, repeats, timeout, model=None, keep_trajectory=False):
+        content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
+        ok = "PROBE_RULE" in content
+        r = ev.EvalResult(genome=str(genome_path))
+        for t in tasks:
+            p = 1 if t.startswith("hold") or (ok and t == "t_alpha") else 0
+            r.tasks[t] = ev.TaskResult(
+                task=t, passes=p, runs=1, mean_s=1.0, mean_tokens=1000.0,
+                failure_trajectory=("" if p else _TRAJ_B),
+                trajectory=_TRAJ_B,
+            )
+        return r
+
+    restore = _install(flat_eval)
+    tb = _ProbeOnlyTeacher()
+    forge.teacher.build_panel = lambda verbose=True: [tb]
+    try:
+        lin = forge.train(
+            rounds=2, train_tasks=["t_alpha", "t_gamma"], holdout_tasks=["hold_beta"],
+            repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T_H2_STAG",
+            h2_k=1, h2_tasks=1, stagnation_limit=1, enable_lessons=False,
+        )
+        r1, r2 = lin["rounds"][0], lin["rounds"][1]
+        assert r1.get("accept", {}).get("mode") == "pass-gain", r1
+        assert r1.get("h2_behavioral_variation") is False, r1
+        assert r2["focus_surface"] is None, r2
+    finally:
+        restore()
+
+
+def test_lesson_library_bootstrap_from_ledgers():
+    import lesson_lib
+
+    tmp = Path(tempfile.mkdtemp(prefix="forge_boot_"))
+    runs = tmp / "runs"
+    runs.mkdir()
+    rows = [
+        {"round": 1, "verdict": "accepted", "target_surfaces": ["system_prompt"],
+         "diff": "system_prompt: 4 -> 30 chars", "reason": "pass-gain"},
+        {"round": 2, "verdict": "rejected", "target_surfaces": ["tool_desc.bash"],
+         "diff": "x", "reason": "below-margin"},
+        {"round": 3, "verdict": "accepted", "target_surfaces": [], "diff": "y"},
+    ]
+    (runs / "ledger_S9.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\nnot json\n", encoding="utf-8"
+    )
+    lib = lesson_lib.LessonLibrary(tmp / "lessons.jsonl")
+    assert lib.bootstrap_from_ledgers(runs) == 1
+    recs = lib.load_all()
+    assert len(recs) == 1 and recs[0]["stamp"] == "S9", recs
+    assert recs[0]["trigger"]["surfaces"] == ["system_prompt"]
+    assert lib.bootstrap_from_ledgers(tmp / "missing") == 0
+    assert not (tmp / "lessons.jsonl.lock").exists()
+
+
+def test_lesson_library_ids_are_collision_free_and_concurrent_writes_kept():
+    import threading
+    import lesson_lib
+
+    tmp = Path(tempfile.mkdtemp(prefix="forge_lconc_"))
+    path = tmp / "lessons.jsonl"
+    # Pre-existing file with a gap / corrupt line: len(records)+1 would collide.
+    path.write_text(
+        json.dumps({"id": "L-0005", "edit_pattern": "old", "trigger": {}, "support": 1,
+                    "refute": 0, "status": "active"}) + "\n{corrupt\n",
+        encoding="utf-8",
+    )
+    errors = []
+
+    def worker(i):
+        try:
+            lib = lesson_lib.LessonLibrary(path)
+            lib.record_lesson(
+                {"symptoms": [f"sym{i}"], "edit_pattern": f"pattern number {i}", "why": "w"},
+                stamp="C", round_num=i,
+            )
+        except Exception as e:  # pragma: no cover - reported via assert
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors
+    recs = lesson_lib.LessonLibrary(path).load_all()
+    ids = [r["id"] for r in recs]
+    assert len(recs) == 13, ids
+    assert len(set(ids)) == len(ids), ids
+    assert "L-0006" in ids and "L-0002" not in ids, ids
+    assert not (tmp / "lessons.jsonl.lock").exists()
+    assert not list(tmp.glob("*.tmp"))
+
+
+def test_lesson_merge_requires_symptom_overlap_and_caps_symptoms():
+    import lesson_lib
+
+    tmp = Path(tempfile.mkdtemp(prefix="forge_lmerge_"))
+    lib = lesson_lib.LessonLibrary(tmp / "lessons.jsonl")
+    pat = "Run targeted pytest -k before exit"
+    a = lib.record_lesson({"symptoms": ["timeout"], "edit_pattern": pat}, stamp="M")
+    b = lib.record_lesson({"symptoms": ["import_error"], "edit_pattern": pat}, stamp="M")
+    assert a["id"] != b["id"], (a, b)
+    c = lib.record_lesson(
+        {"symptoms": ["timeout"] + [f"s{i}" for i in range(20)], "edit_pattern": pat},
+        stamp="M",
+    )
+    assert c["id"] == a["id"] and c["support"] == 2, c
+    assert len(c["trigger"]["symptoms"]) <= lesson_lib.MAX_TRIGGER_SYMPTOMS, c
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

@@ -12,9 +12,7 @@ use regex::{NoExpand, RegexBuilder};
 use serde_json::json;
 
 use crate::isolate::copy_tree;
-use crate::workspace_promotion::{
-    compose_with_paths, promote_with_paths, snapshot, WorkspaceSnapshot,
-};
+use crate::workspace_promotion::{compose_with_report, snapshot, WorkspaceSnapshot};
 use crate::{
     discover_skills, load_workspace_instructions, tool_recovery::classify_tool_result,
     AgentCallResult, AgentLoop, AgentRunner, AgentRuntimeProfile, ConfiguredHarnessRuntime,
@@ -609,29 +607,40 @@ impl AgentRunner for HarnessAgentRunner {
         let promoted_paths = {
             let scratch_map = self.scratch.borrow();
             let mut pairs = Vec::with_capacity(indices.len().max(1));
+            let mut pair_indices = Vec::with_capacity(indices.len().max(1));
             let primary_ws = scratch_map
                 .get(&primary)
                 .ok_or_else(|| format!("Worker {} 没有可提升的隔离工作区", primary + 1))?;
             pairs.push((&primary_ws.baseline, primary_ws.root.as_path()));
+            pair_indices.push(primary);
             for &idx in indices.iter().skip(1) {
                 if idx != primary {
                     if let Some(ws) = scratch_map.get(&idx) {
                         pairs.push((&ws.baseline, ws.root.as_path()));
+                        pair_indices.push(idx);
                     }
                 }
             }
-            if pairs.len() == 1 {
-                promote_with_paths(&primary_ws.baseline, &primary_ws.root, &self.cfg.workspace)
-            } else {
-                compose_with_paths(&pairs, &self.cfg.workspace)
-            }
+            compose_with_report(&pairs, &self.cfg.workspace).map(|report| {
+                let dropped = report
+                    .dropped_workers
+                    .iter()
+                    .map(|&i| pair_indices[i])
+                    .collect::<Vec<_>>();
+                let composed = pair_indices
+                    .iter()
+                    .copied()
+                    .filter(|idx| !dropped.contains(idx))
+                    .collect::<Vec<_>>();
+                (report.promoted, composed)
+            })
         };
         for (_, worker) in self.scratch.borrow_mut().drain() {
             let _ = std::fs::remove_dir_all(worker.root);
         }
-        let promoted_paths = promoted_paths?;
+        let (promoted_paths, composed) = promoted_paths?;
         let mut promoted = self.promoted_telemetry.borrow_mut();
-        for &idx in indices {
+        for idx in composed {
             if let Some(w_telem) = self.worker_telemetry.borrow_mut().remove(&idx) {
                 promoted.merge(w_telem);
             }

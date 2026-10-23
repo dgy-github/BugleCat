@@ -12,11 +12,122 @@ Implements harnessing-level recursion across `ncx-forge` runs:
 """
 from __future__ import annotations
 
+import contextlib
+import functools
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 from pathlib import Path
+
+MAX_TRIGGER_SYMPTOMS = 8
+LOCK_TIMEOUT_S = 30.0
+LOCK_STALE_S = 120.0
+
+_PROCESS_LOCKS: dict[str, threading.RLock] = {}
+_PROCESS_LOCKS_GUARD = threading.Lock()
+_LOCAL = threading.local()
+
+
+def _process_lock(key: str) -> threading.RLock:
+    with _PROCESS_LOCKS_GUARD:
+        return _PROCESS_LOCKS.setdefault(key, threading.RLock())
+
+
+@contextlib.contextmanager
+def file_lock(target: Path, timeout: float = LOCK_TIMEOUT_S, stale: float = LOCK_STALE_S):
+    """Cross-platform, re-entrant advisory lock for `target`.
+
+    In-process threads serialize on an RLock; across processes a sibling
+    `<target>.lock` file is created with `O_CREAT | O_EXCL` (atomic on both
+    POSIX and Windows). Lock files older than `stale` seconds are treated as
+    left over from a crashed process and broken."""
+    target = Path(target)
+    lock_path = target.with_name(target.name + ".lock")
+    key = str(lock_path.resolve())
+    rlock = _process_lock(key)
+    with rlock:
+        depth: dict[str, int] = getattr(_LOCAL, "depth", None) or {}
+        _LOCAL.depth = depth
+        if depth.get(key, 0) > 0:
+            depth[key] += 1
+            try:
+                yield
+            finally:
+                depth[key] -= 1
+            return
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("ascii"))
+                os.close(fd)
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - lock_path.stat().st_mtime > stale:
+                        lock_path.unlink()
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"could not acquire lock {lock_path}")
+                time.sleep(0.05)
+        depth[key] = 1
+        try:
+            yield
+        finally:
+            depth[key] = 0
+            with contextlib.suppress(FileNotFoundError):
+                lock_path.unlink()
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write `text` to `path` via a same-directory temp file + `os.replace`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    for attempt in range(10):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:  # Windows: reader briefly holds the file open
+            if attempt == 9:
+                raise
+            time.sleep(0.05)
+
+
+def _locked(method):
+    """Run a read-modify-write `LessonLibrary` method under the library lock."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with file_lock(self.path):
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _lesson_num(lesson_id: object) -> int:
+    m = re.fullmatch(r"L-(\d+)", str(lesson_id or ""))
+    return int(m.group(1)) if m else 0
+
+
+def _symptoms_overlap(a: list[str], b: list[str]) -> bool:
+    """Signatures overlap if they share a concrete symptom; `general_failure`
+    (or empty) is a wildcard that only matches another wildcard."""
+    sa = {x for x in a if x and x != "general_failure"}
+    sb = {x for x in b if x and x != "general_failure"}
+    if not sa and not sb:
+        return True
+    return bool(sa & sb)
+
 
 GRADER_FORBIDDEN = ("check.py", "_check.py", "hidden test", "eval_holdout")
 
@@ -116,9 +227,9 @@ class LessonLibrary:
         return out
 
     def save_all(self, records: list[dict]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         lines = [json.dumps(r, ensure_ascii=False) for r in records]
-        self.path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+        with file_lock(self.path):
+            _atomic_write_text(self.path, "\n".join(lines) + ("\n" if lines else ""))
 
     def retrieve(self, sig: dict, k: int = 5) -> list[dict]:
         """Return top-k active lessons ranked by symptom/keyword overlap times
@@ -151,6 +262,7 @@ class LessonLibrary:
         retired = [r for r in self.load_all() if r.get("status") == "retired"]
         return retired[-limit:]
 
+    @_locked
     def record_lesson(
         self,
         draft: dict,
@@ -209,11 +321,16 @@ class LessonLibrary:
 
         # Compaction: merge into existing lesson if normalized edit_pattern matches.
         for r in records:
-            if _norm_text(r.get("edit_pattern", "")) == norm_pat:
+            existing_syms = list((r.get("trigger") or {}).get("symptoms") or [])
+            if _norm_text(r.get("edit_pattern", "")) == norm_pat and _symptoms_overlap(
+                existing_syms, symptoms
+            ):
                 r["support"] = int(r.get("support", 1)) + 1
                 r.setdefault("evidence", []).append(ev_entry)
                 existing_trig = r.setdefault("trigger", {})
-                merged_sym = list(dict.fromkeys((existing_trig.get("symptoms") or []) + symptoms))
+                merged_sym = list(
+                    dict.fromkeys((existing_trig.get("symptoms") or []) + symptoms)
+                )[:MAX_TRIGGER_SYMPTOMS]
                 merged_surf = list(
                     dict.fromkeys((existing_trig.get("surfaces") or []) + trig_surfaces)
                 )
@@ -224,13 +341,14 @@ class LessonLibrary:
                 self.save_all(records)
                 return r
 
-        lesson_id = f"L-{len(records) + 1:04d}"
+        next_num = max((_lesson_num(r.get("id")) for r in records), default=0) + 1
+        lesson_id = f"L-{next_num:04d}"
         new_rec = {
             "id": lesson_id,
             "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "stamp": stamp,
             "trigger": {
-                "symptoms": symptoms or ["general_failure"],
+                "symptoms": (symptoms or ["general_failure"])[:MAX_TRIGGER_SYMPTOMS],
                 "surfaces": trig_surfaces,
                 "task_family": task_family,
             },
@@ -245,6 +363,7 @@ class LessonLibrary:
         self.save_all(records)
         return new_rec
 
+    @_locked
     def update_outcomes(
         self,
         lesson_ids: list[str],
@@ -290,6 +409,7 @@ class LessonLibrary:
         if changed:
             self.save_all(records)
 
+    @_locked
     def refute_by_surface(
         self, surface: str | list[str], *, stamp: str = ""
     ) -> list[str]:
@@ -341,9 +461,11 @@ class LessonLibrary:
             "mean_tokens": mean_tokens,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-        with self.adopted_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with file_lock(self.adopted_path):
+            with self.adopted_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+    @_locked
     def bootstrap_from_ledgers(self, runs_dir: Path | str) -> int:
         """Cold-start lessons from historical `ledger_*.jsonl` accepted entries."""
         rdir = Path(runs_dir)

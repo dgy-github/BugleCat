@@ -609,3 +609,68 @@ fn baseline_readiness_requires_two_weeks_two_categories_and_shadow_samples() {
     assert!(!report.baseline.memory_ready);
     assert!(report.baseline.blockers[0].starts_with("baseline 7/14"));
 }
+
+#[test]
+fn label_note_regression_detection_ignores_zero_p2p_field() {
+    assert!(!label_note_indicates_regression(
+        "judge: f2p=0/1 p2p_regressed=0"
+    ));
+    assert!(!label_note_indicates_regression(
+        "P2P_REGRESSED=0, wrong fix"
+    ));
+    assert!(label_note_indicates_regression(
+        "judge: f2p=1/1 p2p_regressed=3"
+    ));
+    assert!(label_note_indicates_regression("p2p_regressed=10"));
+    assert!(label_note_indicates_regression(
+        "p2p_regressed=0 but it regressed docs"
+    ));
+    assert!(label_note_indicates_regression("引入回归"));
+    assert!(!label_note_indicates_regression("wrong answer"));
+}
+
+#[test]
+fn negative_label_records_regression_guardrail_only_when_regressed() {
+    for (label, note, expect_guard) in [
+        ("guard_zero", "judge: f2p=0/1 p2p_regressed=0", false),
+        ("guard_pos", "judge: f2p=1/1 p2p_regressed=2", true),
+    ] {
+        let ws = temp_dir(label);
+        let mut memory = MemoryStore::new(ws.join(".ncx").join("memory"));
+        memory.set_feedback_mode("on");
+        let store = ContextStore::open_in_memory().unwrap();
+        let mut o = sample_outcome(
+            &format!("t-{label}"),
+            TaskRole::Primary,
+            TaskCategory::Bugfix,
+        );
+        o.files_touched = vec!["src/lib.rs".to_string(), "tests/test_a.py".to_string()];
+        append_task_outcome(&store, &o).unwrap();
+        record_followup(
+            &store,
+            "/ws",
+            &o,
+            FollowupSignal::Label {
+                good: false,
+                note: Some(note.to_string()),
+            },
+            Some(MemoryFeedback {
+                store: &memory,
+                mode: "on",
+            }),
+        )
+        .unwrap();
+        let guards = memory
+            .entries()
+            .into_iter()
+            .filter(|e| e.is_guardrail())
+            .map(|e| e.text)
+            .collect::<Vec<_>>();
+        if expect_guard {
+            assert_eq!(guards.len(), 1, "{guards:?}");
+            assert!(guards[0].starts_with("[Regression Guardrail: src/lib.rs]"));
+        } else {
+            assert!(guards.is_empty(), "{guards:?}");
+        }
+    }
+}

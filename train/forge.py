@@ -357,6 +357,52 @@ def _has_behavioral_variation(probes: list[Probe]) -> bool:
     return False
 
 
+def _behavioral_distance(control: Probe, p: Probe) -> int:
+    """Grader-free behavioral distance of probe `p` from the control probe."""
+    c_tools = _extract_tool_sequence(control.trajectory)
+    p_tools = _extract_tool_sequence(p.trajectory)
+    prefix = 0
+    for a, b in zip(c_tools, p_tools):
+        if a != b:
+            break
+        prefix += 1
+    return (max(len(c_tools), len(p_tools)) - prefix) + len(set(c_tools) ^ set(p_tools))
+
+
+def _probe_timed_out(p: Probe) -> bool:
+    traj = p.trajectory or ""
+    return "TIMEOUT" in traj or "timed out" in traj.lower()
+
+
+def _select_fallback_probe(probes: list[Probe], blind: bool = True) -> Probe:
+    """Pick the compose-fallback probe among `probes[1:]`.
+
+    `blind=True` (default): never reads `passed`/`runs`. Ranking is purely
+    behavioral and deterministic: prefer probes that did not time out, then the
+    largest behavioral divergence from control (most informative change), then
+    lower token use, then the lowest probe index.
+    `blind=False` (ablation): rank by single-task probe passes, then tokens.
+    """
+    candidates = probes[1:]
+    if not candidates:
+        raise ValueError("no candidate probes")
+    if not blind:
+        return max(
+            candidates,
+            key=lambda p: (p.passed, -p.mean_tokens if p.mean_tokens > 0 else 0.0, -p.idx),
+        )
+    control = probes[0]
+    return min(
+        candidates,
+        key=lambda p: (
+            _probe_timed_out(p),
+            -_behavioral_distance(control, p),
+            p.mean_tokens if p.mean_tokens > 0 else float("inf"),
+            p.idx,
+        ),
+    )
+
+
 def _run_probes(
     probes: list[Probe],
     task: str,
@@ -364,7 +410,11 @@ def _run_probes(
     repeats: int,
     workers: int = 1,
 ) -> None:
-    """Evaluate `probes` on a single `task` with `keep_trajectory=True`."""
+    """Evaluate `probes` on a single `task` with `keep_trajectory=True`.
+
+    `ev.evaluate` is safe to call from worker threads: each attempt seeds its
+    own temp workspace and passes a per-call env copy to a child process; no
+    module-level mutable state is shared. Results are mapped back in order."""
     if not probes:
         return
 
@@ -589,15 +639,14 @@ def _h2_round(
             append_ledger(RUNS_DIR, stamp, entry)
             rejected_history.append(entry)
 
-    # Fallback: if compose failed or exceeded surface/critic bounds, fall back to the
-    # best already-validated single probe candidate so valid probe work isn't wasted.
+    # Fallback: if compose failed or exceeded surface/critic bounds, fall back to an
+    # already-validated single probe candidate so valid probe work isn't wasted.
+    # It still has to clear the full outer train + holdout gate before promotion.
     if composed is None and len(probes) > 1:
-        best_probe = max(
-            probes[1:],
-            key=lambda p: (p.passed, -p.mean_tokens if p.mean_tokens > 0 else 0.0),
-        )
+        best_probe = _select_fallback_probe(probes, blind=blind)
         composed = best_probe.genome.copy()
-        print(f"[forge]   round {rnd} h2[{task}]: compose fallback -> probe #{best_probe.idx} ({best_probe.kind})")
+        print(f"[forge]   round {rnd} h2[{task}]: compose fallback -> probe #{best_probe.idx} "
+              f"({best_probe.kind}, blind={blind})")
 
     return H2Round(
         task=task,
@@ -1012,7 +1061,11 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                         margin=margin, token_saving=token_saving, reason=reason,
                     )
 
-        if accepted is None or (h2_k > 0 and not any_h2_variation):
+        if h2_k > 0:
+            round_log["h2_behavioral_variation"] = any_h2_variation
+        # A round that promoted a new champion is never stagnant, even if the H2
+        # probes showed no behavioral variation.
+        if accepted is None:
             stagnant_rounds += 1
             if "accept" not in round_log:
                 round_log.setdefault("accept", {"status": "none-cleared-margin"})

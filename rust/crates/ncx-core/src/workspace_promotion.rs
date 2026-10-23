@@ -50,6 +50,7 @@ pub(crate) fn promote(
     promote_with_paths(baseline, worker_root, live_root).map(|paths| paths.len())
 }
 
+#[cfg(test)]
 pub(crate) fn promote_with_paths(
     baseline: &WorkspaceSnapshot,
     worker_root: &Path,
@@ -60,20 +61,50 @@ pub(crate) fn promote_with_paths(
 
 /// Harness² Propose–Probe–Compose: compose non-conflicting file changes across
 /// one or more isolated worker workspaces ordered by priority (`workers[0]` is
-/// the primary `BEST` worker; subsequent workers contribute changes only on
-/// paths untouched by earlier workers or with identical SHA-256 fingerprints).
+/// the primary `BEST` worker).
+///
+/// Secondary workers are composed **atomically per worker**: if any file a
+/// secondary worker changed was also changed by an earlier (accepted) worker
+/// with *different* content, the whole secondary worker is dropped so no
+/// half-applied patch reaches the live workspace. Identical overlapping edits
+/// (same SHA-256 fingerprint) are fine. Every promoted path is checked against
+/// the baseline of the worker that supplied it, so a live workspace that
+/// drifted from *any* contributing worker's baseline aborts the whole promotion.
+#[cfg(test)]
 pub(crate) fn compose_with_paths(
     workers: &[(&WorkspaceSnapshot, &Path)],
     live_root: &Path,
 ) -> Result<Vec<String>, String> {
-    let Some(&(primary_baseline, _)) = workers.first() else {
-        return Ok(Vec::new());
-    };
-    let live = snapshot(live_root).map_err(|error| format!("读取当前工作区失败：{error}"))?;
-    let mut chosen_source: BTreeMap<PathBuf, Option<PathBuf>> = BTreeMap::new();
-    let mut chosen_fp: BTreeMap<PathBuf, Option<FileFingerprint>> = BTreeMap::new();
+    compose_with_report(workers, live_root).map(|report| report.promoted)
+}
 
-    for &(baseline, worker_root) in workers {
+/// Result of [`compose_with_report`].
+#[derive(Debug, Default)]
+pub(crate) struct ComposeReport {
+    pub promoted: Vec<String>,
+    /// Indices (into `workers`) of secondary workers dropped due to
+    /// overlapping edits whose content differs from an earlier worker.
+    pub dropped_workers: Vec<usize>,
+}
+
+pub(crate) fn compose_with_report(
+    workers: &[(&WorkspaceSnapshot, &Path)],
+    live_root: &Path,
+) -> Result<ComposeReport, String> {
+    if workers.is_empty() {
+        return Ok(ComposeReport::default());
+    }
+    let live = snapshot(live_root).map_err(|error| format!("读取当前工作区失败：{error}"))?;
+    // path -> (source file or None for delete, new fingerprint, baseline fingerprint)
+    type Chosen = (
+        Option<PathBuf>,
+        Option<FileFingerprint>,
+        Option<FileFingerprint>,
+    );
+    let mut chosen: BTreeMap<PathBuf, Chosen> = BTreeMap::new();
+    let mut dropped_workers = Vec::new();
+
+    for (index, &(baseline, worker_root)) in workers.iter().enumerate() {
         let worker =
             snapshot(worker_root).map_err(|error| format!("读取 Worker 结果失败：{error}"))?;
         let changed = baseline
@@ -82,25 +113,32 @@ pub(crate) fn compose_with_paths(
             .filter(|path| baseline.get(*path) != worker.get(*path))
             .cloned()
             .collect::<BTreeSet<_>>();
+        let conflicting = changed.iter().any(|relative| {
+            chosen
+                .get(relative)
+                .is_some_and(|(_, existing_fp, _)| existing_fp.as_ref() != worker.get(relative))
+        });
+        if conflicting {
+            // Never half-promote a secondary worker (index 0 never conflicts: `chosen` is empty).
+            dropped_workers.push(index);
+            continue;
+        }
         for relative in changed {
-            let new_fp = worker.get(&relative).cloned();
-            if let Some(existing_fp) = chosen_fp.get(&relative) {
-                // Primary/earlier worker already modified this file; only keep if identical,
-                // never overwrite the primary worker's version on overlapping files.
-                let _ = existing_fp;
-                continue;
+            if chosen.contains_key(&relative) {
+                continue; // identical edit already chosen
             }
+            let new_fp = worker.get(&relative).cloned();
             let src = new_fp.as_ref().map(|_| worker_root.join(&relative));
-            chosen_source.insert(relative.clone(), src);
-            chosen_fp.insert(relative, new_fp);
+            let base_fp = baseline.get(&relative).cloned();
+            chosen.insert(relative, (src, new_fp, base_fp));
         }
     }
 
-    let conflicts = chosen_source
-        .keys()
-        .filter(|path| live.get(*path) != primary_baseline.get(*path))
+    let conflicts = chosen
+        .iter()
+        .filter(|(path, (_, _, base_fp))| live.get(*path) != base_fp.as_ref())
         .take(5)
-        .map(|path| path.display().to_string())
+        .map(|(path, _)| path.display().to_string())
         .collect::<Vec<_>>();
     if !conflicts.is_empty() {
         return Err(format!(
@@ -109,8 +147,8 @@ pub(crate) fn compose_with_paths(
         ));
     }
 
-    let mut promoted_paths = Vec::with_capacity(chosen_source.len());
-    for (relative, source_file) in &chosen_source {
+    let mut promoted_paths = Vec::with_capacity(chosen.len());
+    for (relative, (source_file, _, _)) in &chosen {
         let destination = live_root.join(relative);
         if let Some(src) = source_file {
             if let Some(parent) = destination.parent() {
@@ -126,7 +164,10 @@ pub(crate) fn compose_with_paths(
         }
         promoted_paths.push(relative.to_string_lossy().replace('\\', "/"));
     }
-    Ok(promoted_paths)
+    Ok(ComposeReport {
+        promoted: promoted_paths,
+        dropped_workers,
+    })
 }
 
 fn fingerprint(path: &Path) -> io::Result<FileFingerprint> {
@@ -215,34 +256,71 @@ mod tests {
     }
 
     #[test]
-    fn compose_merges_disjoint_worker_changes_preserving_primary_on_overlap() {
+    fn compose_merges_disjoint_worker_changes() {
         let (live, w1, baseline) = setup("compose");
         let w2 = temp("compose_worker2");
         let _ = std::fs::remove_dir_all(&w2);
         crate::isolate::copy_tree(&live, &w2).unwrap();
-
-        // Worker 1 (primary) edits keep.txt and adds w1_only.py
         std::fs::write(w1.join("keep.txt"), "from_w1").unwrap();
         std::fs::write(w1.join("w1_only.py"), "def a(): pass").unwrap();
-
-        // Worker 2 (secondary) also edits keep.txt (overlap -> ignored in favor of w1)
-        // and adds tests/test_a.py (disjoint -> composed!)
-        std::fs::write(w2.join("keep.txt"), "from_w2").unwrap();
+        // Identical overlapping edit is allowed; disjoint addition is composed.
+        std::fs::write(w2.join("keep.txt"), "from_w1").unwrap();
         std::fs::write(w2.join("test_a.py"), "def test_a(): pass").unwrap();
 
-        let paths = compose_with_paths(&[(&baseline, &w1), (&baseline, &w2)], &live).unwrap();
-        assert_eq!(paths.len(), 3);
+        let report = compose_with_report(&[(&baseline, &w1), (&baseline, &w2)], &live).unwrap();
+        assert!(report.dropped_workers.is_empty());
+        assert_eq!(report.promoted.len(), 3);
         assert_eq!(
             std::fs::read_to_string(live.join("keep.txt")).unwrap(),
             "from_w1"
         );
         assert_eq!(
-            std::fs::read_to_string(live.join("w1_only.py")).unwrap(),
-            "def a(): pass"
-        );
-        assert_eq!(
             std::fs::read_to_string(live.join("test_a.py")).unwrap(),
             "def test_a(): pass"
+        );
+    }
+
+    #[test]
+    fn compose_drops_whole_secondary_worker_on_overlapping_different_content() {
+        let (live, w1, baseline) = setup("compose_overlap");
+        let w2 = temp("compose_overlap_worker2");
+        let _ = std::fs::remove_dir_all(&w2);
+        crate::isolate::copy_tree(&live, &w2).unwrap();
+        std::fs::write(w1.join("keep.txt"), "from_w1").unwrap();
+        std::fs::write(w1.join("w1_only.py"), "def a(): pass").unwrap();
+        std::fs::write(w2.join("keep.txt"), "from_w2").unwrap();
+        std::fs::write(w2.join("test_a.py"), "def test_a(): pass").unwrap();
+
+        let report = compose_with_report(&[(&baseline, &w1), (&baseline, &w2)], &live).unwrap();
+        assert_eq!(report.dropped_workers, vec![1]);
+        assert_eq!(report.promoted.len(), 2);
+        assert_eq!(
+            std::fs::read_to_string(live.join("keep.txt")).unwrap(),
+            "from_w1"
+        );
+        assert!(
+            !live.join("test_a.py").exists(),
+            "conflicting secondary worker must not be half-promoted"
+        );
+    }
+
+    #[test]
+    fn compose_checks_live_against_each_contributing_worker_baseline() {
+        let (live, w1, baseline1) = setup("compose_base");
+        std::fs::write(w1.join("keep.txt"), "from_w1").unwrap();
+        // Worker 2 started from a different baseline of `nested/remove.txt`.
+        let w2 = temp("compose_base_worker2");
+        let _ = std::fs::remove_dir_all(&w2);
+        crate::isolate::copy_tree(&live, &w2).unwrap();
+        std::fs::write(w2.join("nested/remove.txt"), "w2_base").unwrap();
+        let baseline2 = snapshot(&w2).unwrap();
+        std::fs::write(w2.join("nested/remove.txt"), "w2_edit").unwrap();
+
+        let error = compose_with_paths(&[(&baseline1, &w1), (&baseline2, &w2)], &live).unwrap_err();
+        assert!(error.contains("冲突"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(live.join("keep.txt")).unwrap(),
+            "keep"
         );
     }
 }
