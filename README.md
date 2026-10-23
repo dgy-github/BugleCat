@@ -5,24 +5,34 @@ English | [简体中文](README.zh-CN.md)
 ## Latest Update (2026-10-23)
 
 > [!IMPORTANT]
+> **Post-Review Correctness & Safety Fixes (2026-10-23)** — a code review of the items below found gaps between what was documented and what ran; these are now fixed, and the entries below describe the fixed behavior:
+> - **Shell approval bypasses closed (`ncx-sandbox`)**: `python`/`node`/`pytest` no longer auto-run under `untrusted`; `git config` writes and exec-capable overrides (`core.hooksPath`, `core.pager`, `-c alias.*`, `GIT_SSH_COMMAND=…`) require approval; globbed or escaped secret paths (`cat .en*`, `.e""nv`) and `cd %USERPROFILE%`-then-write chains escalate; network detection covers `certutil -urlcache`, `bitsadmin`, `npx`, `gh`, sockets in inline code, and more package-manager subcommands.
+> - **Whole-tree process containment (`ncx-tools`)**: on Windows commands start suspended and run only after joining the Job Object; on Unix they lead a process group that a timeout kills as a whole. `on-failure` offers a retry only after a real sandbox denial.
+> - **Propose–Probe–Compose actually runs, and is verified**: the verify prompt now documents `COMPOSE:`; a composition is re-verified on a staged copy before promotion and otherwise falls back to the best worker; rounds that exhaust retries never compose; verdicts are judged by their leading `PASS`/`FAIL`.
+> - **Forge acceptance above noise**: candidates must beat the incumbent by the sampling-noise floor (`--noise-z`), defaults are `--repeats 3` / `--accept-margin 2`, holdout is re-evaluated after acceptance, and lessons are credited only when the compose step says it applied them.
+> - **Guardrails**: negated wording ("no regressions") and plain rollbacks no longer create regression guardrails, and a later verified success clears them.
+> - **Still open**: shell commands are gated by policy and command-line inspection, not by OS-level filesystem/network isolation (see [Sandbox & Approval](#sandbox--approval)).
+>
+> ---
+>
 > **Stage 3 Milestone (2026-10-23): Self-Evolving Harness Regularization (RRSI / Harness² Alignment, P0–P4) + Paired Compounding Replay**
 > - **P0 — Noise-Calibrated Paired Evaluation (`evals/compounding_replay/analyze.py`) & `python-tabulate` Curriculum**:
 >   * **Statistical Rigor**: Replaced single-run anecdotal comparisons with single-arm noise-floor calibration ($\delta_{\text{resolved}}$ via Jeffreys-smoothed Bernoulli variance, $\delta_{\text{cost}}$ via per-task sample variance sum) and paired A/B testing (`_mcnemar_exact` on discordant pairs + 4,000-iteration task-level paired bootstrap 95% CIs on `cost_per_resolved` ratio `B/A` and per-round cost difference `B-A`).
 >   * **Second Real-Repo Benchmark (`astanin/python-tabulate`)**: Hardened `mine_tasks.py` (`--body` full-commit search, merge-commit diffing, and an `issue["created_at"] <= fixed_at` guard that filtered 7 pre-GitHub Bitbucket issue ID collisions) and verified 9/9 official gold fixes via `validate_gold.py`.
->   * **3-Round Paired Calibration (`tabulate`, 27 paired runs/arm)**: Arm B reduced `cost_per_resolved` by **21.0%** (`B/A = 0.7904`, paired bootstrap 95% CI `[0.6239, 0.9523]`, excluding `1.0`; mean round cost `1.313 CNY` vs `1.586 CNY`, paired 95% CI `[-0.5207, -0.0685]`) while passing the resolution-rate non-inferiority guard (`22/27` vs `21/27`, `+3.7pt >= -14.9pt`). Note: re-analyzing the earlier 2-round `sqlparse_split` v2 run under the same paired bootstrap yields `B/A = 0.7131`, 95% CI `[0.3693, 1.1586]` (crosses `1.0`, statistically inconclusive).
+>   * **3-Round Paired Calibration (`tabulate`, 27 paired runs/arm)**: Arm B reduced `cost_per_resolved` by **21.0%** (`B/A = 0.7904`, paired bootstrap 95% CI `[0.6239, 0.9523]`, excluding `1.0`; mean round cost `1.313 CNY` vs `1.586 CNY`, paired 95% CI `[-0.5207, -0.0685]`) while passing the resolution-rate non-inferiority guard (`22/27` vs `21/27`, `+3.7pt >= -14.9pt`). Note: re-analyzing the earlier 2-round `sqlparse_split` v2 run under the same paired bootstrap yields `B/A = 0.7131`, 95% CI `[0.3693, 1.1586]` (crosses `1.0`, statistically inconclusive). Caveat: the bootstrap resamples only 9 tasks, so its percentile CI is fragile, and the non-inferiority margin (`14.9pt`) is too wide to rule out losing a task — treat the cost reduction as preliminary until more tasks are added.
 > - **P1 — `ncx-forge` Offline Evolution RRSI Regularization (`train/`)**:
 >   * **Annealed Edit Budgets**: `changed_surfaces` & `changed_lines` enforce per-round surface count (`max(1, max_surfaces - round // 2)`) and line-delta caps (`--initial-max-surfaces` (alias: `--max-surfaces`), `--anneal-surfaces`, `--max-changed-lines`).
 >   * **Rule-Based Anti-Memorization Critic (`critic_check`)**: Rejects candidate mutations whose newly added lines reference benchmark task IDs, `check.py`, `_check.py`, or `hidden test`.
 >   * **Falsified Hypothesis Ledger & Stagnation Steering**: Logs every candidate to `train/runs/ledger_<stamp>.jsonl`, injects recent rejected mutations into the teacher prompt (`Falsified / Rejected Mutations`), and steers toward the least-explored surface after `--stagnation-limit` stagnant rounds.
 >   * **Two-Sided Cost-Aware Gate & Post-Search Ablation Pruning (`--prune`)**: Accepts candidates either via pass-rate improvement (guarded by `--max-token-growth` and a sampling-noise floor from `analyze.pass_noise_floor`, `--noise-z`, default one-sided 95%; holdout is re-evaluated with fresh runs after each acceptance) or equal-pass token savings (`>= --delta-tokens`), and ablate-prunes zero-benefit surface edits from the final champion.
 > - **P2 — Expanded `NCX_GENOME` Evolvable Surfaces (`rust/` + `train/`)**:
->   * Added `[orchestrator_prompts]` (`classify_sys`, `plan_sys`, `decompose_sys`, `worker_sys`, `verify_sys`) and bounded `[memory_config]` (`max_entries` clamped to `1..=32`, `max_chars` clamped to `200..=16000`) to `ncx-core::genome` and `ncx --dump-genome`, with a 100% byte-identical no-op guarantee when `NCX_GENOME` is unset or `{}`.
-> - **P3 — Harness² Two-Tier Online Memory Stratification, Negative Guardrail & Cost-Aware Attribution (`ncx-core`)**:
->   * **Module-Level Invariant Promotion (`promote_module_invariant_if_due`) & Regression Guardrail (`record_regression_guardrail`)**: When a module accumulates `>= 2` judge-confirmed (`Accepted`) episodic notes, `MemoryStore` distills a canonical `[Module Invariant: <module_path>]` (`+6` recall priority boost, stable header-hashed `note_id` across in-place updates) and trims older episodic notes for that module to `MAX_EPISODIC_PER_MODULE = 2`, synchronization-rebuilding the SQLite index (`rebuild_from_markdown`). When a rejected turn causes a `pass_to_pass` regression or rollback, it records a `[Regression Guardrail: <module_path>]` warning.
->   * **Tightened Recall Budget & Cost-Aware Feedback (`record_unhelpful_injection`)**: Default recall caps tightened from `8 entries / 4000 chars` to `6 entries / 2400 chars`. On expensive turns (`iterations > 16 || tool_calls > 24 || total_tokens > 80_000`), only recalled notes matching modified file basenames receive `accepted + 1`; unmatched free-rider notes record `injected + 1` only. Live Arm B' verification (`20261023-115758-B-tab-p3-r1`) confirmed `learnings_entries` stayed hard-capped at `6` from task 4 through task 9 (`1.413 CNY` total, `-10.9%` vs Arm A mean).
+>   * Added `[orchestrator_prompts]` (`classify_sys`, `plan_sys`, `decompose_sys`, `worker_sys`, `verify_sys`, `compose_verify_sys`) and bounded `[memory_config]` (`max_entries` clamped to `1..=32`, `max_chars` clamped to `200..=16000`) to `ncx-core::genome` and `ncx --dump-genome`, with a 100% byte-identical no-op guarantee when `NCX_GENOME` is unset or `{}`.
+> - **P3 — Harness² Two-Tier Online Memory Stratification, Negative Guardrail & Cost-Aware Attribution (`ncx-core`)** — active only with `[feedback] memory = "on"`; in the default `"shadow"` mode no learnings are written, so none of this runs:
+>   * **Module-Level Invariant Promotion (`promote_module_invariant_if_due`) & Regression Guardrail (`record_regression_guardrail`)**: When a module accumulates `>= 2` judge-confirmed (`Accepted`) episodic notes, `MemoryStore` consolidates the newest (up to 3) verified snippets for it into one `[Module Invariant: <module_path>]` entry (`+6` recall priority boost, stable header-hashed `note_id` across in-place updates) and trims older episodic notes for that module to `MAX_EPISODIC_PER_MODULE = 2`, synchronization-rebuilding the SQLite index (`rebuild_from_markdown`). A `[Regression Guardrail: <module_path>]` warning is written only for an explicitly reported regression (`p2p_regressed>0`, or a negative label that mentions a regression without negating it — rollbacks alone do not count) and is cleared by a later verified success on that module.
+>   * **Tightened Recall Budget & Cost-Aware Feedback (`record_unhelpful_injection`)**: Default recall caps tightened from `8 entries / 4000 chars` to `6 entries / 2400 chars`. On expensive turns (`iterations > 16 || tool_calls > 24 || total_tokens > 80_000`), only recalled notes matching modified file basenames receive `accepted + 1`; unmatched free-rider notes record `injected + 1` only. Live Arm B' verification (`20261023-115758-B-tab-p3-r1`, a single run) confirmed `learnings_entries` stayed hard-capped at `6` from task 4 through task 9 (`1.413 CNY` total, `-10.9%` vs Arm A mean — less than single-tier Arm B's `-21.0%`, so only the bounded entry count, not a cost benefit of P3, is established).
 > - **P4 — Harness² `Propose–Probe–Compose` Across Runtime (`ncx-core`) & Offline Trainer (`train/forge.py`, `train/lesson_lib.py`)**:
->   * **Runtime Multi-Worker File Composition (`compose_with_paths` / `COMPOSE:i,j`) & Retry Synthesis (`build_compose_feedback`)**: When the verifier emits `BEST:i` alongside `COMPOSE:i,j`, `HarnessAgentRunner::compose_workers` promotes the primary worker's changes and composes non-conflicting file changes (disjoint paths or identical SHA-256 fingerprints) from secondary workers while merging their `SubrunTelemetry`. When a multi-worker round fails verification, `build_compose_feedback` synthesizes a structured peer probe digest for the next retry.
->   * **Offline `ncx-forge` PPC (`--h2-k`, `--h2-mode parallel|sequential`, `--h2-blind`) & Cross-Run Lesson Library (`train/lesson_lib.py`)**: Probes $K$ general/domain genome edits plus the incumbent control on the same failing task (`keep_trajectory=True`), builds a deterministic verifier-blind behavioral contrast (`build_contrast`), and synthesizes 1 composed genome + 1 meta-lesson draft (`build_h2_compose_prompt`, falling back to the best valid probe if compose violates edit budgets). `LessonLibrary` (`lessons.jsonl` + `adopted_harnesses.jsonl`) retrieves active lessons by symptom overlap $\times$ Beta posterior `(support+1)/(support+refute+2)`, updates `support`/`refute` after the outer `train + holdout` gate (and `--prune`), and auto-retires lessons at `refute >= support + 2`. `evals/compounding_replay/replay.py` adds `--genome PATH` to evaluate evolved genomes on real-repo replays ([`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)).
+>   * **Runtime Multi-Worker File Composition (`compose_with_paths` / `COMPOSE:i,j`) & Retry Synthesis (`build_compose_feedback`)**: `VERIFY_SYS` tells the verifier to add `COMPOSE:i,j` after `BEST:i` when other workers made complementary changes to different files. The composition (secondary workers whose edits clash with an earlier one are dropped whole) is first staged on a throwaway copy of the workspace and re-verified there by a tool-using verifier (`COMPOSE_VERIFY_SYS`); only a `PASS` promotes it via `HarnessAgentRunner::compose_workers`, otherwise just the best worker is promoted and the result says why. Rounds that exhaust their retries without a `PASS` never compose. When a multi-worker round fails verification, `build_compose_feedback` synthesizes a structured peer probe digest for the next retry.
+>   * **Offline `ncx-forge` PPC (`--h2-k`, `--h2-mode parallel|sequential`, `--h2-blind`) & Cross-Run Lesson Library (`train/lesson_lib.py`)**: Probes $K$ general/domain genome edits plus the incumbent control on the same failing task (`keep_trajectory=True`), builds a deterministic verifier-blind behavioral contrast (`build_contrast`), and synthesizes 1 composed genome + 1 meta-lesson draft (`build_h2_compose_prompt`, falling back to the best valid probe if compose violates edit budgets). `LessonLibrary` (`lessons.jsonl` + `adopted_harnesses.jsonl`) retrieves active lessons by symptom overlap $\times$ Beta posterior `(support+1)/(support+refute+2)`, updates `support`/`refute` after the outer `train + holdout` gate only for lessons the compose step lists in `applied_lessons` (on `--prune`, only lessons credited for the pruned adoption), and auto-retires lessons at `refute >= support + 2`. `evals/compounding_replay/replay.py` adds `--genome PATH` to evaluate evolved genomes on real-repo replays ([`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)).
 >
 > ---
 >
@@ -186,7 +196,8 @@ tool.
 - **Harness tool families:** the Rust runtime includes a real `rust-analyzer`
   LSP provider, bounded background processes with incremental output, and
   persistent ConPTY/PTY shells with raw stdin, cursor reads, resize, and close.
-  Windows child processes are contained in Job Objects.
+  Windows child processes start suspended inside Job Objects; Unix commands
+  run in their own process group.
 - **Tool recovery:** read-only tool failures are classified, transient failures
   may be retried once, and argument-compatible fallbacks are selected without
   bypassing middleware, approval, or sandbox enforcement.
@@ -268,10 +279,10 @@ Stage 2 built a reliable execution harness, but every task still started statist
    - **GUI ACR & 60-Point Singularity Dashboard**: The Tauri + Svelte 5 right-hand **Memory** panel renders a live visual dashboard displaying 30-day `ACR-strict`, Wilson 95% lower-bound progress bar toward the 60% singularity threshold, per-category sample progress (`n/30`) and singularity badges, and 14-day Shadow baseline readiness.
 
 6. **Self-Evolving Harness Regularization (P0–P4: Paired Replay Calibration, RRSI Forge, Two-Tier Memory & Propose–Probe–Compose)**
-   - **Noise-Calibrated Paired Evaluation (`evals/compounding_replay/analyze.py`)**: Calibrates single-arm noise floors ($\delta_{\text{resolved}}$, $\delta_{\text{cost}}$) and evaluates multi-round curricula (`sqlparse`, `python-tabulate`) with exact McNemar tests and task-level paired bootstrap 95% confidence intervals on `cost_per_resolved` (`B/A = 0.7904`, 95% CI `[0.6239, 0.9523]` across 3 paired rounds on `python-tabulate`).
-   - **Offline Evolution Regularization (`train/forge.py`, `NCX_GENOME`)**: Extends `NCX_GENOME` to cover `system_prompt`, `tool_descriptions`, `orchestrator_prompts` (`classify_sys`, `plan_sys`, `decompose_sys`, `worker_sys`, `verify_sys`), and bounded `memory_config` (`max_entries`, `max_chars`), regularized by annealed surface/line edit budgets, a rule-based anti-memorization critic (`critic_check`), a falsified hypothesis ledger (`ledger_<stamp>.jsonl`), stagnation surface steering, a two-sided token-cost acceptance gate, and post-search ablation pruning (`--prune`).
-   - **Harness² Two-Tier Online Memory & Negative Regression Guardrails (`MemoryStore::promote_module_invariant_if_due`, `record_regression_guardrail`)**: Separates transient per-task episodic notes (capped at `MAX_EPISODIC_PER_MODULE = 2` per module) from persistent module-level invariants (`[Module Invariant: <module_path>]`, `+6` recall priority boost, stable header-hashed `note_id`) and negative regression guardrails (`[Regression Guardrail: <module_path>]` on `pass_to_pass` regressions/rollbacks), paired with cost-aware feedback attribution (`record_unhelpful_injection`) on high-cost turns.
-   - **Harness² Within-Task `Propose–Probe–Compose` (`orchestrator.rs`, `workspace_promotion.rs`)**: Supports multi-worker non-conflicting file composition (`compose_with_paths` / `COMPOSE:i,j`) when the verifier selects complementary worker outputs, and cross-worker probe digest synthesis (`build_compose_feedback`) when multi-worker attempts enter retry rounds.
+   - **Noise-Calibrated Paired Evaluation (`evals/compounding_replay/analyze.py`)**: Calibrates single-arm noise floors ($\delta_{\text{resolved}}$, $\delta_{\text{cost}}$) and evaluates multi-round curricula (`sqlparse`, `python-tabulate`) with exact McNemar tests and task-level paired bootstrap 95% confidence intervals on `cost_per_resolved` (`B/A = 0.7904`, 95% CI `[0.6239, 0.9523]` across 3 paired rounds on `python-tabulate` — preliminary: only 9 tasks back it).
+   - **Offline Evolution Regularization (`train/forge.py`, `NCX_GENOME`)**: Extends `NCX_GENOME` to cover `system_prompt`, `tool_descriptions`, `orchestrator_prompts` (`classify_sys`, `plan_sys`, `decompose_sys`, `worker_sys`, `verify_sys`), and bounded `memory_config` (`max_entries`, `max_chars`), regularized by annealed surface/line edit budgets, a rule-based anti-memorization critic (`critic_check`), a falsified hypothesis ledger (`ledger_<stamp>.jsonl`), stagnation surface steering, a two-sided token-cost acceptance gate that requires pass-rate gains to clear the sampling-noise floor (`--noise-z`, holdout re-evaluated after acceptance), and post-search ablation pruning (`--prune`).
+   - **Harness² Two-Tier Online Memory & Negative Regression Guardrails (`MemoryStore::promote_module_invariant_if_due`, `record_regression_guardrail`)**: Separates transient per-task episodic notes (capped at `MAX_EPISODIC_PER_MODULE = 2` per module) from persistent module-level invariants (`[Module Invariant: <module_path>]`, `+6` recall priority boost, stable header-hashed `note_id`) and negative regression guardrails (`[Regression Guardrail: <module_path>]` on explicitly reported `pass_to_pass` regressions, cleared by a later verified success), paired with cost-aware feedback attribution (`record_unhelpful_injection`) on high-cost turns. Requires `[feedback] memory = "on"`.
+   - **Harness² Within-Task `Propose–Probe–Compose` (`orchestrator.rs`, `workspace_promotion.rs`)**: Supports multi-worker non-conflicting file composition (`COMPOSE:i,j`, re-verified on a staged copy before promotion, falling back to the best worker) when the verifier selects complementary worker outputs, and cross-worker probe digest synthesis (`build_compose_feedback`) when multi-worker attempts enter retry rounds.
 
 ## Table of Contents
 
@@ -606,15 +617,24 @@ Two orthogonal axes gate every action, mirroring Codex:
 | Mode | Reads | Writes | Network |
 | --- | --- | --- | --- |
 | `read-only` | anywhere | none | off |
-| `workspace-write` | anywhere | workspace + writable roots + temp | off unless enabled |
+| `workspace-write` | anywhere (except secret files such as `.env`, private keys, cloud credentials) | workspace + writable roots (+ system temp only when opted in) | off unless enabled |
 | `danger-full-access` | anywhere | anywhere | on |
 
 **Approval policy** — what to do when an action exceeds the sandbox:
 `untrusted`, `on-failure`, `on-request`, `never`. The approval engine resolves
 each escalation to `ASK` / `AUTO_APPROVE` / `AUTO_DENY`.
 
-On Windows enforcement is **policy-level**: path checks and writable-root gating
-happen at the tool boundary. It is not kernel isolation.
+Enforcement is **policy-level on every platform**: file tools check paths and
+writable roots at the tool boundary, and a shell command is classified from its
+command line before it runs (read-only allowlist, destructive patterns, network
+commands and inline network code, paths outside the workspace, secret files
+including globbed or escaped names, `git config` / hook hijacks). It is **not**
+kernel isolation: a program the command starts — a Python script, a build, a
+test suite — is not restricted once it runs. What *is* enforced by the OS is
+process containment: on Windows each command starts suspended inside a
+kill-on-close Job Object, and on Unix in its own process group, so a timeout
+kills the whole tree. Under `untrusted`, interpreters and test runners always
+ask first.
 
 ## MCP
 
@@ -1048,8 +1068,10 @@ table, so validate the release target before changing it.
 - **Never commit real API keys.** `.env`, `*.key`, `*.pem`, token files, and
   local handoff files are git-ignored; `config.toml` / `mcp.toml` live in
   `~/.nanocodex/`, outside the repo.
-- The sandbox is **policy-level on Windows** — it gates tool actions and writable
-  roots, but is not kernel isolation.
+- The sandbox is **policy-level** on every platform — it gates tool actions,
+  writable roots, and shell command lines, but is not kernel isolation: programs
+  a command launches run with your permissions. Use `untrusted` or `on-request`
+  approval in repositories you do not trust.
 - **MCP tools run outside the sandbox** as external subprocesses. Only enable
   servers you trust; the marketplace validates names but does not vet behavior.
 - **Hooks run local commands** around tool execution. Treat hook configuration

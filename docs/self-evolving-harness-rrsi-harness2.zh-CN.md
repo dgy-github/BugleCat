@@ -12,7 +12,7 @@ flowchart TD
     subgraph L0["L0 任务内闭环（Harness² Propose–Probe–Compose）"]
         A1["orchestrator.rs::run_attempts<br/>Propose：N 个隔离 Worker 并行试跑"]
         A2["VERIFY_SYS / Probe<br/>评测各 Worker 结果，输出 PASS/FAIL + BEST:i + COMPOSE:i,j"]
-        A3["workspace_promotion::compose_with_paths<br/>Compose（成功）：合并主 Worker 与次 Worker 不冲突文件变更"]
+        A3["verify_composition + compose_with_report<br/>Compose（成功）：暂存副本中复验通过后，合并主 Worker 与次 Worker 不冲突文件变更"]
         A4["support::build_compose_feedback<br/>Compose（重试）：提炼跨 Worker 互补进展与失败陷阱注入下一轮"]
         A1 --> A2
         A2 -- "PASS / COMPOSE:i,j" --> A3
@@ -61,11 +61,12 @@ flowchart TD
 
 在传统 Best-of-$N$ 编排中，$N$ 个 Worker 在隔离目录中各自独立执行，Verifier 只挑出一个 `BEST:<n>`，其余 $N-1$ 个 Worker 的工作与探测结论全部被直接丢弃。对照 **Harness²** 的任务内闭环思想，BugleCat 在编排层实现了双路径 **Compose**：
 
-1. **路径 A —— 跨 Worker 非冲突文件级组合（[`workspace_promotion::compose_with_paths`](../rust/crates/ncx-core/src/workspace_promotion.rs) & [`HarnessAgentRunner::compose_workers`](../rust/crates/ncx-core/src/orchestrator_runner.rs)）**：
-   - 当 Verifier 输出 `BEST:2` 并附带 `COMPOSE:2,1,3`（由 [`parse_compose_workers`](../rust/crates/ncx-core/src/orchestrator/support.rs) 解析，主 Worker 永远排在首位）时，[`Orchestrator::run_attempts`](../rust/crates/ncx-core/src/orchestrator.rs) 调用 `runner.compose_workers(&composed)`。
-   - `compose_with_paths` 按优先级遍历各 Worker 的隔离快照：
+1. **路径 A —— 跨 Worker 非冲突文件级组合（[`workspace_promotion::compose_with_report`](../rust/crates/ncx-core/src/workspace_promotion.rs) & [`HarnessAgentRunner::compose_workers`](../rust/crates/ncx-core/src/orchestrator_runner.rs)）**：
+   - `VERIFY_SYS` 明确告诉 Verifier：当其他 Worker 在不同文件上做了互补修改时，在 `BEST:2` 之后输出 `COMPOSE:2,1,3`（由 [`parse_compose_workers`](../rust/crates/ncx-core/src/orchestrator/support.rs) 解析，主 Worker 永远排在首位，越界编号忽略）。只有本轮验证 `PASS` 时才会组合；重试用尽仍未通过的轮次只提升最佳 Worker。
+   - **先复验再提升**：[`Orchestrator::run_attempts`](../rust/crates/ncx-core/src/orchestrator.rs) 先调用 `runner.verify_composition`：把真实工作区复制成一次性副本、在副本中组合，再由可调用工具的验证者（`COMPOSE_VERIFY_SYS`，genome 键 `compose_verify_sys`）读文件、跑测试并给出 `PASS`/`FAIL`。只有 `PASS` 才调用 `runner.compose_workers(&composed)` 写入真实工作区；否则（或其余 Worker 全被剔除、runner 无法暂存）只提升最佳 Worker，并在最终结果中注明原因。验证者在副本中留下的文件随副本一起删除。
+   - `compose_with_report` 按优先级遍历各 Worker 的隔离快照：
      - 主 Worker（`composed[0]`）相对于 `baseline` 的全部文件新增、修改、删除优先采纳；
-     - 次级 Worker（`composed[1..]`）相对于 `baseline` 的变更中，**凡是主 Worker 未触碰的文件（或内容 SHA-256 指纹完全一致的文件）自动合并提升到真实工作区**；若与主 Worker 修改了同一文件且指纹不同，则严格保留主 Worker 版本，绝不产生半文件冲突。
+     - 次级 Worker（`composed[1..]`）按 Worker 整体原子合并：只要它改动的任一文件与更早被采纳的 Worker 改了同一文件且 SHA-256 指纹不同，整个次级 Worker 就被剔除，绝不半合并；指纹完全一致的重叠修改可以合并。每个被提升的路径都按提供它的 Worker 的基线检查真实工作区是否漂移。
      - 同时将所有参与组合的 Worker 的 `SubrunTelemetry`（`tools_used`、`files_touched`、`recalled_note_ids`、`recovery_candidates`）合并归档，并通过 [`synthesize_composed`](../rust/crates/ncx-core/src/orchestrator/support.rs) 生成包含 `[Composed from Worker k]` 摘要的最终报告。
 
 2. **路径 B —— 失败重试轮次的跨 Worker 探测合成（[`build_compose_feedback`](../rust/crates/ncx-core/src/orchestrator/support.rs)）**：
@@ -77,14 +78,16 @@ flowchart TD
 对照 **Harness²** "将单任务修改分离为可跨任务复用的结构性不变量（Reusable Invariants）与单题特定实现（Task-Specific Edits）"的核心设计：
 
 1. **模块级不变量自动提炼与单题情景笔记硬顶（[`MemoryStore::promote_module_invariant_if_due`](../rust/crates/ncx-core/src/memory.rs)）**：
-   - 每当同一源码模块（排除 `.ncx`、`.nanocodex`、`tests/`、`test/`）在外部裁判确认通过（[`outcome.rs`](../rust/crates/ncx-core/src/outcome.rs) 的 `Some(true)` 分支）后累计达到 **`>= 2` 条**验证笔记时，自动提取并去重高频关键符号，生成或原地更新模块级不变量：
-     `[Module Invariant: <module_path>] Key symbols: ...`（带 `invariant` 标签）。
+   - **前提**：以下 L1 机制只在 `[feedback] memory = "on"` 时运行；默认 `"shadow"` 模式不写入任何学习笔记。
+   - 每当同一源码模块（排除 `.ncx`、`.nanocodex`、`tests/`、`test/`）在外部裁判确认通过（[`outcome.rs`](../rust/crates/ncx-core/src/outcome.rs) 的 `Some(true)` 分支）后累计达到 **`>= 2` 条**验证笔记时，把该模块最新（最多 3 条）已验证笔记的片段（每条截取前 120 字符，用 ` | ` 连接）合并为一条模块级不变量，生成或原地更新：
+     `[Module Invariant: <module_path>] <片段1> | <片段2> | <片段3>`（带 `invariant` 标签）。这是对最近验证结论的压缩摘要，并非符号级抽取。
    - **单题情景层淘汰上限**：一旦某模块拥有模块不变量，该模块名下的旧单题情景笔记自动裁剪至最多保留最新 **`MAX_EPISODIC_PER_MODULE = 2` 条**，并立即调用 `index.rebuild_from_markdown` 同步 SQLite 索引。这样即便在同一模块上连续跑数十道题，该模块占用的记忆条数恒定有界（$\le 1 \text{ invariant} + 2 \text{ episodic} = 3$ 条）。
 
 2. **负向回归护栏记忆（[`MemoryStore::record_regression_guardrail`](../rust/crates/ncx-core/src/memory.rs)）**：
-   - 当某次修改在 [`outcome.rs`](../rust/crates/ncx-core/src/outcome.rs) 的 `Some(false)` 分支中被判定为**破坏已有功能的回归**（例如裁判报告 `p2p_regressed > 0`、负向标签明确包含 `regress`/`回归`，或触发 Checkpoint `Rollback`）时，在清除本轮错误正向笔记的同时，自动按修改过的非测试模块写入或原地更新一条负向护栏：
+   - 当某次修改在 [`outcome.rs`](../rust/crates/ncx-core/src/outcome.rs) 的 `Some(false)` 分支中被明确报告为**破坏已有功能的回归**（裁判报告 `p2p_regressed > 0`，或负向标注中出现未被否定的 `regress`/`回归`；"no regressions"、"未引入回归" 这类否定说法不算，单纯的 Checkpoint `Rollback` 也不算）时，在清除本轮错误正向笔记的同时，自动按修改过的非测试模块写入或原地更新一条负向护栏：
      `[Regression Guardrail: <module_path>] Caution editing <module_path>: prior patch caused regression (<reason>); run full module tests to preserve pass-to-pass behavior.`（标签：`["guardrail", "regression"]`）。
    - 若仅因未修完新功能或超时/超预算被判 `bad`（`p2p_regressed=0`），则不写入回归护栏，防止噪声污染记忆库。
+   - **护栏会失效**：之后某次修改同一模块的任务被验证通过时，`MemoryStore::clear_regression_guardrail` 会删除该模块的护栏并从索引中移除，避免警告永久累积并持续占用 `+6` 召回加分。
 
 3. **规范化头部 `note_id` 哈希与 `+6` 召回优先级（[`MemoryStore::note_id`](../rust/crates/ncx-core/src/memory.rs) & `semantic_score`）**：
    - `[Module Invariant: <module>]` 与 `[Regression Guardrail: <module>]` 在 `MemoryStore::note_id` 中均按规范化模块头（`[module invariant: <module>]` / `[regression guardrail: <module>]`）计算 SHA-256，确保原地更新正文时永久保留同一个 `note_id` 及 SQLite `memory_feedback` 表中积累的 Beta 后验权重。

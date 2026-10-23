@@ -5,24 +5,34 @@
 ## 最新更新（2026-10-23）
 
 > [!IMPORTANT]
+> **审查后的正确性与安全修复（2026-10-23）**——对下列各项做代码审查时，发现文档描述与实际运行之间有出入；以下问题已修复，后文各条描述的都是修复后的行为：
+> - **堵住 shell 审批绕过（`ncx-sandbox`）**：`untrusted` 下 `python`/`node`/`pytest` 不再自动放行；`git config` 写操作与可执行类覆盖（`core.hooksPath`、`core.pager`、`-c alias.*`、`GIT_SSH_COMMAND=…`）需要审批；通配或转义的敏感文件（`cat .en*`、`.e""nv`）以及先 `cd %USERPROFILE%` 再写入的命令链会触发审批；联网检测覆盖 `certutil -urlcache`、`bitsadmin`、`npx`、`gh`、内联代码中的 socket，以及更多包管理器子命令。
+> - **整棵进程树受控（`ncx-tools`）**：Windows 上命令以挂起方式启动，加入 Job Object 后才开始运行；Unix 上命令自成进程组，超时时整组结束。`on-failure` 只在真正被沙箱拒绝后才提供重试。
+> - **Propose–Probe–Compose 真正生效且经过复验**：验证提示词已说明 `COMPOSE:` 的用法；组合结果先在暂存副本中复验，通过才提升，否则回退为只采用最佳 Worker；重试用尽仍未通过的轮次不再组合；验证结论按开头的 `PASS`/`FAIL` 判定。
+> - **forge 验收门高于噪声**：候选须以采样噪声下限（`--noise-z`）以上的幅度胜过现任 champion；默认 `--repeats 3`、`--accept-margin 2`；接受后重评 holdout；lesson 只在 compose 声明实际采用时才记功记过。
+> - **回归护栏**：否定措辞（"no regressions"、"未引入回归"）与单纯的 Rollback 不再写入回归护栏，同一模块后续验证成功会清除护栏。
+> - **仍未解决**：shell 命令靠策略与命令行检查拦截，没有 OS 层面的文件系统/网络隔离（见 [沙箱与审批](#沙箱与审批)）。
+>
+> ---
+>
 > **第三阶段里程碑（2026-10-23）：自进化 Harness 正则化（对照 Google RRSI / Harness²，P0–P4 全量落地）与配对复利回放实证**
 > - **P0 —— 噪声校准配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）与第二基准仓库（`python-tabulate`）**：
 >   * **统计配对与噪声下限校准**：引入单臂噪声下限校准（解决数按 Jeffreys 平滑伯努利方差求 $\delta_{\text{resolved}}$，成本按逐题样本方差和求 $\delta_{\text{cost}}$）与双臂逐题配对检验（精确 McNemar 检验 + 4000 次按题配对 Bootstrap 95% 置信区间 + 解决率非劣效护栏）。
 >   * **第二真实仓库题库（`astanin/python-tabulate`）**：加固 [`mine_tasks.py`](evals/compounding_replay/mine_tasks.py)（新增 `--body` 全文检索与合并提交支持、`issue["created_at"] <= fixed_at` 时间戳护栏精准拦截 7 个早年 Bitbucket 编号错配任务），通过 [`validate_gold.py`](evals/compounding_replay/validate_gold.py) 完成 9/9 官方黄金补丁验证。
->   * **`tabulate` 3 轮配对实测（每臂 27 次运行）**：Arm B 相比 Arm A 将主指标「每解决一题成本（`cost_per_resolved`）」降低了 **21.0%**（**`B / A = 0.7904`，按题配对 Bootstrap 95% CI `[0.6239, 0.9523]`，不包含 `1.0`**；每轮均摊成本 `1.313` 元 vs `1.586` 元，配对 95% CI `[-0.5207, -0.0685]`），同时严格解决率满足非劣效护栏（`22/27` vs `21/27`，`+3.7pt >= -14.9pt`）。注：用同一配对脚本重算早期 2 轮 `sqlparse_split` v2，得 `B/A = 0.7131`，95% CI `[0.3693, 1.1586]`（跨过 `1.0`，定性为未定论）。
+>   * **`tabulate` 3 轮配对实测（每臂 27 次运行）**：Arm B 相比 Arm A 将主指标「每解决一题成本（`cost_per_resolved`）」降低了 **21.0%**（**`B / A = 0.7904`，按题配对 Bootstrap 95% CI `[0.6239, 0.9523]`，不包含 `1.0`**；每轮均摊成本 `1.313` 元 vs `1.586` 元，配对 95% CI `[-0.5207, -0.0685]`），同时严格解决率满足非劣效护栏（`22/27` vs `21/27`，`+3.7pt >= -14.9pt`）。注：用同一配对脚本重算早期 2 轮 `sqlparse_split` v2，得 `B/A = 0.7131`，95% CI `[0.3693, 1.1586]`（跨过 `1.0`，定性为未定论）。需要注意：Bootstrap 只在 9 道题上重抽样，百分位置信区间并不稳健；非劣效余量（`14.9pt`）也宽到无法排除少解一题。在补充更多题目之前，成本下降应视为初步结果。
 > - **P1 —— `ncx-forge` 离线进化搜索的 RRSI 正则化（`train/`）**：
 >   * **表面级退火编辑预算**：新增 `changed_surfaces` 与 `changed_lines`，支持按轮退火的表面数预算（$\max(1, \text{max\_surfaces} - \lfloor r / 2 \rfloor)$）与修改行数硬上限（`--initial-max-surfaces`（别名 `--max-surfaces`）、`--anneal-surfaces`、`--max-changed-lines`）。
 >   * **规则版反过拟合/反作弊审查器（`critic_check`）**：自动拦截在新增文本中硬编码训练集题号、`check.py`、`_check.py`、`hidden test` 的作弊候选。
 >   * **证伪假设账本与停滞自动转向**：每个候选写入结构化实验账本 `train/runs/ledger_<stamp>.jsonl`，向 Teacher 自动注入最近被拒的证伪历史（`Falsified / Rejected Mutations`），并在连续 `--stagnation-limit` 轮停滞时自动转向探索最少的表面。
 >   * **双通道成本感知验收门与盘后消融剪枝（`--prune`）**：支持「通过数提升（须超过 `analyze.pass_noise_floor` 给出的采样噪声下限，`--noise-z` 默认单侧 95%；接受后用新 runs 重评 holdout）+ `--max-token-growth` 防膨胀护栏」或「同分下显著节省 Token（`>= --delta-tokens`）」双通道晋级，并在搜索结束后对最终 Champion 逐面回滚重评，剔除零收益的搭便车冗余修改。
 > - **P2 —— 扩大 `NCX_GENOME` 可进化面（`rust/` + `train/`）**：
->   * 在保持空 Genome 100% 字节级 No-op 等价保证（且不触碰冻结文件 `prompt.rs`）的前提下，新增 `[orchestrator_prompts]`（覆盖 `classify_sys`、`plan_sys`、`decompose_sys`、`worker_sys`、`verify_sys`）与有界 `[memory_config]`（`max_entries` $\in [1, 32]$、`max_chars` $\in [200, 16000]$），打通 `ncx --dump-genome` 与 `train/genome.py` 双向校验。
-> - **P3 —— Harness² 在线记忆双层结构化、负向回归护栏与成本感知归因（`rust/crates/ncx-core/`）**：
->   * **模块级不变量提炼（`promote_module_invariant_if_due`）与负向回归护栏（`record_regression_guardrail`）**：当同一模块在外部裁判确认通过（`Accepted`）后累计达到 `>= 2` 条验证笔记时，自动合并提炼结构化模块不变量 `[Module Invariant: <module_path>]`（赋予 `+6` 召回优先级加分，并按规范化头部哈希保持原地更新时 `note_id` 与历史权重不变），同时将该模块名下的旧单题情景笔记裁剪至最多 `MAX_EPISODIC_PER_MODULE = 2` 条并同步重建 SQLite 索引（`rebuild_from_markdown`）；当某次修改导致 `pass_to_pass` 回归或 `Rollback` 时，自动按模块提炼 `[Regression Guardrail: <module_path>]` 负向护栏。
->   * **召回预算收紧与高消耗轮次精准打折（`record_unhelpful_injection`）**：默认召回上限从 `8 条 / 4000 字符` 收紧至 `6 条 / 2400 字符`；当高消耗轮次（`iterations > 16 || tool_calls > 24 || total_tokens > 80_000`）完成时，仅命中实际修改文件名的召回笔记获得 `accepted + 1`，未命中的搭便车笔记仅记 `injected + 1`。在 `tabulate` Arm B' 实测（`20261023-115758-B-tab-p3-r1`）中，`learnings_entries` 从第 4 题到第 9 题全程稳定封顶在 `6` 条，总成本 `1.413` 元（较 Arm A 均值下降 `10.9%`）。
+>   * 在保持空 Genome 100% 字节级 No-op 等价保证（且不触碰冻结文件 `prompt.rs`）的前提下，新增 `[orchestrator_prompts]`（覆盖 `classify_sys`、`plan_sys`、`decompose_sys`、`worker_sys`、`verify_sys`、`compose_verify_sys`）与有界 `[memory_config]`（`max_entries` $\in [1, 32]$、`max_chars` $\in [200, 16000]$），打通 `ncx --dump-genome` 与 `train/genome.py` 双向校验。
+> - **P3 —— Harness² 在线记忆双层结构化、负向回归护栏与成本感知归因（`rust/crates/ncx-core/`）**——仅在 `[feedback] memory = "on"` 时生效；默认的 `"shadow"` 模式不写入任何笔记，以下机制都不会运行：
+>   * **模块级不变量提炼（`promote_module_invariant_if_due`）与负向回归护栏（`record_regression_guardrail`）**：当同一模块在外部裁判确认通过（`Accepted`）后累计达到 `>= 2` 条验证笔记时，把该模块最新（最多 3 条）已验证笔记的片段合并为一条模块不变量 `[Module Invariant: <module_path>]`（赋予 `+6` 召回优先级加分，并按规范化头部哈希保持原地更新时 `note_id` 与历史权重不变），同时将该模块名下的旧单题情景笔记裁剪至最多 `MAX_EPISODIC_PER_MODULE = 2` 条并同步重建 SQLite 索引（`rebuild_from_markdown`）；只有在明确报告回归时（`p2p_regressed>0`，或负向标注中出现未被否定的"回归"说法；单纯的 Rollback 不算）才按模块写入 `[Regression Guardrail: <module_path>]` 负向护栏，该模块之后验证成功即清除。
+>   * **召回预算收紧与高消耗轮次精准打折（`record_unhelpful_injection`）**：默认召回上限从 `8 条 / 4000 字符` 收紧至 `6 条 / 2400 字符`；当高消耗轮次（`iterations > 16 || tool_calls > 24 || total_tokens > 80_000`）完成时，仅命中实际修改文件名的召回笔记获得 `accepted + 1`，未命中的搭便车笔记仅记 `injected + 1`。在 `tabulate` Arm B' 实测（`20261023-115758-B-tab-p3-r1`，仅 1 轮）中，`learnings_entries` 从第 4 题到第 9 题全程稳定封顶在 `6` 条，总成本 `1.413` 元（较 Arm A 均值下降 `10.9%`，小于单层记忆 Arm B 的 `21.0%`；因此能确认的只是条目数有上限，P3 本身的成本收益尚未得到证实）。
 > - **P4 —— Harness² 运行时与离线进化双层 `Propose–Probe–Compose` 闭环（[`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs)、[`train/forge.py`](train/forge.py)、[`train/lesson_lib.py`](train/lesson_lib.py)）**：
->   * **运行时多 Worker 非冲突文件级组合（`compose_with_paths` / `COMPOSE:i,j`）与重试探测合成（`build_compose_feedback`）**：当 Verifier 在输出 `BEST:i` 的同时给出 `COMPOSE:i,j` 时，`HarnessAgentRunner::compose_workers` 优先提升主 Worker 的全部修改，并将次级 Worker 在不冲突文件（主 Worker 未触碰或 SHA-256 指纹完全相同）上的修改自动组合提升到工作区；当首轮 $N \ge 2$ 个 Worker 未通过验证进入重试时，自动将 Verifier 审查意见与所有 Worker 的探测结论摘要（`[Propose-Probe-Compose Peer Digest]`）合成为下一轮输入。
->   * **离线 `ncx-forge` PPC（`--h2-k`、`--h2-mode parallel|sequential`、`--h2-blind`）与跨轮改进库（[`train/lesson_lib.py`](train/lesson_lib.py)）**：对单一失败任务在同条件下探测 incumbent 对照 + $K$ 个通用/领域特定候选（`keep_trajectory=True`），确定性生成隐藏裁判结果的纯行为对比（`build_contrast`），由 Teacher 合成 1 个 `composed` Genome 与 1 条元经验草案（越界时自动回退至最佳合法 Probe 候选），再进入外层全量 `train + holdout` 双通道门。`LessonLibrary`（`lessons.jsonl` + `adopted_harnesses.jsonl`）按症状重叠度 $\times$ Beta 后验 `(support+1)/(support+refute+2)` 检索经验，在外层门通过/被拒与 `--prune` 消融时更新 `support`/`refute`，并在 `refute >= support + 2` 时自动退役为证伪禁令；[`replay.py`](evals/compounding_replay/replay.py) 新增 `--genome PATH` 支持直接回放评测进化产物（详见 [`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)）。
+>   * **运行时多 Worker 非冲突文件级组合（`compose_with_paths` / `COMPOSE:i,j`）与重试探测合成（`build_compose_feedback`）**：`VERIFY_SYS` 告诉 Verifier：当其他 Worker 在不同文件上做了互补修改时，在 `BEST:i` 之后再输出 `COMPOSE:i,j`。组合结果（与前面 Worker 改了同一文件且内容不同的次级 Worker 整个剔除）先在工作区的一次性副本中暂存，由可调用工具的验证者（`COMPOSE_VERIFY_SYS`）复验；只有 `PASS` 才通过 `HarnessAgentRunner::compose_workers` 提升，否则只提升最佳 Worker 并在结果中说明原因；重试用尽仍未通过的轮次不会组合；当首轮 $N \ge 2$ 个 Worker 未通过验证进入重试时，自动将 Verifier 审查意见与所有 Worker 的探测结论摘要（`[Propose-Probe-Compose Peer Digest]`）合成为下一轮输入。
+>   * **离线 `ncx-forge` PPC（`--h2-k`、`--h2-mode parallel|sequential`、`--h2-blind`）与跨轮改进库（[`train/lesson_lib.py`](train/lesson_lib.py)）**：对单一失败任务在同条件下探测 incumbent 对照 + $K$ 个通用/领域特定候选（`keep_trajectory=True`），确定性生成隐藏裁判结果的纯行为对比（`build_contrast`），由 Teacher 合成 1 个 `composed` Genome 与 1 条元经验草案（越界时自动回退至最佳合法 Probe 候选），再进入外层全量 `train + holdout` 双通道门。`LessonLibrary`（`lessons.jsonl` + `adopted_harnesses.jsonl`）按症状重叠度 $\times$ Beta 后验 `(support+1)/(support+refute+2)` 检索经验，在外层门通过/被拒时，只对 compose 在 `applied_lessons` 中声明实际采用的 lesson 更新 `support`/`refute`（`--prune` 时只追责被剪掉的那次采纳所归功的 lesson），并在 `refute >= support + 2` 时自动退役为证伪禁令；[`replay.py`](evals/compounding_replay/replay.py) 新增 `--genome PATH` 支持直接回放评测进化产物（详见 [`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)）。
 >
 > ---
 >
@@ -146,7 +156,7 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
   会压缩旧 tool result，并在超过上下文预算时丢弃更早的前缀。
 - **Tool search（按需工具暴露）：** 工具注册时会进入 catalog。小工具集仍全量暴露；工具变多时只暴露核心
   工具和 `tool_search`，搜索命中的工具会在下一轮 schema 里出现（默认单轮最多暴露 16 个 schema）。
-- **Harness 工具族：** Rust 运行时内置真实的 `rust-analyzer` LSP provider、带增量输出的有界后台进程，以及支持原始 stdin、光标读取、尺寸调整和关闭的持久 ConPTY/PTY 终端；Windows 子进程纳入 Job Object 容器管控。
+- **Harness 工具族：** Rust 运行时内置真实的 `rust-analyzer` LSP provider、带增量输出的有界后台进程，以及支持原始 stdin、光标读取、尺寸调整和关闭的持久 ConPTY/PTY 终端；Windows 子进程以挂起方式启动并纳入 Job Object 管控，Unix 命令运行在独立进程组中。
 - **Tool recovery（工具恢复）：** 只读工具失败会自动分类，瞬态故障可重试一次，并在不绕过中间件、审批与沙箱强制的前提下自动选择参数兼容的回退工具。
 - **结构化工作区巡检：** `list_directory` 和 `path_info` 使用原生文件系统 API，`git_status` 和 `git_diff` 暴露固定的只读 Git 操作，无需模型手写平台相关的 `ls`/`dir`/`find` 命令。
 - **Semantic memory（混合语义记忆）：** 项目记忆检索采用混合词法语义排序：关键词、标签、短语、
@@ -212,10 +222,10 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
    - **GUI「ACR & 60 分奇点仪表盘」**：在 Tauri 桌面端右侧 **「记忆」** 面板顶部提供可视化卡片，实时展示近 30 天 `ACR-strict`、面向 60% 奇点线的 Wilson 95% 下界进度条、四大核心类别各自的样本进度（`n/30`）与奇点达标徽章，以及 14 天 Shadow 基线就绪状态。
 
 6. **自进化 Harness 正则化体系（P0–P4：配对复利回放校准、RRSI 离线进化、双层在线记忆与 Propose–Probe–Compose）**
-   - **噪声校准与逐题配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）**：标定单臂噪声下限（$\delta_{\text{resolved}}$、$\delta_{\text{cost}}$），并对真实仓库长课程（`sqlparse`、`python-tabulate`）执行精确 McNemar 检验与按题配对 Bootstrap 95% 置信区间估计（在 `python-tabulate` 3 轮配对回放中，`cost_per_resolved` 比值 `B/A = 0.7904`，配对 95% CI `[0.6239, 0.9523]`）。
-   - **离线进化 RRSI 正则化（`train/forge.py`、`NCX_GENOME`）**：将 `NCX_GENOME` 扩展至 `system_prompt`、`tool_descriptions`、`orchestrator_prompts`（5 个编排阶段提示词）与有界 `memory_config`（`max_entries`、`max_chars`），并配套按轮退火编辑预算、规则版反作弊审查器（`critic_check`）、证伪假设账本（`ledger_<stamp>.jsonl`）、连续停滞转向、双通道成本感知验收门与盘后结构化消融剪枝（`--prune`）。
-   - **Harness² 双层在线记忆与负向回归护栏（`MemoryStore::promote_module_invariant_if_due`、`record_regression_guardrail`）**：区分单题情景层（每模块最多保留 `MAX_EPISODIC_PER_MODULE = 2` 条）、模块级不变量层（`[Module Invariant: <module_path>]`，`+6` 结构性召回加分，按规范化头部哈希稳定保留 `note_id` 与反馈权重）与负向回归护栏（`[Regression Guardrail: <module_path>]`，在发生 `pass_to_pass` 回归或 `Rollback` 时自动写入），配合高消耗轮次搭便车笔记精准打折（`record_unhelpful_injection`）。
-   - **Harness² 任务内 `Propose–Probe–Compose`（[`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs)、[`workspace_promotion.rs`](rust/crates/ncx-core/src/workspace_promotion.rs)）**：支持 Verifier 给出 `COMPOSE:i,j` 时的多 Worker 非冲突文件级组合（`compose_with_paths`）与失败重试轮次的跨 Worker 探测结论合成（`build_compose_feedback`）。
+   - **噪声校准与逐题配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）**：标定单臂噪声下限（$\delta_{\text{resolved}}$、$\delta_{\text{cost}}$），并对真实仓库长课程（`sqlparse`、`python-tabulate`）执行精确 McNemar 检验与按题配对 Bootstrap 95% 置信区间估计（在 `python-tabulate` 3 轮配对回放中，`cost_per_resolved` 比值 `B/A = 0.7904`，配对 95% CI `[0.6239, 0.9523]`；仅基于 9 道题，属初步结果）。
+   - **离线进化 RRSI 正则化（`train/forge.py`、`NCX_GENOME`）**：将 `NCX_GENOME` 扩展至 `system_prompt`、`tool_descriptions`、`orchestrator_prompts`（5 个编排阶段提示词）与有界 `memory_config`（`max_entries`、`max_chars`），并配套按轮退火编辑预算、规则版反作弊审查器（`critic_check`）、证伪假设账本（`ledger_<stamp>.jsonl`）、连续停滞转向、双通道成本感知验收门（通过数提升须超过采样噪声下限 `--noise-z`，接受后重评 holdout）与盘后结构化消融剪枝（`--prune`）。
+   - **Harness² 双层在线记忆与负向回归护栏（`MemoryStore::promote_module_invariant_if_due`、`record_regression_guardrail`）**：区分单题情景层（每模块最多保留 `MAX_EPISODIC_PER_MODULE = 2` 条）、模块级不变量层（`[Module Invariant: <module_path>]`，`+6` 结构性召回加分，按规范化头部哈希稳定保留 `note_id` 与反馈权重）与负向回归护栏（`[Regression Guardrail: <module_path>]`，仅在明确报告 `pass_to_pass` 回归时写入，之后验证成功即清除），配合高消耗轮次搭便车笔记精准打折（`record_unhelpful_injection`）。需要 `[feedback] memory = "on"`。
+   - **Harness² 任务内 `Propose–Probe–Compose`（[`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs)、[`workspace_promotion.rs`](rust/crates/ncx-core/src/workspace_promotion.rs)）**：支持 Verifier 给出 `COMPOSE:i,j` 时的多 Worker 非冲突文件级组合（先在暂存副本中复验，通过才提升，否则回退为最佳 Worker）与失败重试轮次的跨 Worker 探测结论合成（`build_compose_feedback`）。
 
 ## 目录
 
@@ -521,14 +531,18 @@ curl http://127.0.0.1:8005/v1/models
 | 模式 | 读 | 写 | 网络 |
 | --- | --- | --- | --- |
 | `read-only` | 任意 | 无 | 关 |
-| `workspace-write` | 任意 | 工作区 + 可写根 + 临时区 | 默认关，可显式开 |
+| `workspace-write` | 任意（`.env`、私钥、云凭据等敏感文件除外） | 工作区 + 可写根（系统临时目录需显式开启） | 默认关，可显式开 |
 | `danger-full-access` | 任意 | 任意 | 开 |
 
 **审批策略** —— 动作超出沙箱时怎么办：`untrusted`、`on-failure`、`on-request`、
 `never`。审批引擎把每次越权解析为 `ASK` / `AUTO_APPROVE` / `AUTO_DENY`。
 
-在 Windows 上强制是**策略级**的：路径检查和可写根拦截发生在工具边界，不是内核级
-隔离。
+在所有平台上强制都是**策略级**的：文件工具在工具边界检查路径和可写根；shell 命令在运行前
+根据命令行判断（只读白名单、破坏性模式、联网命令与内联联网代码、工作区外路径、包括通配
+和转义写法在内的敏感文件、`git config` / hook 劫持）。这**不是**内核级隔离：命令启动的
+程序（Python 脚本、构建、测试套件）一旦运行就不再受限制。由操作系统强制的只有进程管控：
+Windows 上每条命令以挂起方式启动并放入关闭即终止的 Job Object，Unix 上运行在独立进程组，
+超时时整棵进程树一起结束。在 `untrusted` 策略下，解释器和测试运行器总是先询问。
 
 ## MCP
 
@@ -941,7 +955,9 @@ Windows GNU 链接器的 export ordinal 表溢出，修改前需重新验证目�
 
 - **绝不提交真实 API key。** `.env`、`*.key`、`*.pem`、token 文件以及本地交接文件
   都被 git 忽略；`config.toml` / `mcp.toml` 放在 `~/.nanocodex/`，在仓库之外。
-- 在 Windows 上沙箱是**策略级**的——它拦截工具行为和可写根，但不是内核级隔离。
+- 沙箱在所有平台上都是**策略级**的——它拦截工具行为、可写根和 shell 命令行，但不是
+  内核级隔离：命令启动的程序以你的权限运行。在不信任的仓库中请使用 `untrusted` 或
+  `on-request` 审批策略。
 - **MCP 工具运行在沙箱之外**，作为外部子进程。只启用你信任的服务；市场会校验
   名称但不审查行为。
 - **Hooks 会在工具执行前后运行本地命令**。把 hook 配置当作代码审查后再启用。
