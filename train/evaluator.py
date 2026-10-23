@@ -50,6 +50,9 @@ class TaskResult:
     mean_tokens: float = 0.0
     # One redacted failure trajectory (from the first failing run), or "".
     failure_trajectory: str = ""
+    # Captured trajectory when `keep_trajectory=True` (used by Harness² probes
+    # even when the probe run passed).
+    trajectory: str = ""
 
 
 @dataclass
@@ -159,8 +162,10 @@ def _agent_cmd(prompt: str, model: str | None) -> list[str]:
 
 
 def _run_task_once(task: Path, genome_path: str | None, timeout: int,
-                   model: str | None = None) -> tuple[bool, float, str, int]:
-    """One (task, genome) attempt. Returns (passed, elapsed_s, trajectory_if_failed, tokens)."""
+                   model: str | None = None,
+                   keep_trajectory: bool = False) -> tuple[bool, float, str, int]:
+    """One (task, genome) attempt. Returns (passed, elapsed_s, trajectory, tokens).
+    When `keep_trajectory=False` (default), `trajectory` is "" on pass."""
     prompt = (task / "prompt.txt").read_text(encoding="utf-8")
     ws = Path(tempfile.mkdtemp(prefix=f"forge_{task.name}_"))
     try:
@@ -193,13 +198,15 @@ def _run_task_once(task: Path, genome_path: str | None, timeout: int,
             trajectory = (f"The agent did NOT finish within {timeout}s (timed out)."
                           if timed_out else
                           "The agent produced no usable session log and the task did not pass.")
-        return ok, round(elapsed, 1), ("" if ok else trajectory), tokens
+        kept_traj = trajectory if (keep_trajectory or not ok) else ""
+        return ok, round(elapsed, 1), kept_traj, tokens
     finally:
         shutil.rmtree(ws, ignore_errors=True)
 
 
 def evaluate(genome_path: str | None, task_names: list[str] | None,
-             repeats: int = 3, timeout: int = 180, model: str | None = None) -> EvalResult:
+             repeats: int = 3, timeout: int = 180, model: str | None = None,
+             keep_trajectory: bool = False) -> EvalResult:
     """Evaluate a genome (or baseline when None) over the given tasks. `model`
     overrides the agent's base model (e.g. a weaker one with more headroom)."""
     all_tasks = bench.tasks()
@@ -207,20 +214,25 @@ def evaluate(genome_path: str | None, task_names: list[str] | None,
         all_tasks = [t for t in all_tasks if t.name in task_names]
     res = EvalResult(genome=genome_path or "<baseline>")
     for task in all_tasks:
-        passes, times, toks, traj = 0, [], [], ""
+        passes, times, toks, fail_traj, any_traj = 0, [], [], "", ""
         for _ in range(max(1, repeats)):
-            ok, elapsed, t, tokens = _run_task_once(task, genome_path, timeout, model)
+            ok, elapsed, t, tokens = _run_task_once(
+                task, genome_path, timeout, model, keep_trajectory=keep_trajectory
+            )
             passes += 1 if ok else 0
             times.append(elapsed)
             if tokens > 0:
                 toks.append(tokens)
-            if not ok and not traj:
-                traj = t
+            if not ok and not fail_traj:
+                fail_traj = t
+            if t and not any_traj:
+                any_traj = t
         res.tasks[task.name] = TaskResult(
             task=task.name, passes=passes, runs=max(1, repeats),
             mean_s=round(sum(times) / len(times), 1) if times else 0.0,
             mean_tokens=round(sum(toks) / len(toks), 1) if toks else 0.0,
-            failure_trajectory=traj,
+            failure_trajectory=fail_traj,
+            trajectory=any_traj if keep_trajectory else fail_traj,
         )
     return res
 

@@ -1085,6 +1085,46 @@ pub fn record_followup(
                     let _ = memory.store.forget_text(&note.text);
                     let _ = index.remove_note(&note.note_id);
                 }
+                let reg_reason = match &followup.signal {
+                    FollowupSignal::Rollback { checkpoint_id } => Some(format!(
+                        "rollback to {}",
+                        checkpoint_id.as_deref().unwrap_or("checkpoint")
+                    )),
+                    FollowupSignal::Label {
+                        good: false,
+                        note: Some(n),
+                    } => {
+                        let lower = n.to_ascii_lowercase();
+                        let has_p2p_reg =
+                            lower.contains("p2p_regressed=") && !lower.contains("p2p_regressed=0");
+                        let has_reg_kw = lower.contains("regress") || lower.contains("回归");
+                        (has_p2p_reg || has_reg_kw).then(|| n.clone())
+                    }
+                    _ => None,
+                };
+                if let Some(reason) = reg_reason {
+                    let ts_sec = followup.timestamp_ms / 1_000;
+                    for touched in &outcome.files_touched {
+                        let norm = touched.replace('\\', "/");
+                        if !norm.starts_with(".nanocodex")
+                            && !norm.starts_with(".ncx")
+                            && !norm.starts_with("tests/")
+                            && !norm.contains("/tests/")
+                            && !norm.starts_with("test/")
+                            && !norm.contains("/test/")
+                        {
+                            if memory
+                                .store
+                                .record_regression_guardrail(&norm, &reason, ts_sec)
+                                .ok()
+                                .flatten()
+                                .is_some()
+                            {
+                                let _ = index.rebuild_from_markdown(memory.store, &ws_key);
+                            }
+                        }
+                    }
+                }
             }
             None => {}
         }

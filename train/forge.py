@@ -16,8 +16,12 @@ P1 adds RRSI-inspired regularization to the optimization loop:
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -36,6 +40,7 @@ for _stream in (sys.stdout, sys.stderr):
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import evaluator as ev  # noqa: E402
 import genome  # noqa: E402
+import lesson_lib  # noqa: E402
 import pareto  # noqa: E402
 import splits  # noqa: E402
 import teacher  # noqa: E402
@@ -205,6 +210,406 @@ def prune_genome(
     return cur, pruned
 
 
+@dataclass
+class Probe:
+    """One probe run in a Harness² Propose-Probe-Compose (PPC) round."""
+
+    idx: int                 # 0 = champion control
+    kind: str                # "control" | "general" | "domain"
+    genome: genome.Genome
+    path: Path               # genomes/<stamp>_r{rnd}_t{task}_p{idx}.toml
+    surfaces: list[str] = field(default_factory=list)
+    diff: str = ""
+    trajectory: str = ""     # populated by evaluator with keep_trajectory=True
+    passed: int = 0
+    runs: int = 0
+    mean_tokens: float = 0.0
+    mean_s: float = 0.0
+    rationale: str = ""
+    teacher: str = ""
+
+
+@dataclass
+class H2Round:
+    """Output of a single-task Harness² PPC round."""
+
+    task: str
+    probes: list[Probe]
+    contrast: str
+    composed: genome.Genome | None
+    lessons_used: list[str] = field(default_factory=list)
+    lesson_draft: dict | None = None
+    task_sig: dict = field(default_factory=dict)
+
+
+_TOOL_CALL_RE = re.compile(r"#\d+\s+\[tool\]\s+([A-Za-z0-9_.-]+)")
+
+
+def _extract_tool_sequence(traj: str) -> list[str]:
+    """Extract ordered tool call names from an `extract_trajectory` text dump."""
+    if not traj:
+        return []
+    tools = _TOOL_CALL_RE.findall(traj)
+    if tools:
+        return tools
+    # Fallback for alternative tool call formatting in raw traces.
+    fallback = re.findall(
+        r"\b(bash|apply_patch|read_file|write_file|edit_file|grep|glob|delegate_parallel)\b",
+        traj,
+    )
+    return fallback
+
+
+def _scrub_grader_signals(text: str) -> str:
+    """Remove explicit grader/pass-fail markers when `blind=True`."""
+    cleaned = re.sub(
+        r"(?i)\b(passed|failed|pass_rate|total_passes|resolved\s*=\s*\w+)\b",
+        "[redacted]",
+        text or "",
+    )
+    return cleaned
+
+
+def build_contrast(probes: list[Probe], blind: bool = True) -> str:
+    """Deterministically build a behavioral comparison across K+1 probes without LLM calls.
+
+    When `blind=True` (Harness² default), pass/fail grader outcomes are omitted so the
+    teacher composes purely from behavioral signals (tool sequence, step count,
+    timeout behavior, token usage, and trajectory tail).
+    """
+    if not probes:
+        return "(no probes)"
+    lines: list[str] = []
+    control = probes[0]
+    ctrl_tools = _extract_tool_sequence(control.trajectory)
+
+    for p in probes:
+        tools = _extract_tool_sequence(p.trajectory)
+        timed_out = ("TIMEOUT" in (p.trajectory or "")) or ("timed out" in (p.trajectory or "").lower())
+        header = (
+            f"=== Probe #{p.idx} [{p.kind}] "
+            f"surfaces={p.surfaces or ['(none)']} "
+            f"steps={len(tools)} "
+            f"mean_tokens={p.mean_tokens:.1f} "
+            f"mean_s={p.mean_s:.1f}s "
+            f"timeout={timed_out}"
+        )
+        if not blind:
+            header += f" passes={p.passed}/{p.runs}"
+        header += " ==="
+        lines.append(header)
+        lines.append(f"diff: {p.diff or '(control / no changes)'}")
+        lines.append(f"tool_sequence: {' -> '.join(tools[:20]) if tools else '(no tool calls)'}")
+        tail_raw = (p.trajectory or "")[-300:].strip()
+        if blind:
+            tail_raw = _scrub_grader_signals(tail_raw)
+        lines.append(
+            f"<<<UNTRUSTED trajectory tail probe #{p.idx}\n"
+            f"{tail_raw or '(empty)'}\n"
+            f">>>UNTRUSTED"
+        )
+        lines.append("")
+
+    if len(probes) > 1:
+        lines.append("=== Pairwise Behavioral Delta vs Control (Probe #0) ===")
+        for p in probes[1:]:
+            tools = _extract_tool_sequence(p.trajectory)
+            div_step = None
+            for idx_step in range(max(len(ctrl_tools), len(tools))):
+                c_t = ctrl_tools[idx_step] if idx_step < len(ctrl_tools) else "(end)"
+                p_t = tools[idx_step] if idx_step < len(tools) else "(end)"
+                if c_t != p_t:
+                    div_step = (idx_step + 1, c_t, p_t)
+                    break
+            div_str = (
+                f"step {div_step[0]} (control={div_step[1]} vs probe={div_step[2]})"
+                if div_step
+                else "identical tool sequence"
+            )
+            added_tools = sorted(set(tools) - set(ctrl_tools))
+            removed_tools = sorted(set(ctrl_tools) - set(tools))
+            tok_delta = p.mean_tokens - control.mean_tokens
+            lines.append(
+                f"- Probe #{p.idx} [{p.kind}]: first_divergence={div_str}; "
+                f"step_delta={len(tools) - len(ctrl_tools):+d}; "
+                f"token_delta={tok_delta:+.1f}; "
+                f"added_tools={added_tools}; removed_tools={removed_tools}"
+            )
+    return "\n".join(lines)
+
+
+def _has_behavioral_variation(probes: list[Probe]) -> bool:
+    """Return True if at least one candidate probe differs behaviorally from control."""
+    if len(probes) <= 1:
+        return False
+    ctrl = probes[0]
+    ctrl_tools = _extract_tool_sequence(ctrl.trajectory)
+    ctrl_timeout = "TIMEOUT" in (ctrl.trajectory or "")
+    for p in probes[1:]:
+        p_tools = _extract_tool_sequence(p.trajectory)
+        p_timeout = "TIMEOUT" in (p.trajectory or "")
+        if p_tools != ctrl_tools or p_timeout != ctrl_timeout:
+            return True
+        if abs(p.mean_tokens - ctrl.mean_tokens) > 1.0:
+            return True
+        if (p.trajectory or "")[-200:] != (ctrl.trajectory or "")[-200:]:
+            return True
+    return False
+
+
+def _run_probes(
+    probes: list[Probe],
+    task: str,
+    timeout: int,
+    repeats: int,
+    workers: int = 1,
+) -> None:
+    """Evaluate `probes` on a single `task` with `keep_trajectory=True`."""
+    if not probes:
+        return
+
+    def _eval_one(p: Probe):
+        return ev.evaluate(
+            str(p.path), [task], repeats=repeats, timeout=timeout, keep_trajectory=True
+        )
+
+    max_w = max(1, min(workers, len(probes)))
+    if max_w == 1:
+        results = [_eval_one(p) for p in probes]
+    else:
+        with ThreadPoolExecutor(max_workers=max_w) as ex:
+            results = list(ex.map(_eval_one, probes))
+
+    for p, res in zip(probes, results):
+        tr = res.tasks.get(task)
+        if tr is not None:
+            p.passed = tr.passes
+            p.runs = tr.runs
+            p.mean_tokens = tr.mean_tokens
+            p.mean_s = tr.mean_s
+            p.trajectory = tr.trajectory or ""
+
+
+def _h2_round(
+    rnd: int,
+    task: str,
+    traj: str,
+    champion: genome.Genome,
+    baseline: genome.Genome,
+    panel: list,
+    *,
+    k: int,
+    mode: str,
+    max_surfaces: int | None,
+    focus_surface: str | None,
+    max_changed_lines: int | None,
+    max_token_growth: float | None,
+    forbidden_terms: list[str],
+    rejected_history: list[dict],
+    touched_counts: dict[str, int],
+    lesson_store: lesson_lib.LessonLibrary | None,
+    timeout: int,
+    probe_repeats: int,
+    workers: int,
+    blind: bool,
+    stamp: str,
+    elapsed_fn,
+    budget_s: float,
+) -> H2Round:
+    """Execute one Harness² Propose-Probe-Compose (PPC) round for `task`."""
+    sig = lesson_lib.task_signature(traj)
+    active_lessons = lesson_store.retrieve(sig, k=5) if lesson_store else []
+    falsified_lessons = lesson_store.retired_lessons(limit=6) if lesson_store else []
+    used_ids = [str(l.get("id")) for l in active_lessons if l.get("id")]
+
+    safe_task = re.sub(r"[^A-Za-z0-9_.-]+", "_", task)
+    ctrl_path = GENOMES_DIR / f"{stamp}_r{rnd}_t{safe_task}_p0.toml"
+    champion.save(ctrl_path)
+    ctrl_probe = Probe(
+        idx=0,
+        kind="control",
+        genome=champion.copy(),
+        path=ctrl_path,
+        surfaces=[],
+        diff="(control)",
+        teacher="incumbent",
+    )
+    _run_probes([ctrl_probe], task, timeout, probe_repeats, workers=1)
+    if not ctrl_probe.trajectory:
+        ctrl_probe.trajectory = traj
+
+    probes: list[Probe] = [ctrl_probe]
+
+    for i in range(k):
+        if elapsed_fn() > budget_s:
+            break
+        kind = "general" if i % 2 == 0 else "domain"
+        backend = panel[i % len(panel)]
+        prior_ctx = (
+            build_contrast(probes, blind=blind)
+            if (mode == "sequential" and len(probes) > 1)
+            else None
+        )
+        propose_prompt = teacher.build_h2_propose_prompt(
+            champion,
+            task,
+            traj,
+            kind=kind,
+            prior_probes_contrast=prior_ctx,
+            lessons=active_lessons,
+            falsified_lessons=falsified_lessons,
+            rejected_history=rejected_history if rejected_history else None,
+            focus_surface=focus_surface,
+            max_surfaces=max_surfaces,
+        )
+        raw = backend.propose(propose_prompt) or ""
+        cand, why = teacher.parse_candidate(raw, champion)
+        if not cand:
+            entry = {
+                "round": rnd, "phase": "h2-probe", "task": task, "probe_idx": i + 1,
+                "kind": kind, "teacher": backend.name, "target_surfaces": [],
+                "diff": "", "verdict": "rejected", "reason": why,
+            }
+            append_ledger(RUNS_DIR, stamp, entry)
+            rejected_history.append(entry)
+            continue
+
+        surfaces = genome.changed_surfaces(champion, cand)
+        for s in surfaces:
+            touched_counts[s] = touched_counts.get(s, 0) + 1
+        diff_str = genome.diff(champion, cand)
+
+        errs = genome.validate(
+            cand, baseline, parent=champion,
+            max_surfaces=max_surfaces, max_changed_lines=max_changed_lines,
+        )
+        if errs:
+            reason = f"invalid: {errs[0]}"
+            entry = {
+                "round": rnd, "phase": "h2-probe", "task": task, "probe_idx": i + 1,
+                "kind": kind, "teacher": backend.name, "target_surfaces": surfaces,
+                "diff": diff_str, "verdict": "rejected", "reason": reason,
+            }
+            append_ledger(RUNS_DIR, stamp, entry)
+            rejected_history.append(entry)
+            continue
+
+        critic_errs = teacher.critic_check(cand, champion, forbidden_terms=forbidden_terms)
+        if critic_errs:
+            reason = critic_errs[0]
+            entry = {
+                "round": rnd, "phase": "h2-probe", "task": task, "probe_idx": i + 1,
+                "kind": kind, "teacher": backend.name, "target_surfaces": surfaces,
+                "diff": diff_str, "verdict": "rejected", "reason": reason,
+            }
+            append_ledger(RUNS_DIR, stamp, entry)
+            rejected_history.append(entry)
+            continue
+
+        p_path = GENOMES_DIR / f"{stamp}_r{rnd}_t{safe_task}_p{i + 1}.toml"
+        cand.save(p_path)
+        probe = Probe(
+            idx=i + 1,
+            kind=kind,
+            genome=cand,
+            path=p_path,
+            surfaces=surfaces,
+            diff=diff_str,
+            rationale=diff_str,
+            teacher=backend.name,
+        )
+        probes.append(probe)
+        if mode == "sequential":
+            _run_probes([probe], task, timeout, probe_repeats, workers=1)
+            append_ledger(RUNS_DIR, stamp, {
+                "round": rnd, "phase": "h2-probe", "task": task, "probe_idx": probe.idx,
+                "kind": probe.kind, "teacher": probe.teacher,
+                "target_surfaces": probe.surfaces, "diff": probe.diff,
+                "passed": probe.passed, "runs": probe.runs,
+                "mean_tokens": probe.mean_tokens, "verdict": "probed",
+            })
+
+    if mode == "parallel" and len(probes) > 1:
+        _run_probes(probes[1:], task, timeout, probe_repeats, workers=workers)
+        for probe in probes[1:]:
+            append_ledger(RUNS_DIR, stamp, {
+                "round": rnd, "phase": "h2-probe", "task": task, "probe_idx": probe.idx,
+                "kind": probe.kind, "teacher": probe.teacher,
+                "target_surfaces": probe.surfaces, "diff": probe.diff,
+                "passed": probe.passed, "runs": probe.runs,
+                "mean_tokens": probe.mean_tokens, "verdict": "probed",
+            })
+
+    contrast = build_contrast(probes, blind=blind)
+    contrast_hash = hashlib.sha1(contrast.encode("utf-8")).hexdigest()[:12]
+
+    composed: genome.Genome | None = None
+    lesson_draft: dict | None = None
+    if len(probes) > 1 and elapsed_fn() <= budget_s:
+        compose_prompt = teacher.build_h2_compose_prompt(
+            champion,
+            contrast,
+            lessons=active_lessons,
+            max_surfaces=max_surfaces,
+            max_changed_lines=max_changed_lines,
+            max_token_growth=max_token_growth,
+        )
+        raw_compose = panel[0].propose(compose_prompt) or ""
+        cand_comp, why_comp = teacher.parse_candidate(raw_compose, champion)
+        lesson_draft = teacher.parse_lesson(raw_compose)
+        if cand_comp is not None:
+            comp_surfaces = genome.changed_surfaces(champion, cand_comp)
+            comp_diff = genome.diff(champion, cand_comp)
+            v_errs = genome.validate(
+                cand_comp, baseline, parent=champion,
+                max_surfaces=max_surfaces, max_changed_lines=max_changed_lines,
+            )
+            c_errs = teacher.critic_check(cand_comp, champion, forbidden_terms=forbidden_terms)
+            if v_errs or c_errs:
+                reason = f"invalid: {v_errs[0]}" if v_errs else c_errs[0]
+                entry = {
+                    "round": rnd, "phase": "h2-compose", "task": task,
+                    "teacher": panel[0].name, "target_surfaces": comp_surfaces,
+                    "diff": comp_diff, "contrast_hash": contrast_hash,
+                    "verdict": "rejected", "reason": reason,
+                }
+                append_ledger(RUNS_DIR, stamp, entry)
+                rejected_history.append(entry)
+            else:
+                composed = cand_comp
+                for s in comp_surfaces:
+                    touched_counts[s] = touched_counts.get(s, 0) + 1
+        else:
+            entry = {
+                "round": rnd, "phase": "h2-compose", "task": task,
+                "teacher": panel[0].name, "target_surfaces": [],
+                "diff": "", "contrast_hash": contrast_hash,
+                "verdict": "rejected", "reason": why_comp,
+            }
+            append_ledger(RUNS_DIR, stamp, entry)
+            rejected_history.append(entry)
+
+    # Fallback: if compose failed or exceeded surface/critic bounds, fall back to the
+    # best already-validated single probe candidate so valid probe work isn't wasted.
+    if composed is None and len(probes) > 1:
+        best_probe = max(
+            probes[1:],
+            key=lambda p: (p.passed, -p.mean_tokens if p.mean_tokens > 0 else 0.0),
+        )
+        composed = best_probe.genome.copy()
+        print(f"[forge]   round {rnd} h2[{task}]: compose fallback -> probe #{best_probe.idx} ({best_probe.kind})")
+
+    return H2Round(
+        task=task,
+        probes=probes,
+        contrast=contrast,
+        composed=composed,
+        lessons_used=used_ids,
+        lesson_draft=lesson_draft,
+        task_sig=sig,
+    )
+
+
 def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
           repeats: int, timeout: int, budget_s: float, teachers: str,
           stamp: str, test_tasks: list[str] | None = None,
@@ -215,12 +620,21 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
           delta_tokens: float = 0.0,
           max_token_growth: float | None = None,
           stagnation_limit: int = 2,
-          prune_at_end: bool = False) -> dict:
-    """Single-champion regularized hill-climb (M0b/M1 + P1 RRSI regularization).
+          prune_at_end: bool = False,
+          h2_k: int = 0,
+          h2_mode: str = "parallel",
+          h2_tasks: int = 1,
+          h2_probe_repeats: int | None = None,
+          h2_workers: int | None = None,
+          h2_blind: bool = True,
+          lessons_path: Path | None = None,
+          enable_lessons: bool = True) -> dict:
+    """Single-champion regularized hill-climb (M0b/M1 + P1 RRSI + Harness² PPC).
 
     Each round:
     1. Compute annealed surface budget (`max_surfaces`) and stagnation focus surface.
-    2. Build teacher prompt including falsified/rejected hypothesis history.
+    2. Either run Harness² Propose-Probe-Compose (`h2_k > 0`) on up to `h2_tasks`
+       failing train tasks, or run the standard 1-step teacher panel (`h2_k == 0`).
     3. Validate candidate against baseline size caps, annealed edit budget, and
        anti-memorization critic (`teacher.critic_check`).
     4. Evaluate on `train_tasks` and apply the two-sided acceptance rule:
@@ -228,7 +642,8 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
        - Token-cost improvement at non-inferior pass-rate:
          `margin >= 0` and `token_saving >= delta_tokens` (when `delta_tokens > 0`)
        AND holdout pass-rate must not regress (`chold.total_passes >= champ_hold.total_passes`).
-    5. Log every candidate and verdict to `runs/ledger_<stamp>.jsonl`.
+    5. Log every candidate and verdict to `runs/ledger_<stamp>.jsonl` and update
+       `LessonLibrary` (`lessons.jsonl` + `adopted_harnesses.jsonl`).
     """
     GENOMES_DIR.mkdir(exist_ok=True)
     RUNS_DIR.mkdir(exist_ok=True)
@@ -241,6 +656,13 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
     if not panel:
         print(f"[forge] no teacher backend matches '{teachers}' — aborting.")
         return {"error": "no teacher"}
+
+    lesson_store: lesson_lib.LessonLibrary | None = None
+    if enable_lessons:
+        lpath = lessons_path or (RUNS_DIR / "lessons.jsonl")
+        lesson_store = lesson_lib.LessonLibrary(
+            lpath, adopted_path=lpath.parent / "adopted_harnesses.jsonl"
+        )
 
     baseline = genome.extract_current()
     if from_genome:
@@ -276,7 +698,7 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             print(f"[forge]   round {rnd}: incumbent re-eval train "
                   f"{champ_train.total_passes}/{champ_train.total_runs}, "
                   f"holdout {champ_hold.total_passes}/{champ_hold.total_runs}")
-        failures = champ_train.failing_trajectories(top_k=3)
+        failures = champ_train.failing_trajectories(top_k=max(3, h2_tasks))
         if not failures:
             if champ_train.total_passes >= champ_train.total_runs:
                 print("[forge] champion fully solves the train set — nothing to improve "
@@ -297,13 +719,6 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             if (stagnation_limit > 0 and stagnant_rounds >= stagnation_limit)
             else None
         )
-        prompt = teacher.build_teacher_prompt(
-            champion,
-            failures,
-            rejected_history=rejected_history if rejected_history else None,
-            focus_surface=focus_surface,
-            max_surfaces=max_surfaces,
-        )
         round_log = {
             "round": rnd,
             "max_surfaces": max_surfaces,
@@ -311,68 +726,149 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             "candidates": [],
         }
         candidates = []  # (teacher_name, genome, eval, cpath, surfaces, diff_str)
-        for backend in panel:
-            if elapsed() > budget_s:
-                break
-            resp = backend.propose(prompt)
-            cand, why = teacher.parse_candidate(resp or "", champion)
-            if not cand:
-                print(f"[forge]   round {rnd} {backend.name}: rejected ({why})")
-                round_log["candidates"].append({"teacher": backend.name, "status": why})
-                entry = {
-                    "round": rnd, "teacher": backend.name, "target_surfaces": [],
-                    "diff": "", "verdict": "rejected", "reason": why,
+        candidate_meta: dict[str, dict] = {}
+        any_h2_variation = True
+
+        if h2_k > 0:
+            probe_reps = h2_probe_repeats if (h2_probe_repeats and h2_probe_repeats > 0) else repeats
+            workers = h2_workers if (h2_workers and h2_workers > 0) else min(h2_k + 1, 4)
+            selected_failures = failures[:max(1, h2_tasks)]
+            any_h2_variation = False
+            round_log["h2"] = []
+            for task_name, task_traj in selected_failures:
+                if elapsed() > budget_s:
+                    break
+                h2_res = _h2_round(
+                    rnd, task_name, task_traj, champion, baseline, panel,
+                    k=h2_k, mode=h2_mode, max_surfaces=max_surfaces,
+                    focus_surface=focus_surface, max_changed_lines=max_changed_lines,
+                    max_token_growth=max_token_growth, forbidden_terms=forbidden_terms,
+                    rejected_history=rejected_history, touched_counts=touched_counts,
+                    lesson_store=lesson_store, timeout=timeout, probe_repeats=probe_reps,
+                    workers=workers, blind=h2_blind, stamp=stamp,
+                    elapsed_fn=elapsed, budget_s=budget_s,
+                )
+                if _has_behavioral_variation(h2_res.probes):
+                    any_h2_variation = True
+                round_log["h2"].append({
+                    "task": task_name,
+                    "probes": [
+                        {"idx": p.idx, "kind": p.kind, "surfaces": p.surfaces,
+                         "passed": p.passed, "runs": p.runs, "mean_tokens": p.mean_tokens}
+                        for p in h2_res.probes
+                    ],
+                    "lessons_used": h2_res.lessons_used,
+                    "composed": h2_res.composed is not None,
+                })
+                if h2_res.composed is None:
+                    continue
+                cand = h2_res.composed
+                surfaces = genome.changed_surfaces(champion, cand)
+                diff_str = genome.diff(champion, cand)
+                safe_t = re.sub(r"[^A-Za-z0-9_.-]+", "_", task_name)
+                tname = f"h2_{panel[0].name}_{safe_t}"
+                cpath = GENOMES_DIR / f"{stamp}_gen{rnd}_{tname}.toml"
+                cand.save(cpath)
+                cev = ev.evaluate(str(cpath), train_tasks, repeats, timeout)
+                print(f"[forge]   round {rnd} {tname}: train "
+                      f"{cev.total_passes}/{cev.total_runs} (tokens={cev.mean_tokens}) "
+                      f"changed[{diff_str!r}]")
+                candidates.append((tname, cand, cev, cpath, surfaces, diff_str))
+                candidate_meta[tname] = {
+                    "lessons_used": h2_res.lessons_used,
+                    "lesson_draft": h2_res.lesson_draft,
+                    "task_sig": h2_res.task_sig,
+                    "task": task_name,
+                    "contrast_hash": hashlib.sha1(h2_res.contrast.encode("utf-8")).hexdigest()[:12],
                 }
-                append_ledger(RUNS_DIR, stamp, entry)
-                rejected_history.append(entry)
-                continue
-
-            surfaces = genome.changed_surfaces(champion, cand)
-            for s in surfaces:
-                touched_counts[s] = touched_counts.get(s, 0) + 1
-            diff_str = genome.diff(champion, cand)
-
-            errs = genome.validate(
-                cand, baseline, parent=champion,
-                max_surfaces=max_surfaces, max_changed_lines=max_changed_lines,
+                round_log["candidates"].append({
+                    "teacher": tname, "status": "evaluated",
+                    "train_passes": cev.total_passes, "mean_tokens": cev.mean_tokens,
+                    "target_surfaces": surfaces, "path": str(cpath),
+                })
+        else:
+            combined_traj = "\n".join(t for _, t in failures)
+            sig = lesson_lib.task_signature(combined_traj)
+            active_lessons = lesson_store.retrieve(sig, k=5) if lesson_store else []
+            used_ids = [str(l.get("id")) for l in active_lessons if l.get("id")]
+            prompt = teacher.build_teacher_prompt(
+                champion,
+                failures,
+                rejected_history=rejected_history if rejected_history else None,
+                focus_surface=focus_surface,
+                max_surfaces=max_surfaces,
             )
-            if errs:
-                reason = f"invalid: {errs[0]}"
-                print(f"[forge]   round {rnd} {backend.name}: {reason}")
-                round_log["candidates"].append({"teacher": backend.name, "status": reason})
-                entry = {
-                    "round": rnd, "teacher": backend.name, "target_surfaces": surfaces,
-                    "diff": diff_str, "verdict": "rejected", "reason": reason,
-                }
-                append_ledger(RUNS_DIR, stamp, entry)
-                rejected_history.append(entry)
-                continue
+            for backend in panel:
+                if elapsed() > budget_s:
+                    break
+                resp = backend.propose(prompt)
+                cand, why = teacher.parse_candidate(resp or "", champion)
+                if not cand:
+                    print(f"[forge]   round {rnd} {backend.name}: rejected ({why})")
+                    round_log["candidates"].append({"teacher": backend.name, "status": why})
+                    entry = {
+                        "round": rnd, "phase": "propose", "teacher": backend.name,
+                        "target_surfaces": [], "diff": "", "verdict": "rejected", "reason": why,
+                    }
+                    append_ledger(RUNS_DIR, stamp, entry)
+                    rejected_history.append(entry)
+                    continue
 
-            critic_errs = teacher.critic_check(cand, champion, forbidden_terms=forbidden_terms)
-            if critic_errs:
-                reason = critic_errs[0]
-                print(f"[forge]   round {rnd} {backend.name}: rejected ({reason})")
-                round_log["candidates"].append({"teacher": backend.name, "status": reason})
-                entry = {
-                    "round": rnd, "teacher": backend.name, "target_surfaces": surfaces,
-                    "diff": diff_str, "verdict": "rejected", "reason": reason,
-                }
-                append_ledger(RUNS_DIR, stamp, entry)
-                rejected_history.append(entry)
-                continue
+                surfaces = genome.changed_surfaces(champion, cand)
+                for s in surfaces:
+                    touched_counts[s] = touched_counts.get(s, 0) + 1
+                diff_str = genome.diff(champion, cand)
 
-            cpath = GENOMES_DIR / f"{stamp}_gen{rnd}_{backend.name}.toml"
-            cand.save(cpath)
-            cev = ev.evaluate(str(cpath), train_tasks, repeats, timeout)
-            print(f"[forge]   round {rnd} {backend.name}: train "
-                  f"{cev.total_passes}/{cev.total_runs} (tokens={cev.mean_tokens}) "
-                  f"changed[{diff_str!r}]")
-            candidates.append((backend.name, cand, cev, cpath, surfaces, diff_str))
-            round_log["candidates"].append({
-                "teacher": backend.name, "status": "evaluated",
-                "train_passes": cev.total_passes, "mean_tokens": cev.mean_tokens,
-                "target_surfaces": surfaces, "path": str(cpath),
-            })
+                errs = genome.validate(
+                    cand, baseline, parent=champion,
+                    max_surfaces=max_surfaces, max_changed_lines=max_changed_lines,
+                )
+                if errs:
+                    reason = f"invalid: {errs[0]}"
+                    print(f"[forge]   round {rnd} {backend.name}: {reason}")
+                    round_log["candidates"].append({"teacher": backend.name, "status": reason})
+                    entry = {
+                        "round": rnd, "phase": "propose", "teacher": backend.name,
+                        "target_surfaces": surfaces, "diff": diff_str,
+                        "verdict": "rejected", "reason": reason,
+                    }
+                    append_ledger(RUNS_DIR, stamp, entry)
+                    rejected_history.append(entry)
+                    continue
+
+                critic_errs = teacher.critic_check(cand, champion, forbidden_terms=forbidden_terms)
+                if critic_errs:
+                    reason = critic_errs[0]
+                    print(f"[forge]   round {rnd} {backend.name}: rejected ({reason})")
+                    round_log["candidates"].append({"teacher": backend.name, "status": reason})
+                    entry = {
+                        "round": rnd, "phase": "propose", "teacher": backend.name,
+                        "target_surfaces": surfaces, "diff": diff_str,
+                        "verdict": "rejected", "reason": reason,
+                    }
+                    append_ledger(RUNS_DIR, stamp, entry)
+                    rejected_history.append(entry)
+                    continue
+
+                cpath = GENOMES_DIR / f"{stamp}_gen{rnd}_{backend.name}.toml"
+                cand.save(cpath)
+                cev = ev.evaluate(str(cpath), train_tasks, repeats, timeout)
+                print(f"[forge]   round {rnd} {backend.name}: train "
+                      f"{cev.total_passes}/{cev.total_runs} (tokens={cev.mean_tokens}) "
+                      f"changed[{diff_str!r}]")
+                candidates.append((backend.name, cand, cev, cpath, surfaces, diff_str))
+                candidate_meta[backend.name] = {
+                    "lessons_used": used_ids,
+                    "lesson_draft": teacher.parse_lesson(resp or ""),
+                    "task_sig": sig,
+                    "task": ",".join(t for t, _ in failures),
+                    "contrast_hash": "",
+                }
+                round_log["candidates"].append({
+                    "teacher": backend.name, "status": "evaluated",
+                    "train_passes": cev.total_passes, "mean_tokens": cev.mean_tokens,
+                    "target_surfaces": surfaces, "path": str(cpath),
+                })
 
         accepted = None
         if candidates:
@@ -385,6 +881,12 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                 ),
             )
             tname, cand, cev, cpath, surfaces, diff_str = best
+            meta = candidate_meta.get(tname, {})
+            used_lesson_ids = meta.get("lessons_used", [])
+            lesson_draft = meta.get("lesson_draft")
+            task_sig = meta.get("task_sig", {"sig_hash": ""})
+            phase_label = "h2-compose" if h2_k > 0 else "propose"
+
             margin = cev.total_passes - champ_train.total_passes
             token_saving = (
                 (champ_train.mean_tokens - cev.mean_tokens)
@@ -411,12 +913,19 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                 round_log["accept"] = {"teacher": tname, "status": "token-bloat",
                                        "token_growth": round(token_growth, 1)}
                 entry = {
-                    "round": rnd, "teacher": tname, "target_surfaces": surfaces,
-                    "diff": diff_str, "train_passes": cev.total_passes,
-                    "mean_tokens": cev.mean_tokens, "verdict": "rejected", "reason": reason,
+                    "round": rnd, "phase": phase_label, "teacher": tname,
+                    "target_surfaces": surfaces, "diff": diff_str,
+                    "train_passes": cev.total_passes, "mean_tokens": cev.mean_tokens,
+                    "verdict": "rejected", "reason": reason,
                 }
                 append_ledger(RUNS_DIR, stamp, entry)
                 rejected_history.append(entry)
+                if lesson_store and used_lesson_ids:
+                    lesson_store.update_outcomes(
+                        used_lesson_ids, accepted=False, stamp=stamp, round_num=rnd,
+                        task_sig_hash=str(task_sig.get("sig_hash", "")),
+                        margin=margin, token_saving=token_saving, reason=reason,
+                    )
             elif clears_pass_gate or clears_token_gate:
                 chold = ev.evaluate(str(cpath), holdout_tasks, repeats, timeout)
                 if chold.total_passes >= champ_hold.total_passes:
@@ -433,38 +942,77 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
                         "margin": margin, "token_saving": round(token_saving, 1),
                     }
                     append_ledger(RUNS_DIR, stamp, {
-                        "round": rnd, "teacher": tname, "target_surfaces": surfaces,
-                        "diff": diff_str, "train_passes": cev.total_passes,
+                        "round": rnd, "phase": phase_label, "teacher": tname,
+                        "target_surfaces": surfaces, "diff": diff_str,
+                        "train_passes": cev.total_passes,
                         "holdout_passes": chold.total_passes,
                         "mean_tokens": cev.mean_tokens,
                         "verdict": "accepted", "reason": accept_mode,
                     })
+                    if lesson_store:
+                        if used_lesson_ids:
+                            lesson_store.update_outcomes(
+                                used_lesson_ids, accepted=True, stamp=stamp, round_num=rnd,
+                                task_sig_hash=str(task_sig.get("sig_hash", "")),
+                                margin=margin, token_saving=token_saving, reason=accept_mode,
+                            )
+                        recorded_ids = list(used_lesson_ids)
+                        if lesson_draft:
+                            new_l = lesson_store.record_lesson(
+                                lesson_draft, stamp=stamp, round_num=rnd,
+                                task_sig=task_sig, surfaces=surfaces,
+                                margin=margin, token_saving=token_saving,
+                                forbidden_terms=forbidden_terms,
+                            )
+                            if new_l and new_l.get("id"):
+                                recorded_ids.append(str(new_l["id"]))
+                        lesson_store.record_adopted_harness(
+                            stamp=stamp, round_num=rnd, genome_path=str(cpath),
+                            surfaces=surfaces, lessons_used=recorded_ids,
+                            train_passes=cev.total_passes,
+                            holdout_passes=chold.total_passes,
+                            mean_tokens=cev.mean_tokens,
+                        )
                 else:
                     reason = f"holdout-regressed ({chold.total_passes} < {champ_hold.total_passes})"
                     print(f"[forge]   round {rnd}: REJECT {tname} ({reason})")
                     round_log["accept"] = {"teacher": tname, "status": "holdout-regressed"}
                     entry = {
-                        "round": rnd, "teacher": tname, "target_surfaces": surfaces,
-                        "diff": diff_str, "train_passes": cev.total_passes,
+                        "round": rnd, "phase": phase_label, "teacher": tname,
+                        "target_surfaces": surfaces, "diff": diff_str,
+                        "train_passes": cev.total_passes,
                         "holdout_passes": chold.total_passes,
                         "mean_tokens": cev.mean_tokens,
                         "verdict": "rejected", "reason": reason,
                     }
                     append_ledger(RUNS_DIR, stamp, entry)
                     rejected_history.append(entry)
+                    if lesson_store and used_lesson_ids:
+                        lesson_store.update_outcomes(
+                            used_lesson_ids, accepted=False, stamp=stamp, round_num=rnd,
+                            task_sig_hash=str(task_sig.get("sig_hash", "")),
+                            margin=margin, token_saving=token_saving, reason=reason,
+                        )
             else:
                 reason = f"below-margin (train +{margin} < {accept_margin}, token_saving={token_saving:.1f})"
                 print(f"[forge]   round {rnd}: no candidate cleared the gate ({reason}).")
                 entry = {
-                    "round": rnd, "teacher": tname, "target_surfaces": surfaces,
-                    "diff": diff_str, "train_passes": cev.total_passes,
+                    "round": rnd, "phase": phase_label, "teacher": tname,
+                    "target_surfaces": surfaces, "diff": diff_str,
+                    "train_passes": cev.total_passes,
                     "mean_tokens": cev.mean_tokens,
                     "verdict": "rejected", "reason": reason,
                 }
                 append_ledger(RUNS_DIR, stamp, entry)
                 rejected_history.append(entry)
+                if lesson_store and used_lesson_ids:
+                    lesson_store.update_outcomes(
+                        used_lesson_ids, accepted=False, stamp=stamp, round_num=rnd,
+                        task_sig_hash=str(task_sig.get("sig_hash", "")),
+                        margin=margin, token_saving=token_saving, reason=reason,
+                    )
 
-        if accepted is None:
+        if accepted is None or (h2_k > 0 and not any_h2_variation):
             stagnant_rounds += 1
             if "accept" not in round_log:
                 round_log.setdefault("accept", {"status": "none-cleared-margin"})
@@ -478,6 +1026,8 @@ def train(rounds: int, train_tasks: list[str], holdout_tasks: list[str],
             champion, baseline, train_tasks, holdout_tasks,
             repeats, timeout, champ_train=champ_train, champ_hold=champ_hold, stamp=stamp,
         )
+        if lesson_store and pruned_surfaces:
+            lesson_store.refute_by_surface(pruned_surfaces, stamp=stamp)
 
     champ_final = GENOMES_DIR / f"{stamp}_champion.toml"
     champion.save(champ_final)
@@ -681,8 +1231,11 @@ def main() -> int:
                     help="panel | codex | claude | api")
     ap.add_argument("--accept-margin", type=int, default=1,
                     help="train passes a candidate must clear the incumbent by (noise band)")
-    ap.add_argument("--initial-max-surfaces", type=int, default=0,
+    ap.add_argument("--initial-max-surfaces", "--max-surfaces", dest="initial_max_surfaces",
+                    type=int, default=0,
                     help="RRSI annealed surface budget at round 1 (0 = disabled)")
+    ap.add_argument("--anneal-surfaces", action="store_true",
+                    help="enable surface annealing (defaults initial_max_surfaces to 2 if unset)")
     ap.add_argument("--max-changed-lines", type=int, default=0,
                     help="RRSI cap on changed lines per round (0 = disabled)")
     ap.add_argument("--delta-tokens", type=float, default=0.0,
@@ -693,6 +1246,24 @@ def main() -> int:
                     help="rounds without acceptance before steering teacher to untouched surface")
     ap.add_argument("--prune", action="store_true",
                     help="run RRSI ablation pruning on champion before saving")
+    ap.add_argument("--h2-k", type=int, default=0,
+                    help="Harness² Propose-Probe-Compose candidates per failing task (0 = disabled)")
+    ap.add_argument("--h2-mode", choices=["parallel", "sequential"], default="parallel",
+                    help="Harness² PPC mode: parallel (simultaneous) or sequential (recursive)")
+    ap.add_argument("--h2-tasks", type=int, default=1,
+                    help="number of failing train tasks per round to run PPC on")
+    ap.add_argument("--h2-probe-repeats", type=int, default=0,
+                    help="probe repeat count per candidate (0 = default to --repeats)")
+    ap.add_argument("--h2-workers", type=int, default=0,
+                    help="concurrent worker threads for parallel probes (0 = min(K+1, 4))")
+    ap.add_argument("--h2-blind", dest="h2_blind", action="store_true", default=True,
+                    help="hide pass/fail grader results during compose (default: True)")
+    ap.add_argument("--no-h2-blind", dest="h2_blind", action="store_false",
+                    help="expose pass/fail grader results during compose (ablation)")
+    ap.add_argument("--lessons", default="",
+                    help="path to Harness² lesson library JSONL (default: train/runs/lessons.jsonl)")
+    ap.add_argument("--no-lessons", action="store_true",
+                    help="disable reading/writing the cross-run lesson library")
     ap.add_argument("--no-reeval", action="store_true",
                     help="do NOT re-evaluate the incumbent each round (cheaper, noisier)")
     ap.add_argument("--from-genome", default="",
@@ -721,16 +1292,25 @@ def main() -> int:
         holdout_tasks = [t.strip() for t in a.holdout_tasks.split(",") if t.strip()] or sp["val"]
         test_tasks = [t.strip() for t in a.test_tasks.split(",") if t.strip()] or sp["test"]
         print(f"[forge] splits — train={train_tasks} val={holdout_tasks} test={test_tasks}")
+        init_surfaces = a.initial_max_surfaces or (2 if a.anneal_surfaces else None)
         train(a.rounds, train_tasks, holdout_tasks, a.repeats, a.timeout,
               a.budget_s, a.teacher, stamp, test_tasks=test_tasks,
               accept_margin=a.accept_margin, reeval_incumbent=not a.no_reeval,
               from_genome=(a.from_genome or None),
-              initial_max_surfaces=(a.initial_max_surfaces or None),
+              initial_max_surfaces=init_surfaces,
               max_changed_lines=(a.max_changed_lines or None),
               delta_tokens=a.delta_tokens,
               max_token_growth=(a.max_token_growth or None),
               stagnation_limit=a.stagnation_limit,
-              prune_at_end=a.prune)
+              prune_at_end=a.prune,
+              h2_k=a.h2_k,
+              h2_mode=a.h2_mode,
+              h2_tasks=a.h2_tasks,
+              h2_probe_repeats=(a.h2_probe_repeats or None),
+              h2_workers=(a.h2_workers or None),
+              h2_blind=a.h2_blind,
+              lessons_path=(Path(a.lessons) if a.lessons else None),
+              enable_lessons=not a.no_lessons)
         return 0
     if a.population:
         if not a.no_gate and not self_check(a.timeout):

@@ -51,6 +51,15 @@ impl MemoryEntry {
             .iter()
             .any(|t| t.eq_ignore_ascii_case("invariant"))
             || self.text.starts_with("[Module Invariant:")
+            || self.is_guardrail()
+    }
+
+    /// Whether this entry is a negative regression guardrail (`[Regression Guardrail: ...]`).
+    pub fn is_guardrail(&self) -> bool {
+        self.tags
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("guardrail"))
+            || self.text.starts_with("[Regression Guardrail:")
     }
 }
 
@@ -119,14 +128,24 @@ impl MemoryStore {
     }
 
     /// Deterministic note identifier (`content_hash(&normalize(text))`).
-    /// For `[Module Invariant: <module>]` entries, keys on the canonical header
-    /// so in-place invariant updates preserve their accumulated feedback stats.
+    /// For `[Module Invariant: <module>]` and `[Regression Guardrail: <module>]`
+    /// entries, keys on the canonical header so in-place updates preserve their
+    /// accumulated feedback stats.
     pub fn note_id(text: &str) -> String {
         let trimmed = text.trim();
         if let Some(rest) = trimmed.strip_prefix("[Module Invariant:") {
             if let Some((mod_part, _)) = rest.split_once(']') {
                 let canonical = format!(
                     "[module invariant: {}]",
+                    mod_part.trim().to_ascii_lowercase()
+                );
+                return crate::context_trace::content_hash(&canonical);
+            }
+        }
+        if let Some(rest) = trimmed.strip_prefix("[Regression Guardrail:") {
+            if let Some((mod_part, _)) = rest.split_once(']') {
+                let canonical = format!(
+                    "[regression guardrail: {}]",
                     mod_part.trim().to_ascii_lowercase()
                 );
                 return crate::context_trace::content_hash(&canonical);
@@ -306,6 +325,62 @@ impl MemoryStore {
 
         self.write_all(&entries)?;
         Ok(Some(inv_text))
+    }
+
+    /// Upsert a bounded `[Regression Guardrail: <module_path>]` warning when a
+    /// turn modifying `<module_path>` caused a `pass_to_pass` test regression or
+    /// rollback (Harness² negative guardrail memory).
+    pub fn record_regression_guardrail(
+        &self,
+        module_path: &str,
+        reason: &str,
+        now: u64,
+    ) -> std::io::Result<Option<String>> {
+        let mod_clean = module_path.trim().replace('\\', "/");
+        if mod_clean.is_empty() {
+            return Ok(None);
+        }
+        let guard_prefix = format!("[Regression Guardrail: {mod_clean}]");
+        let reason_clean: String = reason.trim().replace('\n', " ").chars().take(160).collect();
+        let guard_text = format!(
+            "{guard_prefix} Caution editing `{mod_clean}`: prior patch caused regression ({reason_clean}); run full module tests to preserve pass-to-pass behavior."
+        );
+        let mut tags = vec!["guardrail".to_string(), "regression".to_string()];
+        if let Some(stem) = std::path::Path::new(&mod_clean)
+            .file_stem()
+            .and_then(|s| s.to_str())
+        {
+            let st = stem.to_ascii_lowercase();
+            if st.len() >= 3 && !tags.iter().any(|x| x == &st) {
+                tags.push(st);
+            }
+        }
+        let mut entries = self.entries();
+        if let Some(idx) = entries
+            .iter()
+            .position(|e| e.text.starts_with(&guard_prefix))
+        {
+            entries[idx].ts = now;
+            entries[idx].text = guard_text.clone();
+            for t in tags {
+                if !entries[idx].tags.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+                    entries[idx].tags.push(t);
+                }
+            }
+        } else {
+            entries.push(MemoryEntry {
+                ts: now,
+                tags,
+                text: guard_text.clone(),
+            });
+        }
+        entries.sort_by_key(|e| e.ts);
+        if entries.len() > MAX_ENTRIES {
+            let drop = entries.len() - MAX_ENTRIES;
+            entries.drain(0..drop);
+        }
+        self.write_all(&entries)?;
+        Ok(Some(guard_text))
     }
 
     /// Path of the Markdown file this store owns. The metadata index is built
@@ -1018,5 +1093,38 @@ mod tests {
             first_bullet.contains("[Module Invariant: tabulate.py]"),
             "invariant should rank first, got: {first_bullet}"
         );
+    }
+
+    #[test]
+    fn record_regression_guardrail_upserts_and_preserves_note_id() {
+        let s = store("reg_guardrail");
+        let g1 = s
+            .record_regression_guardrail(
+                "tabulate/__init__.py",
+                "judge: f2p=0/1 p2p_regressed=3",
+                100,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(g1.starts_with("[Regression Guardrail: tabulate/__init__.py]"));
+        let id1 = MemoryStore::note_id(&g1);
+
+        let g2 = s
+            .record_regression_guardrail(
+                "tabulate/__init__.py",
+                "judge: f2p=1/1 p2p_regressed=1",
+                200,
+            )
+            .unwrap()
+            .unwrap();
+        let id2 = MemoryStore::note_id(&g2);
+        assert_eq!(
+            id1, id2,
+            "canonical guardrail note_id must stay stable across updates"
+        );
+        let entries = s.entries();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].is_guardrail());
+        assert!(entries[0].is_invariant());
     }
 }

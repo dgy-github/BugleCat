@@ -12,7 +12,9 @@ use regex::{NoExpand, RegexBuilder};
 use serde_json::json;
 
 use crate::isolate::copy_tree;
-use crate::workspace_promotion::{promote_with_paths, snapshot, WorkspaceSnapshot};
+use crate::workspace_promotion::{
+    compose_with_paths, promote_with_paths, snapshot, WorkspaceSnapshot,
+};
 use crate::{
     discover_skills, load_workspace_instructions, tool_recovery::classify_tool_result,
     AgentCallResult, AgentLoop, AgentRunner, AgentRuntimeProfile, ConfiguredHarnessRuntime,
@@ -599,21 +601,40 @@ impl AgentRunner for HarnessAgentRunner {
     }
 
     async fn promote_worker(&self, index: usize) -> Result<(), String> {
-        let promoted_paths = self
-            .scratch
-            .borrow()
-            .get(&index)
-            .ok_or_else(|| format!("Worker {} 没有可提升的隔离工作区", index + 1))
-            .and_then(|worker| {
-                promote_with_paths(&worker.baseline, &worker.root, &self.cfg.workspace)
-            });
+        self.compose_workers(&[index]).await
+    }
+
+    async fn compose_workers(&self, indices: &[usize]) -> Result<(), String> {
+        let primary = indices.first().copied().unwrap_or(0);
+        let promoted_paths = {
+            let scratch_map = self.scratch.borrow();
+            let mut pairs = Vec::with_capacity(indices.len().max(1));
+            let primary_ws = scratch_map
+                .get(&primary)
+                .ok_or_else(|| format!("Worker {} 没有可提升的隔离工作区", primary + 1))?;
+            pairs.push((&primary_ws.baseline, primary_ws.root.as_path()));
+            for &idx in indices.iter().skip(1) {
+                if idx != primary {
+                    if let Some(ws) = scratch_map.get(&idx) {
+                        pairs.push((&ws.baseline, ws.root.as_path()));
+                    }
+                }
+            }
+            if pairs.len() == 1 {
+                promote_with_paths(&primary_ws.baseline, &primary_ws.root, &self.cfg.workspace)
+            } else {
+                compose_with_paths(&pairs, &self.cfg.workspace)
+            }
+        };
         for (_, worker) in self.scratch.borrow_mut().drain() {
             let _ = std::fs::remove_dir_all(worker.root);
         }
         let promoted_paths = promoted_paths?;
         let mut promoted = self.promoted_telemetry.borrow_mut();
-        if let Some(w_telem) = self.worker_telemetry.borrow_mut().remove(&index) {
-            promoted.merge(w_telem);
+        for &idx in indices {
+            if let Some(w_telem) = self.worker_telemetry.borrow_mut().remove(&idx) {
+                promoted.merge(w_telem);
+            }
         }
         for path in promoted_paths {
             if !promoted.files_touched.contains(&path) {

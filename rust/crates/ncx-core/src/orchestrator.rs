@@ -357,21 +357,38 @@ impl<'a> Orchestrator<'a> {
             verify_passed = verdict_passed(&verdict);
 
             if verify_passed || rounds > self.cfg.max_verify_retries {
-                // The verifier names the best attempt; promote that worker's
-                // workspace to the real one and use its result as the answer.
+                // The verifier names the best attempt (and optionally COMPOSE:<w1>,<w2>);
+                // promote/compose those workers' workspaces to the real one.
                 let best = parse_best_worker(&verdict, n);
-                self.emit_stage(
-                    OrchestratorStage::Promote,
-                    None,
-                    format!("采用 Worker {}", best + 1),
-                );
-                let promotion_error = self.runner.promote_worker(best).await.err();
+                let composed = parse_compose_workers(&verdict, n, best);
+                let stage_detail = if composed.len() > 1 {
+                    let labels = composed
+                        .iter()
+                        .map(|idx| (idx + 1).to_string())
+                        .collect::<Vec<_>>()
+                        .join("+");
+                    format!("组合采用 Worker {labels}")
+                } else {
+                    format!("采用 Worker {}", best + 1)
+                };
+                self.emit_stage(OrchestratorStage::Promote, None, stage_detail);
+                let promotion_error = if composed.len() > 1 {
+                    self.runner.compose_workers(&composed).await.err()
+                } else {
+                    self.runner.promote_worker(best).await.err()
+                };
                 let promoted = promotion_error.is_none();
                 let final_text = match &promotion_error {
                     Some(error) => {
                         format!("Worker 结果已验证，但无法安全提升到当前工作区：{error}")
                     }
-                    None => synthesize(&worker_results, best, &verdict, verify_passed),
+                    None => {
+                        if composed.len() > 1 {
+                            synthesize_composed(&worker_results, &composed, &verdict, verify_passed)
+                        } else {
+                            synthesize(&worker_results, best, &verdict, verify_passed)
+                        }
+                    }
                 };
                 return OrchestratorOutcome {
                     complexity,
@@ -386,8 +403,9 @@ impl<'a> Orchestrator<'a> {
                     telemetry: self.telemetry.borrow().clone(),
                 };
             }
-            // Closed loop: carry the verifier's complaint into the next attempt.
-            feedback = verdict;
+            // Harness² Propose–Probe–Compose closed loop: combine the verifier's
+            // complaint with a digest of all workers' probe findings for the next attempt.
+            feedback = build_compose_feedback(&worker_results, &verdict);
         }
     }
 

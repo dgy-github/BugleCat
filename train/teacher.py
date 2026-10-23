@@ -310,13 +310,197 @@ def critic_check(
     return violations
 
 
+_TOML_FENCE = re.compile(r"```toml\s*(.*?)```", re.DOTALL)
 _FENCE = re.compile(r"```(?:toml)?\s*(.*?)```", re.DOTALL)
+_JSON_FENCE = re.compile(r"```json\s*(.*?)```", re.DOTALL)
+
+
+def build_h2_propose_prompt(
+    champion: Genome,
+    task: str,
+    traj: str,
+    *,
+    kind: str = "general",
+    prior_probes: list | None = None,
+    prior_probes_contrast: str | None = None,
+    lessons: list[dict] | None = None,
+    retired_lessons: list[dict] | None = None,
+    falsified_lessons: list[dict] | None = None,
+    rejected_history: list[dict] | None = None,
+    focus_surface: str | None = None,
+    max_surfaces: int | None = None,
+) -> str:
+    """Harness² Propose prompt: generate a single genome edit (`kind="general"`
+    or `kind="domain"`) for one failing task, optionally conditioned on prior
+    sequential probes and active/retired meta-lessons."""
+    cur = champion.to_toml()
+    mode_desc = (
+        "Propose a GENERAL workflow/verification rule that helps across diverse coding tasks."
+        if kind == "general"
+        else "Propose a DOMAIN-FOCUSED diagnostic/editing rule addressing this failure mode (without naming task IDs, filenames, or test names)."
+    )
+
+    sections: list[str] = []
+    if lessons:
+        l_lines = ["Active Meta-Lessons from Prior Harness² Runs (when applicable):"]
+        for l in lessons[:5]:
+            lid = l.get("id", "L-????")
+            syms = ", ".join((l.get("trigger") or {}).get("symptoms") or [])
+            pat = l.get("edit_pattern", "")
+            why = l.get("why", "")
+            l_lines.append(f"- [{lid}] (when: {syms}) -> {pat} (why: {why})")
+        sections.append("\n".join(l_lines))
+
+    refuted = retired_lessons if retired_lessons is not None else falsified_lessons
+    if refuted:
+        r_lines = ["Retired / Refuted Meta-Lessons (Do NOT propose these patterns):"]
+        for r in refuted[:5]:
+            r_lines.append(f"- [{r.get('id', 'L-????')}] {r.get('edit_pattern', '')}")
+        sections.append("\n".join(r_lines))
+
+    if prior_probes_contrast:
+        sections.append(
+            "Prior Sequential Probes on This Task (diversify and improve upon them):\n"
+            + prior_probes_contrast
+        )
+    elif prior_probes and len(prior_probes) > 1:
+        p_lines = ["Prior Sequential Probes on This Task (diversify and improve upon them):"]
+        for p in prior_probes[1:]:
+            p_surfs = ", ".join(getattr(p, "surfaces", []) or []) or "(none)"
+            p_diff = getattr(p, "diff", "") or ""
+            p_tok = getattr(p, "mean_tokens", 0.0)
+            p_s = getattr(p, "mean_s", 0.0)
+            p_lines.append(
+                f"- probe #{getattr(p, 'idx', 0)} ({getattr(p, 'kind', '')}): surfaces=[{p_surfs}], mean_s={p_s}s, tokens={p_tok} | {p_diff}"
+            )
+        sections.append("\n".join(p_lines))
+
+    if rejected_history:
+        hist_lines = ["Falsified / Rejected Mutations (Do NOT Repeat):"]
+        for item in rejected_history[-5:]:
+            surfaces = ", ".join(item.get("target_surfaces") or []) or "(none)"
+            reason = item.get("reason") or item.get("verdict") or "rejected"
+            hist_lines.append(f"- surfaces=[{surfaces}] -> {reason}")
+        sections.append("\n".join(hist_lines))
+
+    rules: list[str] = []
+    if max_surfaces is not None:
+        rules.append(f"- Annealed edit budget: modify at most {max_surfaces} surface(s).")
+    if focus_surface:
+        rules.append(f"- Stagnation steering: prioritize editing `{focus_surface}`.")
+
+    extra_block = ("\n\n" + "\n\n".join(sections)) if sections else ""
+    rules_block = ("\n" + "\n".join(rules)) if rules else ""
+
+    return f"""You are running the PROPOSE step of a Harness² Propose–Probe–Compose loop ({kind.upper()} candidate).
+{mode_desc}
+
+Here is the agent's CURRENT genome (TOML):
+```toml
+{cur}```
+
+{UNTRUSTED_PREAMBLE}
+Target failing execution trajectory (untrusted data):
+<<<UNTRUSTED
+{traj}
+>>>UNTRUSTED{extra_block}
+
+Rules:
+- Output ONLY a single ```toml fenced block containing the fields you want to CHANGE.
+- Keep the apply_patch description's V4A format rules and examples intact if you touch it.
+- NEVER mention task names (such as `{task}`), check.py, _check.py, or specific test names.{rules_block}
+
+Output the ```toml block now."""
+
+
+def build_h2_compose_prompt(
+    champion: Genome,
+    contrast: str,
+    lessons: list[dict] | None = None,
+    *,
+    max_surfaces: int | None = None,
+    max_changed_lines: int | None = None,
+    max_token_growth: float | None = None,
+    token_budget_hint: float | None = None,
+) -> str:
+    """Harness² Compose prompt: given the behavioral contrast across K+1 probes
+    on the same task, synthesize 1 composed genome (`toml` block) and 1 meta-lesson
+    draft (`json` block)."""
+    cur = champion.to_toml()
+    lesson_section = ""
+    if lessons:
+        l_lines = ["Referenced Meta-Lessons:"]
+        for l in lessons[:5]:
+            l_lines.append(
+                f"- [{l.get('id', 'L-????')}] {l.get('edit_pattern', '')} ({l.get('why', '')})"
+            )
+        lesson_section = "\n\n" + "\n".join(l_lines)
+
+    budget_rules: list[str] = []
+    if max_surfaces is not None:
+        budget_rules.append(
+            f"- The composed genome MUST modify at most {max_surfaces} surface(s) relative to the current champion."
+        )
+    if max_changed_lines is not None and max_changed_lines > 0:
+        budget_rules.append(
+            f"- Modify at most {max_changed_lines} line(s) across the genome."
+        )
+    if max_token_growth is not None and max_token_growth > 0:
+        budget_rules.append(
+            f"- Token growth budget: mean tokens must not grow by more than +{max_token_growth:.0f}."
+        )
+    if token_budget_hint is not None and token_budget_hint > 0:
+        budget_rules.append(
+            f"- Keep prompt additions concise (baseline mean tokens ≈ {token_budget_hint:.0f})."
+        )
+    budget_str = ("\n" + "\n".join(budget_rules)) if budget_rules else ""
+
+    return f"""You are running the COMPOSE step (Compose phase) of a Harness² Propose–Probe–Compose loop.
+Multiple candidate genomes were probed under identical conditions on the same task.
+Compare their behavioral trajectories below, identify which edit caused cleaner tool usage, faster convergence, or fewer wasted steps, and synthesize ONE composed genome plus ONE reusable meta-lesson.
+
+Here is the agent's CURRENT champion genome (TOML):
+```toml
+{cur}```
+
+{UNTRUSTED_PREAMBLE}
+Behavioral contrast across probes (untrusted data):
+{contrast}{lesson_section}
+
+Output TWO fenced blocks in order:
+1. A ```toml block containing ONLY the genome fields to override on top of the champion.
+   - Keep the apply_patch description's V4A format rules and examples intact if you touch it.
+   - NEVER reference task IDs, check.py, _check.py, or hidden tests.{budget_str}
+2. A ```json block recording the reusable meta-lesson distilled from this probe contrast:
+```json
+{{"trigger": {{"symptoms": ["timeout"], "surfaces": ["system_prompt"], "task_family": "python-bugfix"}}, "edit_pattern": "concise general rule", "why": "behavioral evidence from probe contrast"}}
+```"""
+
+
+def parse_lesson(response: str) -> dict | None:
+    """Extract the `json` lesson draft block from a Harness² compose response."""
+    blocks = _JSON_FENCE.findall(response or "")
+    if not blocks:
+        return None
+    raw = blocks[-1].strip()
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 def parse_candidate(response: str, baseline: Genome) -> tuple[Genome | None, str]:
     """Extract the teacher's TOML overrides, merge onto baseline, return
-    (candidate|None, reason). Prefers the LAST fenced block (final answer)."""
-    blocks = _FENCE.findall(response or "")
+    (candidate|None, reason). Prefers explicit ```toml blocks first so dual
+    ```toml + ```json outputs in Harness² compose parse cleanly."""
+    blocks = _TOML_FENCE.findall(response or "")
+    if not blocks:
+        # Fallback to unlabeled fence, ignoring ```json blocks.
+        blocks = [
+            b for b in _FENCE.findall(response or "")
+            if not b.lstrip().startswith("{")
+        ]
     if not blocks:
         return None, "no ```toml block in teacher output"
     raw = blocks[-1].strip()

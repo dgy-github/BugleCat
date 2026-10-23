@@ -364,6 +364,180 @@ def test_p2_expanded_genome_surfaces_roundtrip_and_validate():
     assert any("max_entries" in e for e in errs), errs
 
 
+def test_h2_build_contrast_blind_vs_nonblind():
+    base = genome.Genome(system_prompt="base")
+    p0 = forge.Probe(
+        idx=0, kind="control", genome=base, path=Path("p0.toml"),
+        surfaces=[], diff="(control)",
+        trajectory=(
+            "  #01 [tool] read_file (ok, 10ms): a.py\n"
+            "  #02 [tool] bash (ok, 900ms): pytest\n"
+            "  TIMEOUT after 60s — passed=0"
+        ),
+        passed=0, runs=2, mean_tokens=1500.0, mean_s=60.0,
+    )
+    p1 = forge.Probe(
+        idx=1, kind="general", genome=base, path=Path("p1.toml"),
+        surfaces=["system_prompt"], diff="system_prompt: 4 -> 22 chars",
+        trajectory=(
+            "  #01 [tool] read_file (ok, 10ms): a.py\n"
+            "  #02 [tool] edit_file (ok, 15ms): a.py\n"
+            "  #03 [tool] bash (ok, 120ms): pytest -k test_one\n"
+            "  [final_output] all tests passed"
+        ),
+        passed=2, runs=2, mean_tokens=800.0, mean_s=12.0,
+    )
+    blind_txt = forge.build_contrast([p0, p1], blind=True)
+    assert "passes=" not in blind_txt, blind_txt
+    assert "[redacted]" in blind_txt, blind_txt
+    assert "step 2 (control=bash vs probe=edit_file)" in blind_txt, blind_txt
+    assert "<<<UNTRUSTED trajectory tail probe #1" in blind_txt, blind_txt
+
+    open_txt = forge.build_contrast([p0, p1], blind=False)
+    assert "passes=2/2" in open_txt and "passes=0/2" in open_txt, open_txt
+
+
+def test_h2_lesson_library_lifecycle_and_prune_refute():
+    import lesson_lib
+
+    tmp = Path(tempfile.mkdtemp(prefix="forge_lessons_"))
+    lib = lesson_lib.LessonLibrary(
+        tmp / "lessons.jsonl", adopted_path=tmp / "adopted_harnesses.jsonl"
+    )
+    sig = lesson_lib.task_signature(
+        "  #01 [tool] bash (ok, 500ms): pytest\n  TIMEOUT after 120s\n"
+    )
+    assert "timeout" in sig["symptoms"], sig
+
+    # Anti-memorization: lesson containing forbidden task name is rejected
+    leaked = lib.record_lesson(
+        {
+            "symptoms": ["timeout"],
+            "surfaces": ["system_prompt"],
+            "edit_pattern": "special rule for task_secret_42",
+            "why": "fixes task_secret_42",
+        },
+        stamp="S1", round_num=1, task_sig=sig, surfaces=["system_prompt"],
+        margin=1, token_saving=100.0, forbidden_terms=["task_secret_42"],
+    )
+    assert leaked is None
+
+    # Valid lesson is persisted with support=1
+    rec = lib.record_lesson(
+        {
+            "symptoms": ["timeout", "full_suite_pytest"],
+            "surfaces": ["system_prompt", "tool_desc.read_file"],
+            "edit_pattern": "Run targeted pytest -k instead of full test suite",
+            "why": "Avoids 120s timeout on large test suites",
+        },
+        stamp="S1", round_num=1, task_sig=sig,
+        surfaces=["system_prompt", "tool_desc.read_file"],
+        margin=1, token_saving=300.0, forbidden_terms=["task_secret_42"],
+    )
+    assert rec is not None and rec["id"] == "L-0001"
+    hits = lib.retrieve(sig, k=3)
+    assert len(hits) == 1 and hits[0]["id"] == "L-0001", hits
+
+    # Pruned surface increments refute
+    refuted_ids = lib.refute_by_surface(["tool_desc.read_file"], stamp="S1")
+    assert refuted_ids == ["L-0001"]
+
+    # Refute until refute >= support + 2 -> status becomes 'retired'
+    lib.update_outcomes(
+        ["L-0001"], accepted=False, stamp="S1", round_num=2,
+        task_sig_hash=sig["sig_hash"], margin=0, token_saving=0.0, reason="below-margin",
+    )
+    lib.update_outcomes(
+        ["L-0001"], accepted=False, stamp="S1", round_num=3,
+        task_sig_hash=sig["sig_hash"], margin=0, token_saving=0.0, reason="below-margin",
+    )
+    assert lib.retrieve(sig, k=3) == []
+    retired = lib.retired_lessons()
+    assert len(retired) == 1 and retired[0]["id"] == "L-0001", retired
+
+
+def test_h2_ppc_parallel_and_sequential_with_lessons():
+    def h2_eval(genome_path, tasks, repeats, timeout, model=None, keep_trajectory=False):
+        content = Path(genome_path).read_text(encoding="utf-8") if genome_path else ""
+        composed_ok = "COMPOSED_RULE" in content
+        probe_ok = "PROBE_RULE" in content
+        r = ev.EvalResult(genome=str(genome_path))
+        for t in tasks:
+            if t.startswith("hold"):
+                p = 1
+            elif composed_ok or probe_ok:
+                p = 1
+            else:
+                p = 0
+            tok = 700.0 if (composed_ok or probe_ok) else 1200.0
+            traj = (
+                "  #01 [tool] read_file (ok, 10ms): mod.py\n"
+                "  #02 [tool] edit_file (ok, 12ms): mod.py\n"
+                if (composed_ok or probe_ok)
+                else "  #01 [tool] bash (ok, 900ms): pytest\n  TIMEOUT after 60s\n"
+            )
+            r.tasks[t] = ev.TaskResult(
+                task=t, passes=p, runs=1, mean_s=1.0, mean_tokens=tok,
+                failure_trajectory=("" if p else traj),
+                trajectory=(traj if (keep_trajectory or not p) else ""),
+            )
+        return r
+
+    class H2Teacher:
+        name = "h2_mock"
+
+        def __init__(self):
+            self.calls = []
+
+        def propose(self, prompt: str) -> str:
+            self.calls.append(prompt)
+            if "Compose phase" in prompt:
+                return (
+                    '```toml\nsystem_prompt = "COMPOSED_RULE concise verification"\n```\n'
+                    '```json\n'
+                    '{"symptoms": ["timeout"], "surfaces": ["system_prompt"], '
+                    '"edit_pattern": "Use targeted verification before exit", '
+                    '"why": "Probe #1 avoided timeout and used 500 fewer tokens"}\n'
+                    '```'
+                )
+            return '```toml\nsystem_prompt = "PROBE_RULE targeted check"\n```'
+
+    restore = _install(h2_eval)
+    t_backend = H2Teacher()
+    forge.teacher.build_panel = lambda verbose=True: [t_backend]
+    lessons_file = forge.RUNS_DIR / "lessons.jsonl"
+    try:
+        lin = forge.train(
+            rounds=1, train_tasks=["t_alpha"], holdout_tasks=["hold_beta"],
+            repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T_H2_PAR",
+            h2_k=2, h2_mode="parallel", h2_tasks=1, h2_blind=True,
+            lessons_path=lessons_file, enable_lessons=True,
+        )
+        rnd0 = lin["rounds"][0]
+        assert rnd0.get("accept", {}).get("mode") == "pass-gain", rnd0
+        assert len(rnd0.get("h2", [])) == 1, rnd0
+        assert len(rnd0["h2"][0]["probes"]) == 3, rnd0["h2"][0]  # 1 control + 2 probes
+        assert lessons_file.is_file(), "lessons.jsonl should be written on ACCEPT"
+        lessons_data = [
+            json.loads(line)
+            for line in lessons_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(lessons_data) == 1 and lessons_data[0]["support"] == 1, lessons_data
+
+        # Run a second sequential round that retrieves the lesson from round 1
+        lin_seq = forge.train(
+            rounds=1, train_tasks=["t_alpha"], holdout_tasks=["hold_beta"],
+            repeats=1, timeout=10, budget_s=999, teachers="panel", stamp="T_H2_SEQ",
+            h2_k=2, h2_mode="sequential", h2_tasks=1, h2_blind=True,
+            lessons_path=lessons_file, enable_lessons=True,
+        )
+        rnd_seq = lin_seq["rounds"][0]
+        assert "L-0001" in rnd_seq["h2"][0]["lessons_used"], rnd_seq["h2"][0]
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

@@ -99,16 +99,63 @@ pub(super) fn build_verify_task(task: &str, plan: &str, results: &[String]) -> S
 }
 
 pub(super) fn synthesize(results: &[String], best: usize, verdict: &str, passed: bool) -> String {
-    let result = results
+    synthesize_composed(results, &[best], verdict, passed)
+}
+
+pub(super) fn synthesize_composed(
+    results: &[String],
+    composed: &[usize],
+    verdict: &str,
+    passed: bool,
+) -> String {
+    let best = composed.first().copied().unwrap_or(0);
+    let mut result = results
         .get(best)
         .or_else(|| results.first())
         .cloned()
         .unwrap_or_default();
+    if composed.len() > 1 {
+        let extras = composed
+            .iter()
+            .skip(1)
+            .filter_map(|&idx| {
+                results
+                    .get(idx)
+                    .map(|text| format!("[Composed from Worker {}]\n{text}", idx + 1))
+            })
+            .collect::<Vec<_>>();
+        if !extras.is_empty() {
+            result = format!("{result}\n\n{}", extras.join("\n\n"));
+        }
+    }
     if passed {
         result
     } else {
         format!("{result}\n\n[unverified after retries — reviewer said: {verdict}]")
     }
+}
+
+/// Harness² Propose–Probe–Compose: when a multi-worker round fails verification,
+/// combine the reviewer verdict with a bounded digest of all workers' probe
+/// findings so the next round can compose complementary insights across workers.
+pub(super) fn build_compose_feedback(results: &[String], verdict: &str) -> String {
+    if results.len() < 2 {
+        return verdict.to_string();
+    }
+    let mut peer_digest = Vec::with_capacity(results.len());
+    for (idx, text) in results.iter().enumerate() {
+        let snippet: String = text.trim().chars().take(240).collect();
+        if !snippet.is_empty() {
+            peer_digest.push(format!("- Worker {}: {snippet}", idx + 1));
+        }
+    }
+    if peer_digest.is_empty() {
+        return verdict.to_string();
+    }
+    format!(
+        "{verdict}\n\n[Propose-Probe-Compose Peer Digest — combine complementary findings and avoid repeated traps]:\n{}",
+        peer_digest.join("\n")
+    )
 }
 
 pub(super) fn synthesize_subtasks(results: &[String], verdict: &str, passed: bool) -> String {
@@ -136,4 +183,31 @@ pub(super) fn parse_best_worker(verdict: &str, count: usize) -> usize {
         .map(|value| value.saturating_sub(1))
         .unwrap_or(0);
     index.min(count.saturating_sub(1))
+}
+
+/// Parse optional `COMPOSE:<n1>,<n2>...` (1-based worker numbers) from verifier
+/// output. Always returns `best` as the first element, followed by any valid
+/// distinct secondary worker indices `< count`.
+pub(super) fn parse_compose_workers(verdict: &str, count: usize, best: usize) -> Vec<usize> {
+    let mut indices = vec![best.min(count.saturating_sub(1))];
+    if count <= 1 {
+        return indices;
+    }
+    let upper = verdict.to_uppercase();
+    if let Some(pos) = upper.find("COMPOSE:") {
+        let tail = &verdict[pos + "COMPOSE:".len()..];
+        let line = tail.lines().next().unwrap_or("");
+        for token in line.split(|c: char| c == ',' || c == '+' || c.is_whitespace()) {
+            let digits: String = token.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(one_based) = digits.parse::<usize>() {
+                if one_based >= 1 {
+                    let zero_based = (one_based - 1).min(count - 1);
+                    if !indices.contains(&zero_based) {
+                        indices.push(zero_based);
+                    }
+                }
+            }
+        }
+    }
+    indices
 }

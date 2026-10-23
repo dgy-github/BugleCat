@@ -102,6 +102,13 @@ pub trait AgentRunner {
     async fn promote_worker(&self, _idx: usize) -> Result<(), String> {
         Ok(())
     }
+
+    /// Harness² Propose–Probe–Compose: promote primary worker (`indices[0]`) and
+    /// compose any non-conflicting file changes from secondary workers (`indices[1..]`).
+    async fn compose_workers(&self, indices: &[usize]) -> Result<(), String> {
+        let primary = indices.first().copied().unwrap_or(0);
+        self.promote_worker(primary).await
+    }
 }
 
 #[derive(Debug, Clone)]

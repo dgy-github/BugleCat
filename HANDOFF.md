@@ -1,8 +1,8 @@
 # HANDOFF — nanocodex (Rust 线)
 
-### 2026-10-23：自进化 Harness 改进方案与版本优化详单（对照 Google RRSI / Harness²，P0–P3 已完整落地）
+### 2026-10-23：自进化 Harness 改进方案与版本优化详单（对照 Google RRSI / Harness²，P0–P4 已完整落地）
 
-- **完整方案**：[`harness_self_evolution_plan.md`](C:/Users/25376/.gemini/antigravity/brain/67c0cf6c-b237-42b2-96ca-824d99ff2886/harness_self_evolution_plan.md)（会话 artifact，以本节详单为准）。
+- **完整方案文档**：[`docs/self-evolving-harness-rrsi-harness2.zh-CN.md`](docs/self-evolving-harness-rrsi-harness2.zh-CN.md) 与 [`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)（均已入库 `docs/`，与本节详单同步）。
 - **论文依据的可信度**：RRSI（`google-research/rrsi`，arXiv:2609.24972）与 Harness²（arXiv:2610.14224）的内容来自搜索摘要和 README 摘要，没有通读全文。下文标【论文】的是论文写明的做法，标【引申】的是本项目自己的设计。
 - **现状扫描：已有三层自进化回路，但互不相通，也都缺"正则化"**
   - L0 任务内：`orchestrator.rs` 让 workers×N 在隔离副本里试跑，再由 verify 选优并在失败时重试。相当于 Harness² Propose–Probe–Compose 的前两步，**没有 Compose**。
@@ -161,6 +161,33 @@
     - 在 [`outcome.rs`](rust/crates/ncx-core/src/outcome.rs) 的 `Some(true)` 分支中，检查当前任务的资源消耗是否属于高消耗轮次（`expensive_turn = iterations > 16 || tool_calls > 24 || total_tokens > 80_000`）：
       - 若为常规低消耗轮次，保持全部召回笔记 `accepted + 1`；
       - 若为**高消耗轮次**，逐条核对召回笔记内容是否提及本轮实际修改的文件名（`files_modified` basename）：**仅命中实际修改文件的召回笔记获得 `accepted + 1`，未命中的搭便车笔记调用 `record_unhelpful_injection`（仅记 `injected + 1`）**，通过贝叶斯平滑乘子 `feedback_multiplier` 自动压低无关笔记的后续召回排名。
+
+- **P3.6 负向回归护栏记忆（[`memory.rs::MemoryStore::record_regression_guardrail`](rust/crates/ncx-core/src/memory.rs) & [`outcome.rs`](rust/crates/ncx-core/src/outcome.rs)）**
+  - 当某次修改在 `outcome.rs` 的 `Some(false)` 分支中被判定为破坏已有功能的**回归**（例如裁判报告 `p2p_regressed > 0`、负向标签含 `regress`/`回归`，或触发 Checkpoint `Rollback`）时，在清除本轮错误正向笔记后，自动按修改过的非测试模块写入或原地更新一条负向护栏：
+    `[Regression Guardrail: <module_path>] Caution editing <module_path>: prior patch caused regression (<reason>); run full module tests to preserve pass-to-pass behavior.`（标签：`["guardrail", "regression"]`，同样按规范化头部计算稳定 `note_id` 并享有结构性召回加权）。
+
+---
+
+##### 5. P4：Harness² 任务内 `Propose–Probe–Compose` 闭环（`rust/crates/ncx-core/src/`）
+
+- **P4.1 跨 Worker 非冲突文件级组合（[`workspace_promotion.rs::compose_with_paths`](rust/crates/ncx-core/src/workspace_promotion.rs) & [`orchestrator_runner.rs::compose_workers`](rust/crates/ncx-core/src/orchestrator_runner.rs)）**
+  - 突破传统 Best-of-$N$ 只取单一 `BEST:<n>`、丢弃其余 $N-1$ 个 Worker 成果的限制：当 Verifier 在输出 `BEST:i` 的同时给出 `COMPOSE:i,j`（由 [`orchestrator/support.rs::parse_compose_workers`](rust/crates/ncx-core/src/orchestrator/support.rs) 解析，主 Worker 排首位）时，`Orchestrator::run_attempts` 调用 `runner.compose_workers(&composed)`。
+  - `compose_with_paths` 优先提升主 Worker（`composed[0]`）相对于 `baseline` 的全部变更，并将次级 Worker（`composed[1..]`）在**主 Worker 未触碰的文件（或内容 SHA-256 指纹完全相同的文件）**上的变更自动合并提升至真实工作区（重叠且指纹不同的文件严格保留主 Worker 版本，杜绝半文件冲突），同时合并全部参与组合 Worker 的 `SubrunTelemetry` 与结果摘要（`synthesize_composed`）。
+
+- **P4.2 失败重试轮次的跨 Worker 探测合成（[`orchestrator/support.rs::build_compose_feedback`](rust/crates/ncx-core/src/orchestrator/support.rs)）**
+  - 当首轮 $N \ge 2$ 个隔离 Worker 均未通过验证（`!verify_passed`）进入重试轮次时，`build_compose_feedback(&worker_results, &verdict)` 自动将 Verifier 的审查意见与所有 Worker 的探测结论摘要（`[Propose-Probe-Compose Peer Digest — combine complementary findings and avoid repeated traps]`）合成为下一轮输入，使下一轮 Worker 能够融合各分支的互补定位成果并避开已踩陷阱。
+
+- **P4.3 `train/forge.py` 离线 Harness² `Propose–Probe–Compose` (PPC) 与跨轮元记忆库（[`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)）**
+  - **单任务同条件多候选 Probe 与无裁判行为对比（[`train/forge.py`](train/forge.py) & [`train/evaluator.py`](train/evaluator.py)）**：
+    - `evaluator.evaluate(..., keep_trajectory=True)` 在任务通过时也保留行为轨迹（`TaskResult.trajectory`）；
+    - 当传入 `--h2-k K`（支持 `--h2-mode parallel|sequential`、`--h2-tasks`、`--h2-probe-repeats`、`--h2-workers`、`--h2-blind`/`--no-h2-blind`）时，`_h2_round` 对同一失败任务先跑 incumbent 对照（`Probe #0`），再生成 $K$ 个候选（奇偶交替 `"general"` 与 `"domain"`）并在相同任务上并行或递归串行执行 `_run_probes`；
+    - `build_contrast(probes, blind=True)` 确定性提取工具调用序列、首个分歧步、步数差、Token 差、超时状态与末尾轨迹；默认 `blind=True` 隐藏并擦除 pass/fail 裁判结果，防止对 grader 过拟合；
+    - `teacher.build_h2_compose_prompt` 驱动 Teacher 从 $K+1$ 条行为对比中合成 1 个 `composed` Genome（````toml` 块）与 1 条元经验草案（````json` 块，`parse_lesson`）；合成越界或未过 `validate`/`critic_check` 时自动回退到最佳已验证单 Probe 候选，随后统一走外层全量 `train + holdout` 双通道成本门。
+  - **跨轮改进库（Harnessing-Level Recursion，[`train/lesson_lib.py`](train/lesson_lib.py)）**：
+    - 维护跨 `stamp` 持久化的 `train/runs/lessons.jsonl` 与 `adopted_harnesses.jsonl`；
+    - `task_signature(traj)` 确定性提取失败症状标签（`timeout`、`repeated full-suite pytest`、`patch_failed`、`repeated_tool_call` 等）与关键词；`LessonLibrary.retrieve(sig, k=5)` 按症状/关键词重叠度乘以 Beta 平滑后验 `(support + 1) / (support + refute + 2)` 检索 `active` 经验；
+    - 仅在外层 `train + holdout` 门验收通过（`ACCEPT`）后才将新 lesson 落盘（`support=1`，并执行与 `critic_check` 同源的反记忆化题名拦截与同模式压实合并）；被拒时对本轮引用的 lesson 记 `refute += 1`，`--prune` 剪掉冗余表面时调用 `refute_by_surface` 反写 `refute += 1`；当 `refute >= support + 2` 时自动转为 `status = "retired"` 并作为证伪禁令注入后续 Propose 提示词。
+  - **回放评测器接入 `--genome PATH`（[`evals/compounding_replay/replay.py`](evals/compounding_replay/replay.py)）**：支持直接传入 `forge.py` 产出的 Champion Genome TOML（自动注入 `NCX_GENOME` 环境变量），用于 `B` vs `B-RRSI` vs `B-H2p` vs `B-H2s` vs `B-H2p+L` 配对评测。
 
 ---
 

@@ -5,7 +5,7 @@
 ## 最新更新（2026-10-23）
 
 > [!IMPORTANT]
-> **第三阶段里程碑（2026-10-23）：自进化 Harness 正则化（对照 Google RRSI / Harness²，P0–P3 全量落地）与配对复利回放实证**
+> **第三阶段里程碑（2026-10-23）：自进化 Harness 正则化（对照 Google RRSI / Harness²，P0–P4 全量落地）与配对复利回放实证**
 > - **P0 —— 噪声校准配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）与第二基准仓库（`python-tabulate`）**：
 >   * **统计配对与噪声下限校准**：引入单臂噪声下限校准（解决数按 Jeffreys 平滑伯努利方差求 $\delta_{\text{resolved}}$，成本按逐题样本方差和求 $\delta_{\text{cost}}$）与双臂逐题配对检验（精确 McNemar 检验 + 4000 次按题配对 Bootstrap 95% 置信区间 + 解决率非劣效护栏）。
 >   * **第二真实仓库题库（`astanin/python-tabulate`）**：加固 [`mine_tasks.py`](evals/compounding_replay/mine_tasks.py)（新增 `--body` 全文检索与合并提交支持、`issue["created_at"] <= fixed_at` 时间戳护栏精准拦截 7 个早年 Bitbucket 编号错配任务），通过 [`validate_gold.py`](evals/compounding_replay/validate_gold.py) 完成 9/9 官方黄金补丁验证。
@@ -17,9 +17,12 @@
 >   * **双通道成本感知验收门与盘后消融剪枝（`--prune`）**：支持「通过数提升 + `--max-token-growth` 防膨胀护栏」或「同分下显著节省 Token（`>= --delta-tokens`）」双通道晋级，并在搜索结束后对最终 Champion 逐面回滚重评，剔除零收益的搭便车冗余修改。
 > - **P2 —— 扩大 `NCX_GENOME` 可进化面（`rust/` + `train/`）**：
 >   * 在保持空 Genome 100% 字节级 No-op 等价保证（且不触碰冻结文件 `prompt.rs`）的前提下，新增 `[orchestrator_prompts]`（覆盖 `classify_sys`、`plan_sys`、`decompose_sys`、`worker_sys`、`verify_sys`）与有界 `[memory_config]`（`max_entries` $\in [1, 32]$、`max_chars` $\in [200, 16000]$），打通 `ncx --dump-genome` 与 `train/genome.py` 双向校验。
-> - **P3 —— 在线记忆双层结构化与成本感知归因（`rust/crates/ncx-core/`）**：
->   * **模块级不变量提炼（`promote_module_invariant_if_due`）**：当同一模块在外部裁判确认通过（`Accepted`）后累计达到 `>= 2` 条验证笔记时，自动合并提炼结构化模块不变量 `[Module Invariant: <module_path>]`（赋予 `+6` 召回优先级加分，并按规范化头部哈希保持原地更新时 `note_id` 与历史权重不变），同时将该模块名下的旧单题情景笔记裁剪至最多 `MAX_EPISODIC_PER_MODULE = 2` 条并同步重建 SQLite 索引（`rebuild_from_markdown`）。
+> - **P3 —— Harness² 在线记忆双层结构化、负向回归护栏与成本感知归因（`rust/crates/ncx-core/`）**：
+>   * **模块级不变量提炼（`promote_module_invariant_if_due`）与负向回归护栏（`record_regression_guardrail`）**：当同一模块在外部裁判确认通过（`Accepted`）后累计达到 `>= 2` 条验证笔记时，自动合并提炼结构化模块不变量 `[Module Invariant: <module_path>]`（赋予 `+6` 召回优先级加分，并按规范化头部哈希保持原地更新时 `note_id` 与历史权重不变），同时将该模块名下的旧单题情景笔记裁剪至最多 `MAX_EPISODIC_PER_MODULE = 2` 条并同步重建 SQLite 索引（`rebuild_from_markdown`）；当某次修改导致 `pass_to_pass` 回归或 `Rollback` 时，自动按模块提炼 `[Regression Guardrail: <module_path>]` 负向护栏。
 >   * **召回预算收紧与高消耗轮次精准打折（`record_unhelpful_injection`）**：默认召回上限从 `8 条 / 4000 字符` 收紧至 `6 条 / 2400 字符`；当高消耗轮次（`iterations > 16 || tool_calls > 24 || total_tokens > 80_000`）完成时，仅命中实际修改文件名的召回笔记获得 `accepted + 1`，未命中的搭便车笔记仅记 `injected + 1`。在 `tabulate` Arm B' 实测（`20261023-115758-B-tab-p3-r1`）中，`learnings_entries` 从第 4 题到第 9 题全程稳定封顶在 `6` 条，总成本 `1.413` 元（较 Arm A 均值下降 `10.9%`）。
+> - **P4 —— Harness² 运行时与离线进化双层 `Propose–Probe–Compose` 闭环（[`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs)、[`train/forge.py`](train/forge.py)、[`train/lesson_lib.py`](train/lesson_lib.py)）**：
+>   * **运行时多 Worker 非冲突文件级组合（`compose_with_paths` / `COMPOSE:i,j`）与重试探测合成（`build_compose_feedback`）**：当 Verifier 在输出 `BEST:i` 的同时给出 `COMPOSE:i,j` 时，`HarnessAgentRunner::compose_workers` 优先提升主 Worker 的全部修改，并将次级 Worker 在不冲突文件（主 Worker 未触碰或 SHA-256 指纹完全相同）上的修改自动组合提升到工作区；当首轮 $N \ge 2$ 个 Worker 未通过验证进入重试时，自动将 Verifier 审查意见与所有 Worker 的探测结论摘要（`[Propose-Probe-Compose Peer Digest]`）合成为下一轮输入。
+>   * **离线 `ncx-forge` PPC（`--h2-k`、`--h2-mode parallel|sequential`、`--h2-blind`）与跨轮改进库（[`train/lesson_lib.py`](train/lesson_lib.py)）**：对单一失败任务在同条件下探测 incumbent 对照 + $K$ 个通用/领域特定候选（`keep_trajectory=True`），确定性生成隐藏裁判结果的纯行为对比（`build_contrast`），由 Teacher 合成 1 个 `composed` Genome 与 1 条元经验草案（越界时自动回退至最佳合法 Probe 候选），再进入外层全量 `train + holdout` 双通道门。`LessonLibrary`（`lessons.jsonl` + `adopted_harnesses.jsonl`）按症状重叠度 $\times$ Beta 后验 `(support+1)/(support+refute+2)` 检索经验，在外层门通过/被拒与 `--prune` 消融时更新 `support`/`refute`，并在 `refute >= support + 2` 时自动退役为证伪禁令；[`replay.py`](evals/compounding_replay/replay.py) 新增 `--genome PATH` 支持直接回放评测进化产物（详见 [`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)）。
 >
 > ---
 >
@@ -63,6 +66,10 @@
 🛡️ **[上下文压缩安全协议](docs/context-compression-safety-protocol.zh-CN.md)** —— 解释 Coding Agent 为什么会在压缩后发生任务状态漂移，以及如何用任务快照、决策溯源、Git 证据和只读恢复控制风险。
 
 📈 **[智能复利回流与 60 分奇点方案](docs/intelligence-compounding-feedback-plan.zh-CN.md)** —— 详解 BugleCat 如何将过程与结果数据串联为「行动 → 结果（`TaskOutcome` + `OutcomeFollowup`）→ 反馈 → 学习（有界记忆调权 + 路由单调升级 + 复合恢复链沉淀）」的闭环，并持续度量无人工介入完成率（ACR）与 60 分奇点距离。
+
+🧬 **[自进化 Harness 架构与实现方案（对照 Google RRSI & Harness²）](docs/self-evolving-harness-rrsi-harness2.zh-CN.md)** —— 详解 BugleCat 如何打通 L0 任务内 `Propose–Probe–Compose`（Harness²）、L1 跨任务双层记忆（模块不变量 vs 单题情景）与负向回归护栏（Harness²）、以及 L2 离线 `ncx-forge` 正则化基因组进化（RRSI），并给出配对 Bootstrap 回放实证。
+
+🧬 **[Harness² 接入 forge 技术说明](docs/harness2-forge-integration.zh-CN.md)** —— 设计稿：在 `train/forge.py` 中引入 Harness² 的 Propose–Probe–Compose 任务级递归与跨任务经验库，并与现有 RRSI 正则化关卡衔接。
 
 [![BugleCat 桌面端真实截图：Tauri + Svelte 桌面客户端](assets/buglecat-desktop-real.png)](nanocodex.html)
 
@@ -204,10 +211,11 @@ agent 循环、工具体验、审批模型和桌面流程跑通，再决定哪�
    - **多仓库冷启动回填（`ncx --outcomes bootstrap <paths...>`）**：扫描本地多个历史项目的 `.nanocodex/session.jsonl`，自动回填 `_trace` 链路并提取历史 `TaskOutcome` 与 `OutcomeFollowup` 写入全局指标库 `~/.nanocodex/global-outcomes/context.sqlite`。
    - **GUI「ACR & 60 分奇点仪表盘」**：在 Tauri 桌面端右侧 **「记忆」** 面板顶部提供可视化卡片，实时展示近 30 天 `ACR-strict`、面向 60% 奇点线的 Wilson 95% 下界进度条、四大核心类别各自的样本进度（`n/30`）与奇点达标徽章，以及 14 天 Shadow 基线就绪状态。
 
-6. **自进化 Harness 正则化体系（P0–P3：配对复利回放校准、RRSI 离线进化与双层在线记忆）**
+6. **自进化 Harness 正则化体系（P0–P4：配对复利回放校准、RRSI 离线进化、双层在线记忆与 Propose–Probe–Compose）**
    - **噪声校准与逐题配对评测（[`evals/compounding_replay/analyze.py`](evals/compounding_replay/analyze.py)）**：标定单臂噪声下限（$\delta_{\text{resolved}}$、$\delta_{\text{cost}}$），并对真实仓库长课程（`sqlparse`、`python-tabulate`）执行精确 McNemar 检验与按题配对 Bootstrap 95% 置信区间估计（在 `python-tabulate` 3 轮配对回放中，`cost_per_resolved` 比值 `B/A = 0.7904`，配对 95% CI `[0.6239, 0.9523]`）。
    - **离线进化 RRSI 正则化（`train/forge.py`、`NCX_GENOME`）**：将 `NCX_GENOME` 扩展至 `system_prompt`、`tool_descriptions`、`orchestrator_prompts`（5 个编排阶段提示词）与有界 `memory_config`（`max_entries`、`max_chars`），并配套按轮退火编辑预算、规则版反作弊审查器（`critic_check`）、证伪假设账本（`ledger_<stamp>.jsonl`）、连续停滞转向、双通道成本感知验收门与盘后结构化消融剪枝（`--prune`）。
-   - **双层在线记忆与成本感知归因（`MemoryStore::promote_module_invariant_if_due`）**：区分单题情景层（每模块最多保留 `MAX_EPISODIC_PER_MODULE = 2` 条）与模块级不变量层（`[Module Invariant: <module_path>]`，`+6` 结构性召回加分，按规范化头部哈希稳定保留 `note_id` 与反馈权重），配合高消耗轮次搭便车笔记精准打折（`record_unhelpful_injection`），彻底消除长课程下在线记忆无限膨胀的问题。
+   - **Harness² 双层在线记忆与负向回归护栏（`MemoryStore::promote_module_invariant_if_due`、`record_regression_guardrail`）**：区分单题情景层（每模块最多保留 `MAX_EPISODIC_PER_MODULE = 2` 条）、模块级不变量层（`[Module Invariant: <module_path>]`，`+6` 结构性召回加分，按规范化头部哈希稳定保留 `note_id` 与反馈权重）与负向回归护栏（`[Regression Guardrail: <module_path>]`，在发生 `pass_to_pass` 回归或 `Rollback` 时自动写入），配合高消耗轮次搭便车笔记精准打折（`record_unhelpful_injection`）。
+   - **Harness² 任务内 `Propose–Probe–Compose`（[`orchestrator.rs`](rust/crates/ncx-core/src/orchestrator.rs)、[`workspace_promotion.rs`](rust/crates/ncx-core/src/workspace_promotion.rs)）**：支持 Verifier 给出 `COMPOSE:i,j` 时的多 Worker 非冲突文件级组合（`compose_with_paths`）与失败重试轮次的跨 Worker 探测结论合成（`build_compose_feedback`）。
 
 ## 目录
 

@@ -405,3 +405,31 @@ async fn parse_subtasks_falls_back_to_lists() {
     // Explicit SUBTASK: prefixes take priority (no list fallback then).
     assert_eq!(parse_subtasks("SUBTASK: x\n1. y"), vec!["x"]);
 }
+
+#[tokio::test]
+async fn verifier_composes_multiple_workers_and_builds_compose_feedback() {
+    let m = MockRunner::new("medium", vec!["PASS composed\nBEST:2\nCOMPOSE:2,1,3"]);
+    let o = Orchestrator::new(
+        &m,
+        OrchestratorConfig {
+            workers: 3,
+            high_workers: 3,
+            max_verify_retries: 1,
+            max_depth: 1,
+            max_subtasks: 6,
+        },
+    );
+    let out = o.handle("compose disjoint fixes").await;
+    assert!(out.verify_passed);
+    assert_eq!(out.best_worker, 1);
+    assert!(out.final_text.contains("[Composed from Worker 1]"));
+    assert!(out.final_text.contains("[Composed from Worker 3]"));
+
+    let fb = build_compose_feedback(
+        &["fixed parser".to_string(), "added edge test".to_string()],
+        "FAIL missing import",
+    );
+    assert!(fb.contains("[Propose-Probe-Compose Peer Digest"));
+    assert!(fb.contains("- Worker 1: fixed parser"));
+    assert!(fb.contains("- Worker 2: added edge test"));
+}

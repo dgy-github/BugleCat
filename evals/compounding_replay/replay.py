@@ -253,6 +253,8 @@ def main() -> int:
     ap.add_argument("--ids", default="", help="comma-separated task ids (overrides offset/limit)")
     ap.add_argument("--seed-label", default="r1", help="repeat label; also seeds arm D shuffle")
     ap.add_argument("--ncx", default=str(ROOT / "rust" / "target" / "release" / "ncx.exe"))
+    ap.add_argument("--genome", default="",
+                    help="optional path to an NCX_GENOME .toml file (e.g. from train/forge.py)")
     ap.add_argument("--max-iterations", type=int, default=20)
     ap.add_argument("--timeout", type=int, default=900, help="seconds per agent run")
     ap.add_argument("--round-budget", type=float, default=2.0, help="CNY per round")
@@ -291,6 +293,11 @@ def main() -> int:
         PIP_NO_INDEX="1",
         PIP_DISABLE_PIP_VERSION_CHECK="1",
     )
+    if args.genome:
+        genome_path = Path(args.genome).resolve()
+        if not genome_path.is_file():
+            sys.exit(f"missing --genome file: {genome_path}")
+        env["NCX_GENOME"] = str(genome_path)
     spent, results = 0.0, []
     out_f = (run_dir / "results.jsonl").open("w", encoding="utf-8")
     for idx, task in enumerate(tasks):
