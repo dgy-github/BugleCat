@@ -12,8 +12,12 @@ model = "deepseek-chat"
 # model = "Qwen3.6-27B-Q4_K_M"
 
 sandbox_mode = "workspace-write"
+# OS-level shell sandbox on Windows (off | enforce, default off; env NCX_OS_SANDBOX).
+os_sandbox = "off"
 approval_policy = "on-request"
 reasoning_effort = "auto"
+# Claim & pre-execution action review mode (off | shadow | enforce, default off; env NCX_JEV_MODE).
+jev_mode = "off"
 
 # Online compounding feedback modes (off | shadow | on, default shadow).
 # Switching to "on" requires >= 14 days of shadow telemetry and >= 2 core categories with n >= 30.

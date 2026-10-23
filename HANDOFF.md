@@ -1,5 +1,32 @@
 # HANDOFF — nanocodex (Rust 线)
 
+### 2026-10-23（晚）：Windows AppContainer OS 级沙箱隔离与 Jev 工具执行前动作复核（`3d28840`）
+
+- **1. Windows AppContainer OS 级 Shell 沙箱隔离（`os_sandbox = "off" | "enforce"`，默认 `"off"`）**
+  - **实现位置**：[`rust/crates/ncx-tools/src/appcontainer.rs`](rust/crates/ncx-tools/src/appcontainer.rs)、[`rust/crates/ncx-tools/src/os_isolation.rs`](rust/crates/ncx-tools/src/os_isolation.rs)、[`rust/crates/ncx-tools/src/executor.rs`](rust/crates/ncx-tools/src/executor.rs)、[`rust/crates/ncx-tools/src/managed.rs`](rust/crates/ncx-tools/src/managed.rs)、[`rust/crates/ncx-sandbox/src/policy.rs`](rust/crates/ncx-sandbox/src/policy.rs)、[`rust/crates/ncx-config/src/config.rs`](rust/crates/ncx-config/src/config.rs)。
+  - **机制细节**：
+    - 新增配置项 `os_sandbox`（环境变量 `NCX_OS_SANDBOX`，支持 `"off" | "enforce"`）。当设为 `"enforce"` 且 `sandbox_mode != "danger-full-access"` 时，`SandboxPolicy::os_enforced` 置为 `true`。
+    - `OsIsolation::from_policy` 将当前 `SandboxPolicy` 映射为容器权限边界：
+      - **`writable_roots`**：写允许时包含 `workspace`、`writable_roots` 及开启 `allow_temp_write` 时的系统临时目录（`read-only` 模式下 `writable_roots` 为空）；
+      - **`readable_roots`**：由 `toolchain_roots` 从 `PATH` 自动推导工具链根目录（如 `D:\py\Scripts` 自动映射其父目录 `D:\py`，`.cargo` 自动附带同级 `.rustup`），并支持 `NCX_OS_SANDBOX_READ_ROOTS` 追加只读根；严格排除 `%USERPROFILE%`、盘符根目录及其祖先目录，防止暴露 `~/.ssh` 或用户凭据；
+      - **`network`**：仅当 `policy.network_access == true` 时向 AppContainer 授予 `WELL_KNOWN_SID_TYPE::WinCapabilityInternetClientSid` 出站网络能力。
+    - Windows 下通过 `CreateAppContainerProfile` / `DeriveAppContainerSidFromAppContainerName` 创建无状态 AppContainer Profile，按 `SetNamedSecurityInfoW` 为 `writable_roots` / `readable_roots` 挂载容器 SID 的 DACL，并用 `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` 启动进程（同时仍受 kill-on-close Job Object 整树生命周期管控）。
+    - 用户在审批中显式批准的单次提权命令（escalated）在该次执行中绕过 AppContainer；非 Windows 平台在请求 `os_sandbox = "enforce"` 时直接返回错误（fail-closed）。
+
+- **2. Jev 工具执行前动作复核（Pre-Execution Action Review，`jev-action-review-v1`）**
+  - **实现位置**：[`rust/crates/ncx-core/src/verification/action_review.rs`](rust/crates/ncx-core/src/verification/action_review.rs)、[`rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs`](rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs)、[`rust/crates/ncx-provider/src/jev.rs`](rust/crates/ncx-provider/src/jev.rs)、[`rust/crates/ncx-core/src/agent_loop/tests/action_review_tests.rs`](rust/crates/ncx-core/src/agent_loop/tests/action_review_tests.rs)、[`evals/verification/README.md`](evals/verification/README.md)。
+  - **机制细节**：
+    - 模型保持自主决策；只读工具调用不复核，**非只读工具调用**（写文件、`shell`、`apply_patch`、`str_replace_editor`、`background_start` 等）在通过沙箱/审批后、实际执行前，调用 `review_tool_action` 向 Jev 一次查询三个 Noul：
+      1. `not_requested`：用户未要求或不会预期该动作；
+      2. `exceeds_scope`：越出用户允许范围或违反明确限制；
+      3. `irreversible`：动作难以撤销（仅记录供后续校准）。
+    - 复用 `jev_mode`（`"off" | "shadow" | "enforce"`）与 `NCX_JEV_API_KEY`，单次超时 4s、无重试；`NCX_JEV_MODEL_ENABLED=0` 可关闭全部 Jev 调用。
+    - **`shadow` 模式**：只记录，不拦截；
+    - **`enforce` 模式**：仅当设置了 `NCX_JEV_ACTION_THRESHOLD`（`0.5..=1.0`）且 `not_requested >= threshold` 或 `exceeds_scope >= threshold` 时拦截该调用，向模型返回 `Error: tool '<name>' was held by the pre-execution review (...)`；未设阈值时行为与 `shadow` 相同；
+    - **Fail-open 与隐私脱敏落盘**：缺 key、含敏感输入、取消、超时或响应格式不合格时一律放行（fail-open），状态如实记入 `.nanocodex/sessions/<session>.action_review.jsonl`（schema `buglecat.action_review.record.v1`，仅存参数 SHA-256 哈希，不存参数原文）。
+
+---
+
 ### 2026-10-23：自进化 Harness 改进方案与版本优化详单（对照 Google RRSI / Harness²，P0–P4 已完整落地）
 
 - **完整方案文档**：[`docs/self-evolving-harness-rrsi-harness2.zh-CN.md`](docs/self-evolving-harness-rrsi-harness2.zh-CN.md) 与 [`docs/harness2-forge-integration.zh-CN.md`](docs/harness2-forge-integration.zh-CN.md)（均已入库 `docs/`，与本节详单同步）。

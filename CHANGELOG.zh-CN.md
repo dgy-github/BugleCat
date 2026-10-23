@@ -14,7 +14,8 @@ BugleCat 按日期记录的更新说明。[README](README.zh-CN.md) 描述当前
 - **forge 验收门高于噪声**：候选须以采样噪声下限（`--noise-z`）以上的幅度胜过现任 champion；默认 `--repeats 3`、`--accept-margin 2`；接受后重评 holdout；lesson 只在 compose 声明实际采用时才记功记过。
 - **回归护栏**：否定措辞（"no regressions"、"未引入回归"）与单纯的 Rollback 不再写入回归护栏，同一模块后续验证成功会清除护栏。
 - **文档**：2026-10-19 条目中提到的 `memory_auto_promote_enabled` 只写在文档里，从未实现；已验证笔记的自动晋升只在 `[feedback] memory = "on"` 时发生。该配置项已从 README 和 `config.example.toml` 中移除。
-- **仍未解决**：shell 命令靠策略与命令行检查拦截，没有 OS 层面的文件系统/网络隔离（见 [沙箱与审批](README.zh-CN.md#沙箱与审批)）。
+- **Windows AppContainer OS 级 shell 沙箱隔离（`os_sandbox = "enforce"` / `NCX_OS_SANDBOX=enforce`，`ncx-tools::appcontainer`、`ncx-tools::os_isolation`）**：在 Windows 上开启后，非提权 shell 命令与后台进程运行在操作系统强制约束的 AppContainer 中，仅对 `writable_roots`（工作区 + 配置的可写根 + 允许时的 `%TEMP%`）授予写 DACL，对从 `PATH` 推导的工具链目录（及 `NCX_OS_SANDBOX_READ_ROOTS`，排除 `%USERPROFILE%` 和盘符根目录）授予读/执行 DACL，并仅在 `policy.network_access` 为真时授予 `internetClient` 网络能力。非 Windows 平台请求 `"enforce"` 时 fail-closed；默认保持 `"off"`（策略级）。
+- **Jev 工具执行前动作复核（`ncx-core::verification::action_review`，模板 `jev-action-review-v1`）**：在执行非只读工具调用（`shell`、`apply_patch`、`str_replace_editor`、`background_start` 等）前，以 4 秒单次无重试（fail-open）向 Jev 询问三个 Noul（`not_requested`、`exceeds_scope`、`irreversible`），并将脱敏记录（仅含参数 SHA-256）写入 `.nanocodex/sessions/<session>.action_review.jsonl`。`shadow` 模式仅记录；`enforce` 模式下设置 `NCX_JEV_ACTION_THRESHOLD`（`0.5..=1.0`）后，当 `not_requested` 或 `exceeds_scope` 达到阈值时拦截该工具调用（详见 [`evals/verification/README.md`](evals/verification/README.md)）。
 
 ## 2026-10-23 —— 第三阶段里程碑：自进化 Harness 正则化（对照 Google RRSI / Harness²，P0–P4 全量落地）与配对复利回放实证
 

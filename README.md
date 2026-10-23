@@ -29,19 +29,24 @@ Design documents (Chinese):
   `nanocodex/` package is kept as the legacy reference implementation; the old
   name survives in `~/.nanocodex/`, `NANOCODEX_*` variables, and Python commands
   for compatibility.
-- **Latest release:** [`v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2)
-  — Windows installer and portable bundle, macOS DMGs.
-- **Latest changes (2026-10-23):** post-review fixes to shell approval, process
+- **Latest release:** [`v0.1.3`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.3)
+  — Windows installer and portable bundle (`v0.1.2` also includes macOS DMGs).
+- **Latest changes (2026-10-23):** Windows AppContainer OS-level shell isolation
+  (`os_sandbox = "enforce"`), Jev pre-execution action review for non-read-only
+  tools (`action_review.rs`), plus post-review fixes to shell approval, process
   containment, Propose–Probe–Compose, forge acceptance, and memory guardrails —
   see the [Changelog](CHANGELOG.md).
 - **Defaults worth knowing:** `sandbox_mode = "workspace-write"`,
-  `approval_policy = "on-request"`. Online compounding feedback
-  (`[feedback] memory` / `routing`) defaults to `"shadow"`: it observes and
-  logs counterfactuals and review candidates, but writes no learnings and
+  `os_sandbox = "off"`, `approval_policy = "on-request"`. Online compounding
+  feedback (`[feedback] memory` / `routing`) defaults to `"shadow"`: it observes
+  and logs counterfactuals and review candidates, but writes no learnings and
   changes no routes. Switching to `"on"` is gated by a 14-day baseline.
-- **Known limits:** the sandbox is policy-level, not OS-level filesystem or
-  network isolation; MCP servers and hooks run outside it; the compounding
-  replay cost result is preliminary (9 tasks).
+- **Known limits:** by default (`os_sandbox = "off"`), the sandbox is
+  policy-level rather than OS-enforced; setting `os_sandbox = "enforce"` (or
+  `NCX_OS_SANDBOX=enforce`) enforces filesystem and network rules via a Windows
+  AppContainer (other platforms fail closed when `"enforce"` is requested). MCP
+  servers and hooks run outside the sandbox; the compounding replay cost result
+  is preliminary (9 tasks).
 
 ## Table of Contents
 
@@ -354,8 +359,10 @@ base_url = "https://api.deepseek.com/v1"
 model = "deepseek-chat"
 
 sandbox_mode = "workspace-write"   # read-only | workspace-write | danger-full-access
+os_sandbox = "off"                 # off | enforce (Windows AppContainer OS-level shell isolation)
 approval_policy = "on-request"     # untrusted | on-failure | on-request | never
 reasoning_effort = "auto"          # auto | low | high | max | off
+jev_mode = "off"                   # off | shadow | enforce (claim & pre-execution action review)
 
 # Online compounding feedback modes (off | shadow | on, default shadow)
 # Switching to "on" requires >= 14 days of shadow data and >= 2 core categories with n >= 30
@@ -418,17 +425,43 @@ Two orthogonal axes gate every action, mirroring Codex:
 `untrusted`, `on-failure`, `on-request`, `never`. The approval engine resolves
 each escalation to `ASK` / `AUTO_APPROVE` / `AUTO_DENY`.
 
-Enforcement is **policy-level on every platform**: file tools check paths and
-writable roots at the tool boundary, and a shell command is classified from its
-command line before it runs (read-only allowlist, destructive patterns, network
-commands and inline network code, paths outside the workspace, secret files
-including globbed or escaped names, `git config` / hook hijacks). It is **not**
-kernel isolation: a program the command starts — a Python script, a build, a
-test suite — is not restricted once it runs. What *is* enforced by the OS is
-process containment: on Windows each command starts suspended inside a
-kill-on-close Job Object, and on Unix in its own process group, so a timeout
-kills the whole tree. Under `untrusted`, interpreters and test runners always
-ask first.
+Enforcement is **policy-level by default (`os_sandbox = "off"`)**: file tools
+check paths and writable roots at the tool boundary, and a shell command is
+classified from its command line before it runs (read-only allowlist,
+destructive patterns, network commands and inline network code, paths outside
+the workspace, secret files including globbed or escaped names, `git config` /
+hook hijacks). Process containment is always OS-enforced: on Windows each
+command starts suspended inside a kill-on-close Job Object, and on Unix in its
+own process group, so a timeout kills the whole tree. Under `untrusted`,
+interpreters and test runners always ask first.
+
+**Optional OS-level shell isolation (`os_sandbox = "enforce"` / `NCX_OS_SANDBOX=enforce`)**:
+on Windows, setting `os_sandbox = "enforce"` runs non-escalated shell commands
+and background jobs inside a **Windows AppContainer** (`ncx-tools::appcontainer`,
+`ncx-tools::os_isolation`) that the OS kernel holds to the active
+`SandboxPolicy`:
+- Only `writable_roots` (the workspace, configured writable roots, and `%TEMP%`
+  when allowed) receive write DACL grants;
+- Toolchain directories derived from `PATH` (plus `NCX_OS_SANDBOX_READ_ROOTS`,
+  excluding `%USERPROFILE%` and drive roots so `~/.ssh` / credentials stay
+  inaccessible) receive read/execute grants;
+- Outbound network capabilities (`internetClient`) are granted only when
+  `policy.network_access` is true;
+- Escalated commands that the user explicitly approves bypass the container for
+  that single execution; non-Windows platforms fail closed when
+  `os_sandbox = "enforce"` is set.
+
+**Jev Pre-Execution Action Review (`jev_mode = "shadow" | "enforce"`)**:
+before executing any non-read-only tool call (`shell`, `apply_patch`,
+`str_replace_editor`, `background_start`, etc.), `ncx-core::verification::action_review`
+queries Jev (`jev-action-review-v1`, 4s single-shot timeout, fail-open on
+missing key/timeout/error) across three Noul hypotheses: `not_requested`,
+`exceeds_scope`, and `irreversible`. Every check writes a privacy-safe record
+(argument SHA-256 only, no raw arguments) to
+`.nanocodex/sessions/<session>.action_review.jsonl`. In `shadow` mode it only
+logs; in `enforce` mode, when `NCX_JEV_ACTION_THRESHOLD` (`0.5..=1.0`) is set
+and `P(not_requested)` or `P(exceeds_scope)` meets the threshold, the tool call
+is held and returned to the model as an error (`evals/verification/README.md`).
 
 ## Intelligence Compounding Loop
 
@@ -1041,10 +1074,12 @@ table, so validate the release target before changing it.
 - **Never commit real API keys.** `.env`, `*.key`, `*.pem`, token files, and
   local handoff files are git-ignored; `config.toml` / `mcp.toml` live in
   `~/.nanocodex/`, outside the repo.
-- The sandbox is **policy-level** on every platform — it gates tool actions,
-  writable roots, and shell command lines, but is not kernel isolation: programs
-  a command launches run with your permissions. Use `untrusted` or `on-request`
-  approval in repositories you do not trust.
+- By default (`os_sandbox = "off"`), the sandbox is **policy-level** — it gates
+  tool actions, writable roots, and shell command lines, while child programs a
+  command launches run with your user permissions. Set `os_sandbox = "enforce"`
+  (or `NCX_OS_SANDBOX=enforce`) on Windows to enforce filesystem and network
+  boundaries with an OS-level Windows AppContainer, and use `untrusted` or
+  `on-request` approval in repositories you do not trust.
 - **MCP tools run outside the sandbox** as external subprocesses. Only enable
   servers you trust; the marketplace validates names but does not vet behavior.
 - **Hooks run local commands** around tool execution. Treat hook configuration

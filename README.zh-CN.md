@@ -19,10 +19,10 @@
 
 - **当前主线：** `rust/` 下的 Rust 运行时（`ncx.exe` CLI + Tauri 桌面端），处于第三阶段（智能复利）。Python 版 `nanocodex/` 作为历史参考实现保留；为兼容已有安装，`~/.nanocodex/`、`NANOCODEX_*`
   环境变量和 Python 命令中仍沿用旧名称。
-- **最新发布：** [`v0.1.2`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.2) —— Windows 安装包与便携包、macOS DMG。
-- **最近更新（2026-10-23）：** 修复了 shell 审批、进程管控、Propose–Probe–Compose、forge 验收门和记忆护栏中的问题，见 [更新日志](CHANGELOG.zh-CN.md)。
-- **值得了解的默认值：** `sandbox_mode = "workspace-write"`、`approval_policy = "on-request"`。在线复利反馈（`[feedback] memory` / `routing`）默认是 `"shadow"`：只观察、记录反事实结果和待审阅候选，不写入学习笔记，也不改变路由；切换到 `"on"` 需要先满足 14 天基线门槛。
-- **已知限制：** 沙箱是策略级的，不是 OS 层面的文件系统或网络隔离；MCP 服务和 Hooks 运行在沙箱之外；复利回放的成本结论仍是初步结果（9 道题）。
+- **最新发布：** [`v0.1.3`](https://github.com/dgy-github/BugleCat/releases/tag/v0.1.3) —— Windows 安装包与便携包（`v0.1.2` 同时提供 macOS DMG）。
+- **最近更新（2026-10-23）：** 新增 Windows AppContainer OS 级 shell 沙箱隔离（`os_sandbox = "enforce"`）、非只读工具执行前 Jev 动作复核（`action_review.rs`），以及 shell 审批、进程管控、Propose–Probe–Compose、forge 验收门和记忆护栏的审查修复，见 [更新日志](CHANGELOG.zh-CN.md)。
+- **值得了解的默认值：** `sandbox_mode = "workspace-write"`、`os_sandbox = "off"`、`approval_policy = "on-request"`。在线复利反馈（`[feedback] memory` / `routing`）默认是 `"shadow"`：只观察、记录反事实结果和待审阅候选，不写入学习笔记，也不改变路由；切换到 `"on"` 需要先满足 14 天基线门槛。
+- **已知限制：** 默认（`os_sandbox = "off"`）下沙箱是策略级的；在 Windows 上开启 `os_sandbox = "enforce"`（或 `NCX_OS_SANDBOX=enforce`）后，可由 Windows AppContainer 强制执行文件系统与网络隔离（非 Windows 平台请求 `"enforce"` 时 fail-closed）。MCP 服务和 Hooks 运行在沙箱之外；复利回放的成本结论仍是初步结果（9 道题）。
 
 ## 目录
 
@@ -274,8 +274,10 @@ base_url = "https://api.deepseek.com/v1"
 model = "deepseek-chat"
 
 sandbox_mode = "workspace-write"   # read-only | workspace-write | danger-full-access
+os_sandbox = "off"                 # off | enforce（Windows AppContainer OS 级 shell 隔离）
 approval_policy = "on-request"     # untrusted | on-failure | on-request | never
 reasoning_effort = "auto"          # auto | low | high | max | off
+jev_mode = "off"                   # off | shadow | enforce（声明核验与非只读工具执行前动作复核）
 
 # 智能复利在线回流开关（off | shadow | on，默认 shadow）
 # 切换至 "on" 需满足 >= 14 天 Shadow 观测数据且 >= 2 个核心类别样本数 n >= 30
@@ -328,12 +330,22 @@ Hooks 会在环境变量中收到 `NCX_HOOK_EVENT`、`NCX_HOOK_TOOL`、
 **审批策略** —— 动作超出沙箱时怎么办：`untrusted`、`on-failure`、`on-request`、
 `never`。审批引擎把每次越权解析为 `ASK` / `AUTO_APPROVE` / `AUTO_DENY`。
 
-在所有平台上强制都是**策略级**的：文件工具在工具边界检查路径和可写根；shell 命令在运行前
-根据命令行判断（只读白名单、破坏性模式、联网命令与内联联网代码、工作区外路径、包括通配
-和转义写法在内的敏感文件、`git config` / hook 劫持）。这**不是**内核级隔离：命令启动的
-程序（Python 脚本、构建、测试套件）一旦运行就不再受限制。由操作系统强制的只有进程管控：
+默认（`os_sandbox = "off"`）在所有平台上强制是**策略级**的：文件工具在工具边界检查路径和可写根；
+shell 命令在运行前根据命令行判断（只读白名单、破坏性模式、联网命令与内联联网代码、工作区外路径、
+包括通配和转义写法在内的敏感文件、`git config` / hook 劫持）。进程管控始终由操作系统强制：
 Windows 上每条命令以挂起方式启动并放入关闭即终止的 Job Object，Unix 上运行在独立进程组，
 超时时整棵进程树一起结束。在 `untrusted` 策略下，解释器和测试运行器总是先询问。
+
+**可选的 OS 级 shell 沙箱隔离（`os_sandbox = "enforce"` / `NCX_OS_SANDBOX=enforce`）**：
+在 Windows 上，设置 `os_sandbox = "enforce"` 会将非提权 shell 命令与后台任务放入
+**Windows AppContainer**（`ncx-tools::appcontainer`、`ncx-tools::os_isolation`），由操作系统内核按当前 `SandboxPolicy` 强制约束：
+- 仅 `writable_roots`（工作区、配置的可写根，以及允许时的 `%TEMP%`）被授予写 DACL 权限；
+- 从 `PATH` 推导出的工具链目录（外加 `NCX_OS_SANDBOX_READ_ROOTS`，排除 `%USERPROFILE%` 与盘符根目录以防暴露 `~/.ssh` 等凭据）仅被授予读取/执行权限；
+- 仅当 `policy.network_access` 为真时才授予出站网络能力（`internetClient`）；
+- 用户在审批弹窗中显式批准的单次提权命令（escalated）会在该次执行中绕过容器；非 Windows 平台在请求 `os_sandbox = "enforce"` 时直接拒绝执行（fail-closed）。
+
+**Jev 工具执行前动作复核（`jev_mode = "shadow" | "enforce"`）**：
+在执行任何非只读工具调用（`shell`、`apply_patch`、`str_replace_editor`、`background_start` 等）前，`ncx-core::verification::action_review` 会以 4 秒单次无重试向 Jev（模板 `jev-action-review-v1`）查询三个 Noul：`not_requested`（用户未要求/不会预期）、`exceeds_scope`（超出允许范围或违反明确限制）、`irreversible`（难以撤销，仅记录供校准）。每次复核都会将脱敏记录（仅存参数 SHA-256，不存参数原文）追加至 `.nanocodex/sessions/<session>.action_review.jsonl`。`shadow` 模式只记录不拦截；`enforce` 模式下，当设置了 `NCX_JEV_ACTION_THRESHOLD`（`0.5..=1.0`）且 `not_requested` 或 `exceeds_scope` 概率达到阈值时拦截该调用并向模型返回错误（缺 key、超时或故障一律 fail-open 放行，详见 [`evals/verification/README.md`](evals/verification/README.md)）。
 
 ## 智能复利闭环
 
@@ -832,9 +844,7 @@ Windows GNU 链接器的 export ordinal 表溢出，修改前需重新验证目�
 
 - **绝不提交真实 API key。** `.env`、`*.key`、`*.pem`、token 文件以及本地交接文件
   都被 git 忽略；`config.toml` / `mcp.toml` 放在 `~/.nanocodex/`，在仓库之外。
-- 沙箱在所有平台上都是**策略级**的——它拦截工具行为、可写根和 shell 命令行，但不是
-  内核级隔离：命令启动的程序以你的权限运行。在不信任的仓库中请使用 `untrusted` 或
-  `on-request` 审批策略。
+- 默认（`os_sandbox = "off"`）下沙箱是**策略级**的——它拦截工具行为、可写根和 shell 命令行，而命令启动的子程序以你的用户权限运行。在 Windows 上可设置 `os_sandbox = "enforce"`（或 `NCX_OS_SANDBOX=enforce`）启用 Windows AppContainer 内核级文件与网络隔离；在不信任的仓库中请使用 `untrusted` 或 `on-request` 审批策略。
 - **MCP 工具运行在沙箱之外**，作为外部子进程。只启用你信任的服务；市场会校验
   名称但不审查行为。
 - **Hooks 会在工具执行前后运行本地命令**。把 hook 配置当作代码审查后再启用。
