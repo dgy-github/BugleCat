@@ -1,12 +1,13 @@
 //! Sandboxed command execution — Rust port of `nanocodex/sandbox/executor.py`.
 //!
 //! `PolicyExecutor` runs a command in a subprocess with a timeout. On Windows
-//! the process tree is contained in a Win32 Job Object (kill-on-job-close +
-//! active-process cap) for real OS-level PROCESS/RESOURCE containment — the
-//! whole descendant tree dies together on timeout/exit. This is NOT
-//! filesystem/network isolation; that stays gated at the policy+approval layer
-//! (see the Python module docstring). Job-API failure degrades to an
-//! un-contained run rather than failing the command.
+//! the process starts suspended, joins a Win32 Job Object (kill-on-job-close +
+//! active-process cap) and only then runs, so its whole descendant tree is
+//! contained and dies together on timeout/exit. On Unix it leads its own
+//! process group, which is killed as a whole on timeout. This is process
+//! containment only, NOT filesystem/network isolation; that stays gated at the
+//! policy+approval layer. Job-API failure degrades to an un-contained run
+//! rather than failing the command.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -115,8 +116,8 @@ impl PolicyExecutor {
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
 
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
+        let (mut child, containment) = match spawn_contained(&mut cmd, self.active_process_limit) {
+            Ok(spawned) => spawned,
             Err(e) => {
                 return ExecResult {
                     exit_code: 1,
@@ -125,11 +126,6 @@ impl PolicyExecutor {
                 }
             }
         };
-
-        #[cfg(windows)]
-        let _job = child
-            .id()
-            .and_then(|pid| win_job::Job::contain(pid, self.active_process_limit));
 
         let mut stdout_pipe = child.stdout.take();
         let mut stderr_pipe = child.stderr.take();
@@ -165,10 +161,7 @@ impl PolicyExecutor {
             }
             Err(_) => {
                 // Timed out: kill the tree.
-                #[cfg(windows)]
-                if let Some(j) = _job.as_ref() {
-                    j.terminate();
-                }
+                containment.terminate();
                 let _ = child.start_kill();
                 let _ = child.wait().await;
                 // Output the child wrote just before the kill can still sit
@@ -198,6 +191,72 @@ const POST_KILL_DRAIN: Duration = Duration::from_millis(500);
 async fn drain_remaining<R: tokio::io::AsyncRead + Unpin>(pipe: Option<&mut R>, buf: &mut Vec<u8>) {
     if let Some(pipe) = pipe {
         let _ = timeout(POST_KILL_DRAIN, pipe.read_to_end(buf)).await;
+    }
+}
+
+/// Handle for killing a contained process tree.
+pub(crate) struct Containment {
+    #[cfg(windows)]
+    job: Option<win_job::Job>,
+    #[cfg(unix)]
+    process_group: Option<u32>,
+}
+
+impl Containment {
+    /// Kill every process in the tree at once (best effort).
+    pub(crate) fn terminate(&self) {
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            job.terminate();
+        }
+        #[cfg(unix)]
+        if let Some(pgid) = self.process_group {
+            // A negative pid targets the whole process group.
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &format!("-{pgid}")])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
+/// Spawn `command` so its whole process tree can be killed together. On
+/// Windows the process is created suspended and resumed only after it has
+/// joined the Job Object, so no descendant can start outside the job; on Unix
+/// it leads its own process group.
+pub(crate) fn spawn_contained(
+    command: &mut Command,
+    active_process_limit: u32,
+) -> std::io::Result<(tokio::process::Child, Containment)> {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        let mut child = command.spawn()?;
+        let Some(pid) = child.id() else {
+            let _ = child.start_kill();
+            return Err(std::io::Error::other("spawned process has no id"));
+        };
+        let job = win_job::Job::contain(pid, active_process_limit);
+        if let Err(error) = win_job::resume_process(pid) {
+            let _ = child.start_kill();
+            return Err(error);
+        }
+        Ok((child, Containment { job }))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = active_process_limit;
+        #[cfg(unix)]
+        command.process_group(0);
+        let child = command.spawn()?;
+        let containment = Containment {
+            #[cfg(unix)]
+            process_group: child.id(),
+        };
+        Ok((child, containment))
     }
 }
 
@@ -296,14 +355,18 @@ pub(crate) fn build_env() -> HashMap<String, String> {
 /// Win32 Job Object containment — mirrors `_WindowsJob` / `WindowsJobExecutor`.
 #[cfg(windows)]
 pub(crate) mod win_job {
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
         SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        OpenProcess, OpenThread, ResumeThread, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        THREAD_SUSPEND_RESUME,
     };
 
     pub struct Job {
@@ -361,6 +424,39 @@ pub(crate) mod win_job {
             unsafe {
                 TerminateJobObject(self.job, 1);
             }
+        }
+    }
+
+    /// Resume every thread of `pid`, a process created with `CREATE_SUSPENDED`.
+    pub fn resume_process(pid: u32) -> std::io::Result<()> {
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return Err(std::io::Error::last_os_error());
+            }
+            let mut entry: THREADENTRY32 = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            let mut resumed = 0;
+            let mut more = Thread32First(snapshot, &mut entry);
+            while more != 0 {
+                if entry.th32OwnerProcessID == pid {
+                    let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                    if !thread.is_null() {
+                        if ResumeThread(thread) != u32::MAX {
+                            resumed += 1;
+                        }
+                        CloseHandle(thread);
+                    }
+                }
+                more = Thread32Next(snapshot, &mut entry);
+            }
+            CloseHandle(snapshot);
+            if resumed == 0 {
+                return Err(std::io::Error::other(
+                    "could not resume the suspended process",
+                ));
+            }
+            Ok(())
         }
     }
 
@@ -591,6 +687,30 @@ mod tests {
             result.stdout
         );
         assert!(!result.stdout.contains('\u{FFFD}'), "{:?}", result.stdout);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn timeout_kills_background_grandchildren_too() {
+        let dir = std::env::temp_dir().join(format!("ncx-job-grandchild-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // The grandchild would write `escaped.txt` after ~3s; the parent is
+        // killed after 1s, and the job must take the grandchild with it.
+        let result = PolicyExecutor::new()
+            .run(
+                "start /b cmd /c \"ping -n 4 127.0.0.1 >nul & echo escaped> escaped.txt\" & ping -n 30 127.0.0.1 >nul",
+                &dir,
+                1,
+            )
+            .await;
+        assert!(result.timed_out, "{}", result.render());
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(
+            !dir.join("escaped.txt").exists(),
+            "grandchild escaped the job"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

@@ -254,10 +254,12 @@ pub(crate) async fn run_shell(
     } else {
         executor.run(command, workdir, timeout).await
     };
-    if !result.ok()
+    // Only a sandbox denial is worth retrying with approval: commands run
+    // without OS-level isolation, so an ordinary failure would just fail the
+    // same way again.
+    if result.sandbox_denied
         && ctx.approval_policy == ON_FAILURE
-        && !result.timed_out
-        && approve_failed_retry(ctx, command, workdir, justification, result.exit_code).await
+        && approve_failed_retry(ctx, command, workdir, justification).await
     {
         let mut extra_env = HashMap::new();
         extra_env.insert("NCX_SANDBOX_ESCALATED".to_string(), "1".to_string());
@@ -277,7 +279,6 @@ async fn approve_failed_retry(
     command: &str,
     workdir: &Path,
     justification: &str,
-    exit_code: i32,
 ) -> bool {
     let Some(handler) = &ctx.approver else {
         return false;
@@ -285,9 +286,11 @@ async fn approve_failed_retry(
     let answer = handler
         .request(ApprovalRequest {
             command: command.to_string(),
-            reason: format!("Sandboxed run failed (exit {exit_code}). {justification}")
-                .trim()
-                .to_string(),
+            reason: format!(
+                "Command needs permissions outside the sandbox policy. {justification}"
+            )
+            .trim()
+            .to_string(),
             cwd: workdir.display().to_string(),
             escalated: true,
             details: String::new(),

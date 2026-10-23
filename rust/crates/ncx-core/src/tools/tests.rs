@@ -795,4 +795,28 @@ mod tests {
         assert!(ok_out.contains("Exit code: 0"), "{ok_out}");
         assert!(ws.join("approved_on_retry").is_dir());
     }
+
+    #[tokio::test]
+    async fn on_failure_policy_does_not_offer_a_retry_for_ordinary_failures() {
+        struct Counting(std::cell::Cell<usize>);
+        #[async_trait(?Send)]
+        impl ApprovalHandler for Counting {
+            async fn request(&self, _req: ApprovalRequest) -> ApprovalDecision {
+                self.0.set(self.0.get() + 1);
+                ApprovalDecision::Once
+            }
+        }
+        let ws = tmp_ws("on_failure_ordinary");
+        let approver = Rc::new(Counting(std::cell::Cell::new(0)));
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(ncx_sandbox::WORKSPACE_WRITE, &ws))
+            .with_approval_policy(ON_FAILURE)
+            .with_approver(approver.clone());
+        let out = ShellTool
+            .execute(&ctx, &json!({ "command": "echo once>> runs.txt && exit 3" }))
+            .await;
+        assert!(out.contains("Exit code: 3"), "{out}");
+        assert_eq!(approver.0.get(), 0, "no retry prompt for a non-sandbox failure");
+        let runs = std::fs::read_to_string(ws.join("runs.txt")).unwrap();
+        assert_eq!(runs.matches("once").count(), 1, "the command ran exactly once");
+    }
 }

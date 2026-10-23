@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin};
 use tokio::task::JoinHandle;
 
-use crate::executor::{command_with_env, PolicyExecutor};
+use crate::executor::{command_with_env, spawn_contained, Containment, PolicyExecutor};
 use crate::output_buffer::{OutputRingBuffer, SequencedChunk};
 use crate::text_encoding::Utf8StreamDecoder;
 
@@ -44,8 +44,7 @@ pub struct ManagedProcess {
     output: Arc<Mutex<OutputRingBuffer<ProcessOutputChunk>>>,
     readers: Vec<JoinHandle<()>>,
     exit_code: Option<i32>,
-    #[cfg(windows)]
-    job: Option<crate::executor::win_job::Job>,
+    containment: Containment,
 }
 
 impl PolicyExecutor {
@@ -57,13 +56,8 @@ impl PolicyExecutor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = process
-            .spawn()
+        let (mut child, containment) = spawn_contained(&mut process, self.active_process_limit)
             .map_err(|error| format!("spawn failed: {error}"))?;
-        #[cfg(windows)]
-        let job = child
-            .id()
-            .and_then(|pid| crate::executor::win_job::Job::contain(pid, self.active_process_limit));
         let stdin = child.stdin.take();
         let stdout = child
             .stdout
@@ -85,8 +79,7 @@ impl PolicyExecutor {
             output,
             readers,
             exit_code: None,
-            #[cfg(windows)]
-            job,
+            containment,
         })
     }
 }
@@ -130,9 +123,10 @@ impl ManagedProcess {
     }
 
     pub fn terminate(&mut self) {
-        #[cfg(windows)]
-        if let Some(job) = &self.job {
-            job.terminate();
+        // Once the process has been reaped its id (and process group) may be
+        // reused, so only signal the tree while it is still running.
+        if self.exit_code.is_none() {
+            self.containment.terminate();
         }
         let _ = self.child.start_kill();
         self.stdin = None;
