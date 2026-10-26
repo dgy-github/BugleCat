@@ -16,13 +16,13 @@
 - **2. Jev 工具执行前动作复核（Pre-Execution Action Review，`jev-action-review-v1`）**
   - **实现位置**：[`rust/crates/ncx-core/src/verification/action_review.rs`](rust/crates/ncx-core/src/verification/action_review.rs)、[`rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs`](rust/crates/ncx-core/src/agent_loop/tool_dispatch.rs)、[`rust/crates/ncx-provider/src/jev.rs`](rust/crates/ncx-provider/src/jev.rs)、[`rust/crates/ncx-core/src/agent_loop/tests/action_review_tests.rs`](rust/crates/ncx-core/src/agent_loop/tests/action_review_tests.rs)、[`evals/verification/README.md`](evals/verification/README.md)。
   - **机制细节**：
-    - 模型保持自主决策；只读工具调用不复核，**非只读工具调用**（写文件、`shell`、`apply_patch`、`str_replace_editor`、`background_start` 等）在通过沙箱/审批后、实际执行前，调用 `review_tool_action` 向 Jev 一次查询三个 Noul：
+    - 模型保持自主决策；只读工具调用不复核，只改智能体自身记录的工具（能力仅为 Planning / Memory / Skill，如 `update_plan`、`remember`、`skill`）也不复核。其余**非只读工具调用**（写文件、`shell`、`apply_patch`、`str_replace_editor` 写操作、`background_start` 等）在 `tool_dispatch::execute_serial` 中由 `review_before_execution` 先向 Jev 一次查询三个 Noul，再进入工具执行；沙箱与审批检查发生在其后的工具执行内部，因此被拦截的调用不会触发审批弹窗：
       1. `not_requested`：用户未要求或不会预期该动作；
       2. `exceeds_scope`：越出用户允许范围或违反明确限制；
       3. `irreversible`：动作难以撤销（仅记录供后续校准）。
     - 复用 `jev_mode`（`"off" | "shadow" | "enforce"`）与 `NCX_JEV_API_KEY`，单次超时 4s、无重试；`NCX_JEV_MODEL_ENABLED=0` 可关闭全部 Jev 调用。
     - **`shadow` 模式**：只记录，不拦截；
-    - **`enforce` 模式**：仅当设置了 `NCX_JEV_ACTION_THRESHOLD`（`0.5..=1.0`）且 `not_requested >= threshold` 或 `exceeds_scope >= threshold` 时拦截该调用，向模型返回 `Error: tool '<name>' was held by the pre-execution review (...)`；未设阈值时行为与 `shadow` 相同；
+    - **`enforce` 模式**：仅当设置了 `NCX_JEV_ACTION_THRESHOLD`（`0.5..=1.0`）且 `not_requested >= threshold` 或 `exceeds_scope >= threshold` 时拦截该调用，该调用不执行，向模型返回的工具结果为 ``Error: this `<tool>` call was held by the pre-execution review and did not run (<question>=<p> >= <threshold>). ...``，提示其重读用户最新要求、必要时先向用户说明或询问；未设阈值时行为与 `shadow` 相同；
     - **Fail-open 与隐私脱敏落盘**：缺 key、含敏感输入、取消、超时或响应格式不合格时一律放行（fail-open），状态如实记入 `.nanocodex/sessions/<session>.action_review.jsonl`（schema `buglecat.action_review.record.v1`，仅存参数 SHA-256 哈希，不存参数原文）。
 
 ---
