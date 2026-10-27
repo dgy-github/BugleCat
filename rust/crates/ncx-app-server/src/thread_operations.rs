@@ -26,6 +26,14 @@ pub(crate) fn dispatch_metadata<S: ThreadStore>(
             thread_id,
             archived,
         } => server.update_thread_metadata(thread_id, |metadata| metadata.archived = archived),
+        ClientRequest::ThreadDelete { thread_id } => {
+            server.store.delete(&thread_id)?;
+            Ok(server.outcome(ResponsePayload::Ack, Vec::new()))
+        }
+        ClientRequest::ThreadsDelete { thread_ids } => {
+            let deleted = server.store.delete_many(&thread_ids)?;
+            Ok(server.outcome(ResponsePayload::Count(deleted.len() as u64), Vec::new()))
+        }
         ClientRequest::ThreadRename { thread_id, title } => rename(server, thread_id, title),
         ClientRequest::ThreadFork {
             thread_id,

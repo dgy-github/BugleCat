@@ -735,3 +735,106 @@ fn goal_round_requires_armed_exact_identity_and_claims_the_turn_atomically() {
         })
         .is_err());
 }
+
+#[test]
+fn delete_removes_the_thread_and_is_refused_mid_turn() {
+    let server = server();
+    let thread_id = ThreadId::new("doomed").unwrap();
+    server
+        .dispatch(ClientRequest::ThreadCreate {
+            thread_id: Some(thread_id.clone()),
+            workspace: "workspace".into(),
+            title: "doomed".into(),
+            harness_profile: "full".into(),
+        })
+        .unwrap();
+    server
+        .dispatch(ClientRequest::TurnStart {
+            thread_id: thread_id.clone(),
+            turn_id: TurnId::new("turn-1").unwrap(),
+            execution_mode: ncx_protocol::ExecutionMode::Agent,
+        })
+        .unwrap();
+    assert!(server
+        .dispatch(ClientRequest::ThreadDelete {
+            thread_id: thread_id.clone(),
+        })
+        .is_err());
+    server
+        .dispatch(ClientRequest::TurnComplete {
+            thread_id: thread_id.clone(),
+            turn_id: TurnId::new("turn-1").unwrap(),
+            status: ncx_protocol::TurnStatus::Completed,
+            error: None,
+            usage: Default::default(),
+        })
+        .unwrap();
+
+    let deleted = server
+        .dispatch(ClientRequest::ThreadDelete {
+            thread_id: thread_id.clone(),
+        })
+        .unwrap();
+    assert!(matches!(deleted.response.payload, ResponsePayload::Ack));
+    let ResponsePayload::Threads(rows) = server
+        .dispatch(ClientRequest::ThreadList {
+            include_archived: true,
+        })
+        .unwrap()
+        .response
+        .payload
+    else {
+        panic!("expected thread list");
+    };
+    assert!(rows.iter().all(|row| row.id != thread_id));
+    assert!(server
+        .dispatch(ClientRequest::ThreadRead {
+            thread_id: thread_id.clone(),
+        })
+        .is_err());
+    assert!(server
+        .dispatch(ClientRequest::ThreadDelete { thread_id })
+        .is_err());
+}
+
+#[test]
+fn threads_delete_removes_a_batch_and_counts_it() {
+    let server = server();
+    for id in ["one", "two", "three"] {
+        server
+            .dispatch(ClientRequest::ThreadCreate {
+                thread_id: Some(ThreadId::new(id).unwrap()),
+                workspace: "workspace".into(),
+                title: id.into(),
+                harness_profile: "full".into(),
+            })
+            .unwrap();
+    }
+    let deleted = server
+        .dispatch(ClientRequest::ThreadsDelete {
+            thread_ids: vec![
+                ThreadId::new("one").unwrap(),
+                ThreadId::new("two").unwrap(),
+                ThreadId::new("missing").unwrap(),
+            ],
+        })
+        .unwrap();
+    assert!(matches!(
+        deleted.response.payload,
+        ResponsePayload::Count(2)
+    ));
+    let ResponsePayload::Threads(rows) = server
+        .dispatch(ClientRequest::ThreadList {
+            include_archived: true,
+        })
+        .unwrap()
+        .response
+        .payload
+    else {
+        panic!("expected thread list");
+    };
+    assert_eq!(
+        rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
+        ["three"]
+    );
+}

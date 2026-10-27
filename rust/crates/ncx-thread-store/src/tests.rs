@@ -842,3 +842,97 @@ fn corrupt_primary_recovers_from_last_backup() {
         .unwrap()
         .is_some());
 }
+
+#[test]
+fn delete_removes_the_thread_and_its_side_domains_durably() {
+    let store = temp_store("delete");
+    let id = ThreadId::new("doomed").unwrap();
+    let kept = ThreadId::new("kept").unwrap();
+    store.create(thread("doomed")).unwrap();
+    store.create(thread("kept")).unwrap();
+    store
+        .replace_model_context(&id, vec![serde_json::json!({"role": "user"})], 2)
+        .unwrap();
+    store
+        .compare_and_set_goal(&id, GoalExpectation::Absent, Some(goal("goal", 1, "x")))
+        .unwrap();
+    let epoch = write_epoch(&store, &id);
+
+    store.delete(&id).unwrap();
+
+    let reopened = JsonThreadStore::open(store.path.clone()).unwrap();
+    assert_eq!(reopened.read(&id).unwrap(), None);
+    assert_eq!(reopened.read_model_context(&id).unwrap(), None);
+    assert_eq!(reopened.read_goal(&id).unwrap(), None);
+    assert!(
+        write_epoch(&reopened, &id) > epoch,
+        "epoch stays as a tombstone"
+    );
+    let ids: Vec<_> = reopened
+        .list(true)
+        .unwrap()
+        .into_iter()
+        .map(|metadata| metadata.id)
+        .collect();
+    assert_eq!(ids, vec![kept]);
+    assert!(matches!(
+        reopened.delete(&id),
+        Err(ThreadStoreError::NotFound(_))
+    ));
+}
+
+#[test]
+fn delete_is_refused_while_a_turn_is_running() {
+    let store = temp_store("delete-busy");
+    let id = ThreadId::new("busy").unwrap();
+    store.create(thread("busy")).unwrap();
+    store.claim_turn(&id, turn("turn-1")).unwrap();
+    assert!(matches!(
+        store.delete(&id),
+        Err(ThreadStoreError::Busy { .. })
+    ));
+    assert!(store.read(&id).unwrap().is_some());
+    store
+        .finish_turn(
+            &id,
+            &TurnId::new("turn-1").unwrap(),
+            TurnStatus::Completed,
+            3,
+            None,
+            TurnUsage::default(),
+        )
+        .unwrap();
+    store.delete(&id).unwrap();
+    assert_eq!(store.read(&id).unwrap(), None);
+}
+
+#[test]
+fn delete_many_removes_listed_threads_in_one_go_and_skips_busy_or_missing() {
+    let store = temp_store("delete-many");
+    for id in ["a", "b", "busy", "kept"] {
+        store.create(thread(id)).unwrap();
+    }
+    let busy = ThreadId::new("busy").unwrap();
+    store.claim_turn(&busy, turn("turn-1")).unwrap();
+    let ids: Vec<_> = ["a", "b", "busy", "missing"]
+        .into_iter()
+        .map(|id| ThreadId::new(id).unwrap())
+        .collect();
+
+    let deleted = store.delete_many(&ids).unwrap();
+
+    assert_eq!(
+        deleted,
+        vec![ThreadId::new("a").unwrap(), ThreadId::new("b").unwrap()]
+    );
+    let left: Vec<_> = JsonThreadStore::open(store.path.clone())
+        .unwrap()
+        .list(true)
+        .unwrap()
+        .into_iter()
+        .map(|metadata| metadata.id.as_str().to_string())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    assert_eq!(left, vec!["busy".to_string(), "kept".to_string()]);
+}

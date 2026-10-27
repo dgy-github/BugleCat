@@ -120,6 +120,24 @@ function historicalFallbackTitle(text: string): string {
   return `${chars.slice(0, 24).join("")}${chars.length > 24 ? "…" : ""}`;
 }
 
+/** A sidebar row from list metadata alone, for threads whose transcript was
+ *  not read: every stored thread stays listed, selectable, and deletable. */
+export function metadataToSessionRow(metadata: ProtocolThread["metadata"]): SessionRow {
+  return {
+    session_id: metadata.id,
+    workspace: normalizeWorkspacePath(metadata.workspace),
+    title: metadata.title === "(no prompt yet)" ? historicalFallbackTitle("") : metadata.title,
+    snippet: "",
+    user_messages: 0,
+    assistant_messages: 0,
+    tool_calls: 0,
+    updated_at: String(metadata.updatedAt),
+    has_snapshot: false,
+    archived: metadata.archived,
+    harness_profile: metadata.harnessProfile || "full",
+  };
+}
+
 export function threadToSessionRow(thread: ProtocolThread): SessionRow {
   let userMessages = 0;
   let assistantMessages = 0;

@@ -327,6 +327,16 @@ pub enum ClientRequest {
         thread_id: ThreadId,
         archived: bool,
     },
+    /// Permanently remove a Thread from the store; its workspace on disk is
+    /// left untouched. Refused while a turn is running.
+    ThreadDelete {
+        thread_id: ThreadId,
+    },
+    /// Delete many Threads in one store transaction. Missing ids and Threads
+    /// with a running turn are skipped; answers with the number deleted.
+    ThreadsDelete {
+        thread_ids: Vec<ThreadId>,
+    },
     ThreadRename {
         thread_id: ThreadId,
         title: String,

@@ -16,6 +16,7 @@
     "test:e2e:slash": "node e2e/slash.mjs",
     "test:e2e:orchestrator": "node e2e/orchestrator.mjs",
     "test:e2e:goal-worker": "node e2e/goal-worker.mjs",
+    "test:e2e:sidebar-batch": "node e2e/sidebar-batch.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "tauri build --target x86_64-pc-windows-msvc",

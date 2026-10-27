@@ -58,6 +58,15 @@ pub trait ThreadStore: Send + Sync {
     /// the target was handed to a runtime, even though runtime ownership itself
     /// is process-local and does not otherwise change durable Thread data.
     fn mark_runtime_activation(&self, id: &ThreadId) -> Result<(), ThreadStoreError>;
+    /// Permanently remove a Thread with its model context and Goal. Refused
+    /// with `Busy` while a turn is running. The write epoch is kept as a
+    /// tombstone so an old provisioning receipt can never touch a later
+    /// Thread that reuses the id.
+    fn delete(&self, id: &ThreadId) -> Result<(), ThreadStoreError>;
+    /// [`ThreadStore::delete`] for many Threads in one transaction. Missing
+    /// ids and Threads with a running turn are skipped; returns the ids that
+    /// were deleted.
+    fn delete_many(&self, ids: &[ThreadId]) -> Result<Vec<ThreadId>, ThreadStoreError>;
     fn list(&self, include_archived: bool) -> Result<Vec<ThreadMetadata>, ThreadStoreError>;
     fn read(&self, id: &ThreadId) -> Result<Option<Thread>, ThreadStoreError>;
     /// Read a Thread and its durable Goal from one persisted snapshot. A
@@ -260,6 +269,14 @@ fn snapshot_for_state(
 /// older processes preserve it when they rewrite the JSON file. Its purpose is
 /// broader than runtime activation: a rollback receipt must reject a target
 /// that was changed and later restored to byte-for-byte identical state.
+/// Drop a removed Thread's side domains; its write epoch advances and stays
+/// as a tombstone.
+fn remove_thread_domains(persisted: &mut PersistedState, id: &str) {
+    persisted.model_contexts.remove(id);
+    persisted.goals.remove(id);
+    advance_thread_write_epoch(persisted, id);
+}
+
 fn advance_thread_write_epoch(persisted: &mut PersistedState, id: &str) {
     let epoch = persisted
         .runtime_activation_epochs
@@ -417,6 +434,40 @@ impl ThreadStore for JsonThreadStore {
             }
             advance_thread_write_epoch(&mut state.persisted, id.as_str());
             Ok(())
+        })
+    }
+
+    fn delete(&self, id: &ThreadId) -> Result<(), ThreadStoreError> {
+        self.mutate(|state| {
+            let key = id.as_str();
+            if let Some(active) = state.active_turns.get(key) {
+                return Err(ThreadStoreError::Busy {
+                    thread: key.to_string(),
+                    turn: active.turn_id.clone(),
+                });
+            }
+            if state.persisted.threads.remove(key).is_none() {
+                return Err(ThreadStoreError::NotFound(key.to_string()));
+            }
+            remove_thread_domains(&mut state.persisted, key);
+            Ok(())
+        })
+    }
+
+    fn delete_many(&self, ids: &[ThreadId]) -> Result<Vec<ThreadId>, ThreadStoreError> {
+        self.mutate(|state| {
+            let mut deleted = Vec::new();
+            for id in ids {
+                let key = id.as_str();
+                if state.active_turns.contains_key(key)
+                    || state.persisted.threads.remove(key).is_none()
+                {
+                    continue;
+                }
+                remove_thread_domains(&mut state.persisted, key);
+                deleted.push(id.clone());
+            }
+            Ok(deleted)
         })
     }
 

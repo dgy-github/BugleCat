@@ -49,11 +49,13 @@ fn pending_activation_thread_ids(request: &ClientRequest) -> Vec<ncx_protocol::T
         }
         | ThreadCreateActivate { thread_id, .. } => vec![thread_id.clone()],
         ThreadImport { thread } => vec![thread.metadata.id.clone()],
+        ThreadsDelete { thread_ids } => thread_ids.clone(),
         ThreadsImport { threads } => threads
             .iter()
             .map(|thread| thread.metadata.id.clone())
             .collect(),
         ThreadArchive { thread_id, .. }
+        | ThreadDelete { thread_id }
         | ThreadRename { thread_id, .. }
         | ThreadHarnessProfileSet { thread_id, .. }
         | ThreadActivate { thread_id }
@@ -120,6 +122,8 @@ impl<S: ThreadStore> AppServer<S> {
             | ClientRequest::ThreadRead { .. }
             | ClientRequest::ThreadReadVisible { .. }
             | ClientRequest::ThreadArchive { .. }
+            | ClientRequest::ThreadDelete { .. }
+            | ClientRequest::ThreadsDelete { .. }
             | ClientRequest::ThreadRename { .. }
             | ClientRequest::ThreadFork { .. }) => {
                 thread_operations::dispatch_metadata(self, request)

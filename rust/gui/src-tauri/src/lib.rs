@@ -6331,6 +6331,7 @@ mod tests {
             "turnSubmit",
             "turnInterruptLatest",
             "threadArchive",
+            "threadsDelete",
             "threadRename",
             "threadReadVisible",
         ] {
@@ -7278,7 +7279,7 @@ mod tests {
         let sidebar = include_str!("../../src/components/SessionSidebar.svelte");
         let bridge = include_str!("bridge.rs");
         assert!(sidebar.contains(
-            "class=\"recent-main\" title={s.snippet || s.title} disabled={switchingSession}"
+            "class=\"recent-main\" title={s.snippet || s.title} disabled={!selecting && switchingSession}"
         ));
         assert!(sidebar.contains("disabled={switchingSession || !s.has_snapshot} onclick={() => { menuId = \"\"; forkSession"));
         let resume = lifecycle
@@ -7442,8 +7443,10 @@ mod tests {
         assert!(recent < archive_toggle);
         assert!(archive_toggle < archived);
         assert!(sidebar.contains("aria-expanded={showArchived}"));
-        assert!(sidebar.contains("aria-expanded={archivedProjectOpen[group.path] !== false}"));
-        assert!(sidebar.contains("toggleArchivedProject(group.path)"));
+        assert!(sidebar.contains(
+            "projectGroup(group, archivedProjectOpen[group.path] !== false, toggleArchivedProject, true)"
+        ));
+        assert!(sidebar.contains("aria-expanded={open} onclick={() => toggle(group.path)}"));
 
         let css = include_str!("../../src/app.css");
         assert!(css.contains(".side-archive-toggle"));
@@ -7472,7 +7475,10 @@ mod tests {
         ));
         assert!(sidebar.contains("{#each projectGroups as group}"));
         assert!(sidebar.contains("class=\"project-toggle\""));
-        assert!(sidebar.contains("aria-expanded={projectOpen[group.path] !== false}"));
+        assert!(sidebar.contains(
+            "projectGroup(group, projectOpen[group.path] !== false, toggleProject, false)"
+        ));
+        assert!(sidebar.contains("aria-expanded={open} onclick={() => toggle(group.path)}"));
         assert!(sidebar.contains("{#each group.sessions as s}"));
 
         let css = include_str!("../../src/app.css");

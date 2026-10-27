@@ -1478,8 +1478,8 @@ main.app { flex-direction: row; }
 }
 .recent-menu button:hover:not(:disabled) { background: var(--paper-2); color: var(--ink); }
 .recent-menu button:disabled { opacity: 0.4; cursor: default; }
-.session-rename-overlay { z-index: 1100; }
-.session-rename-modal { width: min(25rem, calc(100vw - 2rem)); }
+.session-rename-overlay, .session-delete-overlay { z-index: 1100; }
+.session-rename-modal, .session-delete-modal { width: min(25rem, calc(100vw - 2rem)); }
 .session-rename-modal > label { margin-top: 0.35rem; }
 .session-rename-modal > input {
   width: 100%; min-height: 2.6rem; padding: 0.55rem 0.7rem; border: 1px solid var(--line-strong);
@@ -2384,6 +2384,54 @@ textarea:focus { background: var(--surface-soft); border-color: var(--accent); b
 .side-workspace-actions button svg { width: 0.98rem; height: 0.98rem; }
 .side-workspace-actions button:hover { border-color: var(--line); background: color-mix(in srgb, var(--surface) 72%, transparent); color: var(--ink); }
 .side-workspace-actions button:active { transform: none; }
+.side-workspace-actions button.active { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+
+/* Project-row menu and multi-select mode. */
+.project-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; }
+.project-row .project-toggle { flex: 1 1 auto; width: auto; min-width: 0; }
+.project-row:hover .project-act { opacity: 1; }
+.project-select {
+  display: grid; place-items: center; flex: 0 0 auto; width: 1.6rem; height: 1.6rem; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; box-shadow: none; cursor: pointer;
+}
+.project-select:active { transform: none; }
+.select-box {
+  position: relative; flex: 0 0 auto; width: 0.95rem; height: 0.95rem;
+  border: 1.5px solid var(--ink-4); border-radius: 4px; background: var(--surface);
+}
+.select-box.checked, .select-box.mixed { border-color: var(--accent); background: var(--accent); }
+.select-box.checked::after {
+  content: ""; position: absolute; left: 0.27rem; top: 0.08rem; width: 0.22rem; height: 0.46rem;
+  border: solid var(--accent-ink); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.select-box.mixed::after {
+  content: ""; position: absolute; left: 0.17rem; right: 0.17rem; top: calc(50% - 1px); height: 2px;
+  background: var(--accent-ink);
+}
+.recent-item.selecting .recent-main { cursor: pointer; }
+.recent-item.selected { background: var(--accent-soft); }
+.side-batch-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-top: var(--sp-2);
+  padding: 0.45rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--sh-1);
+}
+.side-batch-count { flex: 1 1 auto; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
+.side-batch-bar button {
+  min-height: 1.8rem; padding: 0.2rem 0.55rem; border: 1px solid var(--line); border-radius: 7px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+}
+.side-batch-bar button:hover:not(:disabled) { background: var(--paper-2); color: var(--ink); }
+.side-batch-bar button:disabled { opacity: 0.4; cursor: default; }
+.side-batch-bar .side-batch-done { border-color: var(--accent-line); color: var(--accent); }
+.side-batch-bar .side-batch-delete { border-color: color-mix(in srgb, var(--danger) 35%, transparent); color: var(--danger); }
+.side-batch-bar .side-batch-delete:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+.recent-menu .menu-danger { color: var(--danger); }
+.session-delete-modal p { margin: 0; color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; }
+.session-delete-modal .delete-projects { color: var(--ink-3); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.session-delete-modal .delete-current {
+  padding: 0.45rem 0.6rem; border-radius: 8px; background: var(--accent-soft); color: var(--ink-2); font-size: var(--fs-xs);
+}
+.abtns .ok.danger { background: var(--danger); color: #fff; }
+.abtns .ok.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 85%, #000); }
 .side-recents { gap: 0.25rem; padding-inline: 0; }
 .side-recent-toggle, .side-archive-toggle { min-height: 2rem; padding-inline: 0.48rem; }
 .recent-item { border-radius: 9px; }

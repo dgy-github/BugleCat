@@ -14,6 +14,8 @@ export const APP_SERVER_PROTOCOL_METHODS = [
   "threadModelContextRead",
   "threadModelContextReplace",
   "threadArchive",
+  "threadDelete",
+  "threadsDelete",
   "threadRename",
   "threadHarnessProfileSet",
   "goalRead",

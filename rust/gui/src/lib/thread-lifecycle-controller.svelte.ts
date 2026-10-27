@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { appServerRequest, threadToSessionRow, type ProtocolThread, type SessionRow } from "./app-server-client";
+import { appServerRequest, metadataToSessionRow, threadToSessionRow, type ProtocolThread, type SessionRow } from "./app-server-client";
 import type { ConversationMessage } from "./conversation-model";
 import type { ThreadController } from "./thread-controller.svelte";
 import type { UsageController } from "./usage-controller.svelte";
@@ -7,6 +7,9 @@ import type { UsageController } from "./usage-controller.svelte";
 type WorkspaceRecovery = {
   reconcile: () => Promise<string>;
 };
+
+/** Threads whose transcript is read for snippets, counts, and usage. */
+const DETAILED_THREAD_LIMIT = 50;
 
 export class ThreadLifecycleController {
   sessions = $state<SessionRow[]>([]);
@@ -129,8 +132,11 @@ export class ThreadLifecycleController {
   private refreshOnce = async (): Promise<void> => {
     const generation = ++this.refreshGeneration;
     try {
-      const metadata = await appServerRequest<{ id: string }[]>({ method: "threadList", params: { includeArchived: true } });
-      const results = await Promise.allSettled(metadata.slice(0, 50).map((item) =>
+      const metadata = await appServerRequest<ProtocolThread["metadata"][]>({ method: "threadList", params: { includeArchived: true } });
+      // Transcripts are read for the newest threads only; every other thread
+      // is still listed from its metadata so select-all and project delete
+      // reach the whole store, not just what happens to be loaded.
+      const results = await Promise.allSettled(metadata.slice(0, DETAILED_THREAD_LIMIT).map((item) =>
         appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: item.id } })));
       if (generation !== this.refreshGeneration) return;
       const threads = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
@@ -140,7 +146,8 @@ export class ThreadLifecycleController {
           completion_tokens: sum.completion_tokens + (turn.usage?.tokens?.completion_tokens || 0),
         }), { prompt_tokens: 0, completion_tokens: 0 },
       )]));
-      this.sessions = threads.map(threadToSessionRow);
+      const detailed = new Map(threads.map((item) => [item.metadata.id, threadToSessionRow(item)]));
+      this.sessions = metadata.map((item) => detailed.get(item.id) ?? metadataToSessionRow(item));
       const current = this.sessions.find((session) => session.session_id === this.thread.currentId);
       if (current) {
         this.thread.title = current.title || "会话";
@@ -159,6 +166,56 @@ export class ThreadLifecycleController {
       if (session) session.archived = archived;
       void this.refresh();
     } catch (error) { this.thread.messages.push({ role: "note", text: `归档失败：${error}` }); }
+  };
+
+  /** Archive or restore several sessions at once; failures are reported together. */
+  archiveMany = async (ids: string[], archived: boolean): Promise<void> => {
+    if (!ids.length) return;
+    this.invalidateRefresh();
+    const results = await Promise.allSettled(ids.map((threadId) =>
+      appServerRequest({ method: "threadArchive", params: { threadId, archived } })));
+    const failed: string[] = [];
+    results.forEach((result, index) => {
+      const session = this.sessions.find((item) => item.session_id === ids[index]);
+      if (result.status === "fulfilled") { if (session) session.archived = archived; }
+      else failed.push(`${session?.title || ids[index]}：${result.reason}`);
+    });
+    if (failed.length) {
+      const action = archived ? "归档" : "取消归档";
+      this.thread.messages.push({ role: "note", text: `${failed.length} 个会话${action}失败：\n${failed.join("\n")}` });
+    }
+    void this.refresh();
+  };
+
+  /** Permanently delete sessions from BugleCat; project folders on disk are
+   *  untouched. An open session among them is first replaced by a new one. */
+  deleteMany = async (ids: string[]): Promise<void> => {
+    let targets = [...new Set(ids)];
+    if (!targets.length) return;
+    if (targets.includes(this.thread.currentId)) {
+      await this.create();
+      if (targets.includes(this.thread.currentId)) {
+        targets = targets.filter((id) => id !== this.thread.currentId);
+        this.thread.messages.push({ role: "note", text: "无法切换到新会话，当前打开的会话未删除。" });
+      }
+    }
+    if (!targets.length) return;
+    this.invalidateRefresh();
+    // One store transaction for the whole batch; running sessions are skipped.
+    try {
+      await appServerRequest<number>({ method: "threadsDelete", params: { threadIds: targets } });
+    } catch (error) {
+      this.thread.messages.push({ role: "note", text: `删除会话失败：${error}` });
+    }
+    await this.refresh();
+    const left = this.sessions.filter((session) => targets.includes(session.session_id));
+    if (left.length) {
+      const names = left.slice(0, 5).map((session) => session.title || session.session_id).join("、");
+      this.thread.messages.push({
+        role: "note",
+        text: `${left.length} 个会话未删除（可能正在运行）：${names}${left.length > 5 ? " 等" : ""}`,
+      });
+    }
   };
 
   rename = async (id: string, value: string): Promise<void> => {

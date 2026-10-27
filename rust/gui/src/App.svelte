@@ -171,6 +171,8 @@
     forkSession={threadLifecycle.fork}
     openSessionLog={threadLifecycle.openLog}
     archiveSession={threadLifecycle.archive}
+    archiveSessions={threadLifecycle.archiveMany}
+    deleteSessions={threadLifecycle.deleteMany}
     renameSession={threadLifecycle.rename}
     chooseWorkspace={runtime.chooseWorkspace}
     {openSettings}
