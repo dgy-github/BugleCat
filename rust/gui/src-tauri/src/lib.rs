@@ -6079,6 +6079,24 @@ mod tests {
     }
 
     #[test]
+    fn progress_text_before_a_tool_call_drops_its_draft_badge() {
+        let thread = include_str!("../../src/lib/thread-controller.svelte.ts");
+        let tool_start = thread
+            .split_once("private handleToolStart(")
+            .unwrap()
+            .1
+            .split_once("this.streamingIndex = null;")
+            .unwrap()
+            .0;
+        assert!(tool_start
+            .contains("else if (message.verification === \"draft\") message.verification = undefined;"));
+        let done = thread.split_once("private handleDone(").unwrap().1;
+        assert!(done.contains(
+            "if (message.role === \"assistant\" && message.verification === \"draft\") message.verification = undefined;"
+        ));
+    }
+
+    #[test]
     fn completed_turn_keeps_prior_history_and_only_its_final_conclusion() {
         let model = include_str!("../../src/lib/conversation-model.ts");
         assert!(model.contains("function keepConversationConclusions("));

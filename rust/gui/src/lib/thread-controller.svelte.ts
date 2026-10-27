@@ -255,7 +255,12 @@ export class ThreadController {
     this.settleReasoning();
     if (this.streamingIndex !== null) {
       const message = this.messages[this.streamingIndex];
-      if (message?.role === "assistant" && message.text.trim() === "") this.messages.splice(this.streamingIndex, 1);
+      if (message?.role === "assistant") {
+        // Text streamed before a tool call is a finished progress note, not the
+        // turn's answer: drop the draft badge (only the final reply is verified).
+        if (message.text.trim() === "") this.messages.splice(this.streamingIndex, 1);
+        else if (message.verification === "draft") message.verification = undefined;
+      }
     }
     this.streamingIndex = null;
     const last = this.messages.at(-1);
@@ -326,6 +331,8 @@ export class ThreadController {
     this.captureTrajectory(event.session_id);
     this.removeReasoning();
     this.messages = hideCompletedToolActivity(this.messages);
+    // Nothing is still streaming once the turn is done.
+    for (const message of this.messages) if (message.role === "assistant" && message.verification === "draft") message.verification = undefined;
     if (event.stop_reason === "completed") this.messages = keepConversationConclusions(this.messages, event.final_text);
     else this.messages.push({ role: "note", text: `[${event.stop_reason}] ${event.final_text}` });
     if (event.task_id) {
