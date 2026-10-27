@@ -94,15 +94,10 @@ mod tests {
                 .iter()
                 .map(|model| model.model_id.as_str())
                 .collect::<Vec<_>>(),
-            [
-                "deepseek-flash",
-                "deepseek-v4-pro",
-                "deepseek-v4-flash-vision-exp",
-                "deepseek-new-exp"
-            ]
+            ["deepseek-flash", "deepseek-v4-pro", "deepseek-new-exp"]
         );
-        assert_eq!(merged[0].price_in, 3.0);
-        assert_eq!(merged[3].display_name, "DeepSeek New Exp");
-        assert_eq!(merged[3].pricing_note.as_deref(), Some(LIVE_NOTE));
+        assert_eq!(merged[0].price_in, 2.0);
+        assert_eq!(merged[2].display_name, "DeepSeek New Exp");
+        assert_eq!(merged[2].pricing_note.as_deref(), Some(LIVE_NOTE));
     }
 }

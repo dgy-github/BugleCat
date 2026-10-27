@@ -133,14 +133,14 @@ fn deepseek_provider() -> CatalogProvider {
                 with_pricing_note(model!(
                     "deepseek",
                     "deepseek-flash",
-                    "DeepSeek Flash",
+                    "DeepSeek V4.1 Flash",
                     "https://api.deepseek.com",
-                    3.0,
-                    9.0,
+                    2.0,
+                    8.0,
                     "CNY",
                     DEEPSEEK_PRICING,
                     Some(1_000_000),
-                ), "显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
+                ), "DeepSeek-V4.1-Flash-1017，支持图像理解；显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
                 with_pricing_note(model!(
                     "deepseek",
                     "deepseek-v4-pro",
@@ -152,17 +152,6 @@ fn deepseek_provider() -> CatalogProvider {
                     DEEPSEEK_PRICING,
                     Some(1_000_000),
                 ), "显示高峰期缓存未命中价；工作日 9:00–12:00、14:00–18:00（北京时间）以外为空闲时段半价，缓存命中另计"),
-                with_pricing_note(model!(
-                    "deepseek",
-                    "deepseek-v4-flash-vision-exp",
-                    "DeepSeek V4 Flash Vision Exp",
-                    "https://api.deepseek.com",
-                    3.0,
-                    9.0,
-                    "CNY",
-                    DEEPSEEK_PRICING,
-                    Some(1_000_000),
-                ), "实验性视觉模型；显示高峰期缓存未命中价，空闲时段半价，缓存命中另计"),
             ],
         }
 }
@@ -541,22 +530,19 @@ mod tests {
 
         assert_eq!(
             ids,
-            vec![
-                "deepseek-flash",
-                "deepseek-v4-pro",
-                "deepseek-v4-flash-vision-exp",
-            ]
+            // deepseek-v4-flash and deepseek-v4-flash-vision-exp are retired
+            // aliases now served by deepseek-flash.
+            vec!["deepseek-flash", "deepseek-v4-pro"]
         );
         assert!(deepseek
             .models
             .iter()
             .all(|model| model.price_currency == "CNY"));
-        assert_eq!(deepseek.models[0].price_in, 3.0);
-        assert_eq!(deepseek.models[0].price_out, 9.0);
+        assert_eq!(deepseek.models[0].display_name, "DeepSeek V4.1 Flash");
+        assert_eq!(deepseek.models[0].price_in, 2.0);
+        assert_eq!(deepseek.models[0].price_out, 8.0);
         assert_eq!(deepseek.models[1].price_in, 9.0);
         assert_eq!(deepseek.models[1].price_out, 27.0);
-        assert_eq!(deepseek.models[2].price_in, 3.0);
-        assert_eq!(deepseek.models[2].price_out, 9.0);
         assert!(deepseek
             .models
             .iter()
