@@ -1437,6 +1437,7 @@ dependencies = [
  "ncx-provider",
  "ncx-sandbox",
  "ncx-thread-store",
+ "ncx-tools",
  "serde_json",
  "tokio",
 ]

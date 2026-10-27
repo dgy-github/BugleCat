@@ -86,6 +86,11 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
         eprintln!("ncx: {error}");
         return Some(1);
     }
+    if args.os_sandbox_setup {
+        let mut paths = vec![cfg.workspace.clone()];
+        paths.extend(cfg.writable_roots.iter().cloned());
+        return Some(os_sandbox_setup(&paths));
+    }
     if let Some(good) = args.outcome_label {
         return Some(record_outcome_label_cli(cfg, good));
     }
@@ -120,6 +125,79 @@ async fn early_exit(cfg: &Config, args: &Args) -> Option<i32> {
             }
         },
     )
+}
+
+/// Let the AppContainer query the volume roots under `paths` (cmd's `del` and
+/// `dir` need it), asking for administrator rights once for all of them.
+#[cfg(windows)]
+fn os_sandbox_setup(paths: &[std::path::PathBuf]) -> i32 {
+    use ncx_tools::appcontainer::{
+        grant_volume_roots_elevated, shared, volume_root, volume_root_ready,
+    };
+
+    let container = match shared() {
+        Ok(container) => container,
+        Err(error) => {
+            eprintln!("ncx: {error}");
+            return 1;
+        }
+    };
+    let mut missing: Vec<std::path::PathBuf> = Vec::new();
+    let mut seen: Vec<std::path::PathBuf> = Vec::new();
+    for path in paths {
+        let root = match volume_root(path) {
+            Ok(root) => root,
+            Err(error) => {
+                eprintln!("ncx: cannot find the drive of {}: {error}", path.display());
+                return 1;
+            }
+        };
+        if seen.contains(&root) {
+            continue;
+        }
+        seen.push(root.clone());
+        match volume_root_ready(container, &root) {
+            Ok(true) => println!("os-sandbox: {} is already set up.", root.display()),
+            Ok(false) => missing.push(root),
+            Err(error) => {
+                eprintln!(
+                    "ncx: cannot read the permissions of {}: {error}",
+                    root.display()
+                );
+                return 1;
+            }
+        }
+    }
+    if missing.is_empty() {
+        println!("os-sandbox: nothing to do.");
+        return 0;
+    }
+    let list: Vec<String> = missing.iter().map(|r| r.display().to_string()).collect();
+    println!(
+        "os-sandbox: granting the BugleCat sandbox SYNCHRONIZE on {} — confirm the administrator prompt.",
+        list.join(", ")
+    );
+    if let Err(error) = grant_volume_roots_elevated(container, &missing) {
+        eprintln!("ncx: os-sandbox setup failed: {error}");
+        return 1;
+    }
+    for root in &missing {
+        if !volume_root_ready(container, root).unwrap_or(false) {
+            eprintln!(
+                "ncx: {} still has no grant for the sandbox.",
+                root.display()
+            );
+            return 1;
+        }
+    }
+    println!("os-sandbox: done; cmd's del and dir now work inside the sandbox.");
+    0
+}
+
+#[cfg(not(windows))]
+fn os_sandbox_setup(_paths: &[std::path::PathBuf]) -> i32 {
+    println!("os-sandbox: nothing to do; this setup is only needed on Windows.");
+    0
 }
 
 fn record_outcome_label_cli(cfg: &Config, good: bool) -> i32 {

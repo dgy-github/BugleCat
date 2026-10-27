@@ -14,6 +14,7 @@ ncx-config = { path = "../ncx-config" }
 ncx-provider = { path = "../ncx-provider" }
 ncx-sandbox = { path = "../ncx-sandbox" }
 ncx-core = { path = "../ncx-core" }
+ncx-tools = { path = "../ncx-tools" }
 ncx-app-server = { path = "../ncx-app-server" }
 ncx-protocol = { path = "../ncx-protocol" }
 ncx-thread-store = { path = "../ncx-thread-store" }

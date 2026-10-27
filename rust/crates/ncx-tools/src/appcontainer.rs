@@ -23,7 +23,8 @@ use std::ptr::{null, null_mut};
 use std::sync::Arc;
 
 use windows_sys::Win32::Foundation::{
-    LocalFree, SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, WAIT_OBJECT_0,
+    LocalFree, SetHandleInformation, ERROR_CANCELLED, GENERIC_ALL, GENERIC_EXECUTE, GENERIC_READ,
+    HANDLE, HANDLE_FLAG_INHERIT, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetExplicitEntriesFromAclW, GetNamedSecurityInfoW, SetEntriesInAclW,
@@ -35,15 +36,16 @@ use windows_sys::Win32::Security::Isolation::{
 };
 use windows_sys::Win32::Security::{
     AddAccessAllowedAceEx, AddAce, CreateWellKnownSid, EqualSid, FreeSid, GetAce, GetLengthSid,
-    InitializeAcl, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE,
-    DACL_SECURITY_INFORMATION, INHERITED_ACE, INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    InitializeAcl, WinBuiltinAnyPackageSid, WinCapabilityInternetClientSid,
+    WinCapabilityPrivateNetworkClientServerSid, ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION,
+    CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, INHERITED_ACE, INHERIT_ONLY_ACE,
+    OBJECT_INHERIT_ACE, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
+    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_ALL_ACCESS, FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, WRITE_DAC,
-    WRITE_OWNER,
+    DELETE, FILE_ALL_ACCESS, FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
+    SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Pipes::CreatePipe;
@@ -54,6 +56,9 @@ use windows_sys::Win32::System::Threading::{
     EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
     STARTF_USESTDHANDLES, STARTUPINFOEXW,
+};
+use windows_sys::Win32::UI::Shell::{
+    ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
 };
 
 /// AppContainer profile used for BugleCat commands.
@@ -434,6 +439,110 @@ unsafe fn ace_is_for(ace: *const u8, sid: PSID) -> bool {
         &(*(ace as *const ACCESS_ALLOWED_ACE)).SidStart as *const u32 as PSID,
         sid,
     ) != 0
+}
+
+/// The one right the container needs on a drive root. cmd.exe's `del` and
+/// `dir` query the volume (`GetVolumeInformationW`), which fails with access
+/// denied when the container holds no right at all on the root — even though
+/// deleting through the API works. `SYNCHRONIZE` alone lists and reveals
+/// nothing.
+pub const VOLUME_ROOT_RIGHTS: u32 = SYNCHRONIZE;
+
+/// The drive root of `path` (`D:\`, `\\server\share\`): what cmd.exe queries,
+/// taken from the path itself — a `subst` drive or a volume mounted in a
+/// folder is still reached through its drive letter's root.
+pub fn volume_root(path: &Path) -> io::Result<PathBuf> {
+    let path = ncx_sandbox::strip_verbatim_prefix(path.to_path_buf());
+    let mut components = path.components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Prefix(prefix)), Some(std::path::Component::RootDir)) => {
+            let mut root = PathBuf::from(prefix.as_os_str());
+            root.push(std::path::MAIN_SEPARATOR_STR);
+            Ok(root)
+        }
+        _ => Err(io::Error::other(format!(
+            "{} is not an absolute Windows path",
+            path.display()
+        ))),
+    }
+}
+
+/// Whether the container — directly or as one of `ALL APPLICATION PACKAGES` —
+/// already holds [`VOLUME_ROOT_RIGHTS`] on `root`.
+pub fn volume_root_ready(container: &AppContainer, root: &Path) -> io::Result<bool> {
+    let any_package = well_known_sid(WinBuiltinAnyPackageSid)?;
+    with_dacl(root, |dacl| unsafe {
+        Ok(aces(dacl).any(|ace| {
+            let header = *(ace as *const ACE_HEADER);
+            let mask = (*(ace as *const ACCESS_ALLOWED_ACE)).Mask;
+            header.AceType == ACCESS_ALLOWED_ACE_TYPE
+                && header.AceFlags as u32 & INHERIT_ONLY_ACE == 0
+                && mask & (VOLUME_ROOT_RIGHTS | GENERIC_ALL | GENERIC_READ | GENERIC_EXECUTE) != 0
+                && (ace_is_for(ace, container.sid) || ace_is_for(ace, any_package.as_ptr() as PSID))
+        }))
+    })
+}
+
+/// The elevated command that grants the container [`VOLUME_ROOT_RIGHTS`] on
+/// every root in `roots`: `cmd.exe` parameters chaining one `icacls` per root.
+pub fn volume_grant_parameters(sid: &str, roots: &[PathBuf]) -> String {
+    let grants: Vec<String> = roots
+        .iter()
+        .map(|root| {
+            // Inside quotes a backslash before `"` escapes it, so a root that
+            // ends in `\` (every drive root) gets it doubled.
+            let mut root = root.display().to_string();
+            if root.ends_with('\\') {
+                root.push('\\');
+            }
+            format!("icacls \"{root}\" /grant *{sid}:(S)")
+        })
+        .collect();
+    format!("/D /S /C \"{}\"", grants.join(" && "))
+}
+
+/// Grant the container [`VOLUME_ROOT_RIGHTS`] on `roots` from one elevated
+/// `cmd.exe` (a single UAC prompt), and wait for it. Drive roots belong to
+/// SYSTEM / TrustedInstaller, so this is the one step that needs an
+/// administrator.
+pub fn grant_volume_roots_elevated(container: &AppContainer, roots: &[PathBuf]) -> io::Result<()> {
+    if roots.is_empty() {
+        return Ok(());
+    }
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let cmd = wide(PathBuf::from(system_root).join("System32").join("cmd.exe"));
+    let parameters = wide(volume_grant_parameters(&container.sid_string()?, roots));
+    let verb = wide("runas");
+    unsafe {
+        let mut info: SHELLEXECUTEINFOW = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+        info.lpVerb = verb.as_ptr();
+        info.lpFile = cmd.as_ptr();
+        info.lpParameters = parameters.as_ptr();
+        info.nShow = 0; // SW_HIDE
+        if ShellExecuteExW(&mut info) == 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_CANCELLED as i32) {
+                return Err(io::Error::other("the administrator prompt was declined"));
+            }
+            return Err(io::Error::other(format!(
+                "starting the elevated icacls failed: {error}"
+            )));
+        }
+        if info.hProcess.is_null() {
+            return Err(io::Error::other("the elevated icacls did not start"));
+        }
+        let process = OwnedHandle::from_raw_handle(info.hProcess as RawHandle);
+        WaitForSingleObject(process.as_raw_handle() as HANDLE, INFINITE);
+        let code = exit_code(process.as_raw_handle() as HANDLE)?;
+        if code != 0 {
+            return Err(io::Error::other(format!(
+                "the elevated icacls exited with code {code}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Whether `path`'s DACL holds an explicit `mode` ACE for the container that
@@ -965,6 +1074,97 @@ mod tests {
         assert!(!secrets.join("new.txt").exists());
         let _ = std::fs::remove_dir_all(workspace);
         let _ = std::fs::remove_dir_all(secrets);
+    }
+
+    #[test]
+    fn volume_grant_runs_one_icacls_per_root() {
+        let roots = [PathBuf::from(r"D:\"), PathBuf::from(r"C:\mnt\data")];
+        assert_eq!(
+            volume_grant_parameters("S-1-15-2-1-2", &roots),
+            r#"/D /S /C "icacls "D:\\" /grant *S-1-15-2-1-2:(S) && icacls "C:\mnt\data" /grant *S-1-15-2-1-2:(S)""#
+        );
+    }
+
+    #[test]
+    fn volume_root_ready_needs_the_right_on_the_root_itself() {
+        let container = AppContainer::open(TEST_PROFILE).unwrap();
+        let dir = temp_dir("volready");
+        let root = volume_root(&dir).unwrap();
+        assert!(
+            dir.starts_with(&root),
+            "{} / {}",
+            dir.display(),
+            root.display()
+        );
+        assert!(!volume_root_ready(&container, &dir).unwrap());
+        grant(&container, &dir, Access::ReadWrite).unwrap();
+        assert!(volume_root_ready(&container, &dir).unwrap());
+        // Rights that only reach the children don't count.
+        let children_only = ContainerRights {
+            own: 0,
+            inherited: FILE_ALL_ACCESS,
+        };
+        restrict(&container, &dir, children_only).unwrap();
+        assert!(!volume_root_ready(&container, &dir).unwrap());
+        let synchronize_only = ContainerRights {
+            own: VOLUME_ROOT_RIGHTS,
+            inherited: FILE_ALL_ACCESS,
+        };
+        restrict(&container, &dir, synchronize_only).unwrap();
+        assert!(volume_root_ready(&container, &dir).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `subst` makes a granted folder the root of its own drive, standing in
+    /// for what `ncx --os-sandbox-setup` grants on a real drive root.
+    #[test]
+    fn cmd_del_works_once_the_volume_root_allows_synchronize() {
+        let container = AppContainer::open(TEST_PROFILE).unwrap();
+        let dir = temp_dir("subst");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        grant(&container, &dir, Access::ReadWrite).unwrap();
+        let Some(letter) = (b'M'..=b'Z')
+            .map(|c| format!("{}:", c as char))
+            .find(|d| !Path::new(&format!("{d}\\")).exists())
+        else {
+            return;
+        };
+        let mapped = std::process::Command::new("subst")
+            .arg(&letter)
+            .arg(&dir)
+            .status()
+            .is_ok_and(|s| s.success());
+        if !mapped {
+            let _ = std::fs::remove_dir_all(dir);
+            return;
+        }
+        let root = PathBuf::from(format!("{letter}\\"));
+        let cwd = root.join("sub");
+        let del = "echo a> a.txt && del a.txt && if exist a.txt (echo STILL) else (echo GONE)";
+        let outcome = || {
+            assert_eq!(volume_root(&cwd).unwrap(), root);
+            for (own, works) in [(0, false), (VOLUME_ROOT_RIGHTS, true)] {
+                let rights = ContainerRights {
+                    own,
+                    inherited: FILE_ALL_ACCESS,
+                };
+                restrict(&container, &dir, rights).unwrap();
+                assert_eq!(volume_root_ready(&container, &root).unwrap(), works);
+                let (code, out) = run(&container, &cwd, del, false);
+                assert_eq!(code == 0 && out.contains("GONE"), works, "{out}");
+                let (code, out) = run(&container, &cwd, "dir /b", false);
+                assert_eq!(code == 0, works, "{out}");
+            }
+        };
+        let result = std::panic::catch_unwind(outcome);
+        let _ = std::process::Command::new("subst")
+            .arg(&letter)
+            .arg("/d")
+            .status();
+        let _ = std::fs::remove_dir_all(dir);
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
     }
 
     #[test]

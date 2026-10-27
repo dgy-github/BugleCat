@@ -149,6 +149,58 @@ fn normalize(path: &Path) -> PathBuf {
     ncx_sandbox::normalize(path)
 }
 
+/// A note for the output of a failed isolated command when the container
+/// can't query the volume holding `cwd` or a writable root: cmd's `del` and
+/// `dir` then fail with "access denied". `None` once every volume is set up
+/// (see `ncx --os-sandbox-setup`), and always off Windows.
+pub fn setup_hint(isolation: &OsIsolation, cwd: &Path) -> Option<String> {
+    let missing = unready_volume_roots(isolation, cwd);
+    if missing.is_empty() {
+        return None;
+    }
+    let roots: Vec<String> = missing.iter().map(|r| r.display().to_string()).collect();
+    Some(format!(
+        "[sandbox] cmd's `del` and `dir` fail with \"access denied\" here because the OS \
+         sandbox has no access to the drive root {}. Run `ncx --os-sandbox-setup` once (one \
+         administrator prompt) to fix it; until then `rd /s /q` still removes directories.",
+        roots.join(", ")
+    ))
+}
+
+/// Volume roots under `cwd` and the writable roots that the container can't
+/// query yet. Roots found ready are remembered for the life of the process.
+#[cfg(windows)]
+pub fn unready_volume_roots(isolation: &OsIsolation, cwd: &Path) -> Vec<PathBuf> {
+    use crate::appcontainer::{shared, volume_root, volume_root_ready};
+    use std::sync::Mutex;
+    static READY: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+    let Ok(container) = shared() else {
+        return Vec::new();
+    };
+    let mut missing: Vec<PathBuf> = Vec::new();
+    let paths = std::iter::once(cwd).chain(isolation.writable_roots.iter().map(PathBuf::as_path));
+    for path in paths {
+        let Ok(root) = volume_root(path) else {
+            continue;
+        };
+        if missing.contains(&root) || READY.lock().unwrap().contains(&root) {
+            continue;
+        }
+        match volume_root_ready(container, &root) {
+            Ok(true) => READY.lock().unwrap().push(root),
+            Ok(false) => missing.push(root),
+            Err(_) => {}
+        }
+    }
+    missing
+}
+
+#[cfg(not(windows))]
+pub fn unready_volume_roots(_isolation: &OsIsolation, _cwd: &Path) -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// How a protected path is shielded from isolated commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shield {
@@ -816,6 +868,30 @@ mod tests {
         let (rights, _) = container_rights(container, &ws.join(".env")).unwrap();
         assert_eq!(rights, Default::default());
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn failed_commands_point_to_setup_while_the_drive_is_unready() {
+        let (workspace, _outside, isolation) = isolated_workspace("hint");
+        let unready = !unready_volume_roots(&isolation, &workspace).is_empty();
+        let ok = run_isolated(&isolation, &workspace, "echo fine").await;
+        assert_eq!(ok.exit_code, 0, "{}", ok.render());
+        assert!(!ok.stderr.contains("--os-sandbox-setup"), "{}", ok.render());
+
+        let result = run_isolated(&isolation, &workspace, "echo a> a.txt && del a.txt").await;
+        if unready {
+            assert_ne!(result.exit_code, 0, "{}", result.render());
+            assert!(
+                result.stderr.contains("ncx --os-sandbox-setup"),
+                "{}",
+                result.render()
+            );
+        } else {
+            assert_eq!(result.exit_code, 0, "{}", result.render());
+            assert!(!workspace.join("a.txt").exists());
+        }
+        let _ = std::fs::remove_dir_all(workspace.parent().unwrap());
     }
 
     #[cfg(windows)]

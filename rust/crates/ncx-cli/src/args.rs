@@ -51,6 +51,9 @@ OPTIONS:
         --since <DURATION>  Time window for --outcomes (e.g. 7d, 30d, 24h; default: 30d).
         --by <DIMS>         Slice dimensions for --outcomes (category,model,policy).
         --json              Emit --outcomes report as JSON.
+        --os-sandbox-setup  Windows, once per drive: let the os_sandbox = \"enforce\" container
+                            query the workspace's drive root (one administrator prompt),
+                            so cmd's del and dir work inside it. Then exit.
         --dump-genome       Print the default harness genome (system_prompt + core tool
                             descriptions) as TOML, then exit. Used by the ncx-forge trainer.
     -h, --help              Show this help.
@@ -92,6 +95,8 @@ pub struct Args {
     pub json: bool,
     /// Print the default genome (system_prompt + core tool descriptions) as TOML and exit.
     pub dump_genome: bool,
+    /// Grant the AppContainer access to the workspace's volume roots, then exit.
+    pub os_sandbox_setup: bool,
     pub help: bool,
     pub version: bool,
 }
@@ -169,6 +174,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--by" => args.by = Some(take_value(argv, &mut i, a)?),
             "--json" => args.json = true,
             "--dump-genome" => args.dump_genome = true,
+            "--os-sandbox-setup" => args.os_sandbox_setup = true,
             "--disable-context-edit" => args.disable_context_edit = true,
             "--mcp" => args.mcp = true,
             "-w" | "--workspace" => {
@@ -319,6 +325,12 @@ mod tests {
     fn dump_genome_flag() {
         assert!(args(&["--dump-genome"]).unwrap().dump_genome);
         assert!(!args(&[]).unwrap().dump_genome);
+    }
+
+    #[test]
+    fn os_sandbox_setup_flag() {
+        assert!(args(&["--os-sandbox-setup"]).unwrap().os_sandbox_setup);
+        assert!(!args(&[]).unwrap().os_sandbox_setup);
     }
 
     #[test]

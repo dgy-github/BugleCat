@@ -17,7 +17,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::os_isolation::{spawn_shell, OsIsolation};
+use crate::os_isolation::{setup_hint, spawn_shell, OsIsolation};
 use crate::text_encoding::decode_text_lossy;
 
 const MAX_OUTPUT: usize = 16_000;
@@ -163,10 +163,23 @@ impl PolicyExecutor {
         match timeout(Duration::from_secs(timeout_s), collect).await {
             Ok(status) => {
                 let code = status.unwrap_or(1);
+                let mut stderr = decode_text_lossy(&err);
+                if code != 0 {
+                    if let Some(hint) = self
+                        .isolation
+                        .as_ref()
+                        .and_then(|isolation| setup_hint(isolation, cwd))
+                    {
+                        if !stderr.is_empty() && !stderr.ends_with('\n') {
+                            stderr.push('\n');
+                        }
+                        stderr.push_str(&hint);
+                    }
+                }
                 ExecResult {
                     exit_code: code,
                     stdout: decode_text_lossy(&out),
-                    stderr: decode_text_lossy(&err),
+                    stderr,
                     ..Default::default()
                 }
             }
