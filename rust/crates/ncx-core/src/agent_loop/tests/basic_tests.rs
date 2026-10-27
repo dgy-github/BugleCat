@@ -847,9 +847,53 @@ async fn http_400_presents_a_readable_error_without_diagnostic_json() {
 }
 
 #[tokio::test]
-async fn text_tool_calls_are_retried_as_native_calls_without_executing_the_text() {
-    let fake_call = "🦊 < | | DSML | | calls>\n< | | DSML | | invoke name=\"shell\">\n< | | DSML | | parameter name=\"command\">echo fake</ | | DSML | | parameter>\n</ | | DSML | | invoke>\n</ | | DSML | | calls>";
-    let patch = "*** Begin Patch\n*** Add File: scanned.txt\n+checked\n*** End Patch";
+async fn dsml_text_tool_calls_run_as_native_calls() {
+    let fake_call = "Reading it now. < | | DSML | | calls>
+< | | DSML | | invoke name=\"read_file\">
+< | | DSML | | parameter name=\"path\">notes.txt</ | | DSML | | parameter>
+</ | | DSML | | invoke>
+</ | | DSML | | calls>";
+    let provider = ScriptedProvider::new(vec![
+        ModelResponse {
+            content: fake_call.into(),
+            ..Default::default()
+        },
+        ModelResponse {
+            content: "扫描完成。".into(),
+            ..Default::default()
+        },
+    ]);
+    let ws = tmpdir("text_tool_call_recovery");
+    std::fs::write(ws.join("notes.txt"), "RECOVERED-CONTENT").unwrap();
+    let mut agent = build(&ws, Box::new(provider));
+    let events = Rc::new(RefCell::new(Vec::<LoopEvent>::new()));
+    let sink = events.clone();
+    agent.set_event_sink(Box::new(move |event| sink.borrow_mut().push(event)));
+
+    let result = agent.run_turn(json!("扫描项目"), None).await;
+
+    assert_eq!(result.stop_reason, "completed", "{}", result.final_text);
+    assert_eq!(result.iterations, 2);
+    assert_eq!(result.tools_used, vec!["read_file".to_string()]);
+    assert_eq!(result.final_text, "扫描完成。");
+    let history = serde_json::to_string(&agent.session.full_messages()).unwrap();
+    assert!(!history.contains("DSML"), "{history}");
+    assert!(history.contains("RECOVERED-CONTENT"), "{history}");
+    assert!(history.contains("call_dsml_"), "{history}");
+    assert!(events.borrow().iter().any(|event| matches!(
+        event,
+        LoopEvent::AssistantText { text, .. } if text.is_empty()
+    )));
+}
+
+#[tokio::test]
+async fn unrecoverable_text_tool_calls_are_retried_as_native_calls() {
+    // `shell` without its required `command` cannot be recovered.
+    let fake_call = "<|DSML|calls><|DSML|invoke name=\"shell\"></|DSML|invoke></|DSML|calls>";
+    let patch = "*** Begin Patch
+*** Add File: scanned.txt
++checked
+*** End Patch";
     let provider = ScriptedProvider::new(vec![
         ModelResponse {
             content: fake_call.into(),
@@ -861,28 +905,22 @@ async fn text_tool_calls_are_retried_as_native_calls_without_executing_the_text(
             ..Default::default()
         },
     ]);
-    let ws = tmpdir("text_tool_call_recovery");
+    let ws = tmpdir("text_tool_call_retry");
     let mut agent = build(&ws, Box::new(provider));
-    let events = Rc::new(RefCell::new(Vec::<LoopEvent>::new()));
-    let sink = events.clone();
-    agent.set_event_sink(Box::new(move |event| sink.borrow_mut().push(event)));
 
     let result = agent.run_turn(json!("扫描项目"), None).await;
 
     assert_eq!(result.stop_reason, "completed");
     assert_eq!(result.iterations, 3);
-    assert!(result.tools_used.contains(&"apply_patch".to_string()));
+    assert_eq!(result.tools_used, vec!["apply_patch".to_string()]);
     assert_eq!(
         std::fs::read_to_string(ws.join("scanned.txt")).unwrap(),
-        "checked\n"
+        "checked
+"
     );
     assert!(!serde_json::to_string(&agent.session.full_messages())
         .unwrap()
         .contains("DSML"));
-    assert!(events.borrow().iter().any(|event| matches!(
-        event,
-        LoopEvent::AssistantText { text, .. } if text.is_empty()
-    )));
 }
 
 #[tokio::test]
@@ -913,26 +951,26 @@ async fn repeated_text_tool_calls_fail_without_claiming_execution() {
 }
 
 #[tokio::test]
-async fn fullwidth_dsml_markers_are_not_shown_as_an_answer() {
-    let fake_call = "<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"shell\"><｜｜DSML｜｜ parameter name=\"command\">echo fake</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>";
+async fn fullwidth_dsml_markers_are_recovered_not_shown_as_an_answer() {
+    let fake_call = "<｜｜DSML｜｜ calls><｜｜DSML｜｜ invoke name=\"read_file\"><｜｜DSML｜｜ parameter name=\"path\">notes.txt</｜｜DSML｜｜ parameter></｜｜DSML｜｜ invoke></｜｜DSML｜｜ calls>";
     let provider = ScriptedProvider::new(vec![
         ModelResponse {
             content: fake_call.into(),
             ..Default::default()
         },
         ModelResponse {
-            content: fake_call.into(),
+            content: "读完了。".into(),
             ..Default::default()
         },
     ]);
     let ws = tmpdir("fullwidth_dsml_recovery");
+    std::fs::write(ws.join("notes.txt"), "hello").unwrap();
     let mut agent = build(&ws, Box::new(provider));
 
     let result = agent.run_turn(json!("扫描项目"), None).await;
 
-    assert_eq!(result.stop_reason, "error");
-    assert!(result.tools_used.is_empty());
-    assert!(result.final_text.contains("扫描命令未执行"));
+    assert_eq!(result.stop_reason, "completed");
+    assert_eq!(result.tools_used, vec!["read_file".to_string()]);
     assert!(!result.final_text.contains("DSML"));
 }
 

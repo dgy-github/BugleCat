@@ -28,6 +28,7 @@ const RETRIEVAL_BUDGET_TOKENS: usize = 1_500;
 
 mod compaction;
 mod deliverable;
+mod dsml;
 mod tool_dispatch;
 mod trace;
 mod turn;

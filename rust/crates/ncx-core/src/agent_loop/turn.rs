@@ -166,7 +166,7 @@ pub(super) async fn run(
         if iteration + state.compaction_calls + state.verification_budget.calls >= max_model_calls {
             return model_budget_result(agent, max_model_calls, state);
         }
-        let response =
+        let mut response =
             match request_model_cancellable(agent, &prompt, iteration, &mut state, sink, cancel)
                 .await
             {
@@ -180,6 +180,9 @@ pub(super) async fn run(
                     );
                 }
             };
+        if looks_like_text_tool_calls(&response) {
+            recover_text_tool_calls(agent, &prompt, iteration, &mut response, sink);
+        }
         if looks_like_text_tool_calls(&response) {
             state.text_tool_call_responses += 1;
             // Streaming may have shown this draft already. An empty authoritative
@@ -832,6 +835,39 @@ fn is_retryable_transport_error(message: &str) -> bool {
     message.starts_with("RequestError:")
         || message.starts_with("TimeoutError:")
         || message.starts_with("StreamError:")
+}
+
+/// Turn a well-formed DSML block in `response.content` into native tool
+/// calls, so they run through the normal dispatch (sandbox, approvals,
+/// review) instead of the turn failing. The streamed draft showing the raw
+/// markup is cleared; the text before the block stays as the call's content.
+fn recover_text_tool_calls(
+    agent: &AgentLoop,
+    prompt: &PromptContext,
+    iteration: usize,
+    response: &mut ModelResponse,
+    sink: &mut Option<EventSink>,
+) {
+    let schemas = agent.tools.schemas_for_query(&prompt.tool_query);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis())
+        .unwrap_or_default();
+    let prefix = format!("call_dsml_{stamp}_{iteration}");
+    let Some((calls, preamble)) = super::dsml::recover_calls(&response.content, &schemas, &prefix)
+    else {
+        return;
+    };
+    emit(
+        sink,
+        LoopEvent::AssistantText {
+            text: String::new(),
+            model: agent.provider.model().to_string(),
+            confirmed_model: agent.provider.confirmed_model(),
+        },
+    );
+    response.content = preamble;
+    response.tool_calls = calls;
 }
 
 fn looks_like_text_tool_calls(response: &ModelResponse) -> bool {
