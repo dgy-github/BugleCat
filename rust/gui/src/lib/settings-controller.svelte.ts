@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { appServerRequest } from "./app-server-client";
 import type { PluginController } from "./plugin-controller.svelte";
 
+const MODEL_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const MODEL_REFRESH_STALE_MS = 10 * 60 * 1000;
+
 export type Settings = {
   model: string; base_url: string; vl_model: string; vl_base_url: string; sandbox_mode: string;
   approval_policy: string; reasoning_effort: string; max_iterations: number; max_tool_calls: number;
@@ -122,7 +125,23 @@ export class SettingsController {
     finally { this.yunmoRefreshing = false; }
   };
 
+  private lastModelRefresh = 0;
+  private modelRefreshArmed = false;
+
+  /** Keep the runtime model list in step with the providers' `/models`:
+   *  hourly, and when the window regains focus with a stale list. */
+  private armModelRefresh(): void {
+    if (this.modelRefreshArmed || typeof window === "undefined") return;
+    this.modelRefreshArmed = true;
+    setInterval(() => void this.refreshRuntimeModels(), MODEL_REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", () => {
+      if (Date.now() - this.lastModelRefresh > MODEL_REFRESH_STALE_MS) void this.refreshRuntimeModels();
+    });
+  }
+
   refreshRuntimeModels = async (): Promise<void> => {
+    this.armModelRefresh();
+    this.lastModelRefresh = Date.now();
     try {
       await this.refreshOfficial(false);
       const settings = await appServerRequest<Settings>({ method: "settingsRead" });

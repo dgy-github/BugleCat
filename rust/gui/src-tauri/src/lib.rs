@@ -2211,11 +2211,13 @@ async fn refresh_official_models(
     .await
     .map_err(|error| format!("官方模型目录任务失败：{error}"))?;
     {
+        // Providers that could not be reached this round keep their last
+        // snapshot rather than falling back to the static catalog.
         let mut official = state
             .official_live_models
             .lock()
             .map_err(|_| "官方模型缓存不可用".to_string())?;
-        *official = discovered;
+        official.extend(discovered);
     }
     let cfg = load_config(Overrides::default()).map_err(|error| error.to_string())?;
     if let Some(provider_id) = cfg.active_provider_id.strip_prefix("preset:") {
@@ -5907,13 +5909,22 @@ mod tests {
             "deepseek".into(),
             merge_official_live_models(
                 &deepseek,
-                &[ncx_core::DiscoveredProviderModel {
-                    id: "deepseek-new-exp".into(),
-                    name: "DeepSeek New Exp".into(),
-                    context_length: Some(256_000),
-                    input_price_per_million: None,
-                    output_price_per_million: None,
-                }],
+                &[
+                    ncx_core::DiscoveredProviderModel {
+                        id: "deepseek-flash".into(),
+                        name: "DeepSeek Flash".into(),
+                        context_length: Some(1_000_000),
+                        input_price_per_million: None,
+                        output_price_per_million: None,
+                    },
+                    ncx_core::DiscoveredProviderModel {
+                        id: "deepseek-new-exp".into(),
+                        name: "DeepSeek New Exp".into(),
+                        context_length: Some(256_000),
+                        input_price_per_million: None,
+                        output_price_per_million: None,
+                    },
+                ],
             ),
         );
         let response = catalog_response(&[], &[], &live, false);
@@ -5926,9 +5937,7 @@ mod tests {
             .iter()
             .map(|model| model.model_id.as_str())
             .collect::<Vec<_>>();
-        assert!(ids.contains(&"deepseek-flash"));
-        assert!(ids.contains(&"deepseek-v4-pro"));
-        assert!(ids.contains(&"deepseek-new-exp"));
+        assert_eq!(ids, ["deepseek-flash", "deepseek-new-exp"]);
     }
 
     #[test]

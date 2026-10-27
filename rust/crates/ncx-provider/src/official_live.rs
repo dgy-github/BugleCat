@@ -48,11 +48,30 @@ pub fn live_official_model(
     }
 }
 
+/// The provider's models as its `/models` snapshot lists them: maintained
+/// presets that are still listed come first (keeping their audited prices),
+/// then newly listed ids. Presets the provider no longer lists are retired
+/// and dropped. An empty snapshot says nothing, so the presets stand.
 pub fn merge_official_live_models(
     provider: &CatalogProvider,
     discovered: &[crate::DiscoveredProviderModel],
 ) -> Vec<CatalogModel> {
-    let mut models = provider.models.clone();
+    if discovered.is_empty() {
+        return provider.models.clone();
+    }
+    let listed = |id: &str| discovered.iter().any(|item| item.id == id);
+    let mut models: Vec<CatalogModel> = provider
+        .models
+        .iter()
+        .filter(|model| listed(&model.model_id))
+        .map(|model| {
+            let item = discovered
+                .iter()
+                .find(|item| item.id == model.model_id)
+                .expect("filtered to listed presets");
+            live_official_model(provider, item)
+        })
+        .collect();
     for item in discovered {
         if !models.iter().any(|model| model.model_id == item.id) {
             models.push(live_official_model(provider, item));
@@ -67,7 +86,7 @@ mod tests {
     use crate::preset_catalog::catalog;
 
     #[test]
-    fn live_official_catalog_keeps_priced_presets_and_appends_new_ids() {
+    fn live_official_catalog_follows_the_snapshot() {
         let deepseek = catalog()
             .into_iter()
             .find(|provider| provider.id == "deepseek")
@@ -94,10 +113,22 @@ mod tests {
                 .iter()
                 .map(|model| model.model_id.as_str())
                 .collect::<Vec<_>>(),
-            ["deepseek-flash", "deepseek-v4-pro", "deepseek-new-exp"]
+            // deepseek-v4-pro is not listed any more: retired, so dropped.
+            ["deepseek-flash", "deepseek-new-exp"]
         );
-        assert_eq!(merged[0].price_in, 2.0);
-        assert_eq!(merged[2].display_name, "DeepSeek New Exp");
-        assert_eq!(merged[2].pricing_note.as_deref(), Some(LIVE_NOTE));
+        assert_eq!(merged[0].price_in, 2.0, "listed presets keep audited prices");
+        assert_eq!(merged[0].display_name, "DeepSeek V4.1 Flash");
+        assert_eq!(merged[1].display_name, "DeepSeek New Exp");
+        assert_eq!(merged[1].pricing_note.as_deref(), Some(LIVE_NOTE));
+    }
+
+    #[test]
+    fn empty_snapshot_keeps_the_presets() {
+        let deepseek = catalog()
+            .into_iter()
+            .find(|provider| provider.id == "deepseek")
+            .expect("missing DeepSeek provider");
+        let merged = merge_official_live_models(&deepseek, &[]);
+        assert_eq!(merged.len(), deepseek.models.len());
     }
 }
