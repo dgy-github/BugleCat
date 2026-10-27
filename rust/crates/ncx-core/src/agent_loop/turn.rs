@@ -894,6 +894,14 @@ fn present_provider_error(message: &str) -> Option<String> {
             "模型响应中断：服务端在一段时间内没有继续输出。当前任务和会话已保留，请重试本轮；如果反复发生，请检查网络或切换模型线路。"
                 .to_string(),
         ),
+        "stream_error" => Some(
+            "模型响应流意外中断（连接被关闭或网络异常）。当前任务和会话已保留，请重试本轮；如果反复发生，请检查网络或代理。"
+                .to_string(),
+        ),
+        "request_deadline" | "headers_timeout" => Some(
+            "模型服务在限定时间内没有开始响应（已自动重试）。当前任务和会话已保留，请稍后重试；如果反复发生，请检查网络或切换模型线路。"
+                .to_string(),
+        ),
         "http_error" => {
             let status = diagnostic.get("http_status")?.as_u64()?;
             let message = match status {

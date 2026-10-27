@@ -116,7 +116,10 @@ mod tests {
             // deepseek-v4-pro is not listed any more: retired, so dropped.
             ["deepseek-flash", "deepseek-new-exp"]
         );
-        assert_eq!(merged[0].price_in, 2.0, "listed presets keep audited prices");
+        assert_eq!(
+            merged[0].price_in, 2.0,
+            "listed presets keep audited prices"
+        );
         assert_eq!(merged[0].display_name, "DeepSeek V4.1 Flash");
         assert_eq!(merged[1].display_name, "DeepSeek New Exp");
         assert_eq!(merged[1].pricing_note.as_deref(), Some(LIVE_NOTE));

@@ -831,6 +831,30 @@ async fn exhausted_provider_budget_is_not_retried_and_presents_read_timeout() {
 }
 
 #[tokio::test]
+async fn stream_errors_present_a_readable_message_without_diagnostic_json() {
+    for (kind, expected) in [
+        ("stream_error", "响应流意外中断"),
+        ("request_deadline", "没有开始响应"),
+    ] {
+        let diagnostic = format!(
+            "StreamError: {kind} | {{\"attempts\":1,\"elapsed_ms\":120001,\"event\":\"provider_request\",\"http_status\":200,\"kind\":\"{kind}\",\"model\":\"deepseek-flash\",\"retries\":0}}"
+        );
+        let provider = ScriptedProvider::new(vec![ModelResponse {
+            content: diagnostic,
+            finish_reason: "error".into(),
+            ..Default::default()
+        }]);
+        let ws = tmpdir(&format!("stream_error_presentation_{kind}"));
+        let mut agent = build(&ws, Box::new(provider));
+        let result = agent.run_turn(json!("继续"), None).await;
+        assert_eq!(result.stop_reason, "error");
+        assert!(result.final_text.contains(expected), "{}", result.final_text);
+        assert!(!result.final_text.contains("provider_request"));
+        assert!(!result.final_text.contains("elapsed_ms"));
+    }
+}
+
+#[tokio::test]
 async fn http_400_presents_a_readable_error_without_diagnostic_json() {
     let diagnostic = "HTTP 400 | {\"event\":\"provider_request\",\"kind\":\"http_error\",\"http_status\":400,\"attempts\":1}";
     let provider = ScriptedProvider::new(vec![ModelResponse {

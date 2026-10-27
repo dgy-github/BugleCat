@@ -28,6 +28,11 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_S: u64 = 60;
 const STREAM_IDLE_TIMEOUT_MIN_S: u64 = 5;
 const STREAM_IDLE_TIMEOUT_MAX_S: u64 = 120;
 const MAX_SSE_LINE_BYTES: usize = 8 * 1024 * 1024;
+/// Whole-request cap for a streaming reply. The client-wide timeout counts
+/// the entire body, so a long but healthy stream (deep reasoning plus a large
+/// generated file) would be cut off at `timeout_s`; stalls are caught by the
+/// idle timeout instead, and the agent loop enforces the turn deadline.
+const STREAM_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// Bounded override for the streaming response-header wait (seconds).
 pub fn stream_open_timeout_s() -> u64 {
@@ -39,9 +44,19 @@ pub fn stream_open_timeout_s() -> u64 {
 }
 
 /// Exponential backoff between retries: 0.5s, 1s, 2s, … capped (matches `chat`).
-async fn backoff_sleep(attempt: u32) {
-    let ms = 500u64 << attempt.saturating_sub(1).min(5);
-    tokio::time::sleep(Duration::from_millis(ms)).await;
+/// Sleep before retry `attempt` unless that would overrun `budget_end`.
+async fn backoff_within(attempt: u32, budget_end: Instant) -> bool {
+    let delay = Duration::from_millis(500u64 << attempt.saturating_sub(1).min(5));
+    if Instant::now() + delay >= budget_end {
+        return false;
+    }
+    tokio::time::sleep(delay).await;
+    true
+}
+
+fn stream_budget_spent(diagnostic: &RefCell<RequestDiagnostic>) -> ProviderError {
+    diagnostic.borrow_mut().kind = "request_deadline";
+    ProviderError("TimeoutError: request_deadline".into())
 }
 
 /// Pure inner helper — injectable for tests (mirrors `_stream_open_timeout_s`).
@@ -302,7 +317,7 @@ impl DeepSeekProvider {
         let started = Instant::now();
         let diagnostic = RefCell::new(RequestDiagnostic::default());
         let result = timeout(
-            self.request_timeout,
+            STREAM_TOTAL_TIMEOUT,
             self.chat_stream_inner(
                 messages,
                 tools,
@@ -337,6 +352,11 @@ impl DeepSeekProvider {
         let payload = to_request_json(&kwargs);
 
         let open_to = Duration::from_secs(stream_open_timeout_s());
+        // `request_timeout` bounds opening the stream (connect, headers,
+        // retries and their backoff). Once a reply is flowing, only the idle
+        // timeout and STREAM_TOTAL_TIMEOUT apply, so a long healthy answer is
+        // not cut off at `timeout_s`.
+        let budget_end = Instant::now() + self.request_timeout;
         // Retry transient failures with backoff, matching the non-streaming path:
         // send/connect errors, header timeout, 408/409/429/5xx, and a mid-stream
         // body error that happened BEFORE any text was shown (retrying after text
@@ -349,17 +369,21 @@ impl DeepSeekProvider {
                 .client
                 .post(&self.endpoint)
                 .bearer_auth(&self.api_key)
+                .timeout(STREAM_TOTAL_TIMEOUT)
                 .json(&payload)
                 .send();
 
-            let resp = match timeout(open_to, send_fut).await {
+            let open_deadline = (Instant::now() + open_to).min(budget_end);
+            let resp = match timeout_at(open_deadline, send_fut).await {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
                     diagnostic.borrow_mut().kind = transport_kind(&e);
                     self.log_attempt(diagnostic, started);
                     if (e.is_connect() || e.is_timeout()) && attempt < self.max_retries {
                         attempt += 1;
-                        backoff_sleep(attempt).await;
+                        if !backoff_within(attempt, budget_end).await {
+                            return Err(stream_budget_spent(diagnostic));
+                        }
                         continue;
                     }
                     return Err(ProviderError(format!(
@@ -367,12 +391,17 @@ impl DeepSeekProvider {
                         transport_kind(&e)
                     )));
                 }
+                Err(_) if Instant::now() >= budget_end => {
+                    return Err(stream_budget_spent(diagnostic));
+                }
                 Err(_) => {
                     diagnostic.borrow_mut().kind = "headers_timeout";
                     self.log_attempt(diagnostic, started);
                     if attempt < self.max_retries {
                         attempt += 1;
-                        backoff_sleep(attempt).await;
+                        if !backoff_within(attempt, budget_end).await {
+                            return Err(stream_budget_spent(diagnostic));
+                        }
                         continue;
                     }
                     return Err(ProviderError(format!(
@@ -393,7 +422,9 @@ impl DeepSeekProvider {
                 let transient = matches!(code, 408 | 409 | 429) || (500..600).contains(&code);
                 if transient && attempt < self.max_retries {
                     attempt += 1;
-                    backoff_sleep(attempt).await;
+                    if !backoff_within(attempt, budget_end).await {
+                        return Err(stream_budget_spent(diagnostic));
+                    }
                     continue;
                 }
                 // Keep the streaming error path consistent with `post`: the
@@ -418,7 +449,9 @@ impl DeepSeekProvider {
                     self.log_attempt(diagnostic, started);
                     if !emitted && attempt < self.max_retries {
                         attempt += 1;
-                        backoff_sleep(attempt).await;
+                        if !backoff_within(attempt, budget_end).await {
+                            return Err(stream_budget_spent(diagnostic));
+                        }
                         continue;
                     }
                     return Err(ProviderError(format!(
@@ -758,6 +791,56 @@ mod tests {
             String::from_utf8(bytes).unwrap()
         });
         (format!("http://{address}/v1"), request)
+    }
+
+    /// The request budget (`timeout_s`) bounds opening a stream, not a reply
+    /// that keeps flowing: a steady stream longer than the budget completes.
+    #[tokio::test]
+    async fn a_long_healthy_stream_outlives_the_request_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0u8; 1024];
+            while !bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut buffer).unwrap();
+                if read == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&buffer[..read]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            for part in 0..8 {
+                let finish = if part == 7 { "\"stop\"" } else { "null" };
+                let event = format!(
+                    "data: {{\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"part{part} \"}},\"finish_reason\":{finish}}}]}}\n\n"
+                );
+                stream.write_all(event.as_bytes()).unwrap();
+                stream.flush().unwrap();
+                thread::sleep(Duration::from_millis(300));
+            }
+            stream.write_all(b"data: [DONE]\n\n").unwrap();
+        });
+        let provider = DeepSeekProvider::with_opts(
+            "private-key",
+            &format!("http://{address}/v1"),
+            "test-model",
+            1,
+            0,
+        );
+        let response = timeout(
+            Duration::from_secs(10),
+            provider.chat_stream(&[], None, None, None, None, |_| {}, |_| {}),
+        )
+        .await
+        .expect("the test itself must finish")
+        .expect("a healthy 2.4 s stream must not hit the 1 s request budget");
+        server.join().unwrap();
+        assert!(response.content.contains("part0"), "{}", response.content);
+        assert!(response.content.contains("part7"), "{}", response.content);
     }
 
     #[test]
