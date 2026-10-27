@@ -7,7 +7,10 @@
 //! capabilities. [`grant`] adds inheritable ACEs for the container SID to the
 //! directories a command may use — the workspace read/write, toolchains
 //! read-only — so everything else (`~/.ssh`, other projects, credentials)
-//! stays closed to it. No administrator rights are needed.
+//! stays closed to it. [`restrict`] narrows the container's allow ACEs on
+//! protected paths (`.git/hooks`, `.git/config`, `.env`, ...) inside a granted
+//! tree — deny ACEs don't bind an AppContainer. No administrator rights are
+//! needed.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -24,20 +27,23 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, GetExplicitEntriesFromAclW, GetNamedSecurityInfoW, SetEntriesInAclW,
-    SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT,
-    TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
+    SetNamedSecurityInfoW, ACCESS_MODE, EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE,
+    SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::{
     CreateAppContainerProfile, DeriveAppContainerSidFromAppContainerName, GetAppContainerFolderPath,
 };
 use windows_sys::Win32::Security::{
-    CreateWellKnownSid, EqualSid, FreeSid, WinCapabilityInternetClientSid,
-    WinCapabilityPrivateNetworkClientServerSid, ACL, DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
-    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    AddAccessAllowedAceEx, AddAce, CreateWellKnownSid, EqualSid, FreeSid, GetAce, GetLengthSid,
+    InitializeAcl, WinCapabilityInternetClientSid, WinCapabilityPrivateNetworkClientServerSid,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE,
+    DACL_SECURITY_INFORMATION, INHERITED_ACE, INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_ALL_ACCESS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
+    DELETE, FILE_ALL_ACCESS, FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, WRITE_DAC,
+    WRITE_OWNER,
 };
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Pipes::CreatePipe;
@@ -209,9 +215,28 @@ pub enum Access {
     ReadWrite,
 }
 
+/// Rights that let the container delete, rename, or re-ACL an object, or
+/// remove a directory's entries (NTFS honours a parent's `FILE_DELETE_CHILD`
+/// even when the entry itself grants no `DELETE`).
+pub const REMOVE_RIGHTS: u32 = DELETE | FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER;
+/// Read and execute, nothing else.
+pub const READ_RIGHTS: u32 = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
+
+const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+
+/// The container's allow rights on one object, split by where they apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ContainerRights {
+    /// Rights on the object itself.
+    pub own: u32,
+    /// Rights handed down to everything below a directory.
+    pub inherited: u32,
+}
+
 fn access_mask(access: Access) -> u32 {
     match access {
-        Access::Read => FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+        Access::Read => READ_RIGHTS,
         Access::ReadWrite => FILE_ALL_ACCESS,
     }
 }
@@ -220,8 +245,207 @@ fn access_mask(access: Access) -> u32 {
 /// `access` for the container, so [`grant`] can skip re-propagating the ACL
 /// through a large tree.
 pub fn has_grant(container: &AppContainer, path: &Path, access: Access) -> io::Result<bool> {
+    has_entry(
+        container,
+        path,
+        GRANT_ACCESS,
+        access_mask(access),
+        SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    )
+}
+
+/// Add an inheritable ACE for the container to `path` (and, by inheritance,
+/// everything below it, including files that already exist). No integrity
+/// label change is needed: an explicit grant to the container SID is enough
+/// for the low-integrity container process to create and overwrite files.
+pub fn grant(container: &AppContainer, path: &Path, access: Access) -> io::Result<()> {
+    add_entry(
+        container,
+        path,
+        GRANT_ACCESS,
+        access_mask(access),
+        SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    )
+}
+
+/// The container's current rights on `path`, and whether any of them is
+/// inherited from a parent directory (so a parent's grant still reaches it).
+///
+/// Deny ACEs can't take rights away from an AppContainer: its second access
+/// check only collects what the package SID is *allowed*. Protected paths are
+/// therefore shielded by narrowing the container's allow ACEs with
+/// [`restrict`], never by adding deny ACEs.
+pub fn container_rights(
+    container: &AppContainer,
+    path: &Path,
+) -> io::Result<(ContainerRights, bool)> {
+    with_dacl(path, |dacl| unsafe {
+        let mut rights = ContainerRights::default();
+        let mut from_parent = false;
+        for ace in aces(dacl) {
+            let header = *(ace as *const ACE_HEADER);
+            if header.AceType != ACCESS_ALLOWED_ACE_TYPE || !ace_is_for(ace, container.sid) {
+                continue;
+            }
+            let mask = (*(ace as *const ACCESS_ALLOWED_ACE)).Mask;
+            let flags = header.AceFlags as u32;
+            if flags & INHERIT_ONLY_ACE == 0 {
+                rights.own |= mask;
+            }
+            if flags & (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) != 0 {
+                rights.inherited |= mask;
+            }
+            if flags & INHERITED_ACE != 0 {
+                from_parent = true;
+            }
+        }
+        Ok((rights, from_parent))
+    })
+}
+
+/// Replace the container's ACEs on `path` with exactly `rights`. When the
+/// container's access came from a parent, the DACL is protected from
+/// inheritance first: every other inherited ACE is kept as an explicit copy,
+/// so users and groups keep exactly the access they had.
+pub fn restrict(container: &AppContainer, path: &Path, rights: ContainerRights) -> io::Result<()> {
+    let mut wpath = wide(path);
+    let new_acl = with_dacl(path, |dacl| unsafe {
+        let from_parent = aces(dacl).any(|ace| {
+            let header = *(ace as *const ACE_HEADER);
+            header.AceFlags as u32 & INHERITED_ACE != 0 && ace_is_for(ace, container.sid)
+        });
+        let sid_len = GetLengthSid(container.sid);
+        let size = (*dacl).AclSize as u32
+            + 2 * (std::mem::size_of::<ACCESS_ALLOWED_ACE>() as u32 + sid_len);
+        let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
+        let acl = buffer.as_mut_ptr() as *mut ACL;
+        let revision = ((*dacl).AclRevision as u32).max(ACL_REVISION);
+        if InitializeAcl(acl, size, revision) == 0 {
+            return Err(last_error("InitializeAcl"));
+        }
+        // Deny ACEs first, then the rest, each in their original order, so
+        // the flattened ACL stays canonical.
+        for deny_pass in [true, false] {
+            for ace in aces(dacl) {
+                let header = *(ace as *const ACE_HEADER);
+                let is_deny = header.AceType == ACCESS_DENIED_ACE_TYPE;
+                let inherited = header.AceFlags as u32 & INHERITED_ACE != 0;
+                if is_deny != deny_pass
+                    || (inherited && !from_parent)
+                    || ((header.AceType == ACCESS_ALLOWED_ACE_TYPE || is_deny)
+                        && ace_is_for(ace, container.sid))
+                {
+                    continue;
+                }
+                let mut copy = std::slice::from_raw_parts(ace, header.AceSize as usize).to_vec();
+                copy[1] &= !(INHERITED_ACE as u8);
+                if AddAce(
+                    acl,
+                    revision,
+                    u32::MAX,
+                    copy.as_ptr() as _,
+                    copy.len() as u32,
+                ) == 0
+                {
+                    return Err(last_error("AddAce"));
+                }
+            }
+        }
+        for (mask, flags) in [
+            (rights.own, 0),
+            (
+                rights.inherited,
+                OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE | INHERIT_ONLY_ACE,
+            ),
+        ] {
+            if mask != 0 && AddAccessAllowedAceEx(acl, revision, flags, mask, container.sid) == 0 {
+                return Err(last_error("AddAccessAllowedAceEx"));
+            }
+        }
+        Ok((buffer, from_parent))
+    })?;
+    let (mut buffer, protect) = new_acl;
+    let mut info = DACL_SECURITY_INFORMATION;
+    if protect {
+        info |= PROTECTED_DACL_SECURITY_INFORMATION;
+    }
+    unsafe {
+        win32(
+            SetNamedSecurityInfoW(
+                wpath.as_mut_ptr(),
+                SE_FILE_OBJECT,
+                info,
+                null_mut(),
+                null_mut(),
+                buffer.as_mut_ptr() as *mut ACL,
+                null(),
+            ),
+            "SetNamedSecurityInfoW",
+        )
+    }
+}
+
+/// Run `f` on `path`'s DACL; a missing (NULL) DACL is an error, since it would
+/// grant everyone everything.
+fn with_dacl<T>(path: &Path, f: impl FnOnce(*const ACL) -> io::Result<T>) -> io::Result<T> {
     let wpath = wide(path);
-    let want = access_mask(access);
+    unsafe {
+        let mut dacl: *mut ACL = null_mut();
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        win32(
+            GetNamedSecurityInfoW(
+                wpath.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                &mut dacl,
+                null_mut(),
+                &mut descriptor,
+            ),
+            "GetNamedSecurityInfoW",
+        )?;
+        let result = if dacl.is_null() {
+            Err(io::Error::other(format!("{} has no DACL", path.display())))
+        } else {
+            f(dacl)
+        };
+        LocalFree(descriptor as _);
+        result
+    }
+}
+
+/// The ACEs of `acl`, as raw pointers to their headers.
+unsafe fn aces(acl: *const ACL) -> impl Iterator<Item = *const u8> {
+    (0..(*acl).AceCount as u32).filter_map(move |index| {
+        let mut ace: *mut core::ffi::c_void = null_mut();
+        (GetAce(acl, index, &mut ace) != 0).then_some(ace as *const u8)
+    })
+}
+
+/// Whether an allow/deny ACE names `sid`. Both layouts put the SID right after
+/// the header and mask.
+unsafe fn ace_is_for(ace: *const u8, sid: PSID) -> bool {
+    let header = *(ace as *const ACE_HEADER);
+    matches!(
+        header.AceType,
+        ACCESS_ALLOWED_ACE_TYPE | ACCESS_DENIED_ACE_TYPE
+    ) && EqualSid(
+        &(*(ace as *const ACCESS_ALLOWED_ACE)).SidStart as *const u32 as PSID,
+        sid,
+    ) != 0
+}
+
+/// Whether `path`'s DACL holds an explicit `mode` ACE for the container that
+/// covers `mask` and carries at least the `inheritance` flags.
+fn has_entry(
+    container: &AppContainer,
+    path: &Path,
+    mode: ACCESS_MODE,
+    mask: u32,
+    inheritance: u32,
+) -> io::Result<bool> {
+    let wpath = wide(path);
     unsafe {
         let mut dacl: *mut ACL = null_mut();
         let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
@@ -244,11 +468,10 @@ pub fn has_grant(container: &AppContainer, path: &Path, access: Access) -> io::R
         let mut found = false;
         if listed == 0 && count > 0 && !entries.is_null() {
             for entry in std::slice::from_raw_parts(entries, count as usize) {
-                if entry.grfAccessMode == GRANT_ACCESS
+                if entry.grfAccessMode == mode
                     && entry.Trustee.TrusteeForm == TRUSTEE_IS_SID
-                    && entry.grfInheritance & SUB_CONTAINERS_AND_OBJECTS_INHERIT
-                        == SUB_CONTAINERS_AND_OBJECTS_INHERIT
-                    && entry.grfAccessPermissions & want == want
+                    && entry.grfInheritance & inheritance == inheritance
+                    && entry.grfAccessPermissions & mask == mask
                     && EqualSid(entry.Trustee.ptstrName as PSID, container.sid) != 0
                 {
                     found = true;
@@ -265,11 +488,14 @@ pub fn has_grant(container: &AppContainer, path: &Path, access: Access) -> io::R
     }
 }
 
-/// Add an inheritable ACE for the container to `path` (and, by inheritance,
-/// everything below it, including files that already exist). No integrity
-/// label change is needed: an explicit grant to the container SID is enough
-/// for the low-integrity container process to create and overwrite files.
-pub fn grant(container: &AppContainer, path: &Path, access: Access) -> io::Result<()> {
+/// Merge one explicit ACE for the container into `path`'s DACL.
+fn add_entry(
+    container: &AppContainer,
+    path: &Path,
+    mode: ACCESS_MODE,
+    mask: u32,
+    inheritance: u32,
+) -> io::Result<()> {
     let mut wpath = wide(path);
     unsafe {
         let mut old_dacl: *mut ACL = null_mut();
@@ -288,9 +514,9 @@ pub fn grant(container: &AppContainer, path: &Path, access: Access) -> io::Resul
             "GetNamedSecurityInfoW",
         )?;
         let entry = EXPLICIT_ACCESS_W {
-            grfAccessPermissions: access_mask(access),
-            grfAccessMode: GRANT_ACCESS,
-            grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            grfAccessPermissions: mask,
+            grfAccessMode: mode,
+            grfInheritance: inheritance,
             Trustee: TRUSTEE_W {
                 pMultipleTrustee: null_mut(),
                 MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,

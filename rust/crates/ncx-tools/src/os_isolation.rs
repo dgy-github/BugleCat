@@ -28,6 +28,9 @@ pub struct OsIsolation {
     pub readable_roots: Vec<PathBuf>,
     /// Whether outbound network access is allowed.
     pub network: bool,
+    /// Trees scanned for protected paths (`.git/hooks`, `.git/config`,
+    /// secret files) whose container access is narrowed below the grants.
+    pub protected_roots: Vec<PathBuf>,
 }
 
 impl OsIsolation {
@@ -39,6 +42,8 @@ impl OsIsolation {
         }
         let mut writable_roots = Vec::new();
         let mut readable_roots = Vec::new();
+        let mut protected_roots = vec![policy.workspace.clone()];
+        protected_roots.extend(policy.writable_roots.iter().cloned());
         if policy.writes_allowed() {
             writable_roots.push(policy.workspace.clone());
             writable_roots.extend(policy.writable_roots.iter().cloned());
@@ -61,6 +66,7 @@ impl OsIsolation {
             writable_roots,
             readable_roots,
             network: policy.network_access,
+            protected_roots,
         })
     }
 }
@@ -141,6 +147,113 @@ pub fn toolchain_roots(path_var: Option<std::ffi::OsString>, home: Option<&Path>
 /// `starts_with` comparisons between roots line up.
 fn normalize(path: &Path) -> PathBuf {
     ncx_sandbox::normalize(path)
+}
+
+/// How a protected path is shielded from isolated commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shield {
+    /// Secret file: no reading, writing, deleting, or renaming.
+    Secret,
+    /// Hook config (`.git/config`, a `.git` pointer file): read-only.
+    Locked,
+    /// Hook directory (`.git/hooks`): read-only, including everything below.
+    LockedTree,
+    /// The `.git` directory: usable, but it can't be deleted or renamed (which
+    /// would let a command swap in a repository with its own hooks).
+    Pinned,
+}
+
+/// A path under a protected root and how it is shielded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtectedPath {
+    pub path: PathBuf,
+    pub shield: Shield,
+}
+
+/// Directories never descended into while scanning: large, generated, and
+/// not where project secrets or repositories live.
+const SKIPPED_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+];
+
+/// Directory entries visited per scan before giving up on the rest.
+const SCAN_BUDGET: usize = 200_000;
+
+/// Find the paths under `roots` that isolated commands must not touch: secret
+/// files (per [`ncx_sandbox::is_sensitive_read_path`]), and in every git
+/// repository the `.git` directory, its `config` and `hooks`, or a `.git`
+/// pointer file. `.git/hooks` is listed even when missing, so it can be
+/// created and locked before a command could plant hooks there. Symlinks and
+/// junctions are not followed.
+pub fn protected_paths(roots: &[PathBuf]) -> Vec<ProtectedPath> {
+    let mut found = Vec::new();
+    let mut budget = SCAN_BUDGET;
+    for root in roots {
+        scan_dir(root, &mut found, &mut budget);
+    }
+    found
+}
+
+fn scan_dir(dir: &Path, found: &mut Vec<ProtectedPath>, budget: &mut usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if name == ".git" {
+            if file_type.is_dir() {
+                found.push(ProtectedPath {
+                    path: path.clone(),
+                    shield: Shield::Pinned,
+                });
+                found.push(ProtectedPath {
+                    path: path.join("hooks"),
+                    shield: Shield::LockedTree,
+                });
+                for (file, shield) in [("config", Shield::Locked), ("credentials", Shield::Secret)]
+                {
+                    if path.join(file).is_file() {
+                        found.push(ProtectedPath {
+                            path: path.join(file),
+                            shield,
+                        });
+                    }
+                }
+            } else {
+                found.push(ProtectedPath {
+                    path,
+                    shield: Shield::Locked,
+                });
+            }
+        } else if file_type.is_dir() {
+            if !SKIPPED_DIRS.contains(&name.as_str()) {
+                scan_dir(&path, found, budget);
+            }
+        } else if ncx_sandbox::is_sensitive_read_path(&path) {
+            found.push(ProtectedPath {
+                path,
+                shield: Shield::Secret,
+            });
+        }
+    }
 }
 
 pub(crate) type BoxRead = Box<dyn AsyncRead + Unpin + Send>;
@@ -262,6 +375,7 @@ fn spawn_isolated(
     for root in &isolation.readable_roots {
         ensure_grant(container, root, Access::Read)?;
     }
+    shield_protected(container, &isolation.protected_roots)?;
     let mut env: std::collections::BTreeMap<String, String> =
         crate::executor::build_env().into_iter().collect();
     env.extend(extra_env.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -335,6 +449,114 @@ fn ensure_grant(
     Ok(())
 }
 
+/// Protected roots are rescanned at most this often; restrictions applied by
+/// an earlier scan stay on the files in between.
+#[cfg(windows)]
+const RESCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Narrow the container's access to every [`protected_paths`] entry under
+/// `roots`, then take [`REMOVE_RIGHTS`](crate::appcontainer::REMOVE_RIGHTS)
+/// off each entry's parent: a parent's `FILE_DELETE_CHILD` would otherwise
+/// still let a command delete or rename the entry. Rights are only ever
+/// intersected with what the container already has, never widened.
+#[cfg(windows)]
+fn shield_protected(
+    container: &crate::appcontainer::AppContainer,
+    roots: &[PathBuf],
+) -> io::Result<()> {
+    use crate::appcontainer::{ContainerRights, READ_RIGHTS, REMOVE_RIGHTS};
+    use std::sync::Mutex;
+    use std::time::Instant;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
+    static SCANNED: Mutex<Option<HashMap<Vec<PathBuf>, Instant>>> = Mutex::new(None);
+
+    if roots.is_empty() {
+        return Ok(());
+    }
+    {
+        let mut scanned = SCANNED.lock().unwrap();
+        let scanned = scanned.get_or_insert_with(HashMap::new);
+        if scanned
+            .get(roots)
+            .is_some_and(|at| at.elapsed() < RESCAN_INTERVAL)
+        {
+            return Ok(());
+        }
+    }
+    let mut parents: Vec<PathBuf> = Vec::new();
+    for target in protected_paths(roots) {
+        if target.shield == Shield::LockedTree && !target.path.exists() {
+            std::fs::create_dir(&target.path).map_err(|error| {
+                io::Error::other(format!(
+                    "creating {} to protect it from sandboxed commands: {error}",
+                    target.path.display()
+                ))
+            })?;
+        }
+        let allowed = match target.shield {
+            Shield::Secret => ContainerRights::default(),
+            Shield::Locked => ContainerRights {
+                own: READ_RIGHTS,
+                inherited: 0,
+            },
+            Shield::LockedTree => ContainerRights {
+                own: READ_RIGHTS,
+                inherited: READ_RIGHTS,
+            },
+            Shield::Pinned => ContainerRights {
+                own: FILE_ALL_ACCESS & !REMOVE_RIGHTS,
+                inherited: FILE_ALL_ACCESS,
+            },
+        };
+        ensure_restricted(container, &target.path, allowed)?;
+        if let Some(parent) = target.path.parent() {
+            if !parents.iter().any(|p| p == parent) {
+                parents.push(parent.to_path_buf());
+            }
+        }
+    }
+    for parent in &parents {
+        let allowed = ContainerRights {
+            own: !REMOVE_RIGHTS,
+            inherited: u32::MAX,
+        };
+        ensure_restricted(container, parent, allowed)?;
+    }
+    SCANNED
+        .lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(roots.to_vec(), Instant::now());
+    Ok(())
+}
+
+/// Cut the container's rights on `path` down to at most `allowed`; a no-op
+/// when they are already within it.
+#[cfg(windows)]
+fn ensure_restricted(
+    container: &crate::appcontainer::AppContainer,
+    path: &Path,
+    allowed: crate::appcontainer::ContainerRights,
+) -> io::Result<()> {
+    use crate::appcontainer::{container_rights, restrict, ContainerRights};
+
+    let protect = |error: io::Error| {
+        io::Error::other(format!(
+            "protecting {} from sandboxed commands: {error}",
+            path.display()
+        ))
+    };
+    let (current, _) = container_rights(container, path).map_err(protect)?;
+    let target = ContainerRights {
+        own: current.own & allowed.own,
+        inherited: current.inherited & allowed.inherited,
+    };
+    if target == current {
+        return Ok(());
+    }
+    restrict(container, path, target).map_err(protect)
+}
+
 #[cfg(not(windows))]
 fn spawn_isolated(
     _command: &str,
@@ -369,6 +591,10 @@ mod tests {
         assert_eq!(iso.writable_roots[0], write.workspace);
         assert!(iso.writable_roots.contains(&write.writable_roots[0]));
         assert!(!iso.network);
+        assert_eq!(
+            iso.protected_roots,
+            vec![write.workspace.clone(), write.writable_roots[0].clone()]
+        );
 
         let read = SandboxPolicy::new(READ_ONLY, &ws)
             .with_network_access(true)
@@ -377,6 +603,232 @@ mod tests {
         assert!(iso.writable_roots.is_empty());
         assert!(iso.readable_roots.contains(&read.workspace));
         assert!(iso.network);
+        assert_eq!(iso.protected_roots, vec![read.workspace.clone()]);
+    }
+
+    fn scan_fixture(label: &str) -> PathBuf {
+        let ws = std::env::temp_dir().join(format!(
+            "ncx_iso_{label}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        for dir in [
+            ws.join(".git").join("hooks"),
+            ws.join("src"),
+            ws.join("sub"),
+            ws.join("node_modules").join("pkg"),
+            ws.join("vendor").join("lib"),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for (file, text) in [
+            (ws.join(".git").join("config"), "[core]\n"),
+            (
+                ws.join(".git").join("hooks").join("pre-commit.sample"),
+                "#!/bin/sh\n",
+            ),
+            (ws.join(".env"), "SECRET=TOPSECRET\n"),
+            (ws.join(".env.example"), "EXAMPLE=1\n"),
+            (ws.join("sub").join(".env"), "SECRET=TOPSECRET\n"),
+            (ws.join("src").join("a.txt"), "a\n"),
+            (ws.join("node_modules").join("pkg").join(".env"), "x\n"),
+            (
+                ws.join("vendor").join("lib").join(".git"),
+                "gitdir: ../../.git\n",
+            ),
+        ] {
+            std::fs::write(file, text).unwrap();
+        }
+        ws
+    }
+
+    #[test]
+    fn scanner_finds_repositories_and_secrets() {
+        let ws = scan_fixture("scan");
+        let found = protected_paths(std::slice::from_ref(&ws));
+        let shield_of = |path: PathBuf| found.iter().find(|p| p.path == path).map(|p| p.shield);
+        assert_eq!(shield_of(ws.join(".git")), Some(Shield::Pinned));
+        assert_eq!(
+            shield_of(ws.join(".git").join("hooks")),
+            Some(Shield::LockedTree)
+        );
+        assert_eq!(
+            shield_of(ws.join(".git").join("config")),
+            Some(Shield::Locked)
+        );
+        assert_eq!(shield_of(ws.join(".env")), Some(Shield::Secret));
+        assert_eq!(shield_of(ws.join("sub").join(".env")), Some(Shield::Secret));
+        assert_eq!(
+            shield_of(ws.join("vendor").join("lib").join(".git")),
+            Some(Shield::Locked)
+        );
+        assert_eq!(shield_of(ws.join(".env.example")), None);
+        assert_eq!(shield_of(ws.join("src").join("a.txt")), None);
+        assert_eq!(
+            shield_of(ws.join("node_modules").join("pkg").join(".env")),
+            None,
+            "generated dirs are not scanned"
+        );
+        assert_eq!(
+            shield_of(ws.join(".git").join("hooks").join("pre-commit.sample")),
+            None,
+            "nothing inside .git beyond the named entries"
+        );
+
+        // A repository without a hooks dir still reports it, so it gets locked.
+        std::fs::remove_dir_all(ws.join(".git").join("hooks")).unwrap();
+        let found = protected_paths(std::slice::from_ref(&ws));
+        assert!(found
+            .iter()
+            .any(|p| p.path == ws.join(".git").join("hooks") && p.shield == Shield::LockedTree));
+        let _ = std::fs::remove_dir_all(ws);
+    }
+
+    #[cfg(windows)]
+    fn shielded_isolation(ws: &Path) -> OsIsolation {
+        OsIsolation {
+            writable_roots: vec![ws.to_path_buf()],
+            readable_roots: Vec::new(),
+            network: false,
+            protected_roots: vec![ws.to_path_buf()],
+        }
+    }
+
+    #[cfg(windows)]
+    async fn run_isolated(
+        isolation: &OsIsolation,
+        workspace: &Path,
+        command: &str,
+    ) -> crate::ExecResult {
+        crate::PolicyExecutor::new()
+            .with_isolation(Some(isolation.clone()))
+            .run(command, workspace, 30)
+            .await
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn isolated_commands_cannot_touch_protected_paths() {
+        let ws = scan_fixture("shield");
+        let isolation = shielded_isolation(&ws);
+        let git = ws.join(".git");
+        let read = |p: &Path| std::fs::read_to_string(p).unwrap_or_default();
+
+        // Ordinary work still runs (and shields the workspace on first spawn):
+        // files anywhere else, including new ones inside `.git` and `sub`.
+        let result = run_isolated(
+            &isolation,
+            &ws,
+            r"echo ok> root.txt && echo ok>> src\a.txt && echo ok> sub\b.txt && echo x> .git\index.lock && type .git\config && type .env.example",
+        )
+        .await;
+        assert_eq!(result.exit_code, 0, "{}", result.render());
+        assert!(result.stdout.contains("[core]"), "{}", result.render());
+        assert!(result.stdout.contains("EXAMPLE=1"), "{}", result.render());
+        assert_eq!(read(&ws.join("root.txt")).trim(), "ok");
+        assert!(read(&ws.join("src").join("a.txt")).starts_with("a\nok"));
+        assert_eq!(read(&ws.join("sub").join("b.txt")).trim(), "ok");
+        assert_eq!(read(&git.join("index.lock")).trim(), "x");
+        let container = crate::appcontainer::shared().unwrap();
+        assert!(
+            crate::appcontainer::has_grant(container, &ws, crate::appcontainer::Access::ReadWrite)
+                .unwrap(),
+            "the workspace grant must survive narrowing the root"
+        );
+        // The user's own access is untouched.
+        std::fs::write(ws.join(".env"), "SECRET=TOPSECRET\nMORE=1\n").unwrap();
+        std::fs::write(git.join("hooks").join("pre-push"), "#!/bin/sh\n").unwrap();
+        assert!(read(&git.join("config")).contains("[core]"));
+
+        // Secrets can't be read, copied, or removed.
+        for command in [r"type .env", r"type sub\.env", r"copy .env leaked.txt"] {
+            let result = run_isolated(&isolation, &ws, command).await;
+            assert!(
+                !result.render().contains("TOPSECRET"),
+                "{command}: {}",
+                result.render()
+            );
+        }
+        assert!(!read(&ws.join("leaked.txt")).contains("TOPSECRET"));
+        run_isolated(&isolation, &ws, r"del /f /q .env & ren .env moved.env").await;
+        assert!(read(&ws.join(".env")).contains("TOPSECRET"));
+        assert!(!ws.join("moved.env").exists());
+
+        // Hook config and hooks can't be changed, removed, re-ACLed, or swapped out.
+        for command in [
+            r"echo [core]hooksPath=evil>> .git\config",
+            r"del /f /q .git\config",
+            r"ren .git\config config.bak",
+            r"icacls .git\config /reset",
+            r"echo evil> .git\hooks\pre-commit",
+            r"echo evil> .git\hooks\pre-commit.sample",
+            r"ren .git\hooks hooks.bak",
+            r"rd /s /q .git\hooks",
+            r"ren .git git.bak",
+            r"echo gitdir: evil> vendor\lib\.git",
+        ] {
+            run_isolated(&isolation, &ws, command).await;
+        }
+        assert_eq!(read(&git.join("config")), "[core]\n");
+        assert!(!git.join("config.bak").exists());
+        assert!(!git.join("hooks").join("pre-commit").exists());
+        assert_eq!(
+            read(&git.join("hooks").join("pre-commit.sample")),
+            "#!/bin/sh\n"
+        );
+        assert!(!git.join("hooks.bak").exists());
+        assert!(!ws.join("git.bak").exists());
+        assert_eq!(
+            read(&ws.join("vendor").join("lib").join(".git")),
+            "gitdir: ../../.git\n"
+        );
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn shielding_never_widens_read_only_access() {
+        use crate::appcontainer::{container_rights, REMOVE_RIGHTS};
+        use windows_sys::Win32::Storage::FileSystem::{FILE_APPEND_DATA, FILE_WRITE_DATA};
+
+        let ws = scan_fixture("readonly");
+        let isolation = OsIsolation {
+            writable_roots: Vec::new(),
+            readable_roots: vec![ws.clone()],
+            network: false,
+            protected_roots: vec![ws.clone()],
+        };
+        let result = run_isolated(&isolation, &ws, r"type .env & echo x> .git\x.txt").await;
+        assert!(
+            !result.render().contains("TOPSECRET"),
+            "{}",
+            result.render()
+        );
+        assert!(!ws.join(".git").join("x.txt").exists());
+        let container = crate::appcontainer::shared().unwrap();
+        let (rights, _) = container_rights(container, &ws.join(".git")).unwrap();
+        let write = FILE_WRITE_DATA | FILE_APPEND_DATA | REMOVE_RIGHTS;
+        assert_eq!(rights.own & write, 0, "{rights:?}");
+        assert_eq!(rights.inherited & write, 0, "{rights:?}");
+        let (rights, _) = container_rights(container, &ws.join(".env")).unwrap();
+        assert_eq!(rights, Default::default());
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn missing_hooks_dir_is_created_locked() {
+        let ws = scan_fixture("nohooks");
+        std::fs::remove_dir_all(ws.join(".git").join("hooks")).unwrap();
+        let isolation = shielded_isolation(&ws);
+        let result = run_isolated(&isolation, &ws, r"echo evil> .git\hooks\post-checkout").await;
+        assert_ne!(result.exit_code, 0, "{}", result.render());
+        assert!(ws.join(".git").join("hooks").is_dir());
+        assert!(!ws.join(".git").join("hooks").join("post-checkout").exists());
+        let _ = std::fs::remove_dir_all(&ws);
     }
 
     #[cfg(windows)]
@@ -397,6 +849,7 @@ mod tests {
             writable_roots: vec![workspace.clone()],
             readable_roots: Vec::new(),
             network: false,
+            protected_roots: vec![workspace.clone()],
         };
         (workspace, outside, isolation)
     }
