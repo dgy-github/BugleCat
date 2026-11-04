@@ -30,10 +30,11 @@ pub fn build_body(
 ) -> Map<String, Value> {
     let mut kwargs = Map::new();
     kwargs.insert("model".into(), json!(model));
-    kwargs.insert(
-        "messages".into(),
-        Value::Array(sanitize_reasoning_replay(messages, model, reasoning_effort)),
-    );
+    let mut messages = sanitize_reasoning_replay(messages, model, reasoning_effort);
+    if !is_deepseek_model(model) {
+        messages = single_system_message(messages);
+    }
+    kwargs.insert("messages".into(), Value::Array(messages));
     if let Some(t) = tools {
         if !t.is_empty() {
             kwargs.insert("tools".into(), Value::Array(t.to_vec()));
@@ -48,6 +49,47 @@ pub fn build_body(
     }
     apply_reasoning_effort(&mut kwargs, model, reasoning_effort);
     kwargs
+}
+
+/// Fold the leading run of system messages (system prompt + runtime notes)
+/// into one, and turn any later system message into a marked user message.
+///
+/// Many local chat templates (Qwen, Llama, Gemma via llama.cpp / vLLM) accept
+/// exactly one system message and only as the first message, and reject the
+/// request otherwise. DeepSeek's API accepts several, so its requests keep
+/// their original shape; the merged text keeps the system prompt first, so a
+/// prefix cache still matches it.
+pub fn single_system_message(messages: Vec<Value>) -> Vec<Value> {
+    let mut system: Vec<String> = Vec::new();
+    let mut out: Vec<Value> = Vec::with_capacity(messages.len());
+    for message in messages {
+        let is_system = message.get("role").and_then(Value::as_str) == Some("system");
+        if !is_system {
+            out.push(message);
+            continue;
+        }
+        let text = match message.get("content") {
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+            None => String::new(),
+        };
+        if out.is_empty() {
+            if !text.trim().is_empty() {
+                system.push(text);
+            }
+        } else {
+            out.push(json!({"role": "user", "content": format!("[System note]
+{text}")}));
+        }
+    }
+    if system.is_empty() {
+        return out;
+    }
+    let mut merged = vec![json!({"role": "system", "content": system.join("
+
+")})];
+    merged.extend(out);
+    merged
 }
 
 /// Translate a reasoning-effort tier into the right request fields per backend.
@@ -172,6 +214,36 @@ mod tests {
 
     fn user_msg(text: &str) -> Value {
         json!({"role": "user", "content": text})
+    }
+
+    #[test]
+    fn local_models_get_exactly_one_leading_system_message() {
+        let messages = vec![
+            json!({"role": "system", "content": "system prompt"}),
+            json!({"role": "system", "content": "budget note"}),
+            json!({"role": "system", "content": "  "}),
+            user_msg("hi"),
+            json!({"role": "system", "content": "late note"}),
+        ];
+        let body = build_body("Qwen3.5-4B-Q4_K_M", &messages, None, None, None, None);
+        let sent = body["messages"].as_array().unwrap();
+        let systems = sent.iter().filter(|m| m["role"] == "system").count();
+        assert_eq!(systems, 1, "{sent:?}");
+        assert_eq!(sent[0]["content"], "system prompt\n\nbudget note");
+        assert_eq!(sent[1], user_msg("hi"));
+        assert_eq!(sent[2]["role"], "user");
+        assert_eq!(sent[2]["content"], "[System note]\nlate note");
+    }
+
+    #[test]
+    fn deepseek_requests_keep_their_system_messages() {
+        let messages = vec![
+            json!({"role": "system", "content": "system prompt"}),
+            json!({"role": "system", "content": "budget note"}),
+            user_msg("hi"),
+        ];
+        let body = build_body("deepseek-flash", &messages, None, None, None, Some("off"));
+        assert_eq!(body["messages"].as_array().unwrap().len(), 3);
     }
 
     fn assistant_toolcall() -> Value {
