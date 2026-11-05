@@ -490,7 +490,7 @@ impl ToolRegistry {
                 .service::<crate::plugins::MemoryServiceDescriptor>("memory")
                 .is_some(),
             compaction: self
-                .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
+                .service::<crate::plugins::CompactionService>("compaction")
                 .is_some(),
             mcp: self
                 .service::<crate::plugins::McpServiceDescriptor>("mcp")

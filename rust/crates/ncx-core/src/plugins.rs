@@ -19,8 +19,8 @@ pub use builtin::{
     AttachmentPlugin, BuiltinToolsPlugin, CompactionPlugin, ContextPlugin, CoreToolsPlugin,
     CostTelemetryPlugin, ExternalHostPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
     MediaPlugin, MemoryPlugin, PolicyPlugin, ProcessToolsPlugin, ProviderCatalogPlugin,
-    ProviderChatProbePlugin, ProviderDirectoryPlugin, SearchToolsPlugin, SessionToolsPlugin,
-    WorkspaceToolsPlugin,
+    ProviderChatProbePlugin, ProviderDirectoryPlugin, RuleCompactionPlugin, SearchToolsPlugin,
+    SessionToolsPlugin, WorkspaceToolsPlugin,
 };
 pub use composition::{
     BundleSpec, HarnessComposition, OverlayEntry, OverlaySpec, PluginEntry, ProfileSpec,
@@ -40,10 +40,10 @@ pub use openai_compat::{
 pub use registry::{PluginInstallReport, PluginRegistry};
 pub use runtime::HarnessRuntimeBuilder;
 pub use services::{
-    context_descriptor, AttachmentServiceDescriptor, CompactionServiceDescriptor,
-    ContextServiceDescriptor, CostTelemetryService, CostTelemetryServiceDescriptor,
-    CostTelemetrySnapshot, HarnessDiagnostics, InteractionService, LlmProviderFactory,
-    LlmProviderFactoryHandle, LlmServiceDescriptor, McpServiceDescriptor, MediaServiceDescriptor,
-    MemoryServiceDescriptor, PolicyService, ProviderCatalogService, ProviderChatProbeService,
-    ProviderDirectoryDiagnostics, ProviderDirectoryService,
+    context_descriptor, AttachmentServiceDescriptor, CompactionService, ContextServiceDescriptor,
+    CostTelemetryService, CostTelemetryServiceDescriptor, CostTelemetrySnapshot,
+    HarnessDiagnostics, InteractionService, LlmProviderFactory, LlmProviderFactoryHandle,
+    LlmServiceDescriptor, McpServiceDescriptor, MediaServiceDescriptor, MemoryServiceDescriptor,
+    PolicyService, ProviderCatalogService, ProviderChatProbeService, ProviderDirectoryDiagnostics,
+    ProviderDirectoryService,
 };

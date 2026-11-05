@@ -97,13 +97,12 @@ pub(super) async fn run(
             );
         }
 
-        if agent
-            .tools
-            .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
-            .is_some()
-            && agent.should_compact(&prompt.runtime_notes, &prompt.tool_query)
-        {
+        let strategy = agent.compaction_strategy().filter(|strategy| {
+            strategy.should_compact(agent, &prompt.runtime_notes, &prompt.tool_query)
+        });
+        if let Some(strategy) = strategy {
             let hook_args = json!({
+                "strategy": strategy.id(),
                 "max_chars": agent.context_edit.max_chars,
                 "keep_recent_messages": agent.context_edit.keep_recent_messages,
                 "max_tool_result_chars": agent.context_edit.max_tool_result_chars,
@@ -122,7 +121,7 @@ pub(super) async fn run(
             }
             if !pre.blocked {
                 {
-                    let (stats, usage) = match agent.compact_context(cancel).await {
+                    let (stats, usage) = match strategy.compact(agent, cancel).await {
                         Ok(result) => result,
                         Err(error) => {
                             if is_cancelled(cancel) {

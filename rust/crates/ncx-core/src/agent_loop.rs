@@ -27,6 +27,7 @@ const DEFAULT_MAX_PARALLEL_TOOL_CALLS: usize = 8;
 const RETRIEVAL_BUDGET_TOKENS: usize = 1_500;
 
 mod compaction;
+pub use compaction::{CompactionOutcome, CompactionStrategy, RuleCompaction, SummaryCompaction};
 mod deliverable;
 mod dsml;
 mod tool_dispatch;

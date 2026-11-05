@@ -10,7 +10,8 @@ use super::{
     HarnessComposition, HarnessPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
     MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
     ProcessToolsPlugin, ProfileSpec, ProviderCatalogPlugin, ProviderChatProbePlugin,
-    ProviderDirectoryPlugin, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
+    ProviderDirectoryPlugin, RuleCompactionPlugin, SearchToolsPlugin, SessionToolsPlugin,
+    WorkspaceToolsPlugin,
 };
 use crate::skills::skills_index_block;
 use crate::tools::{ToolContext, ToolRegistry};
@@ -264,6 +265,7 @@ fn builtin_plugin(id: &str) -> Option<Rc<dyn HarnessPlugin>> {
         "ncx.context" => Some(Rc::new(ContextPlugin)),
         "ncx.memory" => Some(Rc::new(MemoryPlugin)),
         "ncx.compaction" => Some(Rc::new(CompactionPlugin)),
+        "ncx.compaction.rule" => Some(Rc::new(RuleCompactionPlugin)),
         "ncx.mcp" => Some(Rc::new(McpPlugin)),
         "ncx.attachment" => Some(Rc::new(AttachmentPlugin)),
         "ncx.media" => Some(Rc::new(MediaPlugin)),

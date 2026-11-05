@@ -90,9 +90,9 @@ fn compaction_uses_real_prompt_usage_plus_new_messages_and_resets_on_model_chang
     let ws = tmpdir("semantic_trigger");
     let mut agent = build(&ws, Box::new(ScriptedProvider::new(vec![])));
     agent.context_usage.set(Some((0, 27_000)));
-    assert!(!agent.should_compact(&[], ""));
+    assert!(!agent.exceeds_compaction_budget(&[], ""));
     agent.session.add_user_text(&"中".repeat(4_000));
-    assert!(agent.should_compact(&[], ""));
+    assert!(agent.exceeds_compaction_budget(&[], ""));
     agent.replace_provider(Box::new(ScriptedProvider::new(vec![])));
     assert!(agent.context_usage.get().is_none());
     agent.context_window = 32_000;
@@ -208,4 +208,57 @@ async fn compaction_runs_through_openai_compatible_http_provider() {
     // The stub loops on accept; dropping the agent ends the test, and the
     // detached thread exits when the listener is closed with the process.
     drop(server);
+}
+
+/// Swapping the `compaction` plugin changes behavior without touching the loop:
+/// the rule strategy compacts the same oversized history with no summary call.
+#[tokio::test]
+async fn overlay_swaps_compaction_strategy_without_changing_the_loop() {
+    let ws = tmpdir("rule_strategy");
+    // The same file a user drops into a workspace to pick a strategy.
+    std::fs::create_dir_all(ws.join(".ncx")).unwrap();
+    std::fs::write(
+        ws.join(".ncx").join("harness.overlay.toml"),
+        "[[plugins]]
+id = \"compaction\"
+plugin = \"ncx.compaction.rule\"
+",
+    )
+    .unwrap();
+    let tools = crate::plugins::HarnessRuntimeBuilder::configured_for_profile(&ws, Some("coding"))
+        .unwrap()
+        .build(ToolContext::new(
+            ws.clone(),
+            SandboxPolicy::new(WORKSPACE_WRITE, &ws),
+        ));
+    let (provider, summary_calls) = ScriptedProvider::new(vec![ModelResponse {
+        content: "继续完成".into(),
+        ..Default::default()
+    }])
+    .with_summary(ModelResponse {
+        content: "不应被调用".into(),
+        ..Default::default()
+    });
+    let mut agent = AgentLoop::new(Box::new(provider), tools, Session::new("system prompt"))
+        .with_max_iterations(10);
+    assert_eq!(agent.compaction_strategy().unwrap().id(), "rule");
+    agent.context_edit.keep_recent_messages = 4;
+    seed(&mut agent);
+    let before = agent.session.messages.len();
+    let result = agent.run_turn(json!("继续"), None).await;
+    assert_eq!(result.final_text, "继续完成");
+    assert_eq!(summary_calls.get(), 0);
+    assert!(agent.session.messages.len() < before);
+    assert!(agent
+        .session
+        .messages
+        .iter()
+        .all(|m| m.get("_compaction_safety").is_none()));
+}
+
+#[tokio::test]
+async fn default_runtime_installs_summary_compaction() {
+    let ws = tmpdir("summary_strategy");
+    let agent = build(&ws, Box::new(ScriptedProvider::new(vec![])));
+    assert_eq!(agent.compaction_strategy().unwrap().id(), "summary");
 }
