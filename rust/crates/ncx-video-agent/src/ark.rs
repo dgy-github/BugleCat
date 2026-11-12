@@ -172,7 +172,11 @@ fn preview(text: &str) -> String {
     if text.len() <= MAX {
         text.to_string()
     } else {
-        format!("{}...", &text[..MAX])
+        let mut end = MAX;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &text[..end])
     }
 }
 

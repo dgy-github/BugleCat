@@ -265,6 +265,21 @@ impl ForgeJobCoordinator {
         Ok(())
     }
 
+    /// Best-effort shutdown hook invoked when the GUI application exits so an
+    /// active Forge process tree does not outlive the Tauri window.
+    pub fn cancel_active(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        if let Ok(mut state) = self.state.lock() {
+            if state.status.status == "running" {
+                state.status.status = "cancelling".into();
+            }
+        }
+        let active_pid = self.pid.swap(0, Ordering::SeqCst);
+        if active_pid != 0 {
+            self.terminate_owned(active_pid);
+        }
+    }
+
     fn terminate_owned(&self, fallback_pid: u32) {
         #[cfg(windows)]
         if let Ok(mut owner) = self.owner.lock() {

@@ -1,6 +1,7 @@
 //! Provider-neutral model-directory discovery.
 
 use std::collections::HashSet;
+use std::io::Read;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -97,8 +98,10 @@ impl ProviderCatalogClient for HttpProviderCatalogClient {
         {
             return Err("模型目录响应超过 1 MiB 限制".to_string());
         }
-        let bytes = response
-            .bytes()
+        let mut bytes = Vec::new();
+        response
+            .take((MAX_RESPONSE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
             .map_err(|error| format!("模型目录读取失败：{error}"))?;
         if bytes.len() > MAX_RESPONSE_BYTES {
             return Err("模型目录响应超过 1 MiB 限制".to_string());
@@ -418,5 +421,35 @@ mod tests {
         assert!(error.contains("HTTP 403"));
         assert!(!error.contains("private upstream detail"));
         assert!(!error.contains("never-return-this"));
+    }
+
+    #[test]
+    fn http_client_rejects_oversized_body_without_content_length() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 1024];
+            let _ = stream.read(&mut buffer);
+            let headers =
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+            let _ = stream.write_all(headers.as_bytes());
+            let chunk = vec![b'a'; 64 * 1024];
+            for _ in 0..20 {
+                if stream.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+        });
+        let client = HttpProviderCatalogClient;
+        let error = client
+            .discover(&ProviderCatalogRequest::new(
+                format!("http://{address}/v1"),
+                "openai",
+                None,
+            ))
+            .unwrap_err();
+        let _ = handle.join();
+        assert!(error.contains("1 MiB"), "unexpected error: {error}");
     }
 }

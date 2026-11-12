@@ -88,12 +88,15 @@
   let projectOpen = $state<Record<string, boolean>>({});
   let archivedProjectOpen = $state<Record<string, boolean>>({});
 
-  function groupByWorkspace(sessions: SessionRow[]) {
-    const groups = new Map<string, { path: string; sessions: SessionRow[] }>();
+  type ProjectGroup = { key: string; path: string; sessions: SessionRow[] };
+
+  function groupByWorkspace(sessions: SessionRow[]): ProjectGroup[] {
+    const groups = new Map<string, ProjectGroup>();
     for (const session of sessions) {
-      const path = session.workspace || "未指定项目";
+      const raw = session.workspace || "未指定项目";
+      const path = raw.replace(/[\\/]+$/, "") || raw;
       const key = path.toLocaleLowerCase();
-      const group = groups.get(key) || { path, sessions: [] };
+      const group = groups.get(key) || { key, path, sessions: [] };
       group.sessions.push(session);
       groups.set(key, group);
     }
@@ -114,8 +117,6 @@
   function collapseProjects() {
     projectOpen = Object.fromEntries(projectGroups.map((group) => [group.path, false]));
   }
-
-  type ProjectGroup = { path: string; sessions: SessionRow[] };
 
   // Project-row menu ("recent:<path>" / "archived:<path>") and multi-select mode.
   let groupMenuKey = $state("");
@@ -211,6 +212,8 @@
   }
 
   function onSidebarKey(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Escape" && renameTarget && !renameSaving) { renameTarget = null; return; }
     if (event.key === "Escape" && deleteTarget && !batchBusy) { deleteTarget = null; return; }
     if (event.key === "Escape" && selecting && !renameTarget) stopSelecting();
   }
@@ -332,7 +335,7 @@
         </div>
         {#if open}
           <div class="project-sessions">
-            {#each group.sessions as s}
+            {#each group.sessions as s (s.session_id)}
               {@render sessionItem(s)}
             {/each}
           </div>
@@ -343,7 +346,7 @@
     {#if projectGroups.length === 0}
       <div class="side-empty">{archivedCount ? "暂无最近会话" : "暂无项目会话"}</div>
     {/if}
-    {#each projectGroups as group}
+    {#each projectGroups as group (group.key)}
       {@render projectGroup(group, projectOpen[group.path] !== false, toggleProject, false)}
     {/each}
 
@@ -358,7 +361,7 @@
       </button>
       {#if showArchived}
         <div class="side-archived-list">
-          {#each archivedProjectGroups as group}
+          {#each archivedProjectGroups as group (group.key)}
             {@render projectGroup(group, archivedProjectOpen[group.path] !== false, toggleArchivedProject, true)}
           {/each}
         </div>

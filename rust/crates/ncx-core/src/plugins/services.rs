@@ -271,9 +271,18 @@ pub struct MemoryServiceDescriptor {
     pub store: Option<Rc<crate::memory::MemoryStore>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactionServiceDescriptor {
-    pub enabled: bool,
+/// The `compaction` service: the strategy the agent loop delegates to.
+#[derive(Clone)]
+pub struct CompactionService {
+    pub strategy: Rc<dyn crate::agent_loop::CompactionStrategy>,
+}
+
+impl std::fmt::Debug for CompactionService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CompactionService")
+            .field("strategy", &self.strategy.id())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

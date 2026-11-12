@@ -3,8 +3,61 @@
 use super::{ActiveTurn, PersistedState, StoreState, ThreadStoreError};
 use fs2::FileExt;
 use ncx_protocol::{ThreadId, Turn, TurnId, TurnStatus};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DiskStamp {
+    lock_token: [u8; 16],
+    file_len: Option<u64>,
+    modified: Option<SystemTime>,
+}
+
+fn next_lock_token() -> [u8; 16] {
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let hi = (u64::from(std::process::id()) << 32) ^ nanos;
+    let lo = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut out = [0u8; 16];
+    out[..8].copy_from_slice(&hi.to_le_bytes());
+    out[8..].copy_from_slice(&lo.to_le_bytes());
+    out
+}
+
+pub(super) fn current_disk_stamp(
+    path: &Path,
+    lock_file: &mut File,
+) -> Result<DiskStamp, ThreadStoreError> {
+    let mut lock_token = [0u8; 16];
+    if lock_file.seek(SeekFrom::Start(0)).is_ok() {
+        let _ = lock_file.read(&mut lock_token);
+    }
+    let (file_len, modified) = match fs::metadata(path) {
+        Ok(meta) => (Some(meta.len()), meta.modified().ok()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (None, None),
+        Err(error) => return Err(ThreadStoreError::Io(error)),
+    };
+    Ok(DiskStamp {
+        lock_token,
+        file_len,
+        modified,
+    })
+}
+
+fn write_lock_token(lock_file: &mut File, token: &[u8; 16]) {
+    if lock_file.seek(SeekFrom::Start(0)).is_ok() {
+        let _ = lock_file.set_len(0);
+        let _ = lock_file.write_all(token);
+        let _ = lock_file.flush();
+    }
+}
 
 pub(super) fn claim_turn_in_state(
     state: &mut StoreState,
@@ -127,10 +180,14 @@ fn lock_is_contended(error: &std::io::Error) -> bool {
 pub(super) fn recover_orphaned_turns(
     path: &Path,
     persisted: &mut PersistedState,
+    owned_turns: &HashMap<String, ActiveTurn>,
 ) -> Result<bool, ThreadStoreError> {
     let mut recovered = false;
     let mut recovered_threads = Vec::new();
     for (id, thread) in &mut persisted.threads {
+        if owned_turns.contains_key(id) {
+            continue;
+        }
         if !thread
             .turns
             .iter()
@@ -217,14 +274,27 @@ fn recover_state(path: &Path) -> Result<Option<PersistedState>, ThreadStoreError
     Ok(None)
 }
 
-pub(super) fn save_state(path: &Path, state: &PersistedState) -> Result<(), ThreadStoreError> {
+pub(super) fn save_state(
+    path: &Path,
+    lock_file: &mut File,
+    state: &PersistedState,
+) -> Result<DiskStamp, ThreadStoreError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(ThreadStoreError::Io)?;
     }
     let temporary = path.with_extension("tmp");
     let backup = path.with_extension("bak");
-    let bytes = serde_json::to_vec(state).map_err(ThreadStoreError::Encode)?;
-    fs::write(&temporary, bytes).map_err(ThreadStoreError::Io)?;
+    {
+        let tmp_file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temporary)
+            .map_err(ThreadStoreError::Io)?;
+        let mut writer = BufWriter::with_capacity(64 * 1024, tmp_file);
+        serde_json::to_writer(&mut writer, state).map_err(ThreadStoreError::Encode)?;
+        writer.flush().map_err(ThreadStoreError::Io)?;
+    }
     if path.exists() {
         if backup.exists() {
             fs::remove_file(&backup).map_err(ThreadStoreError::Io)?;
@@ -240,5 +310,7 @@ pub(super) fn save_state(path: &Path, state: &PersistedState) -> Result<(), Thre
     if backup.exists() {
         fs::remove_file(backup).map_err(ThreadStoreError::Io)?;
     }
-    Ok(())
+    let token = next_lock_token();
+    write_lock_token(lock_file, &token);
+    current_disk_stamp(path, lock_file)
 }

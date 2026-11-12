@@ -6,8 +6,17 @@
   $effect(() => {
     controller.reconcile();
   });
+
+  function onKeydown(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Escape" && controller.overlay) {
+      event.preventDefault();
+      controller.closeOverlay();
+    }
+  }
 </script>
 
+<svelte:window onkeydown={onKeydown} />
 {#if controller.overlay}
   <div class="modal-backdrop dsh-slot-backdrop" role="presentation" onclick={controller.close}>
     <div class="dsh-slot-overlay" role="dialog" aria-modal="true" aria-label={controller.overlay.label}>

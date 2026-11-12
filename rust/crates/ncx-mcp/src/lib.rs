@@ -20,13 +20,15 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio::time::timeout;
 
 const PROTOCOL: &str = "2024-11-05";
 const REQ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Hard cap on a single newline-delimited JSON-RPC frame from an MCP server.
+const MAX_MCP_LINE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Maximum number of simultaneous read-only calls sent to one MCP process.
 /// A side-effecting call acquires all permits and is therefore exclusive.
@@ -112,7 +114,8 @@ impl McpClient {
         cmd.args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
         hide_child_console(&mut cmd);
         for (k, v) in env {
             cmd.env(k, v);
@@ -129,7 +132,17 @@ impl McpClient {
             let mut stdout = stdout;
             loop {
                 let mut line = String::new();
-                let result = stdout.read_line(&mut line).await;
+                let result = (&mut stdout)
+                    .take(MAX_MCP_LINE_BYTES + 1)
+                    .read_line(&mut line)
+                    .await;
+                if line.len() as u64 > MAX_MCP_LINE_BYTES && !line.ends_with('\n') {
+                    fail_pending(
+                        &reader_pending,
+                        format!("server '{}' exceeded 16 MiB frame limit", server_name),
+                    );
+                    break;
+                }
                 match result {
                     Ok(0) => {
                         fail_pending(
@@ -162,10 +175,13 @@ impl McpClient {
                                     "message": format!("method '{method}' is not supported by ncx-mcp")
                                 }
                             });
-                            if let Err(error) = write_json(&reader_stdin, &response).await {
-                                fail_pending(&reader_pending, error);
-                                break;
-                            }
+                            let reply_stdin = Arc::clone(&reader_stdin);
+                            let reply_pending = Arc::clone(&reader_pending);
+                            tokio::spawn(async move {
+                                if let Err(error) = write_json(&reply_stdin, &response).await {
+                                    fail_pending(&reply_pending, error);
+                                }
+                            });
                             continue;
                         }
 

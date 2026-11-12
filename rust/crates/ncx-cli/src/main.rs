@@ -41,7 +41,7 @@ use ncx_core::{
     RuntimeContextSources, RuntimeHostBindings, Session, Tool, TurnResult,
 };
 use ncx_protocol::{
-    ClientRequest, ItemId, ResponsePayload, Thread, ThreadId, ThreadItem, ThreadMetadata, TurnId,
+    ClientRequest, ItemId, ResponsePayload, ThreadId, ThreadItem, ThreadMetadata, TurnId,
     TurnStatus, TurnUsage as ProtocolTurnUsage,
 };
 use ncx_thread_store::{default_thread_store_path, JsonThreadStore};

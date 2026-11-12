@@ -34,7 +34,9 @@ export class SidebarController {
     this.resizeStartX = event.clientX;
     this.resizeStartWidth = this.width;
     window.addEventListener("pointermove", this.resize);
-    window.addEventListener("pointerup", this.stopResize, { once: true });
+    window.addEventListener("pointerup", this.stopResize);
+    window.addEventListener("pointercancel", this.stopResize);
+    window.addEventListener("blur", this.stopResize);
   };
 
   handleResizeKey = (event: KeyboardEvent): void => {
@@ -59,7 +61,7 @@ export class SidebarController {
 
   private resize = (event: PointerEvent): void => {
     if (!this.resizing) return;
-    this.setWidth(event.clientX - this.resizeStartX + this.resizeStartWidth);
+    this.setWidth(event.clientX - this.resizeStartX + this.resizeStartWidth, false);
   };
 
   private stopResize = (): void => {
@@ -67,5 +69,8 @@ export class SidebarController {
     this.resizing = false;
     window.removeEventListener("pointermove", this.resize);
     window.removeEventListener("pointerup", this.stopResize);
+    window.removeEventListener("pointercancel", this.stopResize);
+    window.removeEventListener("blur", this.stopResize);
+    this.setWidth(this.width, true);
   };
 }

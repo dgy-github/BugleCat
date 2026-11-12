@@ -21,6 +21,8 @@
     streamingIdx,
     reasoningIdx,
     scroller = $bindable(),
+    stickToBottom = $bindable(true),
+    scrollToBottom = () => {},
     renderMarkdown,
     toolGroupFailureCount,
     toolOutcome,
@@ -35,6 +37,8 @@
     streamingIdx: number | null;
     reasoningIdx: number | null;
     scroller: HTMLDivElement | undefined;
+    stickToBottom?: boolean;
+    scrollToBottom?: () => void;
     renderMarkdown: (source: string) => string;
     toolGroupFailureCount: (group: ToolGroup) => number;
     toolOutcome: (result: string) => "ok" | "err" | "empty";
@@ -45,9 +49,21 @@
   } = $props();
 
   let copiedIndex = $state<number | null>(null);
-  let feedback = $state<Record<number, "good" | "bad">>({});
-  let feedbackError = $state<Record<number, string>>({});
+  let copyTimer: number | null = null;
+  let feedback = $state<Record<string, "good" | "bad">>({});
+  let feedbackError = $state<Record<string, string>>({});
   let localPreviews = $state<Record<string, string | null>>({});
+  const fetchedPreviewPaths = new Set<string>();
+  let observedSessionId = "";
+  $effect(() => {
+    if (sessionId !== observedSessionId) {
+      observedSessionId = sessionId;
+      copiedIndex = null;
+    }
+  });
+  $effect(() => () => {
+    if (copyTimer !== null) window.clearTimeout(copyTimer);
+  });
   let lastAssistantIndex = $derived.by(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       if (messages[index]?.role === "assistant") return index;
@@ -68,7 +84,11 @@
     try {
       await navigator.clipboard.writeText(text);
       copiedIndex = index;
-      window.setTimeout(() => { if (copiedIndex === index) copiedIndex = null; }, 1000);
+      if (copyTimer !== null) window.clearTimeout(copyTimer);
+      copyTimer = window.setTimeout(() => {
+        if (copiedIndex === index) copiedIndex = null;
+        copyTimer = null;
+      }, 1200);
     } catch { /* Clipboard denial leaves the action unchanged. */ }
   }
 
@@ -81,7 +101,7 @@
   // record (restored history, goal runs) cannot be rated here.
   async function rateAnswer(index: number, value: "good" | "bad") {
     const taskId = taskIdOf(messages[index]);
-    if (!taskId || feedback[index] === value) return;
+    if (!taskId || feedback[taskId] === value) return;
     try {
       await invoke("record_outcome_label", {
         good: value === "good",
@@ -90,11 +110,11 @@
         taskId,
         expectedWorkspace: workspace || null,
       });
-      feedback = { ...feedback, [index]: value };
-      const { [index]: _cleared, ...rest } = feedbackError;
+      feedback = { ...feedback, [taskId]: value };
+      const { [taskId]: _cleared, ...rest } = feedbackError;
       feedbackError = rest;
     } catch (error) {
-      feedbackError = { ...feedbackError, [index]: String(error) };
+      feedbackError = { ...feedbackError, [taskId]: String(error) };
     }
   }
 
@@ -103,6 +123,7 @@
   }
 
   function localArtifacts(text: string): string[] {
+    if (!text.includes(":\\")) return [];
     const matches = text.match(/[A-Za-z]:\\(?:[^<>:"|?*\r\n`]+\\)*[^\\<>:"|?*\r\n`]+\.(?:png|jpe?g|webp|gif|bmp|svg|mp4|webm|mov|pdf)\b/gi) || [];
     return [...new Set(matches.map((path) => path.trim()))];
   }
@@ -111,12 +132,12 @@
     if (/^(?:\[error\]\s*)?HTTP 400\s*\|/.test(text) && text.includes('"event":"provider_request"')) {
       return "模型服务拒绝了本次请求（HTTP 400，请求格式或参数无效）。当前会话已保留，请重试本轮。";
     }
-    const compact = [...text.slice(0, 1_024)]
-      .filter((ch) => !/\s/.test(ch) && ch !== "|" && ch !== "｜")
-      .join("");
-    const marker = compact.indexOf("<DSMLcalls>");
-    if (marker >= 0 && marker <= 8 && compact.includes("<DSMLinvokename=")) {
-      return "这条历史回答包含文本形式的工具调用，命令并未执行。请重新发送请求。";
+    if (text.includes("DSML")) {
+      const compact = text.slice(0, 1_024).replace(/[\s|｜]+/g, "");
+      const marker = compact.indexOf("<DSMLcalls>");
+      if (marker >= 0 && marker <= 8 && compact.includes("<DSMLinvokename=")) {
+        return "这条历史回答包含文本形式的工具调用，命令并未执行。请重新发送请求。";
+      }
     }
     return text;
   }
@@ -136,13 +157,24 @@
     return ({ draft: "草稿", checking: "核验中…", passed: "规则核验通过", unverified: "未验证", fault: "核验记录故障", historical: "有历史核验记录 · 当前未验证" } as Record<string, string>)[status] || "未验证";
   }
 
+  function handleScroll() {
+    if (!scroller) return;
+    stickToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 72;
+  }
+
   $effect(() => {
-    const paths = messages.flatMap((message) => message.role === "assistant" ? localArtifacts(visibleAssistantText(message.text)) : message.role === "user" ? (message.images ?? []) : []);
+    const paths = messages.flatMap((message, index) => {
+      if (index === streamingIdx) return [];
+      if (message.role === "assistant") return localArtifacts(visibleAssistantText(message.text));
+      if (message.role === "user") return message.images ?? [];
+      return [];
+    });
     for (const path of paths) {
-      if (Object.prototype.hasOwnProperty.call(localPreviews, path)) continue;
-      localPreviews = { ...localPreviews, [path]: null };
+      if (fetchedPreviewPaths.has(path)) continue;
+      fetchedPreviewPaths.add(path);
+      localPreviews[path] = null;
       void invoke<string>("local_artifact_preview", { path })
-        .then((preview) => { localPreviews = { ...localPreviews, [path]: preview }; })
+        .then((preview) => { localPreviews[path] = preview; })
         .catch(() => { /* Unsupported/large images keep the clickable fallback card. */ });
     }
   });
@@ -168,7 +200,7 @@
     </div>
 {/snippet}
 
-<div class="scroll" bind:this={scroller}>
+<div class="scroll" bind:this={scroller} onscroll={handleScroll}>
   {#if activeView === "trajectory"}
     <div class="trajectory-view">
       <div class="trajectory-head"><strong>本轮运行轨迹</strong><span>{messages.length} 个事件</span></div>
@@ -192,11 +224,13 @@
     {#if message.role === "user"}
       <div class="message-block user-block"><div class="msg user"><div class="bubble">{#if message.text}<div>{message.text}</div>{/if}{#if message.images?.length}<div class="user-image-grid">{#each message.images as path}<button class="user-image-card" onclick={() => openLocalArtifact(path)} title={`打开 ${path}`}>{#if localPreviews[path]}<img src={localPreviews[path] || ""} alt={path.split(/[\\/]/).pop() || "上传图片"} />{:else}<span>图片加载中…</span>{/if}</button>{/each}</div>{/if}</div></div><div class="message-actions user-actions"><button onclick={() => copyMessage(message.text, index)} title="复制消息">{copiedIndex === index ? "✓" : "▢"}</button></div></div>
     {:else if message.role === "assistant"}
+      {@const visibleText = visibleAssistantText(message.text)}
+      {@const msgTaskId = taskIdOf(message)}
       <div class="message-block assistant-block">
         <div class="msg assistant"><img class="message-cat" src={buglecatAsset("avatar", 32)} alt="妙脆角猫咪" />
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="bubble md" onclick={openRenderedLink}>{@html renderMarkdown(visibleAssistantText(message.text))}</div>
+          <div class="bubble md" onclick={openRenderedLink}>{@html renderMarkdown(visibleText)}</div>
         </div>
         {#if message.verification}
           <div class="assistant-model" role="status" aria-atomic="true" title="校验状态独立于任务完成；模型概率不代表事实正确率">{verificationLabel(message.verification)}</div>
@@ -208,18 +242,18 @@
         {:else if message.model}
           <div class="assistant-model" title="服务端未返回 model 字段，本条仅显示请求型号">请求模型 · {message.model}</div>
         {/if}
-        {#each localArtifacts(visibleAssistantText(message.text)) as path}
-          <button class="local-artifact-card" class:has-preview={Boolean(localPreviews[path])} onclick={() => openLocalArtifact(path)} title={`打开 ${path}`}>
-            {#if localPreviews[path]}<img src={localPreviews[path] || ""} alt={path.split(/[\\/]/).pop() || "生成图片"} />{:else}<span class="local-artifact-icon" aria-hidden="true">▧</span>{/if}
-            <span class="local-artifact-copy"><strong>{path.split(/[\\/]/).pop()}</strong><code>{path}</code></span><span aria-hidden="true">↗</span>
-          </button>
-        {/each}
         {#if index !== streamingIdx}
+          {#each localArtifacts(visibleText) as path (path)}
+            <button class="local-artifact-card" class:has-preview={Boolean(localPreviews[path])} onclick={() => openLocalArtifact(path)} title={`打开 ${path}`}>
+              {#if localPreviews[path]}<img src={localPreviews[path] || ""} alt={path.split(/[\\/]/).pop() || "生成图片"} />{:else}<span class="local-artifact-icon" aria-hidden="true">▧</span>{/if}
+              <span class="local-artifact-copy"><strong>{path.split(/[\\/]/).pop()}</strong><code>{path}</code></span><span aria-hidden="true">↗</span>
+            </button>
+          {/each}
           <div class="message-actions assistant-actions">
-            <button onclick={() => copyMessage(visibleAssistantText(message.text), index)} title="复制回答">{copiedIndex === index ? "✓" : "▢"}</button>
-            <button class:on={feedback[index] === "good"} disabled={!taskIdOf(message)} onclick={() => rateAnswer(index, "good")} title={taskIdOf(message) ? "回答有帮助" : "这条回答没有任务记录（历史或目标运行），可用 /outcome good|bad 评价最近一次任务"}>♡</button>
-            <button class:on={feedback[index] === "bad"} disabled={!taskIdOf(message)} onclick={() => rateAnswer(index, "bad")} title={taskIdOf(message) ? "回答需改进" : "这条回答没有任务记录（历史或目标运行），可用 /outcome good|bad 评价最近一次任务"}>♧</button>
-            {#if feedbackError[index]}<span class="feedback-error" title={feedbackError[index]}>评价未记录：{feedbackError[index]}</span>{/if}
+            <button onclick={() => copyMessage(visibleText, index)} title="复制回答">{copiedIndex === index ? "✓" : "▢"}</button>
+            <button class:on={Boolean(msgTaskId && feedback[msgTaskId] === "good")} disabled={!msgTaskId} onclick={() => rateAnswer(index, "good")} title={msgTaskId ? "回答有帮助" : "这条回答没有任务记录（历史或目标运行），可用 /outcome good|bad 评价最近一次任务"}>♡</button>
+            <button class:on={Boolean(msgTaskId && feedback[msgTaskId] === "bad")} disabled={!msgTaskId} onclick={() => rateAnswer(index, "bad")} title={msgTaskId ? "回答需改进" : "这条回答没有任务记录（历史或目标运行），可用 /outcome good|bad 评价最近一次任务"}>♧</button>
+            {#if msgTaskId && feedbackError[msgTaskId]}<span class="feedback-error" title={feedbackError[msgTaskId]}>评价未记录：{feedbackError[msgTaskId]}</span>{/if}
             {#if index === lastAssistantIndex}<button onclick={forkCurrent} disabled={busy} title={busy ? "执行完成后可从这里分叉" : "从这条回答分叉新会话"}>⑂</button>{/if}
           </div>
         {/if}
@@ -288,6 +322,9 @@
   {/each}
   {#if busy && messages.length === lastUserIndex + 1}
     {@render liveActivity()}
+  {/if}
+  {#if !stickToBottom && busy}
+    <button class="jump-bottom-pill" onclick={scrollToBottom} title="回到最新输出">↓ 回到最新</button>
   {/if}
   {/if}
 </div>

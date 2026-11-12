@@ -844,6 +844,10 @@ impl Session {
         policy.enabled && total_chars(&self.system, &[], &self.messages) > policy.max_chars
     }
 
+    pub(crate) fn estimated_body_chars(&self) -> usize {
+        total_chars(&self.system, &[], &self.messages)
+    }
+
     fn edited_body(
         &self,
         system_notes: &[String],
@@ -1025,14 +1029,8 @@ impl Session {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(path)
-        else {
-            return;
-        };
+        let mut serialized = String::new();
+        let stamp = now_stamp();
         for msg in &self.messages {
             let Some(mut record) = redact_image_data(msg, "[image omitted from log]")
                 .as_object()
@@ -1040,10 +1038,36 @@ impl Session {
             else {
                 continue;
             };
-            record.insert("_ts".into(), json!(now_stamp()));
+            record.insert("_ts".into(), json!(stamp));
             if let Ok(line) = serde_json::to_string(&Value::Object(record)) {
-                let _ = writeln!(file, "{line}");
+                serialized.push_str(&line);
+                serialized.push('\n');
             }
+        }
+        let tmp_path = path.with_extension(format!("jsonl.tmp.{}", std::process::id()));
+        let wrote_tmp = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&tmp_path)
+            .and_then(|mut file| {
+                file.write_all(serialized.as_bytes())?;
+                file.sync_all()
+            })
+            .is_ok();
+        if wrote_tmp {
+            if fs::rename(&tmp_path, path).is_ok() {
+                return;
+            }
+            let _ = fs::remove_file(&tmp_path);
+        }
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)
+        {
+            let _ = file.write_all(serialized.as_bytes());
         }
     }
 }
@@ -1432,35 +1456,37 @@ fn message_content_text(message: &Value) -> String {
 /// over message text + tool-call name/arguments, plus a small per-message
 /// framing overhead. Used to show context-window occupancy in the UIs; it is an
 /// estimate, not the provider's billed prompt size.
+pub(crate) fn message_token_units(m: &Value) -> usize {
+    let mut total = 0usize;
+    match m.get("content") {
+        Some(Value::String(s)) => total += s.chars().count(),
+        Some(Value::Array(blocks)) => {
+            for b in blocks {
+                if let Some(t) = b.get("text").and_then(|v| v.as_str()) {
+                    total += t.chars().count();
+                }
+            }
+        }
+        _ => {}
+    }
+    if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
+        for tc in calls {
+            if let Some(f) = tc.get("function") {
+                if let Some(n) = f.get("name").and_then(|v| v.as_str()) {
+                    total += n.chars().count();
+                }
+                if let Some(a) = f.get("arguments").and_then(|v| v.as_str()) {
+                    total += a.chars().count();
+                }
+            }
+        }
+    }
+    total + 8
+}
+
 pub fn estimate_tokens(messages: &[Value]) -> i64 {
     const CHARS_PER_TOKEN: usize = 2;
-    let mut total = 0usize;
-    for m in messages {
-        match m.get("content") {
-            Some(Value::String(s)) => total += s.chars().count(),
-            Some(Value::Array(blocks)) => {
-                for b in blocks {
-                    if let Some(t) = b.get("text").and_then(|v| v.as_str()) {
-                        total += t.chars().count();
-                    }
-                }
-            }
-            _ => {}
-        }
-        if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
-            for tc in calls {
-                if let Some(f) = tc.get("function") {
-                    if let Some(n) = f.get("name").and_then(|v| v.as_str()) {
-                        total += n.chars().count();
-                    }
-                    if let Some(a) = f.get("arguments").and_then(|v| v.as_str()) {
-                        total += a.chars().count();
-                    }
-                }
-            }
-        }
-        total += 8; // per-message role/framing overhead
-    }
+    let total: usize = messages.iter().map(message_token_units).sum();
     (total / CHARS_PER_TOKEN) as i64
 }
 

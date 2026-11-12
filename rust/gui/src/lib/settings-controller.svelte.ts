@@ -102,9 +102,14 @@ export class SettingsController {
   refreshOfficial = async (notifyError = true): Promise<void> => {
     try {
       this.catalog = await invoke<ModelCatalogResponse>("refresh_official_models");
-      const settings = this.settings ?? await appServerRequest<Settings>({ method: "settingsRead" });
-      this.settings = settings;
-      if (settings.available_models.length > 0) this.modelApplied(settings.model, settings.available_models);
+      const refreshed = await appServerRequest<Settings>({ method: "settingsRead" });
+      if (this.settings) {
+        this.settings.available_models = refreshed.available_models;
+      }
+      const activeModel = this.settings?.model ?? refreshed.model;
+      if (refreshed.available_models.length > 0) {
+        this.modelApplied(activeModel, refreshed.available_models);
+      }
     } catch (error) {
       if (notifyError) this.notify(`官方模型目录刷新失败：${error}`);
     }
@@ -127,17 +132,32 @@ export class SettingsController {
 
   private lastModelRefresh = 0;
   private modelRefreshArmed = false;
+  private modelRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly onWindowFocus = (): void => {
+    if (Date.now() - this.lastModelRefresh > MODEL_REFRESH_STALE_MS) {
+      void this.refreshRuntimeModels();
+    }
+  };
 
   /** Keep the runtime model list in step with the providers' `/models`:
    *  hourly, and when the window regains focus with a stale list. */
   private armModelRefresh(): void {
     if (this.modelRefreshArmed || typeof window === "undefined") return;
     this.modelRefreshArmed = true;
-    setInterval(() => void this.refreshRuntimeModels(), MODEL_REFRESH_INTERVAL_MS);
-    window.addEventListener("focus", () => {
-      if (Date.now() - this.lastModelRefresh > MODEL_REFRESH_STALE_MS) void this.refreshRuntimeModels();
-    });
+    this.modelRefreshTimer = setInterval(() => void this.refreshRuntimeModels(), MODEL_REFRESH_INTERVAL_MS);
+    window.addEventListener("focus", this.onWindowFocus);
   }
+
+  dispose = (): void => {
+    if (this.modelRefreshTimer !== null) {
+      clearInterval(this.modelRefreshTimer);
+      this.modelRefreshTimer = null;
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("focus", this.onWindowFocus);
+    }
+    this.modelRefreshArmed = false;
+  };
 
   refreshRuntimeModels = async (): Promise<void> => {
     this.armModelRefresh();

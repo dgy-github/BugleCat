@@ -42,11 +42,20 @@ pub(crate) fn maybe_offload(tool_name: &str, output: String) -> String {
         return output;
     }
 
-    let chars: Vec<char> = output.chars().collect();
     let half = TOOL_OUTPUT_OFFLOAD_THRESHOLD / 2;
     let truncated = total_chars.saturating_sub(TOOL_OUTPUT_OFFLOAD_THRESHOLD);
-    let head: String = chars[..half].iter().collect();
-    let tail: String = chars[total_chars - half..].iter().collect();
+    let head_end = output
+        .char_indices()
+        .nth(half)
+        .map(|(idx, _)| idx)
+        .unwrap_or(output.len());
+    let tail_start = output
+        .char_indices()
+        .nth(total_chars - half)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    let head = &output[..head_end];
+    let tail = &output[tail_start..];
     let total_lines = output.lines().count().max(1);
     let head_lines = head.lines().count().max(1);
 

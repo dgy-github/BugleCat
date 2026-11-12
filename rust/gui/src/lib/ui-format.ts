@@ -35,19 +35,49 @@ export function diffLineClass(line: string): string {
   return "";
 }
 
-const escapeHtml = (source: string) => source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeHtml = (source: string) =>
+  source
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 function inlineMarkdown(source: string): string {
-  return source
-    .replace(/`([^`]+)`/g, (_match, code) => `<code>${code}</code>`)
+  const codeSpans: string[] = [];
+  const tokenized = source.replace(/`([^`\n]+)`/g, (_match, code: string) => {
+    const token = `\u0000CODE_${codeSpans.length}\u0000`;
+    codeSpans.push(`<code>${code}</code>`);
+    return token;
+  });
+  const formatted = tokenized
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/__([^_]+)__/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+    .replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)<>]+)\)/g,
+      (_match, label: string, url: string) => {
+        if (url.includes("&quot;") || url.includes("&#39;") || url.includes("\u0000")) {
+          return `[${label}](${url})`;
+        }
+        return `<a href="${url}" target="_blank" rel="noreferrer">${label}</a>`;
+      },
+    );
+  return formatted.replace(/\u0000CODE_(\d+)\u0000/g, (_match, idx: string) => codeSpans[Number(idx)] ?? "");
 }
 
+const MARKDOWN_CACHE_MAX = 256;
+const markdownCache = new Map<string, string>();
+
 export function renderMarkdown(source: string): string {
-  const lines = (source || "").replace(/\r\n/g, "\n").split("\n");
+  const raw = source || "";
+  const cached = markdownCache.get(raw);
+  if (cached !== undefined) {
+    markdownCache.delete(raw);
+    markdownCache.set(raw, cached);
+    return cached;
+  }
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
   const output: string[] = [];
   let index = 0;
   let unordered = false;
@@ -59,11 +89,11 @@ export function renderMarkdown(source: string): string {
   const rowCells = (row: string) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
   while (index < lines.length) {
     const line = lines[index];
-    if (/^```(\w*)\s*$/.test(line)) {
+    if (/^\s*```[^\r\n`]*$/.test(line)) {
       closeLists();
       const buffer: string[] = [];
       index++;
-      while (index < lines.length && !/^```\s*$/.test(lines[index])) buffer.push(lines[index++]);
+      while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) buffer.push(lines[index++]);
       index++;
       output.push(`<pre class="md-code"><code>${escapeHtml(buffer.join("\n"))}</code></pre>`);
       continue;
@@ -94,5 +124,13 @@ export function renderMarkdown(source: string): string {
   }
   closeLists();
   while (output.at(-1) === "<hr/>") output.pop();
-  return output.join("\n");
+  const html = output.join("\n");
+  if (raw.length <= 32_768) {
+    if (markdownCache.size >= MARKDOWN_CACHE_MAX) {
+      const oldest = markdownCache.keys().next().value;
+      if (oldest !== undefined) markdownCache.delete(oldest);
+    }
+    markdownCache.set(raw, html);
+  }
+  return html;
 }

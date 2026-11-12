@@ -565,20 +565,33 @@ where
     R: FnMut(&str),
 {
     buffer.extend_from_slice(bytes);
-    while let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
-        if newline > MAX_SSE_LINE_BYTES {
-            return Err(ProviderError(format!(
+    let mut cursor = 0usize;
+    let mut done = false;
+    let mut parse_err: Option<ProviderError> = None;
+
+    while let Some(rel_nl) = buffer[cursor..].iter().position(|byte| *byte == b'\n') {
+        if rel_nl > MAX_SSE_LINE_BYTES {
+            parse_err = Some(ProviderError(format!(
                 "StreamError: SSE line exceeds {MAX_SSE_LINE_BYTES} bytes"
             )));
+            break;
         }
-        let mut line = buffer.drain(..=newline).collect::<Vec<_>>();
-        line.pop();
-        if line.last() == Some(&b'\r') {
-            line.pop();
+        let mut line_end = cursor + rel_nl;
+        if line_end > cursor && buffer[line_end - 1] == b'\r' {
+            line_end -= 1;
         }
-        let line = std::str::from_utf8(&line).map_err(|error| {
-            ProviderError(format!("StreamError: invalid UTF-8 SSE line: {error}"))
-        })?;
+        let raw_line = &buffer[cursor..line_end];
+        cursor += rel_nl + 1;
+
+        let line = match std::str::from_utf8(raw_line) {
+            Ok(s) => s,
+            Err(error) => {
+                parse_err = Some(ProviderError(format!(
+                    "StreamError: invalid UTF-8 SSE line: {error}"
+                )));
+                break;
+            }
+        };
         let Some(data) = line.strip_prefix("data:") else {
             continue;
         };
@@ -587,11 +600,22 @@ where
             continue;
         }
         if data == "[DONE]" {
-            return Ok(true);
+            done = true;
+            break;
         }
         if let Ok(json) = serde_json::from_str::<Value>(data) {
             agg.ingest(&json, on_content, on_reasoning);
         }
+    }
+
+    if cursor > 0 {
+        buffer.drain(..cursor);
+    }
+    if let Some(err) = parse_err {
+        return Err(err);
+    }
+    if done {
+        return Ok(true);
     }
     if buffer.len() > MAX_SSE_LINE_BYTES {
         return Err(ProviderError(format!(

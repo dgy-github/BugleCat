@@ -61,12 +61,22 @@ impl ExecResult {
     /// Render for the model — mirrors the Python `ExecResult.render`.
     pub fn render(&self) -> String {
         let out = self.render_untruncated();
-        if out.chars().count() > MAX_OUTPUT {
-            let chars: Vec<char> = out.chars().collect();
+        let total_chars = out.chars().count();
+        if total_chars > MAX_OUTPUT {
             let half = MAX_OUTPUT / 2;
-            let truncated = chars.len() - MAX_OUTPUT;
-            let head: String = chars[..half].iter().collect();
-            let tail: String = chars[chars.len() - half..].iter().collect();
+            let truncated = total_chars - MAX_OUTPUT;
+            let head_end = out
+                .char_indices()
+                .nth(half)
+                .map(|(idx, _)| idx)
+                .unwrap_or(out.len());
+            let tail_start = out
+                .char_indices()
+                .nth(total_chars - half)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+            let head = &out[..head_end];
+            let tail = &out[tail_start..];
             return format!("{head}\n\n... ({truncated} chars truncated) ...\n\n{tail}");
         }
         out
@@ -138,6 +148,10 @@ impl PolicyExecutor {
             }
         };
 
+        let mut kill_guard = ActiveRunKillGuard {
+            containment: &containment,
+            armed: true,
+        };
         let mut stdout_pipe = child.take_stdout();
         let mut stderr_pipe = child.take_stderr();
         // Keep buffers outside the timeout future so cancellation retains the
@@ -148,12 +162,12 @@ impl PolicyExecutor {
         let collect = async {
             let stdout = async {
                 if let Some(p) = stdout_pipe.as_mut() {
-                    let _ = p.read_to_end(&mut out).await;
+                    read_pipe_bounded(p, &mut out, MAX_CAPTURE_BYTES).await;
                 }
             };
             let stderr = async {
                 if let Some(p) = stderr_pipe.as_mut() {
-                    let _ = p.read_to_end(&mut err).await;
+                    read_pipe_bounded(p, &mut err, MAX_CAPTURE_BYTES).await;
                 }
             };
             let (_, _, status) = tokio::join!(stdout, stderr, child.wait());
@@ -162,6 +176,7 @@ impl PolicyExecutor {
 
         match timeout(Duration::from_secs(timeout_s), collect).await {
             Ok(status) => {
+                kill_guard.armed = false;
                 let code = status.unwrap_or(1);
                 let mut stderr = decode_text_lossy(&err);
                 if code != 0 {
@@ -185,6 +200,7 @@ impl PolicyExecutor {
             }
             Err(_) => {
                 // Timed out: kill the tree.
+                kill_guard.armed = false;
                 containment.terminate();
                 child.start_kill();
                 let _ = child.wait().await;
@@ -207,14 +223,51 @@ impl PolicyExecutor {
     }
 }
 
+/// Hard cap per pipe (8 MiB) so a noisy subprocess (`yes`, binary dump) drains
+/// cleanly to EOF without exhausting host memory before `truncate_output`.
+const MAX_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
 /// Upper bound for reading what is left in a pipe after a timeout kill.
 const POST_KILL_DRAIN: Duration = Duration::from_millis(500);
+
+struct ActiveRunKillGuard<'a> {
+    containment: &'a Containment,
+    armed: bool,
+}
+
+impl Drop for ActiveRunKillGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.containment.terminate();
+        }
+    }
+}
+
+async fn read_pipe_bounded<R: tokio::io::AsyncRead + Unpin>(
+    pipe: &mut R,
+    buf: &mut Vec<u8>,
+    max_bytes: usize,
+) {
+    let mut scratch = [0u8; 8192];
+    while let Ok(n) = pipe.read(&mut scratch).await {
+        if n == 0 {
+            break;
+        }
+        if buf.len() < max_bytes {
+            let keep = (max_bytes - buf.len()).min(n);
+            buf.extend_from_slice(&scratch[..keep]);
+        }
+    }
+}
 
 /// Append whatever is still buffered in `pipe` to `buf`, giving up after
 /// `POST_KILL_DRAIN` if a writer keeps the pipe open.
 async fn drain_remaining<R: tokio::io::AsyncRead + Unpin>(pipe: Option<&mut R>, buf: &mut Vec<u8>) {
     if let Some(pipe) = pipe {
-        let _ = timeout(POST_KILL_DRAIN, pipe.read_to_end(buf)).await;
+        let _ = timeout(
+            POST_KILL_DRAIN,
+            read_pipe_bounded(pipe, buf, MAX_CAPTURE_BYTES),
+        )
+        .await;
     }
 }
 

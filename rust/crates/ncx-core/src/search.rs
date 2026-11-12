@@ -48,7 +48,7 @@ pub fn walk_files(root: &Path) -> Vec<PathBuf> {
             continue;
         };
         let mut entries = rd.flatten().collect::<Vec<_>>();
-        entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
+        entries.sort_by_cached_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
         for entry in entries.into_iter().rev() {
             visited += 1;
             if visited > MAX_ENTRIES {
@@ -70,7 +70,7 @@ pub fn walk_files(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    out.sort_by_key(|path| rel_slash(root, path));
+    out.sort_by_cached_key(|path| rel_slash(root, path));
     out
 }
 

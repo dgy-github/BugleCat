@@ -66,6 +66,9 @@ export class ThreadController {
   private readyFenceClosed = false;
   private trajectoryStart = 0;
   private pendingVerification: string | undefined;
+  private pendingAssistantDelta = "";
+  private pendingReasoningDelta = "";
+  private deltaFlushFrame: number | null = null;
 
   constructor(private readonly usage: UsageController, private readonly callbacks: ThreadCallbacks) {}
 
@@ -99,6 +102,7 @@ export class ThreadController {
   }
 
   stash(sessionId: string): void {
+    this.flushPendingDeltas();
     if (sessionId) {
       this.queuesBySession.set(sessionId, [...this.queued]);
       this.messagesBySession.set(sessionId, this.clone(this.messages));
@@ -108,6 +112,26 @@ export class ThreadController {
     this.queued = [];
     this.approval = null;
     this.question = null;
+  }
+
+  evictSessions(sessionIds: Iterable<string>): void {
+    for (const id of sessionIds) {
+      this.messagesBySession.delete(id);
+      this.trajectoryBySession.delete(id);
+      this.trajectoryStartBySession.delete(id);
+      this.queuesBySession.delete(id);
+      this.approvalsBySession.delete(id);
+      this.questionsBySession.delete(id);
+      this.skippedLoadedSessions.delete(id);
+    }
+  }
+
+  recordBackgroundError(sessionId: string, noteText: string): void {
+    if (!sessionId) return;
+    const cached = this.clone(this.messagesBySession.get(sessionId) || []);
+    cached.push({ role: "note", text: noteText });
+    this.messagesBySession.set(sessionId, cached);
+    this.queuesBySession.delete(sessionId);
   }
 
   restore(sessionId: string): void {
@@ -148,9 +172,23 @@ export class ThreadController {
   removeQuestion(sessionId: string): void { this.questionsBySession.delete(sessionId); this.question = null; this.questionAnswer = ""; }
 
   handle(event: UiEvent): void {
+    if (event.kind !== "assistant_delta" && event.kind !== "reasoning_delta") {
+      this.flushPendingDeltas();
+    }
     switch (event.kind) {
       case "ready": this.handleReady(event); break;
-      case "assistant_delta": this.handleAssistantDelta(event); break;
+      case "assistant_delta":
+        if (!this.accepts(event.session_id) || event.text === "") return;
+        if (this.pendingReasoningDelta) this.flushPendingDeltas();
+        this.pendingAssistantDelta += event.text;
+        this.scheduleDeltaFlush();
+        return;
+      case "reasoning_delta":
+        if (!this.accepts(event.session_id) || event.text === "") return;
+        if (this.pendingAssistantDelta) this.flushPendingDeltas();
+        this.pendingReasoningDelta += event.text;
+        this.scheduleDeltaFlush();
+        return;
       case "verification": {
         if (!this.accepts(event.session_id)) break;
         this.pendingVerification = event.status;
@@ -162,13 +200,18 @@ export class ThreadController {
         }
         break;
       }
-      case "reasoning_delta": this.handleReasoningDelta(event); break;
-      case "context_compacted":
-        if (this.accepts(event.session_id)) this.messages.push({ role: "compact", text: `已更新上下文摘要：${event.original_chars.toLocaleString()} → ${event.edited_chars.toLocaleString()} 字符，归纳 ${event.dropped_messages} 条历史消息，保留近期完整对话与工具调用。摘要用于恢复任务，代码事实以工作区、diff 和测试结果为准。` });
+      case "context_compacted": {
+        const compactMsg: ConversationMessage = { role: "compact", text: `已更新上下文摘要：${event.original_chars.toLocaleString()} → ${event.edited_chars.toLocaleString()} 字符，归纳 ${event.dropped_messages} 条历史消息，保留近期完整对话与工具调用。摘要用于恢复任务，代码事实以工作区、diff 和测试结果为准。` };
+        if (this.accepts(event.session_id)) this.messages.push(compactMsg);
+        else this.mutateBackgroundMessages(event.session_id, (messages) => { messages.push(compactMsg); });
         break;
-      case "orchestrator_stage":
-        if (this.accepts(event.session_id)) this.messages.push({ role: "orchestration", stage: event.stage, text: event.detail });
+      }
+      case "orchestrator_stage": {
+        const stageMsg: ConversationMessage = { role: "orchestration", stage: event.stage, text: event.detail };
+        if (this.accepts(event.session_id)) this.messages.push(stageMsg);
+        else this.mutateBackgroundMessages(event.session_id, (messages) => { messages.push(stageMsg); });
         break;
+      }
       case "orchestrator_activity": this.handleOrchestratorActivity(event); break;
       case "goal_run_started":
         this.setRunning(event.session_id, true); this.setGoalRunning(event.session_id, true);
@@ -192,6 +235,37 @@ export class ThreadController {
     if (this.accepts(event.session_id)) this.callbacks.scrollDown();
   }
 
+  private scheduleDeltaFlush(): void {
+    if (this.deltaFlushFrame !== null) return;
+    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+      this.flushPendingDeltas();
+      this.callbacks.scrollDown();
+      return;
+    }
+    this.deltaFlushFrame = window.requestAnimationFrame(() => {
+      this.deltaFlushFrame = null;
+      this.flushPendingDeltas();
+      this.callbacks.scrollDown();
+    });
+  }
+
+  flushPendingDeltas(): void {
+    if (this.deltaFlushFrame !== null && typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(this.deltaFlushFrame);
+    }
+    this.deltaFlushFrame = null;
+    if (this.pendingReasoningDelta) {
+      const text = this.pendingReasoningDelta;
+      this.pendingReasoningDelta = "";
+      this.handleReasoningDelta({ text });
+    }
+    if (this.pendingAssistantDelta) {
+      const text = this.pendingAssistantDelta;
+      this.pendingAssistantDelta = "";
+      this.handleAssistantDelta({ text });
+    }
+  }
+
   private handleReady(event: Extract<UiEvent, { kind: "ready" }>): void {
     if (this.readyFenceClosed) return;
     if (this.currentId === "" && this.pendingReadySession && event.session_id !== this.pendingReadySession) return;
@@ -207,8 +281,7 @@ export class ThreadController {
     this.callbacks.refreshSessions();
   }
 
-  private handleAssistantDelta(event: Extract<UiEvent, { kind: "assistant_delta" }>): void {
-    if (!this.accepts(event.session_id)) return;
+  private handleAssistantDelta(event: { text: string }): void {
     this.settleReasoning();
     if (this.streamingIndex === null) {
       if (event.text === "") return;
@@ -222,20 +295,45 @@ export class ThreadController {
     }
   }
 
-  private handleReasoningDelta(event: Extract<UiEvent, { kind: "reasoning_delta" }>): void {
-    if (!this.accepts(event.session_id) || event.text === "") return;
+  private handleReasoningDelta(event: { text: string }): void {
+    if (event.text === "") return;
     if (this.reasoningIndex === null) {
       settleCompletedToolGroups(this.messages);
       this.messages.push({ role: "reasoning", text: appendReasoning("", event.text), settled: false });
       this.reasoningIndex = this.messages.length - 1;
     } else {
-      const message = this.messages[this.reasoningIndex];
+      const message = this.reasoningIndex === null ? undefined : this.messages[this.reasoningIndex];
       if (message?.role === "reasoning") message.text = appendReasoning(message.text, event.text);
     }
   }
 
+  private mutateBackgroundMessages(
+    sessionId: string,
+    mutate: (messages: ConversationMessage[]) => ConversationMessage[] | void,
+  ): void {
+    if (!sessionId || !this.messagesBySession.has(sessionId)) return;
+    const cached = this.clone(this.messagesBySession.get(sessionId) || []);
+    const next = mutate(cached);
+    this.messagesBySession.set(sessionId, next ?? cached);
+  }
+
   private handleAssistant(event: Extract<UiEvent, { kind: "assistant" }>): void {
-    if (!this.accepts(event.session_id)) return;
+    if (!this.accepts(event.session_id)) {
+      this.mutateBackgroundMessages(event.session_id, (messages) => {
+        if (event.text.trim() === "") return;
+        settleCompletedToolGroups(messages);
+        const last = messages.at(-1);
+        if (last?.role === "assistant" && last.verification === "draft") {
+          last.text = event.text;
+          last.model = event.model;
+          last.confirmedModel = event.confirmed_model || undefined;
+          last.verification = undefined;
+        } else {
+          messages.push({ role: "assistant", text: event.text, model: event.model, confirmedModel: event.confirmed_model || undefined });
+        }
+      });
+      return;
+    }
     this.settleReasoning();
     if (this.streamingIndex !== null) {
       const message = this.messages[this.streamingIndex];
@@ -251,7 +349,18 @@ export class ThreadController {
   }
 
   private handleToolStart(event: Extract<UiEvent, { kind: "tool_start" }>): void {
-    if (!this.accepts(event.session_id)) return;
+    if (!this.accepts(event.session_id)) {
+      this.mutateBackgroundMessages(event.session_id, (messages) => {
+        for (const msg of messages) {
+          if (msg.role === "assistant" && msg.verification === "draft") msg.verification = undefined;
+        }
+        const last = messages.at(-1);
+        const entry: ToolEntry = { name: event.name, args: event.args };
+        if (last?.role === "tool_group") last.tools.push(entry);
+        else messages.push({ role: "tool_group", tools: [entry], settled: false });
+      });
+      return;
+    }
     this.settleReasoning();
     if (this.streamingIndex !== null) {
       const message = this.messages[this.streamingIndex];
@@ -269,7 +378,22 @@ export class ThreadController {
   }
 
   private handleOrchestratorActivity(event: Extract<UiEvent, { kind: "orchestrator_activity" }>): void {
-    if (!this.accepts(event.session_id)) return;
+    if (!this.accepts(event.session_id)) {
+      this.mutateBackgroundMessages(event.session_id, (messages) => {
+        if (event.phase === "finished") {
+          for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index];
+            if (message?.role === "orchestrator_activity" && message.worker === event.worker && message.tool === event.tool && message.phase === "started") {
+              message.phase = "finished";
+              message.failure = event.failure || undefined;
+              return;
+            }
+          }
+        }
+        messages.push({ role: "orchestrator_activity", worker: event.worker, tool: event.tool, phase: event.phase, failure: event.failure || undefined });
+      });
+      return;
+    }
     if (event.phase === "finished") {
       for (let index = this.messages.length - 1; index >= 0; index -= 1) {
         const message = this.messages[index];
@@ -284,7 +408,20 @@ export class ThreadController {
   }
 
   private handleToolResult(event: Extract<UiEvent, { kind: "tool_result" }>): void {
-    if (!this.accepts(event.session_id)) return;
+    if (!this.accepts(event.session_id)) {
+      this.mutateBackgroundMessages(event.session_id, (messages) => {
+        let tool: ToolEntry | undefined;
+        for (const message of messages) {
+          if (message.role !== "tool_group") continue;
+          const candidate = message.tools.find((item) => item.name === event.name && item.result === undefined);
+          if (candidate) { tool = candidate; break; }
+        }
+        if (tool) tool.result = event.result;
+        else messages.push({ role: "tool_group", tools: [{ name: event.name, result: event.result }], settled: false });
+        for (const artifact of this.mediaArtifacts(event.name, event.result)) messages.push(artifact);
+      });
+      return;
+    }
     let group: ToolGroup | undefined;
     let tool: ToolEntry | undefined;
     for (const message of this.messages) {
@@ -325,7 +462,25 @@ export class ThreadController {
     this.setGoalRunning(event.session_id, false);
     this.setRunning(event.session_id, false);
     this.usage.add(event.session_id, event.usage || {}, this.currentId);
-    if (!this.accepts(event.session_id)) { this.callbacks.refreshSessions(); return; }
+    if (!this.accepts(event.session_id)) {
+      this.mutateBackgroundMessages(event.session_id, (messages) => {
+        settleCompletedToolGroups(messages);
+        const start = Math.min(this.trajectoryStartBySession.get(event.session_id) ?? messages.length, messages.length);
+        this.trajectoryBySession.set(event.session_id, this.clone(messages.slice(start)));
+        let settled = hideCompletedToolActivity(messages.filter((m) => m.role !== "reasoning"));
+        for (const msg of settled) if (msg.role === "assistant" && msg.verification === "draft") msg.verification = undefined;
+        if (event.stop_reason === "completed") settled = keepConversationConclusions(settled, event.final_text);
+        else settled.push({ role: "note", text: `[${event.stop_reason}] ${event.final_text}` });
+        if (event.task_id) {
+          const answer = [...settled].reverse().find((m) => m.role === "assistant");
+          if (answer?.role === "assistant" && !answer.taskId) answer.taskId = event.task_id;
+        }
+        this.trajectoryStartBySession.set(event.session_id, settled.length);
+        return settled;
+      });
+      this.callbacks.refreshSessions();
+      return;
+    }
     settleCompletedToolGroups(this.messages);
     this.settleReasoning();
     this.captureTrajectory(event.session_id);
@@ -399,13 +554,18 @@ export class ThreadController {
   private handleError(event: Extract<UiEvent, { kind: "error" }>): void {
     this.setGoalRunning(event.session_id, false);
     this.setRunning(event.session_id, false);
-    if (!this.accepts(event.session_id)) return;
+    if (!this.accepts(event.session_id)) {
+      this.recordBackgroundError(event.session_id, `错误：${event.message}`);
+      this.callbacks.refreshSessions();
+      return;
+    }
     settleCompletedToolGroups(this.messages);
     this.settleReasoning();
     this.captureTrajectory(event.session_id);
     this.removeReasoning();
     this.messages = hideCompletedToolActivity(this.messages);
     this.streamingIndex = null;
+    this.queued = [];
     this.messages.push({ role: "note", text: `错误：${event.message}` });
     this.messagesBySession.set(event.session_id, this.clone(this.messages));
     this.trajectoryBySession.set(event.session_id, this.clone(this.trajectory));

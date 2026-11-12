@@ -6,11 +6,11 @@ export class DshSlotController {
 
   constructor(private readonly plugins: { codexPlugins: CodexPlugin[] }) {}
 
-  get footerActions(): DshUiSlotContribution[] {
-    return this.slots()
+  footerActions = $derived.by(() =>
+    this.slots()
       .filter((slot) => slot.slot === "sidebar.footer.action")
-      .sort((left, right) => left.order - right.order);
-  }
+      .sort((left, right) => left.order - right.order),
+  );
 
   open = (slot: DshUiSlotContribution): void => {
     const overlay = this.slots().find(

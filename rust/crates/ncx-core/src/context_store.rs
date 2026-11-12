@@ -223,9 +223,11 @@ impl ContextStore {
     }
 
     fn init(conn: Connection) -> Result<Self, String> {
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
         // WAL keeps a reader (a retrieval query) from blocking the writer (the
         // live turn). Failure is not fatal: an in-memory database has no WAL.
         let _: Result<String, _> = conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0));
+        let _ = conn.execute_batch("PRAGMA synchronous=NORMAL;");
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS context_events (
                 event_id        TEXT PRIMARY KEY,
@@ -246,6 +248,8 @@ impl ContextStore {
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_sequence
                 ON context_events(session_id, sequence);
+            CREATE INDEX IF NOT EXISTS idx_events_session_turn
+                ON context_events(session_id, turn_id, sequence);
             CREATE INDEX IF NOT EXISTS idx_events_task_status
                 ON context_events(task_id, status);
             CREATE INDEX IF NOT EXISTS idx_events_tool_call
@@ -269,47 +273,70 @@ impl ContextStore {
             return Ok(existing);
         }
         let mut stored = event.clone();
-        // Sequence assignment and insert share one transaction, so two writers
-        // cannot observe the same "next" value.
-        let tx = self
-            .conn
-            .unchecked_transaction()
+        // Sequence assignment and insert share one IMMEDIATE transaction so two
+        // concurrent writers queue via busy_timeout instead of hitting SQLITE_BUSY
+        // mid-upgrade from a DEFERRED read snapshot.
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
             .map_err(|e| e.to_string())?;
-        let next: i64 = tx
-            .query_row(
-                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM context_events WHERE session_id = ?1",
-                params![stored.session_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        stored.sequence = next;
-        tx.execute(
-            "INSERT INTO context_events (
-                event_id, session_id, task_id, agent_id, parent_agent_id, thread_id,
-                turn_id, sequence, timestamp, event_type, status, tool_call_id,
-                workspace, payload_json, source_ref
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
-            params![
-                stored.event_id,
-                stored.session_id,
-                stored.task_id,
-                stored.agent_id,
-                stored.parent_agent_id,
-                stored.thread_id,
-                stored.turn_id.map(|v| v as i64),
-                stored.sequence,
-                stored.timestamp as i64,
-                stored.event_type.as_str(),
-                stored.status.as_str(),
-                stored.tool_call_id,
-                stored.workspace,
-                stored.payload_json,
-                stored.source_ref,
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(stored)
+        let tx_result: Result<Option<ContextEvent>, String> = (|| {
+            if let Some(existing) = self.event(&stored.event_id)? {
+                return Ok(Some(existing));
+            }
+            let next: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM context_events WHERE session_id = ?1",
+                    params![stored.session_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            stored.sequence = next;
+            self.conn
+                .execute(
+                    "INSERT INTO context_events (
+                        event_id, session_id, task_id, agent_id, parent_agent_id, thread_id,
+                        turn_id, sequence, timestamp, event_type, status, tool_call_id,
+                        workspace, payload_json, source_ref
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                    params![
+                        stored.event_id,
+                        stored.session_id,
+                        stored.task_id,
+                        stored.agent_id,
+                        stored.parent_agent_id,
+                        stored.thread_id,
+                        stored.turn_id.map(|v| v as i64),
+                        stored.sequence,
+                        stored.timestamp as i64,
+                        stored.event_type.as_str(),
+                        stored.status.as_str(),
+                        stored.tool_call_id,
+                        stored.workspace,
+                        stored.payload_json,
+                        stored.source_ref,
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            Ok(None)
+        })();
+        match tx_result {
+            Ok(Some(existing)) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Ok(existing)
+            }
+            Ok(None) => {
+                self.conn.execute_batch("COMMIT").map_err(|e| {
+                    let _ = self.conn.execute_batch("ROLLBACK");
+                    e.to_string()
+                })?;
+                Ok(stored)
+            }
+            Err(err) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(err)
+            }
+        }
     }
 
     pub fn event(&self, event_id: &str) -> Result<Option<ContextEvent>, String> {
@@ -388,6 +415,22 @@ impl ContextStore {
 
     pub fn session_events(&self, session_id: &str) -> Result<Vec<ContextEvent>, String> {
         self.since(session_id, 0)
+    }
+
+    pub fn turn_events(&self, session_id: &str, turn_id: u64) -> Result<Vec<ContextEvent>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM context_events
+                 WHERE session_id = ?1 AND turn_id = ?2
+                 ORDER BY sequence",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![session_id, turn_id as i64], row_to_event)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     }
 
     /// Query all events of a given `EventType` across sessions, optionally filtered
@@ -724,5 +767,27 @@ mod tests {
         let worker = events.iter().find(|e| e.event_id == "w1").unwrap();
         assert_eq!(worker.agent_id.as_deref(), Some("worker"));
         assert_eq!(worker.parent_agent_id.as_deref(), Some("parent"));
+    }
+
+    #[test]
+    fn turn_events_filters_to_requested_turn_in_sequence_order() {
+        let store = ContextStore::open_in_memory().unwrap();
+        let mut t1 = event("t1-a", "s", EventType::ToolCall, EventStatus::Started);
+        t1.turn_id = Some(1);
+        let mut t2_first = event("t2-a", "s", EventType::ToolCall, EventStatus::Started);
+        t2_first.turn_id = Some(2);
+        let mut t2_second = event("t2-b", "s", EventType::ToolResult, EventStatus::Completed);
+        t2_second.turn_id = Some(2);
+        let mut other_session = event("other", "s2", EventType::ToolCall, EventStatus::Started);
+        other_session.turn_id = Some(2);
+
+        for ev in [&t1, &t2_first, &other_session, &t2_second] {
+            store.append(ev).unwrap();
+        }
+
+        let turn2 = store.turn_events("s", 2).unwrap();
+        let ids: Vec<_> = turn2.iter().map(|e| e.event_id.as_str()).collect();
+        assert_eq!(ids, vec!["t2-a", "t2-b"]);
+        assert!(store.turn_events("s", 99).unwrap().is_empty());
     }
 }

@@ -66,6 +66,8 @@ pub const PROFILE_NAME: &str = "BugleCat.Sandbox";
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+/// `HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)`.
+const HRESULT_FILE_NOT_FOUND: i32 = 0x8007_0002_u32 as i32;
 /// `HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS)`.
 const HRESULT_ALREADY_EXISTS: i32 = 0x8007_00B7_u32 as i32;
 
@@ -120,6 +122,8 @@ impl Drop for AppContainer {
 impl AppContainer {
     /// Create the profile `name`, or look it up when it already exists.
     pub fn open(name: &str) -> io::Result<Self> {
+        static OPEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = OPEN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let wname = wide(name);
         let mut sid: PSID = null_mut();
         // Several processes (CLI + GUI) or threads may create the profile at
@@ -182,15 +186,22 @@ impl AppContainer {
 
     fn folder(&self) -> io::Result<PathBuf> {
         let sid = wide(self.sid_string()?);
-        unsafe {
-            let mut path: *mut u16 = null_mut();
-            hresult(
-                GetAppContainerFolderPath(sid.as_ptr(), &mut path),
-                "GetAppContainerFolderPath",
-            )?;
-            let value = from_wide_ptr(path);
-            CoTaskMemFree(path as _);
-            Ok(PathBuf::from(value))
+        let mut attempt = 0;
+        loop {
+            unsafe {
+                let mut path: *mut u16 = null_mut();
+                let hr = GetAppContainerFolderPath(sid.as_ptr(), &mut path);
+                if hr >= 0 {
+                    let value = from_wide_ptr(path);
+                    CoTaskMemFree(path as _);
+                    return Ok(PathBuf::from(value));
+                }
+                attempt += 1;
+                if hr != HRESULT_FILE_NOT_FOUND || attempt >= 10 {
+                    hresult(hr, "GetAppContainerFolderPath")?;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50 * attempt));
         }
     }
 }
@@ -939,9 +950,11 @@ mod tests {
     const TEST_PROFILE: &str = "BugleCat.SandboxTest";
 
     fn temp_dir(label: &str) -> PathBuf {
+        static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "ncx-appcontainer-{label}-{}-{}",
+            "ncx-appcontainer-{label}-{}-{}-{}",
             std::process::id(),
+            NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

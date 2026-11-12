@@ -237,11 +237,11 @@ impl<'a> ContextRetriever<'a> {
         let (Some(events), Some(turn)) = (self.events, self.active_turn_id) else {
             return Vec::new();
         };
-        let Ok(all) = events.session_events(&self.session_id) else {
+        let Ok(turn_events) = events.turn_events(&self.session_id, turn) else {
             return Vec::new();
         };
-        all.into_iter()
-            .filter(|event| event.turn_id == Some(turn))
+        turn_events
+            .into_iter()
             .map(|event| note_from_event(Layer::ActiveTurn, &event))
             .collect()
     }

@@ -2413,7 +2413,7 @@ pub fn spawn_worker(startup: WorkerStartup) {
                     .as_ref()
                     .map(|(id, _)| id.clone())
                     .unwrap_or_else(new_session_id);
-                let (mut agent, mut workspace, mut session_id) = match build_agent(
+                let (mut workspace, mut session_id) = match build_agent(
                     approver.clone(),
                     questioner.clone(),
                     startup_seed,
@@ -2424,8 +2424,12 @@ pub fn spawn_worker(startup: WorkerStartup) {
                 )
                 .await
                 {
-                    Ok((agent, workspace, session_id, _)) => {
-                        (Some(agent), workspace, session_id)
+                    Ok((built_agent, workspace, session_id, _)) => {
+                        // Turn execution spawns isolated per-turn workers; drop
+                        // the validation instance so idle MCP children and
+                        // transcript clones are not pinned for the app lifetime.
+                        drop(built_agent);
+                        (workspace, session_id)
                     }
                     Err(e) => {
                         emit(
@@ -2438,13 +2442,10 @@ pub fn spawn_worker(startup: WorkerStartup) {
                         // Provider configuration is needed only when a turn is
                         // executed. Keep the coordinator alive so the user can
                         // create a session or open Settings to fix it.
-                        (None, startup_workspace.clone(), startup_session_id)
+                        (startup_workspace.clone(), startup_session_id)
                     }
                 };
                 set_active_session(&active_session, &session_id);
-                if let Some(agent) = agent.as_mut() {
-                    agent.set_event_sink(make_sink(app.clone(), session_id.clone(), None, None));
-                }
                 if let Err(message) = ensure_protocol_thread(&app_server, &session_id, &workspace) {
                     emit(
                         &app,
@@ -2526,6 +2527,7 @@ pub fn spawn_worker(startup: WorkerStartup) {
                             .await
                             {
                                 Ok((a, ws, sid, _)) => {
+                                    drop(a);
                                     // The successful builder must win this
                                     // fence before touching live state. If the
                                     // caller won with abort(), its App Server
@@ -2533,8 +2535,7 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                     // durable Thread.
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
-                                    grants = next_grants;
-                                            agent = Some(a);
+                                            grants = next_grants;
                                             workspace = ws;
                                             session_id = sid;
                                             set_active_session(&active_session, &session_id);
@@ -2545,14 +2546,6 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                             .send(Err("新建会话初始化已被更新的运行态切换取消"
                                                 .to_string()));
                                         continue;
-                                    }
-                                    if let Some(agent) = agent.as_mut() {
-                                        agent.set_event_sink(make_sink(
-                                        app.clone(),
-                                        session_id.clone(),
-                                        None,
-                                        None,
-                                        ));
                                     }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
@@ -2574,7 +2567,6 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
                                             grants = next_grants;
-                                            agent = None;
                                             workspace = requested_workspace.clone();
                                             session_id = requested_id.clone();
                                             set_active_session(&active_session, &session_id);
@@ -2715,10 +2707,10 @@ pub fn spawn_worker(startup: WorkerStartup) {
                             .await
                             {
                                 Ok((a, ws, sid, _)) => {
+                                    drop(a);
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
                                             grants = next_grants;
-                                            agent = Some(a);
                                             workspace = ws;
                                             session_id = sid;
                                             set_active_session(&active_session, &session_id);
@@ -2729,14 +2721,6 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                             .send(Err("分叉会话初始化已被更新的运行态切换取消"
                                                 .to_string()));
                                         continue;
-                                    }
-                                    if let Some(agent) = agent.as_mut() {
-                                        agent.set_event_sink(make_sink(
-                                        app.clone(),
-                                        session_id.clone(),
-                                        None,
-                                        None,
-                                        ));
                                     }
                                     emit_ready(&app, &workspace, &session_id);
                                     emit(
@@ -2870,9 +2854,9 @@ pub fn spawn_worker(startup: WorkerStartup) {
                             .await
                             {
                                 Ok((a, ws, sid, _)) => {
+                                    drop(a);
                                     if runtime_activation
                                         .commit_if_current(&activation, || {
-                                            agent = Some(a);
                                             workspace = ws;
                                             session_id = sid;
                                             set_active_session(&active_session, &session_id);
@@ -2884,14 +2868,6 @@ pub fn spawn_worker(startup: WorkerStartup) {
                                                 .send(Err("切换权限模式已被更新的运行态切换取消"
                                                     .to_string()));
                                         continue;
-                                    }
-                                    if let Some(agent) = agent.as_mut() {
-                                        agent.set_event_sink(make_sink(
-                                        app.clone(),
-                                        session_id.clone(),
-                                        None,
-                                        None,
-                                        ));
                                     }
                                     emit_ready(&app, &workspace, &session_id);
                                     let _ = completion.send(Ok(()));

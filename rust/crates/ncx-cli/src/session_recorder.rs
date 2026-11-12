@@ -5,6 +5,7 @@ pub(crate) struct SessionRecorder {
     pub(crate) thread_id: ThreadId,
     workspace: PathBuf,
     model_context: Option<Vec<Value>>,
+    needs_prompt_title: bool,
 }
 
 impl SessionRecorder {
@@ -37,8 +38,9 @@ impl SessionRecorder {
         } else {
             None
         };
-        let thread_id = if let Some(metadata) = existing {
-            metadata.id
+        let (thread_id, needs_prompt_title) = if let Some(metadata) = existing {
+            let needs_title = metadata.title == "(no prompt yet)";
+            (metadata.id, needs_title)
         } else {
             let thread_id = ThreadId::new(new_session_id()).map_err(|e| e.to_string())?;
             server
@@ -49,7 +51,7 @@ impl SessionRecorder {
                     harness_profile: "full".to_string(),
                 })
                 .map_err(|e| e.to_string())?;
-            thread_id
+            (thread_id, true)
         };
         let model_context = match server
             .dispatch(ClientRequest::ThreadModelContextRead {
@@ -68,6 +70,7 @@ impl SessionRecorder {
             thread_id,
             workspace,
             model_context,
+            needs_prompt_title,
         })
     }
 
@@ -116,20 +119,14 @@ impl SessionRecorder {
                 },
             })
             .map_err(|error| error.to_string())?;
-        let current = self
-            .server
-            .dispatch(ClientRequest::ThreadRead {
-                thread_id: self.thread_id.clone(),
-            })
-            .map_err(|error| error.to_string())?;
-        if matches!(current.response.payload, ResponsePayload::Thread(Thread { metadata: ThreadMetadata { ref title, .. }, .. }) if title == "(no prompt yet)")
-        {
+        if self.needs_prompt_title {
             self.server
                 .dispatch(ClientRequest::ThreadRename {
                     thread_id: self.thread_id.clone(),
                     title: clipped_label(user_text, 80),
                 })
                 .map_err(|error| error.to_string())?;
+            self.needs_prompt_title = false;
         }
         Ok(turn_id)
     }

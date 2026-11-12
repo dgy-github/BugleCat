@@ -97,13 +97,12 @@ pub(super) async fn run(
             );
         }
 
-        if agent
-            .tools
-            .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
-            .is_some()
-            && agent.should_compact(&prompt.runtime_notes, &prompt.tool_query)
-        {
+        let strategy = agent.compaction_strategy().filter(|strategy| {
+            strategy.should_compact(agent, &prompt.runtime_notes, &prompt.tool_query)
+        });
+        if let Some(strategy) = strategy {
             let hook_args = json!({
+                "strategy": strategy.id(),
                 "max_chars": agent.context_edit.max_chars,
                 "keep_recent_messages": agent.context_edit.keep_recent_messages,
                 "max_tool_result_chars": agent.context_edit.max_tool_result_chars,
@@ -121,44 +120,59 @@ pub(super) async fn run(
                 prompt.runtime_notes.push(pre.notes);
             }
             if !pre.blocked {
-                {
-                    let (stats, usage) = match agent.compact_context(cancel).await {
-                        Ok(result) => result,
-                        Err(error) => {
-                            if is_cancelled(cancel) {
-                                return interrupted_result(
-                                    agent,
-                                    iteration + 1,
-                                    state,
-                                    tokio::time::Instant::now() >= deadline,
-                                );
-                            }
+                agent.last_compaction_calls.set(0);
+                match strategy.compact(agent, cancel).await {
+                    Ok((stats, usage)) => {
+                        add_usage(&mut state.usage, &usage);
+                        let observed_calls = agent.last_compaction_calls.replace(0);
+                        if strategy.uses_model() {
+                            state.compaction_calls += observed_calls.max(1);
+                        }
+                        let rendered = format!(
+                            "chars {} -> {}; compressed_tool_results={}; dropped_messages={}",
+                            stats.original_chars,
+                            stats.edited_chars,
+                            stats.compressed_tool_results,
+                            stats.dropped_messages
+                        );
+                        let post = run_matching_hooks(
+                            &agent.tools.ctx.hooks,
+                            HookEvent::PostCompact,
+                            "compaction",
+                            &hook_args,
+                            Some(&rendered),
+                            &agent.tools.ctx.workspace,
+                        )
+                        .await;
+                        if !post.notes.trim().is_empty() {
+                            prompt.runtime_notes.push(post.notes);
+                        }
+                        emit(sink, LoopEvent::ContextCompacted(stats));
+                    }
+                    Err(error) => {
+                        let observed_calls = agent.last_compaction_calls.replace(0);
+                        if strategy.uses_model() {
+                            state.compaction_calls += observed_calls;
+                        }
+                        if is_cancelled(cancel) {
+                            return interrupted_result(
+                                agent,
+                                iteration + 1,
+                                state,
+                                tokio::time::Instant::now() >= deadline,
+                            );
+                        }
+                        if !strategy.uses_model()
+                            && agent.session.unresolved_tool_calls().is_empty()
+                        {
+                            // Zero-call rule compaction had no releasable older items
+                            // (e.g. an oversized latest user turn). Proceed to the
+                            // model call rather than aborting the turn prematurely.
+                        } else {
                             let text = format!("上下文压缩未完成：{error}");
                             return state.finish(text, iteration + 1, "compaction_failed");
                         }
-                    };
-                    add_usage(&mut state.usage, &usage);
-                    state.compaction_calls += 1;
-                    let rendered = format!(
-                        "chars {} -> {}; compressed_tool_results={}; dropped_messages={}",
-                        stats.original_chars,
-                        stats.edited_chars,
-                        stats.compressed_tool_results,
-                        stats.dropped_messages
-                    );
-                    let post = run_matching_hooks(
-                        &agent.tools.ctx.hooks,
-                        HookEvent::PostCompact,
-                        "compaction",
-                        &hook_args,
-                        Some(&rendered),
-                        &agent.tools.ctx.workspace,
-                    )
-                    .await;
-                    if !post.notes.trim().is_empty() {
-                        prompt.runtime_notes.push(post.notes);
                     }
-                    emit(sink, LoopEvent::ContextCompacted(stats));
                 }
             }
         }
@@ -1027,25 +1041,6 @@ fn append_pending_check_failure(reason: Option<&str>, text: &mut String) {
     }
 }
 
-#[cfg(test)]
-mod budget_message_tests {
-    use super::*;
-
-    #[test]
-    fn budget_message_reports_actual_pending_check_reason() {
-        for reason in ["compile_failed", "verification_failed"] {
-            let mut text = "budget exhausted".to_string();
-            append_pending_check_failure(Some(reason), &mut text);
-            assert!(text.contains(reason));
-            assert!(text.contains("budget exhausted"));
-        }
-
-        let mut text = "budget exhausted".to_string();
-        append_pending_check_failure(None, &mut text);
-        assert_eq!(text, "budget exhausted");
-    }
-}
-
 fn budget_note(agent: &AgentLoop, model_call: usize, tool_calls_used: usize) -> String {
     format!(
         "Runtime task budget: model_call {}/{}; tool_calls {}/{}; context_input_budget_tokens {}. Stay within this budget, prefer direct progress, and summarize before asking for more work.",
@@ -1111,4 +1106,23 @@ fn memory_recall(
         .as_ref()
         .map(|store| store.recall_with_feedback(focused, max_entries, max_chars))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod budget_message_tests {
+    use super::*;
+
+    #[test]
+    fn budget_message_reports_actual_pending_check_reason() {
+        for reason in ["compile_failed", "verification_failed"] {
+            let mut text = "budget exhausted".to_string();
+            append_pending_check_failure(Some(reason), &mut text);
+            assert!(text.contains(reason));
+            assert!(text.contains("budget exhausted"));
+        }
+
+        let mut text = "budget exhausted".to_string();
+        append_pending_check_failure(None, &mut text);
+        assert_eq!(text, "budget exhausted");
+    }
 }

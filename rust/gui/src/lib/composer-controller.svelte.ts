@@ -62,8 +62,14 @@ export class ComposerController {
     try { await appServerRequest({ method: "turnSubmit", params: { threadId: targetSessionId, text, images, executionMode } }); }
     catch (error) {
       this.thread.setRunning(targetSessionId, false);
-      this.thread.messages.push({ role: "note", text: `发送失败：${error}` });
-      this.thread.busy = false; this.thread.stopping = false; this.dequeue();
+      if (this.thread.currentId === targetSessionId) {
+        this.thread.messages.push({ role: "note", text: `发送失败：${error}` });
+        this.thread.busy = false;
+        this.thread.stopping = false;
+        this.dequeue();
+      } else {
+        this.thread.recordBackgroundError(targetSessionId, `发送失败：${error}`);
+      }
     }
   };
 
@@ -123,6 +129,7 @@ export class ComposerController {
   };
 
   onKey = (event: KeyboardEvent): void => {
+    if (event.isComposing || event.keyCode === 229) return;
     const slash = this.slash;
     if (slash?.visible && slash.matches.length) {
       if (event.key === "ArrowDown") { event.preventDefault(); slash.index = (slash.index + 1) % slash.matches.length; return; }

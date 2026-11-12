@@ -848,7 +848,11 @@ async fn stream_errors_present_a_readable_message_without_diagnostic_json() {
         let mut agent = build(&ws, Box::new(provider));
         let result = agent.run_turn(json!("继续"), None).await;
         assert_eq!(result.stop_reason, "error");
-        assert!(result.final_text.contains(expected), "{}", result.final_text);
+        assert!(
+            result.final_text.contains(expected),
+            "{}",
+            result.final_text
+        );
         assert!(!result.final_text.contains("provider_request"));
         assert!(!result.final_text.contains("elapsed_ms"));
     }

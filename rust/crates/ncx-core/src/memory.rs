@@ -551,7 +551,25 @@ impl MemoryStore {
                 e.text
             ));
         }
-        std::fs::write(&self.path, s)
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("LEARNINGS.md");
+        let tmp_path = self
+            .path
+            .with_file_name(format!(".{file_name}.tmp.{}", std::process::id()));
+        {
+            use std::io::Write;
+            let mut tmp = std::fs::File::create(&tmp_path)?;
+            tmp.write_all(s.as_bytes())?;
+            let _ = tmp.sync_all();
+        }
+        if let Err(err) = std::fs::rename(&tmp_path, &self.path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(err);
+        }
+        Ok(())
     }
 }
 

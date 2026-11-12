@@ -201,7 +201,7 @@ fn parse_update_body(
         }
 
         let (marker, content) = match raw.chars().next() {
-            Some(c) => (c, &raw[1..]),
+            Some(c) => (c, &raw[c.len_utf8()..]),
             None => (' ', ""),
         };
         match marker {
@@ -707,5 +707,12 @@ mod tests {
             moved: vec![("s".into(), "t".into())],
         };
         assert_eq!(o.summary(), "  A a\n  R s -> t\n  M m\n  D d");
+    }
+
+    #[test]
+    fn multibyte_invalid_hunk_prefix_errors_cleanly_without_panicking() {
+        let bad = "*** Begin Patch\n*** Update File: main.rs\n中文缺少前缀标记\n*** End Patch";
+        let err = parse_patch(bad).unwrap_err();
+        assert!(err.to_string().contains("line must start with"));
     }
 }

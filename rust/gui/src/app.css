@@ -776,7 +776,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   padding: var(--sp-5);
-  z-index: 10;
+  z-index: 200;
   animation: overlay-in var(--dur) var(--ease);
 }
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
@@ -1277,11 +1277,11 @@ main.app { flex-direction: row; }
 
 .forge-card { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--surface) 92%, var(--accent) 8%); }
 .forge-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.forge-title span { font-size: 12px; color: var(--muted); }
+.forge-title span { font-size: 12px; color: var(--ink-3); }
 .forge-title span.ready { color: #16835b; }
 .forge-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
-.forge-grid label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); }
-.forge-grid input, .forge-grid select { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); }
+.forge-grid label { display: grid; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.forge-grid input, .forge-grid select { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
 .forge-error { margin: 8px 0; color: var(--danger); font-size: 12px; }
 .forge-summary { display: grid; gap: 5px; margin-top: 10px; padding: 10px; border-radius: 9px; background: var(--surface); font-size: 12px; }
 .side-collapse svg { width: 1.08rem; height: 1.08rem; }
@@ -1627,7 +1627,7 @@ main.app { flex-direction: row; }
 }
 
 /* ── 模型厂商目录 ─────────────────────────────────────────────────────────── */
-.custom-providers { margin-bottom: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--paper-1); }
+.custom-providers { margin-bottom: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--accent-line); border-radius: var(--r-md); background: var(--paper-2); }
 .custom-provider-title { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start; }
 .custom-provider-title p { margin: .2rem 0 var(--sp-3); color: var(--ink-3); font-size: var(--fs-xs); }
 .custom-provider-title button, .custom-provider-form button, .custom-provider-list button { padding: .35rem .6rem; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); }
@@ -1656,7 +1656,7 @@ main.app { flex-direction: row; }
   padding: var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: var(--paper-1);
+  background: var(--paper-2);
 }
 .catalog-head {
   display: flex;
@@ -1677,7 +1677,7 @@ main.app { flex-direction: row; }
 .plugin-diagnostics { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.7rem 0 1rem; }
 .provider-activation-diagnostic.failed { border-color: color-mix(in srgb, #ff453a 45%, var(--line)); }
 .provider-activation-diagnostic.failed > span[role="alert"] { color: #d9362b; overflow-wrap: anywhere; }
-.plugin-state { padding: 0.28rem 0.55rem; border-radius: 999px; color: var(--muted); background: var(--surface); font-size: 0.78rem; }
+.plugin-state { padding: 0.28rem 0.55rem; border-radius: 999px; color: var(--ink-3); background: var(--surface); font-size: 0.78rem; }
 .plugin-state.active { color: #287a4a; background: rgba(40, 122, 74, 0.1); }
 .catalog-refresh,
 .catalog-select,
@@ -1991,8 +1991,8 @@ main.app { flex-direction: row; }
   flex-direction: row;
 }
 .rightpanel {
-  flex: 0 0 420px;
-  width: 420px;
+  flex: 0 0 min(420px, 42vw);
+  width: min(420px, 42vw);
   min-width: 0;
   max-width: 420px;
   display: flex;
@@ -2437,6 +2437,7 @@ textarea:focus { background: var(--surface-soft); border-color: var(--accent); b
 .recent-item { border-radius: 9px; }
 .recent-item.active { background: color-mix(in srgb, var(--ink) 9%, transparent); box-shadow: none; }
 .recent-dot { display: none; }
+.recent-item.running .recent-dot { display: inline-block; color: var(--accent); margin-right: 0.28rem; font-size: 0.62rem; }
 .recent-main { min-height: 2.8rem; }
 .side-foot { margin-top: auto; padding: 0.6rem 0 0; border-top: 0; }
 
@@ -2491,9 +2492,17 @@ textarea:focus { background: var(--surface-soft); border-color: var(--accent); b
 .assistant-model {
   width: max-content; margin: 0.18rem 0 0.1rem 2.5rem; padding: 0.16rem 0.45rem;
   border: 1px solid var(--line); border-radius: 999px; color: var(--ink-4);
-  background: color-mix(in srgb, var(--panel) 86%, transparent); font-size: 0.68rem;
+  background: color-mix(in srgb, var(--surface-soft) 86%, transparent); font-size: 0.68rem;
   line-height: 1.25;
 }
+.jump-bottom-pill {
+  position: sticky; bottom: 0.5rem; align-self: center; z-index: 8;
+  padding: 0.34rem 0.78rem; border: 1px solid var(--line-strong); border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--ink);
+  font-size: var(--fs-xs); font-weight: 500; box-shadow: var(--sh-2);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); cursor: pointer;
+}
+.jump-bottom-pill:hover { border-color: var(--accent-line); color: var(--accent); }
 .assistant-model.confirmed { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 34%, var(--line)); }
 .assistant-model.mismatch { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 46%, var(--line)); }
 .message-actions button {
@@ -2742,8 +2751,8 @@ footer {
 .dsh-settings-slots > div { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.65rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
 .dsh-settings-slots small { color: var(--ink-3); font-size: 0.7rem; }
 .dsh-settings-slots a { color: var(--accent); font-size: 0.7rem; }
-.dsh-slot-backdrop { z-index: 90; display: grid; place-items: center; }
-.dsh-slot-overlay { width: min(30rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: var(--shadow-lg); }
+.dsh-slot-backdrop { z-index: 220; display: grid; place-items: center; }
+.dsh-slot-overlay { width: min(30rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: var(--sh-3); }
 .dsh-slot-overlay > div { display: flex; align-items: center; justify-content: space-between; }
 .dsh-slot-overlay p { color: var(--ink-3); font-size: 0.8rem; line-height: 1.55; }
 .dsh-slot-overlay a { color: var(--accent); font-size: 0.78rem; }

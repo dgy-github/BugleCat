@@ -65,22 +65,31 @@ impl PolicyExecutor {
             command.env(key, value);
         }
         command.env("TERM", "xterm-256color");
-        let child = pair
+        let mut child = pair
             .slave
             .spawn_command(command)
             .map_err(|error| format!("PTY shell spawn failed: {error}"))?;
+        drop(pair.slave);
         #[cfg(windows)]
         let job = child
             .process_id()
             .and_then(|pid| crate::executor::win_job::Job::contain(pid, self.active_process_limit));
-        let reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|error| format!("PTY reader failed: {error}"))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|error| format!("PTY writer failed: {error}"))?;
+        let reader = match pair.master.try_clone_reader() {
+            Ok(reader) => reader,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("PTY reader failed: {error}"));
+            }
+        };
+        let writer = match pair.master.take_writer() {
+            Ok(writer) => writer,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("PTY writer failed: {error}"));
+            }
+        };
         let writer = Arc::new(Mutex::new(writer));
         let output = Arc::new(Mutex::new(OutputRingBuffer::default()));
         spawn_reader(reader, output.clone(), Arc::downgrade(&writer));
@@ -146,6 +155,11 @@ impl PtyProcess {
             job.terminate();
         }
         let _ = self.child.kill();
+        if self.exit_code.is_none() {
+            if let Ok(Some(status)) = self.child.try_wait() {
+                self.exit_code = Some(status.exit_code());
+            }
+        }
         self.writer = None;
     }
 }

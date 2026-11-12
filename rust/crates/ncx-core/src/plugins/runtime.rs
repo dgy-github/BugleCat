@@ -10,7 +10,8 @@ use super::{
     HarnessComposition, HarnessPlugin, InteractionPlugin, LlmProviderPlugin, McpPlugin,
     MediaPlugin, MemoryPlugin, PluginInstallReport, PluginRegistry, PolicyPlugin,
     ProcessToolsPlugin, ProfileSpec, ProviderCatalogPlugin, ProviderChatProbePlugin,
-    ProviderDirectoryPlugin, SearchToolsPlugin, SessionToolsPlugin, WorkspaceToolsPlugin,
+    ProviderDirectoryPlugin, RuleCompactionPlugin, SearchToolsPlugin, SessionToolsPlugin,
+    WorkspaceToolsPlugin,
 };
 use crate::skills::skills_index_block;
 use crate::tools::{ToolContext, ToolRegistry};
@@ -114,6 +115,12 @@ impl HarnessRuntimeBuilder {
         let mut builder = Self::from_composition(&composition)?;
         let mut names = std::collections::HashSet::new();
         if builder.external_enabled {
+            let probe_ctx = ToolContext::new(
+                workspace.to_path_buf(),
+                ncx_sandbox::SandboxPolicy::new(ncx_sandbox::WORKSPACE_WRITE, workspace),
+            );
+            let mut probe_tools = ToolRegistry::empty(probe_ctx);
+            let _ = builder.plugins.install_into(&mut probe_tools);
             for plugin in ExternalPluginCatalog::new(workspace.join(".ncx").join("plugins"))
                 .discover()?
                 .into_iter()
@@ -121,6 +128,9 @@ impl HarnessRuntimeBuilder {
             {
                 let registration = plugin.handshake()?;
                 for tool in &registration.tools {
+                    if probe_tools.get(&tool.name).is_some() {
+                        return Err(format!("外部插件工具 '{}' 与内置工具重名", tool.name));
+                    }
                     if !names.insert(tool.name.clone()) {
                         return Err(format!("外部插件工具 '{}' 重名", tool.name));
                     }
@@ -163,10 +173,9 @@ impl HarnessRuntimeBuilder {
                         as Box<dyn crate::Tool>
                 })
             })
+            .filter(|tool| tools.get(tool.name()).is_none())
             .collect::<Vec<_>>();
-        tools
-            .replace_tools(&[], external_tools)
-            .expect("validated external plugin tool names must be unique");
+        let _ = tools.replace_tools(&[], external_tools);
         (tools, report)
     }
 }
@@ -264,6 +273,7 @@ fn builtin_plugin(id: &str) -> Option<Rc<dyn HarnessPlugin>> {
         "ncx.context" => Some(Rc::new(ContextPlugin)),
         "ncx.memory" => Some(Rc::new(MemoryPlugin)),
         "ncx.compaction" => Some(Rc::new(CompactionPlugin)),
+        "ncx.compaction.rule" => Some(Rc::new(RuleCompactionPlugin)),
         "ncx.mcp" => Some(Rc::new(McpPlugin)),
         "ncx.attachment" => Some(Rc::new(AttachmentPlugin)),
         "ncx.media" => Some(Rc::new(MediaPlugin)),

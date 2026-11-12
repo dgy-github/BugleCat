@@ -16,6 +16,25 @@ use url::Url;
 use crate::lsp_tool::{LspProvider, LspRequest};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+const MAX_LSP_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+enum LspFailure {
+    Application(String),
+    Transport(String),
+}
+
+impl LspFailure {
+    fn into_message(self) -> String {
+        match self {
+            Self::Application(msg) | Self::Transport(msg) => msg,
+        }
+    }
+
+    fn is_transport(&self) -> bool {
+        matches!(self, Self::Transport(_))
+    }
+}
 
 /// A lazily started, persistent rust-analyzer process scoped to one workspace.
 pub struct RustAnalyzerProvider {
@@ -44,13 +63,18 @@ impl LspProvider for RustAnalyzerProvider {
             .expect("LSP session initialized")
             .request(&self.workspace, request)
             .await;
-        if result.is_err() {
-            if let Some(session) = state.as_mut() {
-                session.terminate();
+        match result {
+            Ok(value) => Ok(value),
+            Err(failure) => {
+                if failure.is_transport() {
+                    if let Some(session) = state.as_mut() {
+                        session.terminate();
+                    }
+                    *state = None;
+                }
+                Err(failure.into_message())
             }
-            *state = None;
         }
-        result
     }
 }
 
@@ -104,33 +128,42 @@ impl LspSession {
                     "clientInfo": {"name": "nanocodex", "version": env!("CARGO_PKG_VERSION")}
                 }),
             )
-            .await?;
-        session.notify("initialized", json!({})).await?;
+            .await
+            .map_err(LspFailure::into_message)?;
+        session
+            .notify("initialized", json!({}))
+            .await
+            .map_err(LspFailure::into_message)?;
         Ok(session)
     }
 
-    async fn request(&mut self, workspace: &Path, request: LspRequest) -> Result<Value, String> {
+    async fn request(
+        &mut self,
+        workspace: &Path,
+        request: LspRequest,
+    ) -> Result<Value, LspFailure> {
         if let Some(path) = request.path.as_deref() {
             self.open_document(workspace, path).await?;
         }
-        let (method, params) = request_parts(workspace, request)?;
+        let (method, params) =
+            request_parts(workspace, request).map_err(LspFailure::Application)?;
         self.call(method, params).await
     }
 
     /// Open a document in `rust-analyzer` on first access (`textDocument/didOpen`),
     /// or synchronize its latest disk contents via `textDocument/didChange` so
     /// post-edit diagnostics always inspect the freshly modified buffer.
-    async fn open_document(&mut self, workspace: &Path, path: &str) -> Result<(), String> {
-        let uri = file_uri(workspace, Some(path))?;
+    async fn open_document(&mut self, workspace: &Path, path: &str) -> Result<(), LspFailure> {
+        let uri = file_uri(workspace, Some(path)).map_err(LspFailure::Application)?;
         let uri_text = uri.to_string();
-        let source_path = uri
-            .to_file_path()
-            .map_err(|_| format!("cannot convert source URI back to a path: {uri}"))?;
+        let source_path = uri.to_file_path().map_err(|_| {
+            LspFailure::Application(format!("cannot convert source URI back to a path: {uri}"))
+        })?;
         let text = std::fs::read_to_string(&source_path).map_err(|error| {
-            format!(
+            LspFailure::Application(format!(
                 "cannot read source file '{}': {error}",
                 source_path.display()
-            )
+            ))
         })?;
         if let Some(prev_version) = self.open_documents.get(&uri_text).copied() {
             let next_version = prev_version + 1;
@@ -164,7 +197,7 @@ impl LspSession {
         Ok(())
     }
 
-    async fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+    async fn call(&mut self, method: &str, params: Value) -> Result<Value, LspFailure> {
         let id = self.next_id;
         self.next_id += 1;
         self.write_message(&json!({
@@ -176,55 +209,72 @@ impl LspSession {
         .await?;
         timeout(REQUEST_TIMEOUT, self.read_response(id))
             .await
-            .map_err(|_| format!("LSP request '{method}' timed out"))?
+            .map_err(|_| LspFailure::Transport(format!("LSP request '{method}' timed out")))?
     }
 
-    async fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
+    async fn notify(&mut self, method: &str, params: Value) -> Result<(), LspFailure> {
         self.write_message(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
             .await
     }
 
-    async fn write_message(&mut self, message: &Value) -> Result<(), String> {
-        let body = serde_json::to_vec(message).map_err(|error| error.to_string())?;
+    async fn write_message(&mut self, message: &Value) -> Result<(), LspFailure> {
+        let body = serde_json::to_vec(message)
+            .map_err(|error| LspFailure::Application(error.to_string()))?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
         self.stdin
             .write_all(header.as_bytes())
             .await
-            .map_err(|error| format!("LSP write failed: {error}"))?;
+            .map_err(|error| LspFailure::Transport(format!("LSP write failed: {error}")))?;
         self.stdin
             .write_all(&body)
             .await
-            .map_err(|error| format!("LSP write failed: {error}"))?;
+            .map_err(|error| LspFailure::Transport(format!("LSP write failed: {error}")))?;
         self.stdin
             .flush()
             .await
-            .map_err(|error| format!("LSP flush failed: {error}"))
+            .map_err(|error| LspFailure::Transport(format!("LSP flush failed: {error}")))
     }
 
-    async fn read_response(&mut self, expected_id: u64) -> Result<Value, String> {
+    async fn read_response(&mut self, expected_id: u64) -> Result<Value, LspFailure> {
         loop {
             let message = self.read_message().await?;
+            if message.get("method").is_some() {
+                // Server-initiated request (e.g., window/workDoneProgress/create):
+                // reply with a null result so rust-analyzer never stalls waiting.
+                if let Some(server_req_id) = message.get("id").filter(|id| !id.is_null()) {
+                    let _ = self
+                        .write_message(&json!({
+                            "jsonrpc": "2.0",
+                            "id": server_req_id,
+                            "result": Value::Null,
+                        }))
+                        .await;
+                }
+                continue;
+            }
             if message.get("id").and_then(Value::as_u64) != Some(expected_id) {
                 continue;
             }
             if let Some(error) = message.get("error") {
-                return Err(format!("LSP server error: {error}"));
+                return Err(LspFailure::Application(format!(
+                    "LSP server error: {error}"
+                )));
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
         }
     }
 
-    async fn read_message(&mut self) -> Result<Value, String> {
+    async fn read_message(&mut self) -> Result<Value, LspFailure> {
         let mut content_length = None;
         loop {
             let mut line = String::new();
-            let read = self
-                .stdout
-                .read_line(&mut line)
-                .await
-                .map_err(|error| format!("LSP header read failed: {error}"))?;
+            let read = self.stdout.read_line(&mut line).await.map_err(|error| {
+                LspFailure::Transport(format!("LSP header read failed: {error}"))
+            })?;
             if read == 0 {
-                return Err("rust-analyzer closed stdout".to_string());
+                return Err(LspFailure::Transport(
+                    "rust-analyzer closed stdout".to_string(),
+                ));
             }
             if line == "\r\n" || line == "\n" {
                 break;
@@ -233,14 +283,21 @@ impl LspSession {
                 content_length = value.trim().parse::<usize>().ok();
             }
         }
-        let length =
-            content_length.ok_or_else(|| "LSP message omitted Content-Length".to_string())?;
+        let length = content_length.ok_or_else(|| {
+            LspFailure::Transport("LSP message omitted Content-Length".to_string())
+        })?;
+        if length > MAX_LSP_MESSAGE_BYTES {
+            return Err(LspFailure::Transport(format!(
+                "LSP message length {length} exceeds {MAX_LSP_MESSAGE_BYTES} bytes"
+            )));
+        }
         let mut body = vec![0; length];
         self.stdout
             .read_exact(&mut body)
             .await
-            .map_err(|error| format!("LSP body read failed: {error}"))?;
-        serde_json::from_slice(&body).map_err(|error| format!("LSP JSON decode failed: {error}"))
+            .map_err(|error| LspFailure::Transport(format!("LSP body read failed: {error}")))?;
+        serde_json::from_slice(&body)
+            .map_err(|error| LspFailure::Transport(format!("LSP JSON decode failed: {error}")))
     }
 
     fn terminate(&mut self) {

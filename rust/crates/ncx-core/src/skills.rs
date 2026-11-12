@@ -115,6 +115,7 @@ pub fn builtin_skills() -> Vec<Skill> {
         include_str!("../builtin_skills/commit-message/SKILL.md"),
         include_str!("../builtin_skills/dashscope-image/SKILL.md"),
         include_str!("../builtin_skills/dashscope-video/SKILL.md"),
+        include_str!("../builtin_skills/product-sense/SKILL.md"),
     ];
     let mut out = Vec::new();
     for text in BUILTINS {

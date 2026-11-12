@@ -448,6 +448,7 @@ pub struct ToolRegistry {
     middleware_names: HashSet<String>,
     runtime_state: Rc<RefCell<ToolRuntimeState>>,
     recovery_trace: RefCell<Option<crate::context_trace::SourceTraceStore>>,
+    cached_all_schema_chars: Cell<Option<usize>>,
     pub(crate) plugin_state: crate::plugins::PluginRuntimeState,
 }
 
@@ -490,7 +491,7 @@ impl ToolRegistry {
                 .service::<crate::plugins::MemoryServiceDescriptor>("memory")
                 .is_some(),
             compaction: self
-                .service::<crate::plugins::CompactionServiceDescriptor>("compaction")
+                .service::<crate::plugins::CompactionService>("compaction")
                 .is_some(),
             mcp: self
                 .service::<crate::plugins::McpServiceDescriptor>("mcp")
@@ -555,6 +556,7 @@ impl ToolRegistry {
             middleware_names: HashSet::new(),
             runtime_state: Rc::new(RefCell::new(ToolRuntimeState::default())),
             recovery_trace: RefCell::new(None),
+            cached_all_schema_chars: Cell::new(None),
             plugin_state: Default::default(),
         }
     }
@@ -587,6 +589,9 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
+        if !tool_allowed(tool.name()) {
+            return;
+        }
         let name = tool.name().to_string();
         let idx = self.tools.len();
         // Apply any NCX_GENOME description override so tool_search (which scores
@@ -604,6 +609,7 @@ impl ToolRegistry {
         });
         self.tools.push(tool);
         self.by_name.insert(name, idx);
+        self.cached_all_schema_chars.set(None);
     }
 
     /// Atomically replace an owned subset of tools after validating additions.
@@ -617,32 +623,51 @@ impl ToolRegistry {
         remove_names: &[String],
         additions: Vec<Box<dyn Tool>>,
     ) -> Result<Vec<String>, String> {
+        self.replace_tools_with_allow(
+            remove_names,
+            additions,
+            std::env::var(TOOL_ALLOW_ENV).ok().as_deref(),
+        )
+    }
+
+    fn replace_tools_with_allow(
+        &mut self,
+        remove_names: &[String],
+        additions: Vec<Box<dyn Tool>>,
+        allow: Option<&str>,
+    ) -> Result<Vec<String>, String> {
         let remove: HashSet<&str> = remove_names.iter().map(String::as_str).collect();
         let mut additions_seen = HashSet::new();
+        let mut allowed_additions = Vec::with_capacity(additions.len());
         let mut addition_names = Vec::with_capacity(additions.len());
-        for tool in &additions {
-            let name = tool.name().trim();
+        for tool in additions {
+            let name = tool.name().trim().to_string();
             if name.is_empty() {
                 return Err("replacement tool name cannot be empty".to_string());
             }
-            if !additions_seen.insert(name.to_string()) {
+            if !additions_seen.insert(name.clone()) {
                 return Err(format!("replacement contains duplicate tool '{name}'"));
             }
-            if self.by_name.contains_key(name) && !remove.contains(name) {
+            if !tool_allowed_by(allow, &name) {
+                continue;
+            }
+            if self.by_name.contains_key(&name) && !remove.contains(name.as_str()) {
                 return Err(format!(
                     "replacement tool '{name}' conflicts with an existing tool"
                 ));
             }
-            addition_names.push(name.to_string());
+            addition_names.push(name);
+            allowed_additions.push(tool);
         }
 
         self.tools.retain(|tool| !remove.contains(tool.name()));
-        self.tools.extend(additions);
+        self.tools.extend(allowed_additions);
         self.rebuild_tool_indexes();
         Ok(addition_names)
     }
 
     fn rebuild_tool_indexes(&mut self) {
+        self.cached_all_schema_chars.set(None);
         self.by_name.clear();
         let mut catalog = Vec::with_capacity(self.tools.len());
         for (index, tool) in self.tools.iter().enumerate() {
@@ -707,6 +732,26 @@ impl ToolRegistry {
         self.schemas_limited_for_query(query, DEFAULT_VISIBLE_TOOL_LIMIT)
     }
 
+    /// Serialized schema character count for token estimation, cached when the
+    /// full tool set fits within the visible limit.
+    pub(crate) fn schema_chars_for_query(&self, query: &str) -> usize {
+        if self.tools.len() <= DEFAULT_VISIBLE_TOOL_LIMIT {
+            if let Some(cached) = self.cached_all_schema_chars.get() {
+                return cached;
+            }
+            let schemas = self.schemas_limited_for_query("", DEFAULT_VISIBLE_TOOL_LIMIT);
+            let chars = serde_json::to_string(&schemas)
+                .map(|s| s.chars().count())
+                .unwrap_or(0);
+            self.cached_all_schema_chars.set(Some(chars));
+            return chars;
+        }
+        let schemas = self.schemas_for_query(query);
+        serde_json::to_string(&schemas)
+            .map(|s| s.chars().count())
+            .unwrap_or(0)
+    }
+
     pub fn schemas_limited_for_query(&self, query: &str, limit: usize) -> Vec<Value> {
         if self.tools.len() <= limit {
             return self
@@ -766,3 +811,74 @@ pub(crate) mod post_edit_diagnostics;
 pub(crate) mod python_check;
 include!("tools/builtins.rs");
 include!("tools/tests.rs");
+
+/// `NCX_TOOL_ALLOW`: comma-separated tool names a scope may use. When set and
+/// non-empty, every other tool is left unregistered, so it is neither offered
+/// to the model nor callable. Unset or empty keeps the full tool set.
+pub const TOOL_ALLOW_ENV: &str = "NCX_TOOL_ALLOW";
+
+fn tool_allowed(name: &str) -> bool {
+    tool_allowed_by(std::env::var(TOOL_ALLOW_ENV).ok().as_deref(), name)
+}
+
+fn tool_allowed_by(allow: Option<&str>, name: &str) -> bool {
+    match allow.map(str::trim).filter(|list| !list.is_empty()) {
+        None => true,
+        Some(list) => list.split(',').any(|entry| entry.trim() == name),
+    }
+}
+
+#[cfg(test)]
+mod tool_allow_tests {
+    use super::*;
+    use ncx_sandbox::{SandboxPolicy, WORKSPACE_WRITE};
+
+    struct DummyAllowTool(&'static str);
+
+    #[async_trait(?Send)]
+    impl Tool for DummyAllowTool {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "dummy"
+        }
+        fn parameters(&self) -> Value {
+            json!({"type": "object"})
+        }
+        async fn execute(&self, _ctx: &ToolContext, _args: &Value) -> String {
+            "ok".into()
+        }
+    }
+
+    #[test]
+    fn allowlist_limits_tools_only_when_set() {
+        assert!(tool_allowed_by(None, "web_search"));
+        assert!(tool_allowed_by(Some("  "), "web_search"));
+        let list = Some("read_file, shell,apply_patch");
+        assert!(tool_allowed_by(list, "read_file"));
+        assert!(tool_allowed_by(list, "shell"));
+        assert!(!tool_allowed_by(list, "web_search"));
+        assert!(!tool_allowed_by(list, "read"));
+    }
+
+    #[test]
+    fn replace_tools_returns_only_allowed_tools_and_avoids_false_conflicts() {
+        let ws = std::env::temp_dir().join("ncx_tool_allow_replace_test");
+        let ctx = ToolContext::new(ws.clone(), SandboxPolicy::new(WORKSPACE_WRITE, &ws));
+        let mut reg = ToolRegistry::empty(ctx);
+        let registered = reg
+            .replace_tools_with_allow(
+                &[],
+                vec![
+                    Box::new(DummyAllowTool("read_file")),
+                    Box::new(DummyAllowTool("mcp__fs__delete")),
+                ],
+                Some("read_file,apply_patch"),
+            )
+            .unwrap();
+        assert_eq!(registered, vec!["read_file"]);
+        assert!(reg.get("read_file").is_some());
+        assert!(reg.get("mcp__fs__delete").is_none());
+    }
+}

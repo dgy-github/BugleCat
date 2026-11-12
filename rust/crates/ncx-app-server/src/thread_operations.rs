@@ -28,10 +28,14 @@ pub(crate) fn dispatch_metadata<S: ThreadStore>(
         } => server.update_thread_metadata(thread_id, |metadata| metadata.archived = archived),
         ClientRequest::ThreadDelete { thread_id } => {
             server.store.delete(&thread_id)?;
+            let _ = server.disarm_goal(&thread_id);
             Ok(server.outcome(ResponsePayload::Ack, Vec::new()))
         }
         ClientRequest::ThreadsDelete { thread_ids } => {
             let deleted = server.store.delete_many(&thread_ids)?;
+            for removed_id in &deleted {
+                let _ = server.disarm_goal(removed_id);
+            }
             Ok(server.outcome(ResponsePayload::Count(deleted.len() as u64), Vec::new()))
         }
         ClientRequest::ThreadRename { thread_id, title } => rename(server, thread_id, title),

@@ -62,7 +62,8 @@ pub mod workspace_tools;
 pub(crate) mod test_support;
 
 pub use agent_loop::{
-    suggest_title_with_provider, AgentLoop, EventSink, LoopEvent, Provider, TaskBudget, TurnResult,
+    suggest_title_with_provider, AgentLoop, CompactionOutcome, CompactionStrategy, EventSink,
+    LoopEvent, Provider, RuleCompaction, SummaryCompaction, TaskBudget, TurnResult,
 };
 pub use agent_state::{AgentState, AgentStateMachine};
 pub use checkpoint::{CheckpointMeta, CheckpointStore, RestoreReport};
@@ -119,7 +120,7 @@ pub use plugins::{
     discover_codex_apps, discover_codex_hooks, discover_codex_mcp_servers, discover_marketplaces,
     resolve_local_marketplace_plugin, AttachmentPlugin, AttachmentServiceDescriptor,
     BuiltinToolsPlugin, CodexAppResource, CodexPluginCatalog, CodexPluginManifest,
-    CodexPluginRecord, CompactionPlugin, CompactionServiceDescriptor, ContextPlugin,
+    CodexPluginRecord, CompactionPlugin, CompactionService, ContextPlugin,
     ContextServiceDescriptor, CoreToolsPlugin, CostTelemetryPlugin, CostTelemetryService,
     CostTelemetryServiceDescriptor, CostTelemetrySnapshot, ExternalHostPlugin,
     ExternalPluginCatalog, ExternalPluginHandshake, ExternalPluginManifest, ExternalPluginRecord,

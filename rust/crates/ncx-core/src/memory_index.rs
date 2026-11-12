@@ -183,7 +183,9 @@ impl MemoryIndex {
     }
 
     fn init(conn: Connection) -> Result<Self, String> {
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
         let _: Result<String, _> = conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0));
+        let _ = conn.execute_batch("PRAGMA synchronous=NORMAL;");
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS memory_index (
                 note_id       TEXT PRIMARY KEY,
@@ -581,21 +583,46 @@ impl MemoryIndex {
     /// Recall notes for one workspace, newest first. Superseded, Demoted, and Candidate
     /// notes are never returned.
     pub fn recall(&self, workspace: &str, query: &str, limit: usize) -> Vec<IndexedNote> {
+        if limit == 0 {
+            return Vec::new();
+        }
         let terms = instruction_state::parse(query).1;
-        let mut notes = self.active_notes(workspace);
-        if !terms.is_empty() {
-            notes.retain(|note| {
-                let note_terms = instruction_state::parse(&note.text).1;
-                instruction_state::subjects_overlap(&note_terms, &terms)
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT * FROM memory_index
+             WHERE workspace = ?1 AND status = 'active'
+             ORDER BY created_at DESC",
+        ) else {
+            return Vec::new();
+        };
+        let Ok(rows) = stmt.query_map(params![workspace], |row| {
+            let keywords: String = row.get("keywords").unwrap_or_default();
+            Ok((row_to_note(row)?, keywords))
+        }) else {
+            return Vec::new();
+        };
+        let mut out = Vec::with_capacity(limit.min(16));
+        for (note, keywords) in rows.flatten() {
+            if !terms.is_empty() {
+                let note_terms: Vec<String> = if keywords.trim().is_empty() {
+                    instruction_state::parse(&note.text).1
+                } else {
+                    keywords.split_whitespace().map(str::to_string).collect()
+                };
+                let matched = instruction_state::subjects_overlap(&note_terms, &terms)
                     || note
                         .tags
                         .iter()
-                        .any(|tag| terms.contains(&tag.to_lowercase()))
-            });
+                        .any(|tag| terms.contains(&tag.to_lowercase()));
+                if !matched {
+                    continue;
+                }
+            }
+            out.push(note);
+            if out.len() >= limit {
+                break;
+            }
         }
-        notes.sort_by_key(|note| std::cmp::Reverse(note.created_at));
-        notes.truncate(limit);
-        notes
+        out
     }
 
     pub fn active_notes(&self, workspace: &str) -> Vec<IndexedNote> {
@@ -688,27 +715,46 @@ impl MemoryIndex {
         store: &MemoryStore,
         workspace: &str,
     ) -> Result<usize, String> {
-        self.conn
-            .execute(
-                "DELETE FROM memory_index WHERE workspace = ?1 AND status != 'candidate'",
-                params![workspace],
-            )
-            .map_err(|e| e.to_string())?;
+        let entries = store.entries();
         let source = store.markdown_path().display().to_string();
-        let mut stored = 0;
-        for entry in store.entries() {
-            let evidence = Evidence::UserStatement {
-                source_ref: source.clone(),
-            };
-            if self
-                .promote(workspace, &entry.text, &entry.tags, &evidence, entry.ts)
-                .is_ok()
-            {
-                stored += 1;
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| e.to_string())?;
+        let outcome = (|| -> Result<usize, String> {
+            self.conn
+                .execute(
+                    "DELETE FROM memory_index WHERE workspace = ?1 AND status != 'candidate'",
+                    params![workspace],
+                )
+                .map_err(|e| e.to_string())?;
+            let mut stored = 0;
+            for entry in entries {
+                let evidence = Evidence::UserStatement {
+                    source_ref: source.clone(),
+                };
+                if self
+                    .promote(workspace, &entry.text, &entry.tags, &evidence, entry.ts)
+                    .is_ok()
+                {
+                    stored += 1;
+                }
+            }
+            self.apply_feedback_demotions();
+            Ok(stored)
+        })();
+        match outcome {
+            Ok(stored) => {
+                self.conn.execute_batch("COMMIT").map_err(|e| {
+                    let _ = self.conn.execute_batch("ROLLBACK");
+                    e.to_string()
+                })?;
+                Ok(stored)
+            }
+            Err(err) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(err)
             }
         }
-        self.apply_feedback_demotions();
-        Ok(stored)
     }
 }
 

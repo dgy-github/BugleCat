@@ -1,10 +1,10 @@
 //! Built-in capability plugins composed by the default nanocodex runtime.
 
 use crate::plugins::{
-    context_descriptor, AttachmentServiceDescriptor, CompactionServiceDescriptor,
-    CostTelemetryService, CostTelemetryServiceDescriptor, HarnessPlugin, InteractionService,
-    LlmServiceDescriptor, McpServiceDescriptor, MediaServiceDescriptor, MemoryServiceDescriptor,
-    PluginCapability, PluginHost, PluginManifest, PolicyService,
+    context_descriptor, AttachmentServiceDescriptor, CompactionService, CostTelemetryService,
+    CostTelemetryServiceDescriptor, HarnessPlugin, InteractionService, LlmServiceDescriptor,
+    McpServiceDescriptor, MediaServiceDescriptor, MemoryServiceDescriptor, PluginCapability,
+    PluginHost, PluginManifest, PolicyService,
 };
 use crate::tools::{
     ApplyPatchTool, RememberTool, ShellTool, SkillTool, ToolSearchTool, UpdatePlanTool,
@@ -256,7 +256,33 @@ impl HarnessPlugin for CompactionPlugin {
     fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
         host.provide(
             "compaction",
-            Rc::new(CompactionServiceDescriptor { enabled: true }),
+            Rc::new(CompactionService {
+                strategy: Rc::new(crate::agent_loop::SummaryCompaction),
+            }),
+        )
+    }
+}
+
+/// Drop-in replacement for `ncx.compaction` that compacts without a model call.
+/// Select it by pointing the `compaction` entry at `ncx.compaction.rule` in an overlay.
+pub struct RuleCompactionPlugin;
+impl HarnessPlugin for RuleCompactionPlugin {
+    fn id(&self) -> &str {
+        "ncx.compaction.rule"
+    }
+    fn manifest(&self) -> PluginManifest {
+        PluginManifest::new(
+            "ncx.compaction.rule",
+            "Rule Compaction",
+            PluginCapability::Compaction,
+        )
+    }
+    fn install(&self, host: &mut PluginHost<'_>, _config: &toml::Value) -> Result<(), String> {
+        host.provide(
+            "compaction",
+            Rc::new(CompactionService {
+                strategy: Rc::new(crate::agent_loop::RuleCompaction),
+            }),
         )
     }
 }

@@ -3299,18 +3299,44 @@ fn list_mcp() -> Result<Vec<McpRow>, String> {
         .collect())
 }
 
+/// Normalize untrusted clipboard image extensions to a strict safe allowlist.
+fn sanitize_paste_image_ext(raw_ext: &str) -> &'static str {
+    let trimmed = raw_ext.trim().trim_start_matches('.');
+    match trimmed.to_ascii_lowercase().as_str() {
+        "png" => "png",
+        "jpg" | "jpeg" => "jpg",
+        "gif" => "gif",
+        "webp" => "webp",
+        "bmp" => "bmp",
+        _ => "png",
+    }
+}
+
 /// Write pasted/clipboard image bytes to a temp file and return its path, so it
 /// can be attached through the normal image pipeline.
 #[tauri::command]
 fn save_temp_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
     let dir = std::env::temp_dir().join("ncx_gui_paste");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let ext = if ext.trim().is_empty() {
-        "png".into()
-    } else {
-        ext
-    };
-    let n = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let cutoff = std::time::Duration::from_secs(24 * 60 * 60);
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file()
+                    && meta
+                        .modified()
+                        .ok()
+                        .and_then(|m| now.duration_since(m).ok())
+                        .is_some_and(|age| age > cutoff)
+                {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+    let ext = sanitize_paste_image_ext(&ext);
+    let n = now
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
@@ -5046,8 +5072,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building the BugleCat GUI");
     app.run(|handle, event| {
-        if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+        if matches!(
+            event,
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+        ) {
             let state = handle.state::<AppState>();
+            let _ = state.memory_merge.cancel();
+            state.forge_job.cancel_active();
             state.worker_lifecycle.shutdown_and_join(
                 &state.tx,
                 &state.cancels,
@@ -6088,8 +6119,9 @@ mod tests {
             .split_once("this.streamingIndex = null;")
             .unwrap()
             .0;
-        assert!(tool_start
-            .contains("else if (message.verification === \"draft\") message.verification = undefined;"));
+        assert!(tool_start.contains(
+            "else if (message.verification === \"draft\") message.verification = undefined;"
+        ));
         let done = thread.split_once("private handleDone(").unwrap().1;
         assert!(done.contains(
             "if (message.role === \"assistant\" && message.verification === \"draft\") message.verification = undefined;"
@@ -6143,7 +6175,12 @@ mod tests {
             "../../../crates/ncx-core/src/agent_loop/turn.rs"
         ));
 
-        assert!(core.contains(".compact_context("));
+        let compaction = frontend_source(include_str!(
+            "../../../crates/ncx-core/src/agent_loop/compaction.rs"
+        ));
+
+        assert!(core.contains("strategy.compact("));
+        assert!(compaction.contains(".summarize_context("));
         assert!(bridge.contains("UiEvent::ContextCompacted"));
         assert!(thread.contains("case \"context_compacted\":"));
         assert!(thread.contains("this.accepts(event.session_id)"));
@@ -7435,10 +7472,12 @@ mod tests {
             .split_once("<div class=\"side-foot\">")
             .unwrap()
             .0;
-        let recent = sidebar.find("{#each projectGroups as group}").unwrap();
+        let recent = sidebar
+            .find("{#each projectGroups as group (group.key)}")
+            .unwrap();
         let archive_toggle = sidebar.find("class=\"side-archive-toggle\"").unwrap();
         let archived = sidebar
-            .find("{#each archivedProjectGroups as group}")
+            .find("{#each archivedProjectGroups as group (group.key)}")
             .unwrap();
         assert!(recent < archive_toggle);
         assert!(archive_toggle < archived);
@@ -7473,13 +7512,13 @@ mod tests {
         assert!(sidebar_component.contains(
             "const archivedProjectGroups = $derived(groupByWorkspace(archivedSessions))"
         ));
-        assert!(sidebar.contains("{#each projectGroups as group}"));
+        assert!(sidebar.contains("{#each projectGroups as group (group.key)}"));
         assert!(sidebar.contains("class=\"project-toggle\""));
         assert!(sidebar.contains(
             "projectGroup(group, projectOpen[group.path] !== false, toggleProject, false)"
         ));
         assert!(sidebar.contains("aria-expanded={open} onclick={() => toggle(group.path)}"));
-        assert!(sidebar.contains("{#each group.sessions as s}"));
+        assert!(sidebar.contains("{#each group.sessions as s (s.session_id)}"));
 
         let css = include_str!("../../src/app.css");
         assert!(css.contains(".project-toggle"));

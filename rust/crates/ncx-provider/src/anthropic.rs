@@ -80,6 +80,18 @@ fn convert_tool(tool: &Value) -> Option<Value> {
         json!({"name": f.get("name")?, "description": f.get("description").cloned().unwrap_or(json!("")), "input_schema": f.get("parameters").cloned().unwrap_or(json!({"type":"object"}))}),
     )
 }
+fn push_or_merge_message(out: &mut Vec<Value>, role: &str, mut content: Vec<Value>) {
+    if let Some(last) = out.last_mut() {
+        if last.get("role").and_then(Value::as_str) == Some(role) {
+            if let Some(existing) = last.get_mut("content").and_then(Value::as_array_mut) {
+                existing.append(&mut content);
+                return;
+            }
+        }
+    }
+    out.push(json!({"role": role, "content": content}));
+}
+
 fn convert_messages(messages: &[Value]) -> (String, Vec<Value>) {
     let mut system = Vec::new();
     let mut out = Vec::new();
@@ -95,7 +107,12 @@ fn convert_messages(messages: &[Value]) -> (String, Vec<Value>) {
             continue;
         }
         if role == "tool" {
-            out.push(json!({"role":"user","content":[{"type":"tool_result","tool_use_id":message.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),"content":message.get("content").cloned().unwrap_or(json!(""))}]}));
+            let block = json!({
+                "type": "tool_result",
+                "tool_use_id": message.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
+                "content": message.get("content").cloned().unwrap_or(json!("")),
+            });
+            push_or_merge_message(&mut out, "user", vec![block]);
             continue;
         }
         let mut content = match message.get("content") {
@@ -121,7 +138,7 @@ fn convert_messages(messages: &[Value]) -> (String, Vec<Value>) {
         if content.is_empty() {
             content.push(json!({"type":"text","text":""}));
         }
-        out.push(json!({"role":role,"content":content}));
+        push_or_merge_message(&mut out, role, content);
     }
     (system.join("\n\n"), out)
 }
@@ -229,5 +246,29 @@ mod tests {
         let request = request.join().unwrap().to_ascii_lowercase();
         assert!(request.starts_with("post /v1/messages http/1.1"));
         assert!(request.contains("x-api-key: anthropic-client-secret"));
+    }
+
+    #[test]
+    fn parallel_tool_results_coalesce_into_single_user_message() {
+        let input = vec![
+            json!({"role": "user", "content": "check two files"}),
+            json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "function": {"name": "read_file", "arguments": "{\"path\":\"a.rs\"}"}},
+                    {"id": "c2", "function": {"name": "read_file", "arguments": "{\"path\":\"b.rs\"}"}},
+                ]
+            }),
+            json!({"role": "tool", "tool_call_id": "c1", "content": "file a"}),
+            json!({"role": "tool", "tool_call_id": "c2", "content": "file b"}),
+        ];
+        let (_sys, converted) = convert_messages(&input);
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[2]["role"], "user");
+        let blocks = converted[2]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0]["tool_use_id"], "c1");
+        assert_eq!(blocks[1]["tool_use_id"], "c2");
     }
 }

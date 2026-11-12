@@ -15,8 +15,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use storage::{
-    acquire_global_lock, claim_turn_in_state, find_turn_mut, load_state, recover_orphaned_turns,
-    require_owner, save_state,
+    acquire_global_lock, claim_turn_in_state, current_disk_stamp, find_turn_mut, load_state,
+    recover_orphaned_turns, require_owner, save_state, DiskStamp,
 };
 
 pub trait ThreadStore: Send + Sync {
@@ -188,6 +188,7 @@ struct ActiveTurn {
 struct StoreState {
     persisted: PersistedState,
     active_turns: HashMap<String, ActiveTurn>,
+    disk_stamp: Option<DiskStamp>,
 }
 
 pub struct JsonThreadStore {
@@ -198,19 +199,41 @@ pub struct JsonThreadStore {
 impl JsonThreadStore {
     pub fn open(path: impl Into<PathBuf>) -> Result<Self, ThreadStoreError> {
         let path = path.into();
-        let _global = acquire_global_lock(&path)?;
+        let mut global = acquire_global_lock(&path)?;
         let mut persisted = load_state(&path)?;
-        let recovered = recover_orphaned_turns(&path, &mut persisted)?;
-        if recovered {
-            save_state(&path, &persisted)?;
-        }
+        let active_turns = HashMap::new();
+        let recovered = recover_orphaned_turns(&path, &mut persisted, &active_turns)?;
+        let stamp = if recovered {
+            Some(save_state(&path, &mut global, &persisted)?)
+        } else {
+            current_disk_stamp(&path, &mut global).ok()
+        };
         Ok(Self {
             path,
             state: Mutex::new(StoreState {
                 persisted,
-                active_turns: HashMap::new(),
+                active_turns,
+                disk_stamp: stamp,
             }),
         })
+    }
+
+    fn sync_from_disk_locked(
+        &self,
+        state: &mut StoreState,
+        global: &mut File,
+    ) -> Result<(), ThreadStoreError> {
+        let observed = current_disk_stamp(&self.path, global).ok();
+        let cache_fresh = observed.is_some() && state.disk_stamp == observed;
+        if !cache_fresh {
+            state.persisted = load_state(&self.path)?;
+            state.disk_stamp = current_disk_stamp(&self.path, global).ok();
+        }
+        if recover_orphaned_turns(&self.path, &mut state.persisted, &state.active_turns)? {
+            let stamp = save_state(&self.path, global, &state.persisted)?;
+            state.disk_stamp = Some(stamp);
+        }
+        Ok(())
     }
 
     fn mutate<T>(
@@ -218,13 +241,14 @@ impl JsonThreadStore {
         operation: impl FnOnce(&mut StoreState) -> Result<T, ThreadStoreError>,
     ) -> Result<T, ThreadStoreError> {
         let mut state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
-        let _global = acquire_global_lock(&self.path)?;
-        state.persisted = load_state(&self.path)?;
-        if recover_orphaned_turns(&self.path, &mut state.persisted)? {
-            save_state(&self.path, &state.persisted)?;
-        }
+        let mut global = acquire_global_lock(&self.path)?;
+        self.sync_from_disk_locked(&mut state, &mut global)?;
+        // Invalidate cache stamp before running `operation` so any early `Err`
+        // after partial in-memory mutation forces a clean reload on next access.
+        state.disk_stamp = None;
         let result = operation(&mut state)?;
-        save_state(&self.path, &state.persisted)?;
+        let stamp = save_state(&self.path, &mut global, &state.persisted)?;
+        state.disk_stamp = Some(stamp);
         Ok(result)
     }
 
@@ -233,11 +257,8 @@ impl JsonThreadStore {
         operation: impl FnOnce(&PersistedState) -> T,
     ) -> Result<T, ThreadStoreError> {
         let mut state = self.state.lock().map_err(|_| ThreadStoreError::Poisoned)?;
-        let _global = acquire_global_lock(&self.path)?;
-        state.persisted = load_state(&self.path)?;
-        if recover_orphaned_turns(&self.path, &mut state.persisted)? {
-            save_state(&self.path, &state.persisted)?;
-        }
+        let mut global = acquire_global_lock(&self.path)?;
+        self.sync_from_disk_locked(&mut state, &mut global)?;
         Ok(operation(&state.persisted))
     }
 }

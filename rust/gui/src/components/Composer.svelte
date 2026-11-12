@@ -32,13 +32,20 @@
     handlePaste: (event: ClipboardEvent) => void; attachFiles: () => void; stopping: boolean;
     stopGeneration: () => void; send: () => void;
   } = $props();
+
+  let slashMenuEl = $state<HTMLDivElement>();
+  $effect(() => {
+    if (!showSlash || !slashMenuEl) return;
+    const active = slashMenuEl.children[slashIdx] as HTMLElement | undefined;
+    active?.scrollIntoView({ block: "nearest" });
+  });
 </script>
 
 <footer>
   {#if queued.length}<div class="attachments">{#each queued as turn, index}<span class="chip queued-chip" title={turn.shown}>⏳ {turn.shown.split("\n")[0].slice(0, 40)}<button class="chipx" onclick={() => (queued = queued.filter((_, itemIndex) => itemIndex !== index))} aria-label="移除">×</button></span>{/each}</div>{/if}
   {#if attached.length}<div class="attachments">{#each attached as path}<span class="chip" title={path}>{isImage(path) ? "🖼" : "📄"} {baseName(path)}<button class="chipx" onclick={() => removeAttachment(path)} aria-label="移除">×</button></span>{/each}</div>{/if}
   {#if showSlash && slashMatches.length}
-    <div class="slash-menu" role="listbox" aria-label="命令">{#each slashMatches as command, index}<button class="slash-item" class:on={index === slashIdx} role="option" aria-selected={index === slashIdx} onmouseenter={() => (slashIdx = index)} onclick={() => runSlash(command)}><span class="slash-cmd">/{command.id}</span><span class="slash-label">{command.label}</span><span class="slash-desc">{command.desc}</span></button>{/each}</div>
+    <div bind:this={slashMenuEl} class="slash-menu" role="listbox" aria-label="命令">{#each slashMatches as command, index (command.id)}<button class="slash-item" class:on={index === slashIdx} role="option" aria-selected={index === slashIdx} onmouseenter={() => (slashIdx = index)} onclick={() => runSlash(command)}><span class="slash-cmd">/{command.id}</span><span class="slash-label">{command.label}</span><span class="slash-desc">{command.desc}</span></button>{/each}</div>
   {/if}
   {#if needsWorkspace}<div class="ws-warn"><span>⚠ 当前工作区是主目录（非项目），已暂停对话以免误操作。请选择项目目录。</span><button class="plain" onclick={chooseWorkspace}>选择项目目录</button></div>{/if}
   <div class="composer-shell">

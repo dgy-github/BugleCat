@@ -50,6 +50,25 @@ enabled = false
 
 外部配置只能选择已编译进当前版本的插件。动态下载和加载不可信插件不属于 M1。
 
+## 可替换实现：上下文压缩
+
+`compaction` 服务提供的是 `CompactionStrategy` 实现，而不是开关。Agent loop 只决定在什么时机考虑压缩（每次模型请求前，前后由 PreCompact/PostCompact hook 包裹）；是否触发、怎么改写历史，都交给已安装的策略。
+
+| 插件 | 策略 id | 行为 |
+| --- | --- | --- |
+| `ncx.compaction`（默认） | `summary` | 分段让模型写摘要，附带安全快照，失败时保留原始历史 |
+| `ncx.compaction.rule` | `rule` | 不调用模型：按 `ContextEditPolicy` 截短旧工具结果并丢弃最早的消息 |
+
+在工作区 `.ncx/harness.overlay.toml` 里换掉同一个 entry 即可切换，不需要改代码：
+
+```toml
+[[plugins]]
+id = "compaction"
+plugin = "ncx.compaction.rule"
+```
+
+PreCompact/PostCompact hook 的参数里带有 `strategy` 字段，可以据此区分当前生效的策略。
+
 ## M5 能力服务
 
 `full` Profile 额外挂载 `media` Bundle，其中包含：

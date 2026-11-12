@@ -5,14 +5,40 @@
 //! disambiguation) — NOT general web-crawl results. Good enough for "what is X"
 //! style lookups; a keyed backend (Tavily/Brave) would be the upgrade.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
+use futures_util::StreamExt;
 use serde_json::Value;
 
 const ENDPOINT: &str = "https://api.duckduckgo.com/";
 const TAVILY_ENDPOINT: &str = "https://api.tavily.com/search";
 const WIKIPEDIA_ENDPOINT: &str = "https://en.wikipedia.org/w/api.php";
 const BING_ENDPOINT: &str = "https://www.bing.com/search";
+
+fn shared_web_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(25))
+                .build()
+                .map_err(|e| format!("client error: {e}"))
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+fn utf8_prefix(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
 
 /// Keyed general web search via Tavily (built for LLM agents — returns clean
 /// title/url/content). Needs an API key. Falls back to nothing here; the caller
@@ -21,10 +47,7 @@ pub async fn tavily_search(query: &str, api_key: &str, max_results: u32) -> Resu
     if api_key.is_empty() {
         return Err("no Tavily API key configured".to_string());
     }
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(25))
-        .build()
-        .map_err(|e| format!("client error: {e}"))?;
+    let client = shared_web_client()?;
     let body = serde_json::json!({
         "api_key": api_key,
         "query": query,
@@ -62,11 +85,7 @@ fn format_tavily(v: &Value, query: &str) -> String {
             let title = r.get("title").and_then(|x| x.as_str()).unwrap_or("");
             let url = r.get("url").and_then(|x| x.as_str()).unwrap_or("");
             let content = r.get("content").and_then(|x| x.as_str()).unwrap_or("");
-            let snippet = if content.len() > 300 {
-                &content[..300]
-            } else {
-                content
-            };
+            let snippet = utf8_prefix(content, 300);
             parts.push(format!(
                 "- {title} ({url})\n  {}",
                 snippet.replace('\n', " ")
@@ -82,12 +101,10 @@ fn format_tavily(v: &Value, query: &str) -> String {
 
 /// Query the DuckDuckGo Instant Answer API and return a compact text summary.
 pub async fn ddg_instant_answer(query: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("client error: {e}"))?;
+    let client = shared_web_client()?;
     let resp = client
         .get(ENDPOINT)
+        .timeout(Duration::from_secs(20))
         .query(&[
             ("q", query),
             ("format", "json"),
@@ -111,12 +128,10 @@ pub async fn ddg_instant_answer(query: &str) -> Result<String, String> {
 
 /// Keyless fallback search using Wikipedia's OpenSearch API.
 pub async fn wikipedia_search(query: &str, limit: u32) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("client error: {e}"))?;
+    let client = shared_web_client()?;
     let resp = client
         .get(WIKIPEDIA_ENDPOINT)
+        .timeout(Duration::from_secs(20))
         .query(&[
             ("action", "opensearch"),
             ("search", query),
@@ -173,12 +188,10 @@ fn format_wikipedia(value: &Value, query: &str) -> Result<String, String> {
 
 /// Keyless broad-search fallback using Bing's RSS response.
 pub async fn bing_rss_search(query: &str, limit: usize) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("client error: {e}"))?;
+    let client = shared_web_client()?;
     let response = client
         .get(BING_ENDPOINT)
+        .timeout(Duration::from_secs(20))
         .query(&[("format", "rss"), ("q", query)])
         .header("User-Agent", "nanocodex/0.1 (+https://localhost)")
         .send()
@@ -300,10 +313,7 @@ pub async fn fetch_url(url: &str) -> Result<String, String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("url must start with http:// or https://".to_string());
     }
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(25))
-        .build()
-        .map_err(|e| format!("client error: {e}"))?;
+    let client = shared_web_client()?;
     let resp = client
         .get(url)
         .header("User-Agent", "nanocodex/0.1 (+https://localhost)")
@@ -319,13 +329,18 @@ pub async fn fetch_url(url: &str) -> Result<String, String> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_lowercase();
-    let bytes = resp.bytes().await.map_err(|e| format!("read error: {e}"))?;
-    let slice = if bytes.len() > MAX_FETCH_BYTES {
-        &bytes[..MAX_FETCH_BYTES]
-    } else {
-        &bytes[..]
-    };
-    let body = String::from_utf8_lossy(slice);
+    let mut collected = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("read error: {e}"))?;
+        let remaining = MAX_FETCH_BYTES.saturating_sub(collected.len());
+        if chunk.len() >= remaining {
+            collected.extend_from_slice(&chunk[..remaining]);
+            break;
+        }
+        collected.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8_lossy(&collected);
     let mut text = if ctype.contains("html") || body.trim_start().starts_with('<') {
         html_to_text(&body)
     } else {
@@ -493,5 +508,18 @@ mod tests {
     #[tokio::test]
     async fn tavily_without_key_errors() {
         assert!(tavily_search("q", "", 5).await.is_err());
+    }
+
+    #[test]
+    fn tavily_multibyte_chinese_snippet_truncates_on_char_boundary() {
+        // 1 + 150*3 = 451 bytes; byte index 300 lands mid-codepoint.
+        let content = format!("A{}", "中".repeat(150));
+        let v = json!({
+            "results": [
+                {"title": "中文结果", "url": "https://example.com", "content": content}
+            ]
+        });
+        let out = format_tavily(&v, "中文");
+        assert!(out.contains("中文结果"));
     }
 }

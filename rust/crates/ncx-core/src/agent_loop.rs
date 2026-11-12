@@ -27,6 +27,7 @@ const DEFAULT_MAX_PARALLEL_TOOL_CALLS: usize = 8;
 const RETRIEVAL_BUDGET_TOKENS: usize = 1_500;
 
 mod compaction;
+pub use compaction::{CompactionOutcome, CompactionStrategy, RuleCompaction, SummaryCompaction};
 mod deliverable;
 mod dsml;
 mod tool_dispatch;
@@ -113,6 +114,7 @@ pub struct AgentLoop {
     pub context_window: i64,
     resolved_context_window: Option<i64>,
     context_usage: std::cell::Cell<Option<(usize, i64)>>,
+    pub(super) last_compaction_calls: std::cell::Cell<usize>,
     pub reasoning_effort: Option<String>,
     pub verification: crate::verification::Config,
     /// Test-only Jev key and transport for the pre-execution action review.
@@ -244,6 +246,7 @@ impl AgentLoop {
             context_window: 1_048_576,
             resolved_context_window: None,
             context_usage: std::cell::Cell::new(None),
+            last_compaction_calls: std::cell::Cell::new(0),
             reasoning_effort: None,
             verification: crate::verification::Config::from_env(),
             #[cfg(test)]
@@ -1091,16 +1094,28 @@ impl AgentLoop {
 }
 
 fn bounded_title_source(text: &str, max_chars: usize) -> String {
-    let chars = text.chars().collect::<Vec<_>>();
-    if chars.len() <= max_chars {
+    let total_chars = text.chars().count();
+    if total_chars <= max_chars {
         return text.to_string();
     }
     let head = max_chars / 2;
     let tail = max_chars - head;
+    let head_end = text
+        .char_indices()
+        .nth(head)
+        .map_or(text.len(), |(idx, _)| idx);
+    let tail_start = if tail == 0 {
+        text.len()
+    } else {
+        text.char_indices()
+            .rev()
+            .nth(tail - 1)
+            .map_or(0, |(idx, _)| idx)
+    };
     format!(
         "{}\n[中间背景已省略]\n{}",
-        chars[..head].iter().collect::<String>(),
-        chars[chars.len() - tail..].iter().collect::<String>()
+        &text[..head_end],
+        &text[tail_start..]
     )
 }
 

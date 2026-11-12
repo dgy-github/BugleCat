@@ -91,7 +91,8 @@ impl ManagedProcess {
                 .map_err(|error| format!("process status failed: {error}"))?;
             if self.exit_code.is_some() {
                 for reader in self.readers.drain(..) {
-                    let _ = reader.await;
+                    let _ =
+                        tokio::time::timeout(std::time::Duration::from_millis(250), reader).await;
                 }
             }
         }

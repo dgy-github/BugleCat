@@ -28,6 +28,14 @@ export class ThreadLifecycleController {
   // pass instead of creating an unbounded fan-out of obsolete requests.
   private refreshInFlight: Promise<void> | null = null;
   private refreshDirty = false;
+  private readonly threadSummaryCache = new Map<
+    string,
+    {
+      updatedAt: number;
+      row: SessionRow;
+      usage: { prompt_tokens: number; completion_tokens: number };
+    }
+  >();
   private profileSelectionGeneration = 0;
   private profileSelectionQueue: Promise<void> = Promise.resolve();
   // Workspace activation changes a process-global CWD. Associate recovery
@@ -50,9 +58,9 @@ export class ThreadLifecycleController {
     private readonly workspaceRecovery: WorkspaceRecovery,
   ) {}
 
-  get recentSessions(): SessionRow[] { return this.pinActive(this.sessions.filter((session) => !session.archived)); }
-  get archivedSessions(): SessionRow[] { return this.pinActive(this.sessions.filter((session) => session.archived)); }
-  get archivedCount(): number { return this.sessions.filter((session) => session.archived).length; }
+  recentSessions = $derived(this.pinActive(this.sessions.filter((session) => !session.archived)));
+  archivedSessions = $derived(this.pinActive(this.sessions.filter((session) => session.archived)));
+  archivedCount = $derived(this.archivedSessions.length);
   get harnessProfileLocked(): boolean {
     const current = this.sessions.find((session) => session.session_id === this.thread.currentId);
     return Boolean(current?.has_snapshot || this.thread.messages.some((message) => message.role === "user"));
@@ -66,6 +74,7 @@ export class ThreadLifecycleController {
   workspaceChanged = (): void => {
     this.invalidateRefresh();
     this.invalidateProfileSelection();
+    this.threadSummaryCache.clear();
     this.sessions = [];
     this.usage.replaceProtocolUsage([]);
     this.usage.reset();
@@ -120,7 +129,12 @@ export class ThreadLifecycleController {
 
   private runRefreshLoop = async (): Promise<void> => {
     try {
+      let firstPass = true;
       do {
+        if (!firstPass || this.sessions.length > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+        firstPass = false;
         this.refreshDirty = false;
         await this.refreshOnce();
       } while (this.refreshDirty);
@@ -133,20 +147,52 @@ export class ThreadLifecycleController {
     const generation = ++this.refreshGeneration;
     try {
       const metadata = await appServerRequest<ProtocolThread["metadata"][]>({ method: "threadList", params: { includeArchived: true } });
-      // Transcripts are read for the newest threads only; every other thread
-      // is still listed from its metadata so select-all and project delete
-      // reach the whole store, not just what happens to be loaded.
-      const results = await Promise.allSettled(metadata.slice(0, DETAILED_THREAD_LIMIT).map((item) =>
+      if (generation !== this.refreshGeneration) return;
+      const presentIds = new Set(metadata.map((item) => item.id));
+      for (const cachedId of this.threadSummaryCache.keys()) {
+        if (!presentIds.has(cachedId)) this.threadSummaryCache.delete(cachedId);
+      }
+      // Transcripts are read for the newest threads only, and only when
+      // `updatedAt` has advanced since the last cached summary; unchanged
+      // historical threads reuse their cached snippet/token summary in O(1).
+      const topMetadata = metadata.slice(0, DETAILED_THREAD_LIMIT);
+      const staleItems = topMetadata.filter((item) => {
+        const cached = this.threadSummaryCache.get(item.id);
+        return !cached || cached.updatedAt !== item.updatedAt;
+      });
+      const results = await Promise.allSettled(staleItems.map((item) =>
         appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: item.id } })));
       if (generation !== this.refreshGeneration) return;
-      const threads = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-      this.usage.replaceProtocolUsage(threads.map((item) => [item.metadata.id, item.turns.reduce(
-        (sum, turn) => ({
-          prompt_tokens: sum.prompt_tokens + (turn.usage?.tokens?.prompt_tokens || 0),
-          completion_tokens: sum.completion_tokens + (turn.usage?.tokens?.completion_tokens || 0),
-        }), { prompt_tokens: 0, completion_tokens: 0 },
-      )]));
-      const detailed = new Map(threads.map((item) => [item.metadata.id, threadToSessionRow(item)]));
+      for (const result of results) {
+        if (result.status !== "fulfilled") continue;
+        const thread = result.value;
+        const usage = thread.turns.reduce(
+          (sum, turn) => ({
+            prompt_tokens: sum.prompt_tokens + (turn.usage?.tokens?.prompt_tokens || 0),
+            completion_tokens: sum.completion_tokens + (turn.usage?.tokens?.completion_tokens || 0),
+          }),
+          { prompt_tokens: 0, completion_tokens: 0 },
+        );
+        this.threadSummaryCache.set(thread.metadata.id, {
+          updatedAt: thread.metadata.updatedAt,
+          row: threadToSessionRow(thread),
+          usage,
+        });
+      }
+      const usageEntries: [string, { prompt_tokens: number; completion_tokens: number }][] = [];
+      const detailed = new Map<string, SessionRow>();
+      for (const item of topMetadata) {
+        const cached = this.threadSummaryCache.get(item.id);
+        if (!cached) continue;
+        usageEntries.push([item.id, cached.usage]);
+        detailed.set(item.id, {
+          ...cached.row,
+          title: item.title,
+          archived: item.archived,
+          harness_profile: item.harnessProfile || cached.row.harness_profile,
+        });
+      }
+      this.usage.replaceProtocolUsage(usageEntries);
       this.sessions = metadata.map((item) => detailed.get(item.id) ?? metadataToSessionRow(item));
       const current = this.sessions.find((session) => session.session_id === this.thread.currentId);
       if (current) {
@@ -209,6 +255,12 @@ export class ThreadLifecycleController {
     }
     await this.refresh();
     const left = this.sessions.filter((session) => targets.includes(session.session_id));
+    const leftIds = new Set(left.map((session) => session.session_id));
+    const removedIds = targets.filter((id) => !leftIds.has(id));
+    if (removedIds.length > 0) {
+      this.thread.evictSessions(removedIds);
+      for (const removedId of removedIds) this.threadSummaryCache.delete(removedId);
+    }
     if (left.length) {
       const names = left.slice(0, 5).map((session) => session.title || session.session_id).join("、");
       this.thread.messages.push({
@@ -291,18 +343,20 @@ export class ThreadLifecycleController {
       const visible = await appServerRequest<ProtocolThread>({ method: "threadReadVisible", params: { threadId: id } });
       this.activeHarnessProfile = visible.metadata.harnessProfile || "full";
       this.selectedHarnessProfile = this.activeHarnessProfile;
-      if (!this.thread.busy || this.thread.messages.length === 0) {
-        this.thread.messages = visible.turns.flatMap((turn): ConversationMessage[] => turn.items.flatMap((item): ConversationMessage[] => {
-          if (item.type === "userMessage") return [{ role: "user" as const, text: item.text }];
-          if (item.type === "assistantMessage") return [{
-            role: "assistant" as const,
-            text: item.text,
-            model: item.model,
-            confirmedModel: item.confirmedModel,
-          }];
-          if (item.type === "artifact") return [{ role: "artifact" as const, kind: item.kind, name: item.name, url: item.url }];
-          return [];
-        }));
+      const projected = visible.turns.flatMap((turn): ConversationMessage[] => turn.items.flatMap((item): ConversationMessage[] => {
+        if (item.type === "userMessage") return [{ role: "user" as const, text: item.text }];
+        if (item.type === "goalMessage") return [{ role: "user" as const, text: item.text }];
+        if (item.type === "assistantMessage") return [{
+          role: "assistant" as const,
+          text: item.text,
+          model: item.model,
+          confirmedModel: item.confirmedModel,
+        }];
+        if (item.type === "artifact") return [{ role: "artifact" as const, kind: item.kind, name: item.name, url: item.url }];
+        return [];
+      }));
+      if (!this.thread.busy || this.thread.messages.length === 0 || projected.length >= this.thread.messages.length) {
+        this.thread.messages = projected;
       }
       this.thread.switching = false;
     } catch (error) {

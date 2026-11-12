@@ -111,7 +111,7 @@
       <option value="standard-http">标准 HTTP v1</option>
     </select>
     {#if dshSource === "standard-http"}<input bind:value={dshManifestUrl} placeholder="https://example.com/catalog-source.json" aria-label="标准市场清单地址" />{/if}
-    <input bind:value={dshQuery} placeholder="搜索插件" aria-label="搜索 DSH 插件" onkeydown={(event) => { if (event.key === "Enter") searchDshMarketplace(); }} />
+    <input bind:value={dshQuery} placeholder="搜索插件" aria-label="搜索 DSH 插件" onkeydown={(event) => { if (!event.isComposing && event.keyCode !== 229 && event.key === "Enter") searchDshMarketplace(); }} />
     <button class="plain" onclick={searchDshMarketplace} disabled={dshLoading}>{dshLoading ? "加载中…" : "搜索"}</button>
   </div>
   {#if dshCategories.length}

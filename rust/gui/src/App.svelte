@@ -60,7 +60,7 @@
     { reconcile: () => runtime.reconcileWorkspace() },
   );
   const goalController = new GoalController(thread);
-  const composer = new ComposerController(thread, () => runtime.needsWorkspace, () => scrollDown());
+  const composer = new ComposerController(thread, () => runtime.needsWorkspace, () => scrollDown(true));
   const fileBrowser = new FileBrowserController(note, () => composer.input, (value) => (composer.input = value), workspace);
   const gitWorkspace = new GitWorkspaceController(note, workspace);
   const checkpointController = new CheckpointController(note, () => thread.busy, workspace);
@@ -118,9 +118,25 @@
   });
 
   let scroller = $state<HTMLDivElement>();
-  function scrollDown() {
+  let stickToBottom = $state(true);
+  let lastScrolledSessionId = "";
+  $effect(() => {
+    const id = thread.currentId;
+    if (id !== lastScrolledSessionId) {
+      lastScrolledSessionId = id;
+      stickToBottom = true;
+    }
+  });
+  function scrollDown(force = false) {
+    if (force) stickToBottom = true;
+    if (!stickToBottom) return;
     queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
   }
+
+  const turnCount = $derived(thread.messages.filter((message) => message.role === "user").length);
+  const stepCount = $derived(
+    thread.messages.reduce((count, message) => count + (message.role === "tool_group" ? message.tools.length : 0), 0),
+  );
 
   onMount(() => {
     const savedTheme = localStorage.getItem("nanocodex.theme");
@@ -142,6 +158,7 @@
     });
     return () => {
       disposed = true;
+      settingsController.dispose();
       forgeController.dispose();
       void runtime.stop();
     };
@@ -204,6 +221,8 @@
 
     <ConversationView
       bind:scroller
+      bind:stickToBottom
+      scrollToBottom={() => scrollDown(true)}
       messages={activeView === "trajectory" ? thread.trajectoryMessages : thread.messages}
       {activeView}
       busy={thread.busy}
@@ -254,8 +273,8 @@
       needsWorkspace={runtime.needsWorkspace}
       wsName={runtime.workspaceName}
       chooseWorkspace={runtime.chooseWorkspace}
-      turnCount={thread.messages.filter((message) => message.role === "user").length}
-      stepCount={thread.messages.reduce((count, message) => count + (message.role === "tool_group" ? message.tools.length : 0), 0)}
+      {turnCount}
+      {stepCount}
       tokIn={usage.promptTokens}
       tokOut={usage.completionTokens}
       priceIn={usage.priceIn}

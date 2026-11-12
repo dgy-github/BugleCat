@@ -144,34 +144,63 @@ pub fn retrieve(mut records: Vec<SourceRecord>, query: &str, max: usize) -> Vec<
     // diagnostics, but never recall them as facts after upgrading.
     records.retain(|r| r.status.as_deref() != Some("jev_shadow"));
     let words = terms(query);
+    if words.is_empty() {
+        return Vec::new();
+    }
     let query_lower = query.to_lowercase();
-    records.retain(|record| {
-        !words.is_empty()
-            && (record.text.to_lowercase().contains(&query_lower)
-                || terms(&record.text).iter().any(|w| words.contains(w)))
-    });
-    records.sort_by_key(|record| {
-        std::cmp::Reverse((overlap(&terms(&record.text), &words), record.timestamp))
-    });
-    records.truncate(max);
-    let selected = records.clone();
-    records
+    let word_set: std::collections::HashSet<&str> = words.iter().map(String::as_str).collect();
+
+    struct ScoredCandidate {
+        record: SourceRecord,
+        term_overlap: usize,
+        contains_exact: bool,
+        negative: bool,
+    }
+
+    let mut candidates: Vec<ScoredCandidate> = records
         .into_iter()
-        .map(|record| {
-            let score = overlap(&terms(&record.text), &words)
-                + usize::from(record.text.to_lowercase().contains(&query_lower));
-            let conflict_with = selected
+        .filter_map(|record| {
+            let lower = record.text.to_lowercase();
+            let contains_exact = !query_lower.is_empty() && lower.contains(&query_lower);
+            let rec_terms = terms(&record.text);
+            let term_overlap = rec_terms
                 .iter()
-                .filter(|other| {
-                    other.source_id != record.source_id
-                        && (overlap(&terms(&other.text), &words) > 0
-                            || other.text.to_lowercase().contains(&query_lower))
-                        && is_negative(&other.text) != is_negative(&record.text)
+                .filter(|w| word_set.contains(w.as_str()))
+                .count();
+            if !contains_exact && term_overlap == 0 {
+                return None;
+            }
+            let negative = is_negative_lower(&lower);
+            Some(ScoredCandidate {
+                record,
+                term_overlap,
+                contains_exact,
+                negative,
+            })
+        })
+        .collect();
+
+    candidates.sort_by_key(|c| std::cmp::Reverse((c.term_overlap, c.record.timestamp)));
+    candidates.truncate(max);
+
+    let meta: Vec<(String, bool)> = candidates
+        .iter()
+        .map(|c| (c.record.source_id.clone(), c.negative))
+        .collect();
+
+    candidates
+        .into_iter()
+        .map(|c| {
+            let score = c.term_overlap + usize::from(c.contains_exact);
+            let conflict_with = meta
+                .iter()
+                .filter(|(other_id, other_neg)| {
+                    *other_id != c.record.source_id && *other_neg != c.negative
                 })
-                .map(|other| other.source_id.clone())
+                .map(|(other_id, _)| other_id.clone())
                 .collect();
             RetrievedSource {
-                record,
+                record: c.record,
                 score,
                 conflict_with,
             }
@@ -179,23 +208,39 @@ pub fn retrieve(mut records: Vec<SourceRecord>, query: &str, max: usize) -> Vec<
         .collect()
 }
 
-fn is_negative(text: &str) -> bool {
-    let lower = text.to_lowercase();
+fn is_negative_lower(lower: &str) -> bool {
     ["不要", "禁止", "不得", "don't", "do not", "never", "cannot"]
         .iter()
         .any(|needle| lower.contains(needle))
 }
 
-fn terms(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() >= 2)
-        .map(str::to_string)
-        .collect()
+fn is_cjk(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xF900..=0xFAFF | 0x3040..=0x30FF | 0xAC00..=0xD7AF
+    )
 }
 
-fn overlap(left: &[String], right: &[String]) -> usize {
-    left.iter().filter(|word| right.contains(word)).count()
+fn terms(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for token in text.to_lowercase().split(|c: char| !c.is_alphanumeric()) {
+        if token.len() < 2 {
+            continue;
+        }
+        out.push(token.to_string());
+        // Emit CJK character bigrams so unsegmented Chinese phrases match
+        // overlapping sub-clauses even when not an exact substring.
+        let cjk_chars: Vec<char> = token.chars().filter(|c| is_cjk(*c)).collect();
+        if cjk_chars.len() > 2 {
+            for pair in cjk_chars.windows(2) {
+                let bigram: String = pair.iter().collect();
+                if !out.contains(&bigram) {
+                    out.push(bigram);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Read-only recall over the provenance log. Compaction removes history from the

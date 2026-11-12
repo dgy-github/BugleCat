@@ -37,6 +37,17 @@ pub struct AppServer<S: ThreadStore> {
     pending_activations: Mutex<HashSet<String>>,
 }
 
+struct PendingActivationGuard<'a, S: ThreadStore> {
+    server: &'a AppServer<S>,
+    thread_id: ncx_protocol::ThreadId,
+}
+
+impl<S: ThreadStore> Drop for PendingActivationGuard<'_, S> {
+    fn drop(&mut self) {
+        self.server.finish_activation(&self.thread_id);
+    }
+}
+
 /// Return the durable Thread identities touched by a mutating or host-side
 /// request. Read-only projections intentionally return an empty list so the
 /// UI can still inspect a target while its runtime activation is pending.
@@ -307,18 +318,16 @@ impl<S: ThreadStore> AppServer<S> {
                 runtime
                     .validate_harness_profile(&harness_profile, &workspace)
                     .map_err(AppServerError::Runtime)?;
-                let (outcome, rollback) = self.create_thread_for_activation(
+                let (outcome, rollback, _activation_guard) = self.create_thread_for_activation(
                     thread_id.clone(),
                     workspace,
                     title,
                     harness_profile,
                 )?;
-                let result = match runtime.create_thread(&thread_id) {
+                match runtime.create_thread(&thread_id) {
                     Ok(()) => Ok(outcome),
                     Err(error) => Err(self.compensate_activation(rollback, error)),
-                };
-                self.finish_activation(&thread_id);
-                result
+                }
             }
             ClientRequest::ThreadActivate { thread_id } => {
                 self.dispatch(ClientRequest::ThreadRead {
@@ -344,14 +353,12 @@ impl<S: ThreadStore> AppServer<S> {
                 thread_id,
                 new_thread_id,
             } => {
-                let (outcome, rollback) =
+                let (outcome, rollback, _activation_guard) =
                     self.fork_thread_for_activation(thread_id.clone(), new_thread_id.clone())?;
-                let result = match runtime.fork_thread(&thread_id, &new_thread_id) {
+                match runtime.fork_thread(&thread_id, &new_thread_id) {
                     Ok(()) => Ok(outcome),
                     Err(error) => Err(self.compensate_activation(rollback, error)),
-                };
-                self.finish_activation(&new_thread_id);
-                result
+                }
             }
             ClientRequest::TurnSubmit {
                 thread_id,
@@ -629,7 +636,14 @@ impl<S: ThreadStore> AppServer<S> {
         workspace: String,
         title: String,
         harness_profile: String,
-    ) -> Result<(DispatchOutcome, ThreadRollbackSnapshot), AppServerError> {
+    ) -> Result<
+        (
+            DispatchOutcome,
+            ThreadRollbackSnapshot,
+            PendingActivationGuard<'_, S>,
+        ),
+        AppServerError,
+    > {
         let now = (self.clock)();
         let metadata = ThreadMetadata {
             id: thread_id.clone(),
@@ -644,18 +658,13 @@ impl<S: ThreadStore> AppServer<S> {
             metadata: metadata.clone(),
             turns: Vec::new(),
         };
-        self.begin_activation(&thread_id)?;
-        let rollback = match self.store.create_with_rollback(thread.clone()) {
-            Ok(rollback) => rollback,
-            Err(error) => {
-                self.finish_activation(&thread_id);
-                return Err(error.into());
-            }
-        };
+        let guard = self.begin_activation(&thread_id)?;
+        let rollback = self.store.create_with_rollback(thread.clone())?;
         let event = self.event(thread_id, None, Event::ThreadCreated { metadata });
         Ok((
             self.outcome(ResponsePayload::Thread(thread), vec![event]),
             rollback,
+            guard,
         ))
     }
 
@@ -663,20 +672,19 @@ impl<S: ThreadStore> AppServer<S> {
         &self,
         source_id: ncx_protocol::ThreadId,
         target_id: ncx_protocol::ThreadId,
-    ) -> Result<(DispatchOutcome, ThreadRollbackSnapshot), AppServerError> {
+    ) -> Result<
+        (
+            DispatchOutcome,
+            ThreadRollbackSnapshot,
+            PendingActivationGuard<'_, S>,
+        ),
+        AppServerError,
+    > {
         let now = (self.clock)();
-        self.begin_activation(&target_id)?;
+        let guard = self.begin_activation(&target_id)?;
         let (thread, rollback) =
-            match self
-                .store
-                .fork_with_rollback(&source_id, target_id.clone(), now, now)
-            {
-                Ok(result) => result,
-                Err(error) => {
-                    self.finish_activation(&target_id);
-                    return Err(error.into());
-                }
-            };
+            self.store
+                .fork_with_rollback(&source_id, target_id.clone(), now, now)?;
         let event = self.event(
             target_id,
             None,
@@ -687,6 +695,7 @@ impl<S: ThreadStore> AppServer<S> {
         Ok((
             self.outcome(ResponsePayload::Thread(thread), vec![event]),
             rollback,
+            guard,
         ))
     }
 
@@ -728,7 +737,10 @@ impl<S: ThreadStore> AppServer<S> {
         Ok(())
     }
 
-    fn begin_activation(&self, thread_id: &ncx_protocol::ThreadId) -> Result<(), AppServerError> {
+    fn begin_activation(
+        &self,
+        thread_id: &ncx_protocol::ThreadId,
+    ) -> Result<PendingActivationGuard<'_, S>, AppServerError> {
         let mut pending = self
             .pending_activations
             .lock()
@@ -738,7 +750,10 @@ impl<S: ThreadStore> AppServer<S> {
                 "Thread {thread_id} activation is already in progress"
             )));
         }
-        Ok(())
+        Ok(PendingActivationGuard {
+            server: self,
+            thread_id: thread_id.clone(),
+        })
     }
 
     fn finish_activation(&self, thread_id: &ncx_protocol::ThreadId) {

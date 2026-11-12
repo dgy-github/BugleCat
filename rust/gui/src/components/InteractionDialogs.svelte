@@ -9,12 +9,33 @@
     decide: (choice: "deny" | "always" | "once") => void;
     answerUserQuestion: (answer: string | null) => void;
   } = $props();
+
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key !== "Escape") return;
+    if (approval) {
+      event.preventDefault();
+      decide("deny");
+    } else if (userQuestion) {
+      event.preventDefault();
+      answerUserQuestion(null);
+    }
+  }
+
+  function onAnswerKeydown(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && questionAnswer.trim() !== "") {
+      event.preventDefault();
+      answerUserQuestion(questionAnswer);
+    }
+  }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} />
 {#if approval}
   <div class="overlay">
-    <div class="modal">
-      <h3>需要审批</h3>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="approval-dialog-title">
+      <h3 id="approval-dialog-title">需要审批</h3>
       <p class="areason">{approval.reason}</p>
       <div class="afield"><span>操作</span><code>{approval.command}</code></div>
       <div class="afield"><span>目录</span><code>{approval.cwd}</code></div>
@@ -30,13 +51,13 @@
 
 {#if userQuestion}
   <div class="overlay">
-    <div class="modal question-modal">
-      <h3>需要你的选择</h3>
+    <div class="modal question-modal" role="dialog" aria-modal="true" aria-labelledby="question-dialog-title">
+      <h3 id="question-dialog-title">需要你的选择</h3>
       <p class="areason">{userQuestion.question}</p>
       {#if userQuestion.options.length > 0}
         <div class="question-options">{#each userQuestion.options as option}<button class="plain" onclick={() => answerUserQuestion(option)}>{option}</button>{/each}</div>
       {/if}
-      {#if userQuestion.allow_free_text}<textarea bind:value={questionAnswer} rows="3" placeholder="输入你的回答"></textarea>{/if}
+      {#if userQuestion.allow_free_text}<textarea bind:value={questionAnswer} onkeydown={onAnswerKeydown} rows="3" placeholder="输入你的回答（Ctrl+Enter 提交）"></textarea>{/if}
       <div class="abtns">
         <button class="deny" onclick={() => answerUserQuestion(null)}>取消</button>
         {#if userQuestion.allow_free_text}<button class="ok" disabled={questionAnswer.trim() === ""} onclick={() => answerUserQuestion(questionAnswer)}>提交</button>{/if}
