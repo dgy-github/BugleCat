@@ -563,7 +563,7 @@
 用户要求“两项做完”；本节如实记录推进结果，**两项仍未完成，不得将工具开发或统计准备标成生产认证**。
 
 1. 账务：已在官方 Usage 切换 Hourly 并下载12行导出，总计576请求、1,481,138输入token、15,693输出token。CSV SHA256 `c31d2c590ca7fbaffc84548bdcfba188f4d45285e439cabf423d39c2222729d3`。仍没有request ID、HTTP状态、逐笔扣费。312份旧直接响应合计1,253,250输入/7,800输出token；不能凭token相同认定请求相同或额外重试。
-2. 用户明确批准联系并跟进服务商；已向官方公开的 sales@typesafe.ai 发出账务支持询问，请其提供安全获取2026-10-10至13日逐请求记录的方法及失败/重试收费规则。未附Key、账户资料、账单。发送返回SENT；线程ID留私有记录。每6小时只读检查回复的本线程跟进已创建（automation id: jev），无变化不通知，不发送模型请求。
+2. 用户明确批准联系并跟进服务商；已通过服务商官方公开支持渠道发出账务支持询问，请其提供安全获取2026-10-10至13日逐请求记录的方法及失败/重试收费规则。未附Key、账户资料、账单。发送返回SENT；线程ID留私有记录。每6小时只读检查回复的本线程跟进已创建（automation id: jev），无变化不通知，不发送模型请求。
 3. 来源实际清点：本机线程存储443条，190条带fixture/e2e/selftest等标记，240条缺回答或工具结果，仅13条进入待复核候选；这13条也**尚非独立合格样本**。逐条来源hash和匿名元数据在私有 `reports/.nanocodex/verification-readiness-20261013.json`。不能将443线程、407条回答或175规则夹具直接算作独立样本。
 4. 新增只读 `scripts/verification_readiness_inventory.py`：验证官方CSV数值、仅导出匿名候选元数据、读取主模型SQLite账本，保留未知；当前主模型预约855条，其中1条未结束。该数字不是已收费证明，也不用于自行恢复预算。旧授权冻结于STDIN特定来源，旁路旧重试未知，尚未发起新收费。
 5. 评测统计补强：`calibration.py` 新增显式 `min_detection_rate` 门槛以及按独立负任务组计算的单侧精确置信下界。一个组有多个负声明时，全部检出才算组检出。原门槛只验证5个新增检出和配对显著性，可能5/50也通过，不能替代50%检出要求。兼容旧未声明此字段的协议；新正式方案 `evals/verification/claim_production_protocol_v1.json` 明确启用0.5，并保留误拦上界0.02。旧协议/旧结果不会被追溯升级。
@@ -1921,7 +1921,7 @@ evals/
 
 ## 2026-09-11：继续审计复现结果
 
-- 新增审计证据保存在 `C:/Users/25376/.codex/visualizations/2026/09/10/01a08aa3-4627-7630-b94c-36ffe5a62461/audit-20260911/`。本地模拟 Anthropic `stop_reason=max_tokens` 被归一成 `stop`，因此不完整摘要会被接受；同样增删行数的 Git 内容变化保持 `diff --stat` 不变，当前校验可能放行；`prepare_compaction(20_000)` 构造的摘要输入估算约 175,400 Token；长约束超过 500 字符的禁止事项不会进入安全摘录。
+- 新增审计证据保存在 `~/.codex/visualizations/2026/09/10/01a08aa3-4627-7630-b94c-36ffe5a62461/audit-20260911/`。本地模拟 Anthropic `stop_reason=max_tokens` 被归一成 `stop`，因此不完整摘要会被接受；同样增删行数的 Git 内容变化保持 `diff --stat` 不变，当前校验可能放行；`prepare_compaction(20_000)` 构造的摘要输入估算约 175,400 Token；长约束超过 500 字符的禁止事项不会进入安全摘录。
 - 控制器离线复现确认恢复运行会话会清空 `reasoningIndex`，下一条 reasoning delta 可创建第二个未结束思考块。后台事件触发当前窗口滚动的问题已修复为 session fence，离线复现从 1 次滚动降至 0 次。
 - 本轮未宣称上述 P1/P2 问题已全部修复；已生成审计 canvas `buglecat-audit-20260911.canvas.tsx` 展示证据、优先级和状态。此前模型容量、压缩流程和 UI 改动的验证结果不覆盖本轮新增缺陷。
 
@@ -2572,10 +2572,10 @@ Service Definition ← Provider Plugins ← Consumer Plugins
 
 ### 全局技能：阿里百炼文生图（2026-08-18）
 
-- 技能位置：`C:\Users\25376\.ncx\skills\aliyun-image-generation`，属于 nanocodex 全局技能，打开任意工作区都可发现。
+- 技能位置：`~\.ncx\skills\aliyun-image-generation`，属于 nanocodex 全局技能，打开任意工作区都可发现。
 - 技能名：`aliyun-image-generation`；触发场景包括画图、文生图、生成图片、海报、插画、产品图和视觉素材。
 - 执行脚本：`scripts/generate_image.py`，纯 Python 标准库实现；默认模型 `qwen-image-3.0`，高质量可选 `qwen-image-3.0-pro`。
-- 密钥从 `C:\Users\25376\Desktop\qw_key.txt` 自动选取第二个 `sk-ws-...` 工作空间密钥；第一行 `sk-sp-...` Token Plan 密钥不用于文生图，完整密钥不会进入日志、仓库或命令参数。
+- 密钥从 `~\Desktop\qw_key.txt` 自动选取第二个 `sk-ws-...` 工作空间密钥；第一行 `sk-sp-...` Token Plan 密钥不用于文生图，完整密钥不会进入日志、仓库或命令参数。
 - 第二个密钥已确认能枚举中国区百炼 239 个模型，包含 `qwen-image-3.0`、`qwen-image-3.0-pro`、`wan2.7-image`、`z-image-turbo` 等图片模型。
 - 接口约束：该密钥拒绝异步任务调用，且百炼兼容接口没有 `/images/generations`；脚本使用已验证成功的中国区百炼同步原生多模态生成接口。
 - 验证：4 项离线测试通过；真实执行脚本生成 879264 字节 PNG，文件头和实际渲染均正常。测试图：`artifacts\aliyun-skill-live-test.png`。
@@ -3460,7 +3460,7 @@ rust-rewrite-setup · rust-rewrite-rationale · rust-apply-patch-tool-desc · ru
 
 - 新增轻量本地插件源 `local-plugins/llmwiki-memory`：MCP 直接运行 `D:\LLMWIKI\wiki_mcp.py`，只暴露单一 `llmwiki(action=...)` 工具；Skill 规定 `D:\LLMWIKI` 是实际记忆库，`D:\llm-wiki-template` 只是协议/初始化模板，并保留用户批准、敏感信息和项目事实源边界。
 - Codex 兼容插件现在统一发现用户全局 `~/.ncx/codex-plugins` 与当前工作区 `.ncx/codex-plugins`，工作区同名插件覆盖全局。MCP、Skills、Hooks 和 Apps 共用这一规则，因此切换 BugleCat 工作区后 LLM Wiki 仍可用。
-- 插件已安装到 `C:\Users\25376\.ncx\codex-plugins\llmwiki-memory`。`wiki_mcp.py --selftest` 的 recall_user/recall_project/project_status/corpus/status 全部通过；Skill 与插件结构校验通过；新增全局发现与工作区覆盖回归通过。
+- 插件已安装到 `~\.ncx\codex-plugins\llmwiki-memory`。`wiki_mcp.py --selftest` 的 recall_user/recall_project/project_status/corpus/status 全部通过；Skill 与插件结构校验通过；新增全局发现与工作区覆盖回归通过。
 
 ### 2026-08-28 运行态活动收紧与 MCP 隐藏窗口
 

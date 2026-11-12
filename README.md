@@ -1092,8 +1092,8 @@ table, so validate the release target before changing it.
 ## Collaboration
 
 Interested in coding-agent integration and customization, evaluation and
-self-repair research, or joint development? Contact
-**[2537676793@qq.com](mailto:2537676793@qq.com)** with your team, use case,
+self-repair research, or joint development? Open an issue on
+**[GitHub Issues](https://github.com/dgy-github/BugleCat/issues)** with your team, use case,
 proposed scope, and timeline. Scope and delivery arrangements are discussed
 individually. See also the [collaboration overview](nanocodex.html#collaboration).
 

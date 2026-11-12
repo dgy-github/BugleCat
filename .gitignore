@@ -32,6 +32,7 @@ _probe_*.py
 _*.py
 _*.ps1
 scripts/archive/
+docs/network-plan/
 *.log
 HANDOFF.md
 .claude/

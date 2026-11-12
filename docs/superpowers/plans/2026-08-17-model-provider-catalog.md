@@ -374,7 +374,7 @@ available_models = "deepseek-chat,deepseek-reasoner"
 Run:
 
 ```powershell
-$mingwBin = 'C:\Users\25376\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin'
+$mingwBin = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
 $env:Path = "$mingwBin;$env:Path"
 cargo +1.96.0-x86_64-pc-windows-gnu test --workspace --target x86_64-pc-windows-gnu
 ```

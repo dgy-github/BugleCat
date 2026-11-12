@@ -851,7 +851,7 @@ Windows GNU 链接器的 export ordinal 表溢出，修改前需重新验证目�
 
 ## 合作
 
-欢迎交流 **Agent 集成与定制、评测与自修复研究、联合开发**。合作联系：**[2537676793@qq.com](mailto:2537676793@qq.com)**。邮件中可介绍你或团队、使用场景、希望合作的内容与时间安排；具体范围和交付方式沟通后确定。另见 [合作介绍](nanocodex.html#collaboration)。
+欢迎交流 **Agent 集成与定制、评测与自修复研究、联合开发**。合作联系：**[GitHub Issues](https://github.com/dgy-github/BugleCat/issues)**。可在 Issue 中介绍你或团队、使用场景、希望合作的内容与时间安排；具体范围和交付方式沟通后确定。另见 [合作介绍](nanocodex.html#collaboration)。
 
 ## 许可证
 
