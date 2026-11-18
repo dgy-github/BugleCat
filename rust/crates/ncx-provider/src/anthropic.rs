@@ -44,12 +44,15 @@ impl AnthropicProvider {
         if !converted_tools.is_empty() {
             body["tools"] = json!(converted_tools);
         }
-        let response = self
+        let mut request = self
             .client
             .post(&self.endpoint)
-            .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::CONTENT_TYPE, "application/json");
+        if !self.api_key.trim().is_empty() {
+            request = request.header("x-api-key", self.api_key.trim());
+        }
+        let response = request
             .json(&body)
             .send()
             .await

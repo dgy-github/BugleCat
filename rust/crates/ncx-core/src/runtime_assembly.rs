@@ -19,6 +19,7 @@ use crate::{
 };
 
 const INSTRUCTIONS_ORDER: u16 = 10;
+const SCOPE_ORDER: u16 = 15;
 const SKILLS_ORDER: u16 = 20;
 const PLAN_ORDER: u16 = 30;
 
@@ -76,6 +77,7 @@ pub struct ConfiguredHarnessRuntime {
     model: String,
     profile: AgentRuntimeProfile,
     harness_profile: Option<String>,
+    scope: Option<Rc<crate::scope::LoadedScope>>,
 }
 
 impl ConfiguredHarnessRuntime {
@@ -85,6 +87,7 @@ impl ConfiguredHarnessRuntime {
             model: model.into(),
             profile,
             harness_profile: None,
+            scope: None,
         }
     }
 
@@ -101,6 +104,15 @@ impl ConfiguredHarnessRuntime {
     pub fn with_harness_profile(mut self, profile: impl Into<String>) -> Self {
         self.harness_profile = Some(profile.into());
         self
+    }
+
+    pub fn with_scope(mut self, scope: Rc<crate::scope::LoadedScope>) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+
+    pub fn scope(&self) -> Option<&Rc<crate::scope::LoadedScope>> {
+        self.scope.as_ref()
     }
 
     /// Resolve the configured primary Provider through the same runtime owner
@@ -128,6 +140,17 @@ impl ConfiguredHarnessRuntime {
                     tools.register(tool);
                 }
             }
+        }
+        if let Some(scope) = &self.scope {
+            scope.install_into_registry(&mut tools);
+            tools.replace_service(
+                "policy",
+                Rc::new(crate::plugins::PolicyService {
+                    sandbox: tools.ctx.policy.clone(),
+                    approval_policy: tools.ctx.approval_policy.clone(),
+                    plan_mode: tools.ctx.plan_mode,
+                }),
+            );
         }
         install_llm_provider_factory(&mut tools, self.cfg.clone(), self.model.clone());
         Ok(tools)
@@ -171,11 +194,14 @@ impl ConfiguredHarnessRuntime {
         sources: RuntimeContextSources,
         bindings: RuntimeHostBindings,
     ) -> ToolContext {
-        let entries = context_entries(&sources);
-        let policy = self
+        let entries = context_entries(&sources, self.scope.as_deref());
+        let mut policy = self
             .profile
             .sandbox_policy(&workspace)
             .with_os_enforcement(self.cfg.os_sandbox == "enforce");
+        if let Some(scope) = &self.scope {
+            policy = scope.narrow_sandbox(&policy, None);
+        }
         let mut context = self
             .profile
             .apply_tool_context(ToolContext::new(workspace, policy))
@@ -188,6 +214,11 @@ impl ConfiguredHarnessRuntime {
             .with_skills(sources.skills)
             .with_genome(sources.genome)
             .with_context_entries(entries);
+        if let Some(scope) = &self.scope {
+            context = context
+                .with_tool_filter(scope.tool_filter())
+                .with_scope(scope.clone());
+        }
         if let Some(memory) = sources.memory {
             context = context.with_memory(memory);
         }
@@ -207,8 +238,11 @@ impl ConfiguredHarnessRuntime {
     }
 }
 
-fn context_entries(sources: &RuntimeContextSources) -> Vec<ContextEntry> {
-    vec![
+fn context_entries(
+    sources: &RuntimeContextSources,
+    scope: Option<&crate::scope::LoadedScope>,
+) -> Vec<ContextEntry> {
+    let mut entries = vec![
         ContextEntry {
             order: INSTRUCTIONS_ORDER,
             fragment: TextContextFragment::new(
@@ -229,7 +263,14 @@ fn context_entries(sources: &RuntimeContextSources) -> Vec<ContextEntry> {
             order: PLAN_ORDER,
             fragment: TextContextFragment::new("plan_mode", sources.plan_note.clone(), 4_000),
         },
-    ]
+    ];
+    if let Some(scope) = scope {
+        entries.push(ContextEntry {
+            order: SCOPE_ORDER,
+            fragment: TextContextFragment::new("active_scope", scope.context_fragment(), 8_000),
+        });
+    }
+    entries
 }
 
 #[cfg(test)]

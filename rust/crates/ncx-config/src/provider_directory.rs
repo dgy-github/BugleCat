@@ -247,7 +247,9 @@ impl ProviderDirectory {
             .iter()
             .position(|route| route.id == id)
             .ok_or("模型商不存在")?;
-        if routes[index].api_key.trim().is_empty() {
+        if routes[index].api_key.trim().is_empty()
+            && !crate::is_local_base_url(&routes[index].base_url)
+        {
             return Err("请先配置该模型商 Token".into());
         }
         if !routes[index]
@@ -589,5 +591,37 @@ mod tests {
         assert!(config.contains(
             "available_models = \"deepseek-v4-flash,deepseek-v4-pro,deepseek-v4-flash-vision-exp\""
         ));
+    }
+
+    #[test]
+    fn keyless_local_provider_route_activates_and_loads_cleanly() {
+        let directory = directory("local-keyless");
+        directory
+            .upsert(ProviderRouteInput {
+                id: Some("local-llama".into()),
+                name: "Local llama.cpp".into(),
+                protocol: "openai".into(),
+                base_url: "http://127.0.0.1:8080/v1".into(),
+                api_key: None,
+                models: vec!["qwen3-8b-q4_k_m".into()],
+            })
+            .unwrap();
+        let route = directory
+            .activate("local-llama", "qwen3-8b-q4_k_m")
+            .expect("local route activates without token");
+        assert!(route.api_key.is_empty());
+
+        let paths = ConfigPaths {
+            deepseek: directory
+                .config_path
+                .with_file_name("missing-deepseek.toml"),
+            codex: directory.config_path.with_file_name("missing-codex.toml"),
+            nanocodex: directory.config_path.clone(),
+        };
+        let cfg = crate::load_config_with_paths(crate::Overrides::default(), &paths).unwrap();
+        assert_eq!(cfg.base_url, "http://127.0.0.1:8080/v1");
+        assert_eq!(cfg.model, "qwen3-8b-q4_k_m");
+        assert!(cfg.api_key.is_empty());
+        cfg.validate().expect("keyless local config validates");
     }
 }

@@ -40,17 +40,22 @@ impl OsIsolation {
         if !policy.os_enforced || policy.mode == DANGER_FULL_ACCESS {
             return None;
         }
-        let mut writable_roots = Vec::new();
+        let writable_roots = policy.effective_writable_roots();
         let mut readable_roots = Vec::new();
         let mut protected_roots = vec![policy.workspace.clone()];
         protected_roots.extend(policy.writable_roots.iter().cloned());
-        if policy.writes_allowed() {
-            writable_roots.push(policy.workspace.clone());
-            writable_roots.extend(policy.writable_roots.iter().cloned());
-            if policy.allow_temp_write {
-                writable_roots.push(std::env::temp_dir());
+        for prot in &policy.protected_paths {
+            if !protected_roots.contains(prot) {
+                protected_roots.push(prot.clone());
             }
-        } else {
+        }
+        if let Some(scoped_reads) = policy.effective_readable_roots() {
+            for root in scoped_reads {
+                if !writable_roots.contains(&root) && !readable_roots.contains(&root) {
+                    readable_roots.push(root);
+                }
+            }
+        } else if !policy.writes_allowed() || !writable_roots.contains(&policy.workspace) {
             readable_roots.push(policy.workspace.clone());
         }
         let home = home_dir();
@@ -248,6 +253,22 @@ pub fn protected_paths(roots: &[PathBuf]) -> Vec<ProtectedPath> {
     let mut found = Vec::new();
     let mut budget = SCAN_BUDGET;
     for root in roots {
+        if root.is_file() {
+            found.push(ProtectedPath {
+                path: root.clone(),
+                shield: Shield::Locked,
+            });
+            continue;
+        }
+        if root
+            .file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("agents"))
+        {
+            found.push(ProtectedPath {
+                path: root.clone(),
+                shield: Shield::LockedTree,
+            });
+        }
         scan_dir(root, &mut found, &mut budget);
     }
     found

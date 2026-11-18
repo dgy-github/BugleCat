@@ -209,3 +209,32 @@ def test_auto_and_none_set_no_reasoning_fields():
             )
             assert "reasoning_effort" not in kwargs
             assert "extra_body" not in kwargs
+
+
+def test_local_non_deepseek_models_fold_system_messages_and_allow_empty_key():
+    provider = DeepSeekProvider(
+        api_key="",
+        base_url="http://127.0.0.1:8080/v1",
+        model="Qwen3-8B-Q4_K_M",
+    )
+    messages = [
+        {"role": "system", "content": "system prompt"},
+        {"role": "system", "content": "budget note"},
+        {"role": "system", "content": "   "},
+        {"role": "user", "content": "hi"},
+        {"role": "system", "content": "late runtime note"},
+    ]
+    kwargs = provider._build_kwargs(messages, tools=None, temperature=None, max_tokens=None)
+    sent = kwargs["messages"]
+    assert [m["role"] for m in sent] == ["system", "user", "user"]
+    assert sent[0]["content"] == "system prompt\n\nbudget note"
+    assert sent[2]["content"] == "[System note]\nlate runtime note"
+
+
+def test_split_leading_think_and_lenient_tool_args():
+    from nanocodex.provider.deepseek import _parse_tool_arguments, _split_leading_think_blocks
+
+    thought, rest = _split_leading_think_blocks("<think>\nstep 1\n</think>\n\nFinal answer.")
+    assert thought == "step 1"
+    assert rest == "Final answer."
+    assert _parse_tool_arguments('```json\n{"path": "a.txt",}\n```') == {"path": "a.txt"}

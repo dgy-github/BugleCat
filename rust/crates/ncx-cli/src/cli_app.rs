@@ -1,23 +1,34 @@
 use super::*;
 
 pub(crate) async fn run(args: Args) -> i32 {
-    let cfg = match load_cli_config(&args) {
+    let mut cfg = match load_cli_config(&args) {
         Ok(cfg) => cfg,
         Err(error) => {
             eprintln!("ncx: config error: {error}");
             return 1;
         }
     };
-    if let Some(exit) = early_exit(&cfg, &args).await {
-        return exit;
-    }
-    let (runtime, mut tools, system_prompt, base_prompt) = match build_registry(&cfg, &args) {
-        Ok(runtime) => runtime,
+    let active_scope = match resolve_cli_scope(&cfg, &args) {
+        Ok(scope) => scope,
         Err(error) => {
-            eprintln!("ncx: {error}");
+            eprintln!("ncx: scope error: {error}");
             return 1;
         }
     };
+    if let Some(scope) = &active_scope {
+        scope.apply_to_config(&mut cfg, args.model.is_some());
+    }
+    if let Some(exit) = early_exit(&cfg, &args).await {
+        return exit;
+    }
+    let (runtime, mut tools, system_prompt, base_prompt) =
+        match build_registry(&cfg, &args, active_scope) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("ncx: {error}");
+                return 1;
+            }
+        };
     if args.dump_genome {
         print!(
             "{}",
@@ -315,9 +326,21 @@ fn validate_cli_config(cfg: &Config, args: &Args) -> Result<(), String> {
     Ok(())
 }
 
+fn resolve_cli_scope(
+    cfg: &Config,
+    args: &Args,
+) -> Result<Option<Rc<ncx_core::LoadedScope>>, String> {
+    if let Some(selector) = &args.scope {
+        let loaded = ncx_core::resolve_scope(&cfg.workspace, selector)?;
+        return Ok(Some(Rc::new(loaded)));
+    }
+    Ok(ncx_core::resolve_scope_from_env(&cfg.workspace)?.map(Rc::new))
+}
+
 fn build_registry(
     cfg: &Config,
     args: &Args,
+    active_scope: Option<Rc<ncx_core::LoadedScope>>,
 ) -> Result<
     (
         ConfiguredHarnessRuntime,
@@ -328,7 +351,11 @@ fn build_registry(
     String,
 > {
     let runtime_profile = runtime_profile_for_args(cfg, args);
-    let mut memory_store = MemoryStore::new(cfg.workspace.join(".ncx").join("memory"));
+    let base_memory_dir = cfg.workspace.join(".ncx").join("memory");
+    let mut memory_store = match &active_scope {
+        Some(scope) => scope.memory_store(&base_memory_dir)?,
+        None => MemoryStore::new(base_memory_dir),
+    };
     memory_store.set_feedback_mode(&cfg.feedback_memory);
     let memory = Rc::new(memory_store);
     let _ = memory.consolidate(0.85);
@@ -339,6 +366,14 @@ fn build_registry(
             genome.system_prompt.is_some(),
             genome.tool_desc.len()
         );
+    }
+    if let Some(scope) = &active_scope {
+        if !args.dump_genome {
+            eprintln!(
+                "[ncx] active scope: {} (id={}, v{})",
+                scope.manifest.name, scope.manifest.id, scope.manifest.version
+            );
+        }
     }
     let base_prompt = genome.base_system_prompt(SYSTEM_PROMPT).to_string();
     let plan_note = if runtime_profile.permissions.plan_mode {
@@ -359,7 +394,11 @@ fn build_registry(
     .with_memory(memory)
     .with_hooks(hooks)
     .with_genome(genome);
-    let runtime = ConfiguredHarnessRuntime::new(cfg.clone(), cfg.model.clone(), runtime_profile);
+    let mut runtime =
+        ConfiguredHarnessRuntime::new(cfg.clone(), cfg.model.clone(), runtime_profile);
+    if let Some(scope) = active_scope {
+        runtime = runtime.with_scope(scope);
+    }
     let tools = runtime
         .build_tools(
             cfg.workspace.clone(),

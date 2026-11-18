@@ -32,6 +32,16 @@ pub struct SandboxPolicy {
     /// shell commands run in an isolated process that can only write the
     /// writable roots and only reach the network when it is enabled.
     pub os_enforced: bool,
+    /// Optional scoped write boundary. When `Some`, writes are restricted
+    /// strictly to these directories rather than the entire workspace.
+    pub scoped_writable_roots: Option<Vec<PathBuf>>,
+    /// Optional scoped read boundary. When `Some`, reads are restricted to
+    /// these directories (plus `effective_writable_roots`), while sensitive
+    /// files remain blocked.
+    pub scoped_read_roots: Option<Vec<PathBuf>>,
+    /// Explicit paths/directories locked against runtime writes (e.g. scope
+    /// manifests and installed scope tool directories).
+    pub protected_paths: Vec<PathBuf>,
 }
 
 impl SandboxPolicy {
@@ -44,6 +54,9 @@ impl SandboxPolicy {
             network_access: false,
             allow_temp_write: false,
             os_enforced: false,
+            scoped_writable_roots: None,
+            scoped_read_roots: None,
+            protected_paths: Vec::new(),
         }
     }
 
@@ -71,12 +84,119 @@ impl SandboxPolicy {
         self
     }
 
+    pub fn with_protected_paths<I, P>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        for p in paths {
+            let resolved = resolve_for_policy(&self.workspace, p.as_ref());
+            if !self.protected_paths.contains(&resolved) {
+                self.protected_paths.push(resolved);
+            }
+        }
+        self
+    }
+
+    /// True when writes are bound to an explicit scope allowlist and must not
+    /// escalate outside it via interactive approval.
+    pub fn is_write_scope_restricted(&self) -> bool {
+        self.scoped_writable_roots.is_some()
+    }
+
+    /// Monotonically narrow this policy for a Scoped Agent (`ncx-scope/v1`).
+    ///
+    /// Never widens any axis of `self`:
+    /// * Global `read-only` stays `read-only` even if `writable_roots` is non-empty.
+    /// * Global `danger-full-access` drops down to `workspace-write` (or `read-only`).
+    /// * Every candidate writable root must already be writable under `self`.
+    /// * Network is `self.network_access && network`.
+    /// * OS enforcement is `self.os_enforced || enforce_os_sandbox`.
+    pub fn narrow(
+        &self,
+        read_roots: Option<&[PathBuf]>,
+        writable_roots: &[PathBuf],
+        network: bool,
+        enforce_os_sandbox: bool,
+        extra_protected_paths: &[PathBuf],
+    ) -> Self {
+        let mut protected = self.protected_paths.clone();
+        for p in extra_protected_paths {
+            let resolved = resolve_for_policy(&self.workspace, p);
+            if !protected.contains(&resolved) {
+                protected.push(resolved);
+            }
+        }
+
+        let allowed_writes: Vec<PathBuf> = if self.writes_allowed() {
+            writable_roots
+                .iter()
+                .map(|root| resolve_for_policy(&self.workspace, root))
+                .filter(|resolved| self.can_write(resolved))
+                .filter(|resolved| !protected.iter().any(|prot| resolved.starts_with(prot)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let narrowed_mode = if allowed_writes.is_empty() {
+            READ_ONLY.to_string()
+        } else {
+            WORKSPACE_WRITE.to_string()
+        };
+
+        let raw_reads: Vec<PathBuf> = match read_roots {
+            Some(roots) => roots
+                .iter()
+                .map(|root| resolve_for_policy(&self.workspace, root))
+                .collect(),
+            None => vec![resolve_for_policy(&self.workspace, &self.workspace)],
+        };
+        let allowed_reads: Vec<PathBuf> = raw_reads
+            .into_iter()
+            .filter(|resolved| match &self.scoped_read_roots {
+                Some(existing) => existing
+                    .iter()
+                    .map(|r| resolve_for_policy(&self.workspace, r))
+                    .any(|r| resolved.starts_with(&r)),
+                None => true,
+            })
+            .collect();
+
+        SandboxPolicy {
+            mode: narrowed_mode,
+            workspace: self.workspace.clone(),
+            writable_roots: self.writable_roots.clone(),
+            network_access: self.network_access && network,
+            allow_temp_write: false,
+            os_enforced: self.os_enforced || enforce_os_sandbox,
+            scoped_writable_roots: Some(allowed_writes),
+            scoped_read_roots: Some(allowed_reads),
+            protected_paths: protected,
+        }
+    }
+
     /// True for the modes that permit any writes at all.
     pub fn writes_allowed(&self) -> bool {
+        if let Some(scoped) = &self.scoped_writable_roots {
+            if scoped.is_empty() {
+                return false;
+            }
+        }
         self.mode == WORKSPACE_WRITE || self.mode == DANGER_FULL_ACCESS
     }
 
-    fn writable_dirs(&self) -> Vec<PathBuf> {
+    /// Resolved directory trees writable without escalation.
+    pub fn effective_writable_roots(&self) -> Vec<PathBuf> {
+        if !self.writes_allowed() {
+            return Vec::new();
+        }
+        if let Some(scoped) = &self.scoped_writable_roots {
+            return scoped
+                .iter()
+                .map(|root| resolve_for_policy(&self.workspace, root))
+                .collect();
+        }
         let mut roots = vec![resolve_for_policy(&self.workspace, &self.workspace)];
         roots.extend(
             self.writable_roots
@@ -90,13 +210,36 @@ impl SandboxPolicy {
         roots
     }
 
+    /// Resolved directory trees readable when a scope read boundary is active.
+    /// `None` means standard unscoped reads (all non-sensitive paths).
+    pub fn effective_readable_roots(&self) -> Option<Vec<PathBuf>> {
+        let scoped = self.scoped_read_roots.as_ref()?;
+        let mut roots: Vec<PathBuf> = scoped
+            .iter()
+            .map(|root| resolve_for_policy(&self.workspace, root))
+            .collect();
+        for writable in self.effective_writable_roots() {
+            if !roots.contains(&writable) {
+                roots.push(writable);
+            }
+        }
+        Some(roots)
+    }
+
+    fn is_runtime_protected(&self, lexical: &Path, target: &Path) -> bool {
+        self.protected_paths.iter().any(|prot| {
+            let resolved_prot = resolve_for_policy(&self.workspace, prot);
+            target.starts_with(&resolved_prot) || lexical.starts_with(&resolved_prot)
+        })
+    }
+
     /// Whether reading `path` is permitted under this policy.
     ///
     /// Outside `danger-full-access`, sensitive credential and private-key files
     /// (`.env`, SSH private keys, `.git-credentials`, `.nanocodex/config.toml`,
     /// cloud credentials, etc.) are blocked from automatic reads.
     pub fn can_read(&self, path: impl AsRef<Path>) -> bool {
-        if self.mode == DANGER_FULL_ACCESS {
+        if self.mode == DANGER_FULL_ACCESS && self.scoped_read_roots.is_none() {
             return true;
         }
         let raw = path.as_ref();
@@ -104,7 +247,13 @@ impl SandboxPolicy {
             return false;
         }
         let target = resolve_for_policy(&self.workspace, raw);
-        !is_sensitive_read_path(&target)
+        if is_sensitive_read_path(&target) {
+            return false;
+        }
+        if let Some(roots) = self.effective_readable_roots() {
+            return roots.iter().any(|root| target.starts_with(root));
+        }
+        true
     }
 
     /// Whether a write to `path` is allowed under this policy without escalation.
@@ -114,25 +263,28 @@ impl SandboxPolicy {
     /// (`.git/hooks/**`, `.git/config`, `.env*`, `.nanocodex/config.toml`) as
     /// requiring explicit escalation even inside `writable_roots`.
     pub fn can_write(&self, path: impl AsRef<Path>) -> bool {
-        if self.mode == DANGER_FULL_ACCESS {
-            return true;
-        }
-        if self.mode == READ_ONLY {
-            return false;
-        }
         let raw = path.as_ref();
         let lexical = normalize(&make_absolute(&self.workspace, raw));
-        if is_protected_write_path(raw) || is_protected_write_path(&lexical) {
+        let target = resolve_for_policy(&self.workspace, raw);
+        if self.is_runtime_protected(&lexical, &target) {
             return false;
         }
-        let target = resolve_for_policy(&self.workspace, raw);
-        if is_protected_write_path(&target) {
+        if self.mode == DANGER_FULL_ACCESS && self.scoped_writable_roots.is_none() {
+            return true;
+        }
+        if !self.writes_allowed() {
+            return false;
+        }
+        if is_protected_write_path(raw)
+            || is_protected_write_path(&lexical)
+            || is_protected_write_path(&target)
+        {
             return false;
         }
         // `starts_with` is component-wise, so it covers both `target == root`
         // and `root` being an ancestor of `target` (and won't match a mere
         // string prefix like `/a/bc` under `/a/b`).
-        self.writable_dirs()
+        self.effective_writable_roots()
             .iter()
             .any(|root| target.starts_with(root))
     }
@@ -152,7 +304,7 @@ impl SandboxPolicy {
             READ_ONLY => format!("{} (no writes, {net})", self.mode),
             _ => {
                 let roots: Vec<String> = self
-                    .writable_dirs()
+                    .effective_writable_roots()
                     .iter()
                     .map(|p| p.display().to_string())
                     .collect();
@@ -292,6 +444,9 @@ pub fn is_protected_write_path(path: &Path) -> bool {
         if window[0] == ".git" && matches!(window[1].as_str(), "hooks" | "config") {
             return true;
         }
+        if window[0] == ".nanocodex" && matches!(window[1].as_str(), "agents" | "providers.json") {
+            return true;
+        }
     }
     false
 }
@@ -405,5 +560,47 @@ mod tests {
         assert!(!p.can_write(ws.join(".env")));
         assert!(!p.can_write(ws.join(".git/hooks/pre-commit")));
         assert!(!p.can_write(ws.join(".git/config")));
+        assert!(!p.can_write(ws.join(".nanocodex/agents/refund.toml")));
+    }
+
+    #[test]
+    fn scope_narrowing_never_widens_global_policy_and_protects_scope_files() {
+        let ws = base().join("ws");
+        let global_ro = SandboxPolicy::new(READ_ONLY, &ws);
+        let narrowed_ro = global_ro.narrow(
+            Some(&[PathBuf::from("data/orders")]),
+            &[PathBuf::from("out/refund")],
+            true,
+            true,
+            &[PathBuf::from("agents")],
+        );
+        // Global read-only cannot be widened to write or network.
+        assert_eq!(narrowed_ro.mode, READ_ONLY);
+        assert!(!narrowed_ro.writes_allowed());
+        assert!(!narrowed_ro.can_write(ws.join("out/refund/a.json")));
+        assert!(!narrowed_ro.network_access);
+        assert!(narrowed_ro.os_enforced);
+        assert!(narrowed_ro.can_read(ws.join("data/orders/1.json")));
+        assert!(!narrowed_ro.can_read(ws.join("src/secret_logic.rs")));
+
+        // Global workspace-write narrowed to out/refund blocks sibling writes and agents/.
+        let global_rw = SandboxPolicy::new(WORKSPACE_WRITE, &ws).with_network_access(true);
+        let narrowed_rw = global_rw.narrow(
+            Some(&[
+                PathBuf::from("data/orders"),
+                PathBuf::from("docs/refund-policy"),
+            ]),
+            &[PathBuf::from("out/refund"), PathBuf::from("../escape")],
+            false,
+            false,
+            &[PathBuf::from("agents")],
+        );
+        assert_eq!(narrowed_rw.mode, WORKSPACE_WRITE);
+        assert!(!narrowed_rw.network_access);
+        assert!(narrowed_rw.can_write(ws.join("out/refund/decision.json")));
+        assert!(narrowed_rw.can_read(ws.join("out/refund/decision.json")));
+        assert!(!narrowed_rw.can_write(ws.join("data/orders/1.json")));
+        assert!(!narrowed_rw.can_write(ws.join("agents/refund.toml")));
+        assert!(!narrowed_rw.can_write(ws.join("../escape/x.txt")));
     }
 }

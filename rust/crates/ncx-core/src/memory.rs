@@ -68,6 +68,7 @@ impl MemoryEntry {
 pub struct MemoryStore {
     pub(crate) path: PathBuf,
     pub(crate) feedback_mode: String,
+    pub(crate) namespace: Option<String>,
 }
 
 /// Result of one prompt-scoped recall.
@@ -115,7 +116,32 @@ impl MemoryStore {
         MemoryStore {
             path: dir.into().join("LEARNINGS.md"),
             feedback_mode: "shadow".to_string(),
+            namespace: None,
         }
+    }
+
+    /// Build a namespace-isolated memory store under `<dir>/scopes/<namespace>/LEARNINGS.md`.
+    /// Rejects empty or path-traversing namespace names.
+    pub fn scoped(dir: impl Into<PathBuf>, namespace: &str) -> Result<Self, String> {
+        let trimmed = namespace.trim();
+        if trimmed.is_empty()
+            || !trimmed
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        {
+            return Err(format!(
+                "invalid memory_namespace {namespace:?}; expected ASCII [a-zA-Z0-9_-]+"
+            ));
+        }
+        Ok(MemoryStore {
+            path: dir.into().join("scopes").join(trimmed).join("LEARNINGS.md"),
+            feedback_mode: "shadow".to_string(),
+            namespace: Some(trimmed.to_string()),
+        })
+    }
+
+    pub fn namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
     }
 
     /// Set online memory feedback mode (`"off" | "shadow" | "on"`).
@@ -156,13 +182,20 @@ impl MemoryStore {
 
     /// Workspace key associated with this memory store directory.
     pub fn workspace_key(&self) -> String {
-        self.path
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::parent)
-            .unwrap_or_else(|| Path::new("."))
-            .display()
-            .to_string()
+        let base = if self.namespace.is_some() {
+            self.path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+        } else {
+            self.path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+        };
+        base.unwrap_or_else(|| Path::new(".")).display().to_string()
     }
 
     /// Record a verified note. Returns `Ok(false)` if it duplicates an existing

@@ -52,6 +52,16 @@ def test_validate_rejects_missing_key():
         assert "API key" in str(exc)
 
 
+def test_validate_allows_keyless_local_loopback_endpoints():
+    for url in (
+        "http://127.0.0.1:8080/v1",
+        "http://localhost:11434/v1",
+        "http://[::1]:8000/v1",
+    ):
+        cfg = Config(api_key="", base_url=url, model="qwen3-8b")
+        cfg.validate()
+
+
 def test_compaction_defaults_on_with_1m_window():
     # Auto-compaction ships ON: a positive default budget at ~50% of the 1M
     # window. This is the "Codex-style, just works" behavior — a regression to

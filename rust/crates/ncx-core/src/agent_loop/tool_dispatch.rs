@@ -228,23 +228,41 @@ async fn review_before_execution(
     {
         return None;
     }
+    let scope_summary = agent.tools.ctx.scope.as_deref().map(|s| s.jev_summary());
     #[cfg(test)]
     let review = match &agent.action_review_override {
         Some((key, transport)) => {
-            action_review::review_with(
+            action_review::review_with_scope(
                 config,
                 &agent.session,
                 call,
+                scope_summary.as_deref(),
                 Some(key),
                 transport.as_ref(),
                 cancel,
             )
             .await
         }
-        None => action_review::review(config, &agent.session, call, cancel).await,
+        None => {
+            action_review::review_scoped(
+                config,
+                &agent.session,
+                call,
+                scope_summary.as_deref(),
+                cancel,
+            )
+            .await
+        }
     };
     #[cfg(not(test))]
-    let review = action_review::review(config, &agent.session, call, cancel).await;
+    let review = action_review::review_scoped(
+        config,
+        &agent.session,
+        call,
+        scope_summary.as_deref(),
+        cancel,
+    )
+    .await;
     if let Err(reason) = action_review::persist(&agent.session, config.mode, &review) {
         trace::action_review_unpersisted(&call.name, reason);
     }

@@ -55,11 +55,19 @@ pub fn parse_completion(resp: &Value) -> ModelResponse {
     let choice = resp.get("choices").and_then(|c| c.get(0));
     let msg = choice.and_then(|c| c.get("message"));
 
-    let content = msg
+    let mut content = msg
         .and_then(|m| m.get("content"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+
+    let mut reasoning = msg.map(extract_reasoning).unwrap_or_default();
+    if reasoning.is_empty() {
+        if let Some((think, rest)) = split_leading_think_blocks(&content) {
+            reasoning = think;
+            content = rest;
+        }
+    }
 
     let mut tool_calls = Vec::new();
     if let Some(tcs) = msg
@@ -98,7 +106,6 @@ pub fn parse_completion(resp: &Value) -> ModelResponse {
         .unwrap_or("stop")
         .to_string();
 
-    let reasoning = msg.map(extract_reasoning).unwrap_or_default();
     let usage = extract_usage(resp.get("usage"));
 
     ModelResponse {
@@ -110,12 +117,132 @@ pub fn parse_completion(resp: &Value) -> ModelResponse {
     }
 }
 
-/// Parse tool-call argument JSON; non-object or invalid collapses to `{}`.
+/// Extract closed leading `<think>...</think>` blocks emitted inline inside
+/// `content` by local models (Qwen3, DeepSeek-R1-Distill via llama.cpp/Ollama)
+/// when the server does not populate `reasoning_content`.
+pub fn split_leading_think_blocks(content: &str) -> Option<(String, String)> {
+    let mut rest = content;
+    let mut thoughts: Vec<String> = Vec::new();
+    loop {
+        let trimmed = rest.trim_start();
+        if trimmed.len() < "<think></think>".len() {
+            break;
+        }
+        let open_prefix = &trimmed[..trimmed.floor_char_boundary(7)];
+        if !open_prefix.eq_ignore_ascii_case("<think>") {
+            break;
+        }
+        let after_open = &trimmed[7..];
+        let Some(close_idx) = find_ascii_case_insensitive(after_open, "</think>") else {
+            break;
+        };
+        let thought = after_open[..close_idx].trim();
+        if !thought.is_empty() {
+            thoughts.push(thought.to_string());
+        }
+        rest = after_open[close_idx + 8..].trim_start();
+    }
+    if rest.len() == content.len() {
+        return None;
+    }
+    Some((thoughts.join("\n\n"), rest.to_string()))
+}
+
+fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
+    let n_bytes = needle.as_bytes();
+    haystack
+        .as_bytes()
+        .windows(n_bytes.len())
+        .position(|window| window.eq_ignore_ascii_case(n_bytes))
+}
+
+/// Parse tool-call argument JSON; tolerates markdown code fences, trailing
+/// commas, and double-encoded JSON strings from small local models. Non-object
+/// or irrecoverable input collapses to `{}`.
 pub(crate) fn parse_args(raw: &str) -> Value {
-    match serde_json::from_str::<Value>(if raw.is_empty() { "{}" } else { raw }) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Value::Object(serde_json::Map::new());
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(v @ Value::Object(_)) => return v,
+        Ok(Value::String(inner)) => {
+            if let Ok(v @ Value::Object(_)) = serde_json::from_str::<Value>(inner.trim()) {
+                return v;
+            }
+        }
+        _ => {}
+    }
+    let unfenced = strip_code_fences(trimmed);
+    let repaired = strip_json_trailing_commas(unfenced);
+    match serde_json::from_str::<Value>(&repaired) {
         Ok(v @ Value::Object(_)) => v,
         _ => Value::Object(serde_json::Map::new()),
     }
+}
+
+fn strip_code_fences(text: &str) -> &str {
+    let trimmed = text.trim();
+    let Some(after_open) = trimmed.strip_prefix("```") else {
+        return trimmed;
+    };
+    let Some(before_close) = after_open.strip_suffix("```") else {
+        return trimmed;
+    };
+    let body = match before_close.find('\n') {
+        Some(nl) => {
+            let lang = before_close[..nl].trim();
+            if lang.is_empty() || lang.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                &before_close[nl + 1..]
+            } else {
+                before_close
+            }
+        }
+        None => before_close,
+    };
+    body.trim()
+}
+
+fn strip_json_trailing_commas(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            out.push(ch);
+            i += 1;
+            continue;
+        }
+        if ch == ',' {
+            let mut look = i + 1;
+            while look < chars.len() && chars[look].is_whitespace() {
+                look += 1;
+            }
+            if look < chars.len() && matches!(chars[look], '}' | ']') {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(ch);
+        i += 1;
+    }
+    out
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -220,5 +347,45 @@ mod tests {
         let resp = json!({"choices": [{"message": {"content": "x"}}]});
         let r = parse_completion(&resp);
         assert_eq!(r.finish_reason, "stop");
+    }
+
+    #[test]
+    fn parse_completion_extracts_inline_leading_think_blocks_when_reasoning_absent() {
+        let resp = json!({
+            "choices": [{
+                "message": {
+                    "content": "<think>\ncheck the order rule\n</think>\n\nApproved.",
+                },
+                "finish_reason": "stop",
+            }],
+        });
+        let r = parse_completion(&resp);
+        assert_eq!(r.reasoning, "check the order rule");
+        assert_eq!(r.content, "Approved.");
+
+        // Explicit reasoning_content is preserved untouched.
+        let explicit = json!({
+            "choices": [{
+                "message": {
+                    "reasoning_content": "native reasoning",
+                    "content": "<think>literal example</think> kept",
+                },
+            }],
+        });
+        let r2 = parse_completion(&explicit);
+        assert_eq!(r2.reasoning, "native reasoning");
+        assert_eq!(r2.content, "<think>literal example</think> kept");
+    }
+
+    #[test]
+    fn parse_args_repairs_fences_trailing_commas_and_double_encoded_json() {
+        assert_eq!(
+            parse_args("```json\n{\"path\": \"a,b.txt\", \"limit\": 10,}\n```"),
+            json!({"path": "a,b.txt", "limit": 10})
+        );
+        assert_eq!(
+            parse_args("\"{\\\"path\\\": \\\"nested.txt\\\"}\""),
+            json!({"path": "nested.txt"})
+        );
     }
 }

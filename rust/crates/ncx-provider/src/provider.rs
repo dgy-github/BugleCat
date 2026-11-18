@@ -262,10 +262,11 @@ impl DeepSeekProvider {
         payload: &Value,
         diagnostic: &RefCell<RequestDiagnostic>,
     ) -> Result<Value, HttpErr> {
-        let resp = self
-            .client
-            .post(&self.endpoint)
-            .bearer_auth(&self.api_key)
+        let mut req = self.client.post(&self.endpoint);
+        if !self.api_key.trim().is_empty() {
+            req = req.bearer_auth(self.api_key.trim());
+        }
+        let resp = req
             .json(payload)
             .send()
             .await
@@ -365,13 +366,11 @@ impl DeepSeekProvider {
         loop {
             diagnostic.borrow_mut().begin();
             let started = Instant::now();
-            let send_fut = self
-                .client
-                .post(&self.endpoint)
-                .bearer_auth(&self.api_key)
-                .timeout(STREAM_TOTAL_TIMEOUT)
-                .json(&payload)
-                .send();
+            let mut req = self.client.post(&self.endpoint);
+            if !self.api_key.trim().is_empty() {
+                req = req.bearer_auth(self.api_key.trim());
+            }
+            let send_fut = req.timeout(STREAM_TOTAL_TIMEOUT).json(&payload).send();
 
             let open_deadline = (Instant::now() + open_to).min(budget_end);
             let resp = match timeout_at(open_deadline, send_fut).await {
@@ -730,6 +729,14 @@ impl StreamAgg {
     }
 
     fn finish(self) -> ModelResponse {
+        let mut content = self.content;
+        let mut reasoning = self.reasoning;
+        if reasoning.is_empty() {
+            if let Some((think, rest)) = crate::response::split_leading_think_blocks(&content) {
+                reasoning = think;
+                content = rest;
+            }
+        }
         let mut tool_calls = Vec::new();
         for (idx, frag) in &self.tc {
             if frag.name.is_empty() {
@@ -747,14 +754,14 @@ impl StreamAgg {
             });
         }
         ModelResponse {
-            content: self.content,
+            content,
             tool_calls,
             finish_reason: if self.finish_reason.is_empty() {
                 "stop".to_string()
             } else {
                 self.finish_reason
             },
-            reasoning: self.reasoning,
+            reasoning,
             usage: self.usage,
         }
     }

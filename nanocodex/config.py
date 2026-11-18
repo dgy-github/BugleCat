@@ -17,11 +17,13 @@ never logged, printed, or returned by :meth:`Config.redacted`.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 DEEPSEEK_CONFIG = Path.home() / ".deepseek" / "config.toml"
 CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
@@ -36,6 +38,26 @@ _DEFAULT_MODEL = "deepseek-chat"
 
 VALID_SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 VALID_APPROVAL_POLICIES = ("untrusted", "on-failure", "on-request", "never")
+
+
+def is_local_base_url(base_url: str) -> bool:
+    """True when *base_url* targets a loopback/local HTTP(S) inference server."""
+    try:
+        parsed = urlparse((base_url or "").strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_unspecified
 
 
 class ConfigError(RuntimeError):
@@ -95,7 +117,7 @@ class Config:
     ])
 
     def validate(self) -> None:
-        if not self.api_key:
+        if not self.api_key.strip() and not is_local_base_url(self.base_url):
             raise ConfigError(
                 "No API key found. Set DEEPSEEK_API_KEY or add api_key to "
                 f"{DEEPSEEK_CONFIG}."

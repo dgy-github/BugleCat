@@ -152,6 +152,43 @@ pub trait ApprovalHandler {
     async fn request(&self, req: ApprovalRequest) -> ApprovalDecision;
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolFilter {
+    pub allow: Option<HashSet<String>>,
+    pub deny: HashSet<String>,
+}
+
+impl ToolFilter {
+    pub fn new(allow: Option<Vec<String>>, deny: Vec<String>) -> Self {
+        let allow_set = allow.map(|items| {
+            items
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<HashSet<_>>()
+        });
+        let deny_set = deny
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<HashSet<_>>();
+        Self {
+            allow: allow_set,
+            deny: deny_set,
+        }
+    }
+
+    pub fn allows(&self, name: &str) -> bool {
+        if self.deny.contains(name) {
+            return false;
+        }
+        if let Some(allow) = &self.allow {
+            return allow.contains(name);
+        }
+        true
+    }
+}
+
 /// Everything a tool needs, shared (cheaply cloned) across tools.
 #[derive(Clone)]
 pub struct ToolContext {
@@ -222,6 +259,10 @@ pub struct ToolContext {
     pub genome: Rc<Genome>,
     /// Ordered, bounded fragments consumed by the Context provider plugin.
     pub context_entries: Rc<Vec<ContextEntry>>,
+    /// Explicit per-context allow/deny tool filter (e.g. from a Scoped Agent).
+    pub tool_filter: ToolFilter,
+    /// Optional active Scoped Agent manifest (`ncx-scope/v1`).
+    pub scope: Option<Rc<crate::scope::LoadedScope>>,
 }
 
 impl ToolContext {
@@ -256,7 +297,19 @@ impl ToolContext {
             skills: Rc::new(Vec::new()),
             genome: Rc::new(Genome::default()),
             context_entries: Rc::new(Vec::new()),
+            tool_filter: ToolFilter::default(),
+            scope: None,
         }
+    }
+
+    pub fn with_tool_filter(mut self, filter: ToolFilter) -> Self {
+        self.tool_filter = filter;
+        self
+    }
+
+    pub fn with_scope(mut self, scope: Rc<crate::scope::LoadedScope>) -> Self {
+        self.scope = Some(scope);
+        self
     }
 
     /// Configure the web search backend the `web_search` tool uses.
@@ -589,7 +642,7 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
-        if !tool_allowed(tool.name()) {
+        if !self.ctx.tool_filter.allows(tool.name()) || !tool_allowed(tool.name()) {
             return;
         }
         let name = tool.name().to_string();
@@ -623,18 +676,40 @@ impl ToolRegistry {
         remove_names: &[String],
         additions: Vec<Box<dyn Tool>>,
     ) -> Result<Vec<String>, String> {
-        self.replace_tools_with_allow(
+        self.replace_tools_with_filter(
             remove_names,
             additions,
             std::env::var(TOOL_ALLOW_ENV).ok().as_deref(),
+            std::env::var(TOOL_DENY_ENV).ok().as_deref(),
         )
     }
 
+    /// Narrow an existing registry in place to a [`ToolFilter`], removing any
+    /// disallowed tools and rebuilding schemas and catalog indexes.
+    pub fn apply_tool_filter(&mut self, filter: ToolFilter) {
+        self.ctx.tool_filter = filter;
+        let filter_ref = &self.ctx.tool_filter;
+        self.tools
+            .retain(|tool| filter_ref.allows(tool.name()) && tool_allowed(tool.name()));
+        self.rebuild_tool_indexes();
+    }
+
+    #[cfg(test)]
     fn replace_tools_with_allow(
         &mut self,
         remove_names: &[String],
         additions: Vec<Box<dyn Tool>>,
         allow: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        self.replace_tools_with_filter(remove_names, additions, allow, None)
+    }
+
+    fn replace_tools_with_filter(
+        &mut self,
+        remove_names: &[String],
+        additions: Vec<Box<dyn Tool>>,
+        allow: Option<&str>,
+        deny: Option<&str>,
     ) -> Result<Vec<String>, String> {
         let remove: HashSet<&str> = remove_names.iter().map(String::as_str).collect();
         let mut additions_seen = HashSet::new();
@@ -648,7 +723,7 @@ impl ToolRegistry {
             if !additions_seen.insert(name.clone()) {
                 return Err(format!("replacement contains duplicate tool '{name}'"));
             }
-            if !tool_allowed_by(allow, &name) {
+            if !self.ctx.tool_filter.allows(&name) || !tool_allowed_with_deny(allow, deny, &name) {
                 continue;
             }
             if self.by_name.contains_key(&name) && !remove.contains(name.as_str()) {
@@ -816,12 +891,28 @@ include!("tools/tests.rs");
 /// non-empty, every other tool is left unregistered, so it is neither offered
 /// to the model nor callable. Unset or empty keeps the full tool set.
 pub const TOOL_ALLOW_ENV: &str = "NCX_TOOL_ALLOW";
+/// `NCX_TOOL_DENY`: comma-separated tool names explicitly forbidden (wins over allow).
+pub const TOOL_DENY_ENV: &str = "NCX_TOOL_DENY";
 
 fn tool_allowed(name: &str) -> bool {
-    tool_allowed_by(std::env::var(TOOL_ALLOW_ENV).ok().as_deref(), name)
+    tool_allowed_with_deny(
+        std::env::var(TOOL_ALLOW_ENV).ok().as_deref(),
+        std::env::var(TOOL_DENY_ENV).ok().as_deref(),
+        name,
+    )
 }
 
+#[cfg(test)]
 fn tool_allowed_by(allow: Option<&str>, name: &str) -> bool {
+    tool_allowed_with_deny(allow, None, name)
+}
+
+fn tool_allowed_with_deny(allow: Option<&str>, deny: Option<&str>, name: &str) -> bool {
+    if let Some(deny_list) = deny.map(str::trim).filter(|list| !list.is_empty()) {
+        if deny_list.split(',').any(|entry| entry.trim() == name) {
+            return false;
+        }
+    }
     match allow.map(str::trim).filter(|list| !list.is_empty()) {
         None => true,
         Some(list) => list.split(',').any(|entry| entry.trim() == name),

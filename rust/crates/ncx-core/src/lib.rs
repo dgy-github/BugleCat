@@ -41,6 +41,7 @@ pub mod prompt;
 pub mod runtime_assembly;
 pub mod runtime_profile;
 pub mod rust_analyzer;
+pub mod scope;
 pub mod search;
 pub mod session;
 pub mod session_index;
@@ -144,6 +145,11 @@ pub use runtime_profile::{
     RuntimePermissionProfile,
 };
 pub use rust_analyzer::RustAnalyzerProvider;
+pub use scope::{
+    discover_scopes_with_home, resolve_scope, resolve_scope_from_env, resolve_scope_with_home,
+    LoadedScope, ScopeAcceptance, ScopeApprovalRule, ScopeData, ScopeDuty, ScopeEscalation,
+    ScopeGuardMiddleware, ScopeManifest, ScopeModel, ScopeTools, SCOPE_ENV, SCOPE_SCHEMA,
+};
 pub use session::{
     estimate_tokens, CompactionTrace, ContextEditPolicy, ContextEditStats, MessageTrace, Session,
     COMPACTED_HISTORY_PREFIX,
@@ -157,7 +163,7 @@ pub use tool_recovery::{ToolCapability, ToolFailureClass};
 pub use tool_scheduler::{BoundedToolScheduler, ToolScheduler};
 pub use tools::{
     ApprovalDecision, ApprovalHandler, ApprovalRequest, SessionGrants, Tool, ToolContext,
-    ToolDuplicatePolicy, ToolRegistry, ToolRetryPolicy, ToolRuntimePolicy,
+    ToolDuplicatePolicy, ToolFilter, ToolRegistry, ToolRetryPolicy, ToolRuntimePolicy,
 };
 pub use turn_context::{TurnContextProvider, TurnContextRegistry, TurnContextRequest};
 pub use user_question::{UserQuestionHandler, UserQuestionRequest};

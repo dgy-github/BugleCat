@@ -123,6 +123,21 @@ pub fn grep(
     path_glob: Option<&str>,
     max_results: usize,
 ) -> Result<String, String> {
+    grep_with_filter(root, pattern, path_glob, max_results, |f| {
+        !ncx_sandbox::is_sensitive_read_path(f)
+    })
+}
+
+fn grep_with_filter<F>(
+    root: &Path,
+    pattern: &str,
+    path_glob: Option<&str>,
+    max_results: usize,
+    allow_file: F,
+) -> Result<String, String>
+where
+    F: Fn(&Path) -> bool,
+{
     let max_results = max_results.clamp(1, 1_000);
     let re = Regex::new(pattern).map_err(|e| format!("invalid regex: {e}"))?;
     let path_re = path_glob.map(glob_to_regex);
@@ -133,7 +148,7 @@ pub fn grep(
         if hits.len() >= max_results {
             break;
         }
-        if ncx_sandbox::is_sensitive_read_path(&f) {
+        if !allow_file(&f) {
             continue;
         }
         let rel = rel_slash(root, &f);
@@ -198,10 +213,20 @@ pub fn grep_literal(
 
 /// glob: filenames matching a pattern → newline list of `rel/path` (capped).
 pub fn glob(root: &Path, pattern: &str, max_results: usize) -> String {
+    glob_with_filter(root, pattern, max_results, |_| true)
+}
+
+fn glob_with_filter<F>(root: &Path, pattern: &str, max_results: usize, allow_file: F) -> String
+where
+    F: Fn(&Path) -> bool,
+{
     let max_results = max_results.clamp(1, 1_000);
     let re = glob_to_regex(pattern);
     let mut hits: Vec<String> = Vec::new();
     for f in walk_files(root) {
+        if !allow_file(&f) {
+            continue;
+        }
         let rel = rel_slash(root, &f);
         if re.is_match(&rel) {
             hits.push(rel);
@@ -226,9 +251,23 @@ pub fn find_files_by_name(
     exact: bool,
     max_results: usize,
 ) -> Vec<String> {
+    find_files_with_filter(root, query, exact, max_results, |_| true)
+}
+
+fn find_files_with_filter<F>(
+    root: &Path,
+    query: &str,
+    exact: bool,
+    max_results: usize,
+    allow_file: F,
+) -> Vec<String>
+where
+    F: Fn(&Path) -> bool,
+{
     let query_folded = query.to_lowercase();
     let mut matches = walk_files(root)
         .into_iter()
+        .filter(|path| allow_file(path))
         .filter_map(|path| {
             let relative = rel_slash(root, &path);
             let matched = if exact {
@@ -284,7 +323,9 @@ impl Tool for GrepTool {
             .get("max_results")
             .and_then(|v| v.as_u64())
             .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
-        match grep(&ctx.workspace, pattern, path_glob, max) {
+        match grep_with_filter(&ctx.workspace, pattern, path_glob, max, |f| {
+            ctx.policy.can_read(f)
+        }) {
             Ok(s) => s,
             Err(e) => format!("Error: {e}"),
         }
@@ -330,8 +371,14 @@ impl Tool for GrepLiteralTool {
             .get("max_results")
             .and_then(Value::as_u64)
             .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
-        grep_literal(&ctx.workspace, pattern, path_glob, max)
-            .unwrap_or_else(|error| format!("Error: {error}"))
+        grep_with_filter(
+            &ctx.workspace,
+            &regex::escape(pattern),
+            path_glob,
+            max,
+            |f| ctx.policy.can_read(f),
+        )
+        .unwrap_or_else(|error| format!("Error: {error}"))
     }
 }
 
@@ -369,7 +416,7 @@ impl Tool for GlobTool {
             .get("max_results")
             .and_then(|v| v.as_u64())
             .unwrap_or(DEFAULT_MAX_RESULTS as u64) as usize;
-        glob(&ctx.workspace, pattern, max)
+        glob_with_filter(&ctx.workspace, pattern, max, |f| ctx.policy.can_read(f))
     }
 }
 
@@ -422,7 +469,7 @@ impl Tool for FindFilesTool {
         if query.trim().is_empty() {
             return "Error: 'query' must not be empty.".into();
         }
-        if !ctx.policy.can_read(&ctx.workspace) {
+        if ctx.policy.effective_readable_roots().is_none() && !ctx.policy.can_read(&ctx.workspace) {
             return "Error: reading the workspace is not allowed under the sandbox policy.".into();
         }
         let exact = args.get("exact").and_then(Value::as_bool).unwrap_or(false);
@@ -431,7 +478,10 @@ impl Tool for FindFilesTool {
             .and_then(Value::as_u64)
             .unwrap_or(100)
             .clamp(1, 1_000) as usize;
-        let mut matches = find_files_by_name(&ctx.workspace, query, exact, max_results + 1);
+        let mut matches =
+            find_files_with_filter(&ctx.workspace, query, exact, max_results + 1, |f| {
+                ctx.policy.can_read(f)
+            });
         let truncated = matches.len() > max_results;
         matches.truncate(max_results);
         json!({

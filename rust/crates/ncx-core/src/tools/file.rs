@@ -121,6 +121,16 @@ impl Tool for ApplyPatchTool {
             Err(e) => return format!("Error applying patch: {e}"),
         };
         let escaping = escaping_targets(ctx, &actions);
+        if !escaping.is_empty() && ctx.policy.is_write_scope_restricted() {
+            let paths = escaping
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return format!(
+                "Error: patch targets path(s) outside the active scope's writable_roots or protected paths ({paths}); scope boundaries cannot be escalated."
+            );
+        }
         let approved = match approve_patch(ctx, patch, escaping).await {
             Ok(paths) => paths,
             Err(error) => return error,

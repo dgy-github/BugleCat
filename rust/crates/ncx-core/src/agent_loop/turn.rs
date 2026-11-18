@@ -730,7 +730,7 @@ async fn request_model(
     }
     if state.text_tool_call_responses > 0 {
         notes.push(
-            "Your previous response wrote tool calls as DSML text. That text was not executed. Use the provided native tool_calls interface to call tools; do not serialize tool invocations in assistant content or claim that files were inspected."
+            "Your previous response wrote tool calls as inline text (DSML or <tool_call> tags). That text was not executed. Use the provided native tool_calls interface to call tools; do not serialize tool invocations in assistant content or claim that files were inspected."
                 .to_string(),
         );
     }
@@ -888,13 +888,7 @@ fn looks_like_text_tool_calls(response: &ModelResponse) -> bool {
     if response.finish_reason == "error" || response.has_tool_calls() {
         return false;
     }
-    let compact: String = response
-        .content
-        .chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '|' && *ch != '｜')
-        .take(1_024)
-        .collect();
-    compact.contains("<DSMLcalls>") && compact.contains("<DSMLinvokename=")
+    super::dsml::looks_like_text_tool_calls(&response.content)
 }
 
 fn present_provider_error(message: &str) -> Option<String> {

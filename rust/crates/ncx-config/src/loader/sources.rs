@@ -235,7 +235,7 @@ fn apply_active_provider_route(
         .ok_or_else(|| ConfigError(format!("Active provider {provider_id:?} does not exist")))?;
     if !matches!(route.protocol.as_str(), "openai" | "anthropic")
         || route.base_url.trim().is_empty()
-        || route.api_key.trim().is_empty()
+        || (route.api_key.trim().is_empty() && !crate::config::is_local_base_url(&route.base_url))
         || route.selected_model.trim().is_empty()
     {
         return Err(ConfigError(format!(

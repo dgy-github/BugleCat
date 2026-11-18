@@ -108,7 +108,7 @@ class DeepSeekProvider:
         # (SDK default is 2) so a flaky/rate-limited endpoint recovers without
         # killing the turn; permanent 4xx (auth, bad-request) are never retried.
         self._client = AsyncOpenAI(
-            api_key=api_key, base_url=base_url,
+            api_key=api_key or "local", base_url=base_url,
             timeout=timeout_s, max_retries=max_retries,
         )
         self.model = model
@@ -122,9 +122,12 @@ class DeepSeekProvider:
         max_tokens: int | None,
         reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
+        shaped_messages = _sanitize_reasoning_replay(messages, self.model, reasoning_effort)
+        if not _is_deepseek_model(self.model):
+            shaped_messages = _single_system_message(shaped_messages)
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "messages": _sanitize_reasoning_replay(messages, self.model, reasoning_effort),
+            "messages": shaped_messages,
         }
         if tools:
             kwargs["tools"] = tools
@@ -157,25 +160,28 @@ class DeepSeekProvider:
         tool_calls: list[ToolCall] = []
         for tc in msg.tool_calls or []:
             raw_args = tc.function.arguments or "{}"
-            try:
-                parsed = json.loads(raw_args)
-            except json.JSONDecodeError:
-                parsed = {}
             tool_calls.append(
                 ToolCall(
                     id=tc.id,
                     name=tc.function.name,
-                    arguments=parsed if isinstance(parsed, dict) else {},
+                    arguments=_parse_tool_arguments(raw_args),
                 )
             )
 
         usage = _extract_usage(resp.usage)
+        content = msg.content or ""
+        reasoning = _extract_reasoning(msg)
+        if not reasoning:
+            think, rest = _split_leading_think_blocks(content)
+            if think or rest != content:
+                reasoning = think
+                content = rest
 
         return ModelResponse(
-            content=msg.content or "",
+            content=content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason or "stop",
-            reasoning=_extract_reasoning(msg),
+            reasoning=reasoning,
             usage=usage,
         )
 
@@ -265,23 +271,27 @@ class DeepSeekProvider:
             slot = tc_acc[idx]
             if not slot["name"]:
                 continue
-            try:
-                parsed = json.loads(slot["arguments"] or "{}")
-            except json.JSONDecodeError:
-                parsed = {}
             tool_calls.append(
                 ToolCall(
                     id=slot["id"] or f"call_{idx}",
                     name=slot["name"],
-                    arguments=parsed if isinstance(parsed, dict) else {},
+                    arguments=_parse_tool_arguments(slot["arguments"] or "{}"),
                 )
             )
 
+        content = "".join(content_parts)
+        reasoning = "".join(reasoning_parts)
+        if not reasoning:
+            think, rest = _split_leading_think_blocks(content)
+            if think or rest != content:
+                reasoning = think
+                content = rest
+
         return ModelResponse(
-            content="".join(content_parts),
+            content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
-            reasoning="".join(reasoning_parts),
+            reasoning=reasoning,
             usage=usage,
         )
 
@@ -294,6 +304,130 @@ def _extract_reasoning(obj: Any) -> str:
 def _is_deepseek_model(model: str) -> bool:
     """True for DeepSeek's own models (their thinking-mode API shape applies)."""
     return model.strip().lower().startswith("deepseek")
+
+
+def _single_system_message(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fold leading system messages into one and turn later ones into user notes.
+
+    Mirrors ``rust/crates/ncx-provider/src/request.rs::single_system_message`` so
+    strict local chat templates (Qwen, Llama, Gemma on llama.cpp / vLLM / Ollama)
+    never reject multi-system-message requests with HTTP 400.
+    """
+    system_parts: list[str] = []
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") != "system":
+            out.append(msg)
+            continue
+        raw_content = msg.get("content")
+        if isinstance(raw_content, str):
+            text = raw_content
+        elif raw_content is None:
+            text = ""
+        else:
+            text = json.dumps(raw_content, ensure_ascii=False)
+        if not out:
+            if text.strip():
+                system_parts.append(text)
+        else:
+            out.append({"role": "user", "content": f"[System note]\n{text}"})
+    if not system_parts:
+        return out
+    return [{"role": "system", "content": "\n\n".join(system_parts)}, *out]
+
+
+def _split_leading_think_blocks(content: str) -> tuple[str, str]:
+    """Extract closed leading ``<think>...</think>`` blocks from *content*."""
+    rest = content
+    thoughts: list[str] = []
+    while True:
+        trimmed = rest.lstrip()
+        if not trimmed.lower().startswith("<think>"):
+            break
+        after_open = trimmed[7:]
+        close_idx = after_open.lower().find("</think>")
+        if close_idx < 0:
+            break
+        thought = after_open[:close_idx].strip()
+        if thought:
+            thoughts.append(thought)
+        rest = after_open[close_idx + 8:].lstrip()
+    if len(rest) == len(content):
+        return "", content
+    return "\n\n".join(thoughts), rest
+
+
+def _parse_tool_arguments(raw: str) -> dict[str, Any]:
+    """Parse tool-call JSON arguments, tolerating fences and trailing commas."""
+    trimmed = (raw or "").strip()
+    if not trimmed:
+        return {}
+    try:
+        parsed = json.loads(trimmed)
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, str):
+            nested = json.loads(parsed.strip())
+            if isinstance(nested, dict):
+                return nested
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    unfenced = _strip_code_fences(trimmed)
+    repaired = _strip_json_trailing_commas(unfenced)
+    try:
+        parsed = json.loads(repaired)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _strip_code_fences(text: str) -> str:
+    trimmed = text.strip()
+    if not (trimmed.startswith("```") and trimmed.endswith("```") and len(trimmed) >= 6):
+        return trimmed
+    body = trimmed[3:-3]
+    nl = body.find("\n")
+    if nl >= 0:
+        lang = body[:nl].strip()
+        if not lang or all(c.isalnum() or c == "-" for c in lang):
+            body = body[nl + 1:]
+    return body.strip()
+
+
+def _strip_json_trailing_commas(text: str) -> str:
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    n = len(text)
+    i = 0
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            look = i + 1
+            while look < n and text[look].isspace():
+                look += 1
+            if look < n and text[look] in ("}", "]"):
+                i += 1
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def _apply_reasoning_effort(kwargs: dict[str, Any], effort: str | None) -> None:

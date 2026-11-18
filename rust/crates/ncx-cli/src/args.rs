@@ -17,6 +17,9 @@ OPTIONS:
     -w, --workspace <DIR>   Workspace root (default: current directory).
     -m, --model <NAME>      Model to use (overrides config).
     -p, --profile <NAME>    Config profile from ~/.nanocodex/config.toml.
+        --scope <ID|PATH>   Run inside a Scoped Agent manifest (agents/<id>.toml,
+                            ~/.nanocodex/agents/<id>.toml, or explicit .toml path;
+                            also configurable via NCX_SCOPE).
     -s, --sandbox <MODE>    read-only | workspace-write | danger-full-access.
     -a, --approval <POLICY> untrusted | on-failure | on-request | never.
         --permission-mode <MODE>
@@ -65,6 +68,7 @@ pub struct Args {
     pub workspace: Option<PathBuf>,
     pub model: Option<String>,
     pub profile: Option<String>,
+    pub scope: Option<String>,
     pub sandbox: Option<String>,
     pub approval: Option<String>,
     /// Claude-Code permission mode (plan/default/accept-edits/bypass). When set,
@@ -185,6 +189,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
                 .push(PathBuf::from(take_value(argv, &mut i, a)?)),
             "-m" | "--model" => args.model = Some(take_value(argv, &mut i, a)?),
             "-p" | "--profile" => args.profile = Some(take_value(argv, &mut i, a)?),
+            "--scope" => args.scope = Some(take_value(argv, &mut i, a)?),
             "-s" | "--sandbox" => args.sandbox = Some(take_value(argv, &mut i, a)?),
             "-a" | "--approval" => args.approval = Some(take_value(argv, &mut i, a)?),
             "--permission-mode" => args.permission_mode = Some(take_value(argv, &mut i, a)?),

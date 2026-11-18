@@ -22,8 +22,8 @@ pub mod writer;
 pub(crate) mod test_support;
 
 pub use config::{
-    derive_permission_mode, permission_mode_to_knobs, Config, ConfigError, HookConfig,
-    McpServerConfig, VALID_APPROVAL_POLICIES, VALID_FEEDBACK_MODES, VALID_HOOK_EVENTS,
+    derive_permission_mode, is_local_base_url, permission_mode_to_knobs, Config, ConfigError,
+    HookConfig, McpServerConfig, VALID_APPROVAL_POLICIES, VALID_FEEDBACK_MODES, VALID_HOOK_EVENTS,
     VALID_JEV_MODES, VALID_OS_SANDBOX_MODES, VALID_PERMISSION_MODES, VALID_PRICE_CURRENCIES,
     VALID_SANDBOX_MODES,
 };

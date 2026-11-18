@@ -205,10 +205,30 @@ impl Default for Config {
     }
 }
 
+/// True when `base_url` points to a loopback/local HTTP(S) inference server
+/// (`localhost`, `127.x.x.x`, `[::1]`, `0.0.0.0`), which commonly requires no API key.
+pub fn is_local_base_url(base_url: &str) -> bool {
+    let Ok(url) = url::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Domain(domain)) => {
+            domain.eq_ignore_ascii_case("localhost")
+                || domain.to_ascii_lowercase().ends_with(".localhost")
+        }
+        None => false,
+    }
+}
+
 impl Config {
     /// Validate required/enum fields; returns `ConfigError` on first violation.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.api_key.is_empty() {
+        if self.api_key.trim().is_empty() && !is_local_base_url(&self.base_url) {
             return Err(ConfigError(
                 "No API key found. Set DEEPSEEK_API_KEY or add api_key to \
                  ~/.nanocodex/config.toml."
@@ -527,6 +547,39 @@ mod tests {
             };
             mutate(&mut cfg);
             assert!(cfg.validate().unwrap_err().to_string().contains(name));
+        }
+    }
+
+    #[test]
+    fn local_loopback_endpoints_validate_without_api_key() {
+        for local_url in [
+            "http://127.0.0.1:8080/v1",
+            "http://localhost:11434/v1",
+            "http://[::1]:8000/v1",
+            "http://0.0.0.0:1234/v1",
+        ] {
+            assert!(is_local_base_url(local_url), "{local_url}");
+            let cfg = Config {
+                api_key: String::new(),
+                base_url: local_url.into(),
+                model: "qwen3-8b".into(),
+                ..Config::default()
+            };
+            cfg.validate().expect(local_url);
+        }
+
+        for remote_url in [
+            "https://api.deepseek.com/v1",
+            "https://openrouter.ai/api/v1",
+            "ftp://127.0.0.1:8080/v1",
+        ] {
+            assert!(!is_local_base_url(remote_url), "{remote_url}");
+            let cfg = Config {
+                api_key: String::new(),
+                base_url: remote_url.into(),
+                ..Config::default()
+            };
+            assert!(cfg.validate().is_err(), "{remote_url}");
         }
     }
 }

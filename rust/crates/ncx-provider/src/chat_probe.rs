@@ -56,7 +56,8 @@ pub struct HttpProviderChatProbeClient;
 
 impl ProviderChatProbeClient for HttpProviderChatProbeClient {
     fn probe(&self, request: &ProviderChatProbeRequest) -> Result<ProviderChatProbeResult, String> {
-        if request.api_key.trim().is_empty() {
+        let key = request.api_key.trim();
+        if key.is_empty() && !is_local_base_url(&request.base_url) {
             return Err("请先配置该模型商 Token".into());
         }
         let protocol = request.protocol.trim().to_ascii_lowercase();
@@ -76,11 +77,12 @@ impl ProviderChatProbeClient for HttpProviderChatProbeClient {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let body = if protocol == "anthropic" {
-            headers.insert(
-                "x-api-key",
-                HeaderValue::from_str(request.api_key.trim())
-                    .map_err(|_| "Token 包含无效字符".to_string())?,
-            );
+            if !key.is_empty() {
+                headers.insert(
+                    "x-api-key",
+                    HeaderValue::from_str(key).map_err(|_| "Token 包含无效字符".to_string())?,
+                );
+            }
             headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
             json!({
                 "model": request.model,
@@ -88,11 +90,13 @@ impl ProviderChatProbeClient for HttpProviderChatProbeClient {
                 "messages": [{"role": "user", "content": "Reply OK"}]
             })
         } else {
-            headers.insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", request.api_key.trim()))
-                    .map_err(|_| "Token 包含无效字符".to_string())?,
-            );
+            if !key.is_empty() {
+                headers.insert(
+                    AUTHORIZATION,
+                    HeaderValue::from_str(&format!("Bearer {key}"))
+                        .map_err(|_| "Token 包含无效字符".to_string())?,
+                );
+            }
             json!({
                 "model": request.model,
                 "max_tokens": 1,
@@ -162,6 +166,25 @@ pub fn chat_probe_endpoint(base_url: &str, protocol: &str) -> Result<String, Str
         url.set_path(&format!("{current}/{suffix}"));
     }
     Ok(url.to_string().trim_end_matches('/').to_string())
+}
+
+/// True when `base_url` targets a loopback/local HTTP(S) inference server.
+pub fn is_local_base_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if bare.eq_ignore_ascii_case("localhost") || bare.to_ascii_lowercase().ends_with(".localhost") {
+        return true;
+    }
+    bare.parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback() || ip.is_unspecified())
 }
 
 #[cfg(test)]
@@ -254,5 +277,22 @@ mod tests {
         assert_eq!(error, "对话接口返回 HTTP 403");
         assert!(!error.contains("secret-body"));
         assert!(!error.contains("probe-secret"));
+    }
+
+    #[test]
+    fn local_keyless_probe_succeeds_without_authorization_header() {
+        let reply = Box::leak(
+            response(r#"{"model":"qwen3-8b","choices":[{"message":{"content":"OK"}}]}"#)
+                .into_boxed_str(),
+        );
+        let (base_url, request) = server(reply);
+        let result = HttpProviderChatProbeClient
+            .probe(&ProviderChatProbeRequest::new(
+                base_url, "openai", "", "qwen3-8b",
+            ))
+            .unwrap();
+        let request = request.recv().unwrap().to_ascii_lowercase();
+        assert!(!request.contains("authorization:"));
+        assert_eq!(result.confirmed_model.as_deref(), Some("qwen3-8b"));
     }
 }

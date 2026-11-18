@@ -1,0 +1,44 @@
+# Scoped Agent example manifest (`ncx-scope/v1`)
+# Copy to `<workspace>/agents/refund.toml` or `~/.nanocodex/agents/refund.toml`
+# and run with `ncx --scope refund "处理退款工单 ..."` (or `NCX_SCOPE=refund`).
+
+schema = "ncx-scope/v1"
+id = "refund"
+name = "售后退款处理"
+version = 1
+
+[duty]
+summary = "处理退款工单：核对订单与规则，给出结论和回复草稿"
+accepts = ["退款", "退货", "refund"]
+input = "一张退款工单（订单号、诉求、聊天记录）"
+output = "结论（同意/拒绝/转人工）+ 依据 + 回复草稿"
+
+[data]
+read_roots = ["data/orders", "docs/refund-policy"]
+memory_namespace = "refund"
+
+[tools]
+allow = ["read_file", "grep", "glob", "find_files", "list_directory", "apply_patch", "remember"]
+deny = ["web_fetch", "web_search"]
+writable_roots = ["out/refund"]
+network = false
+os_sandbox = "off"
+
+[[tools.approval]]
+when = "refund_amount > 500"
+reason = "大额退款需人工复核"
+
+[model]
+base = "qwen3-8b-instruct-q4_k_m"
+adapter = ""
+endpoint = "http://127.0.0.1:8080/v1"
+fallback = "preset:deepseek/deepseek-v4-pro"
+
+[acceptance]
+suite = "agents/refund/acceptance.jsonl"
+pass_rate = 0.95
+no_regression = true
+
+[escalation]
+on_out_of_scope = "fallback"
+on_low_confidence = "human"
